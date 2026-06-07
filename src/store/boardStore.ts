@@ -245,6 +245,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }),
 }));
 
+// DEV-only debug handle so the board store can be inspected/driven from the
+// browser console (e.g. preview harness). No-op in production builds.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __kvBoard?: typeof useBoardStore }).__kvBoard = useBoardStore;
+}
+
 export const LANE_STEP_WIDTH = 340;
 export const LANE_GAP = 24;
 export function laneWidth(lane: Lane): number {

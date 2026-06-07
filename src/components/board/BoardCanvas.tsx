@@ -26,6 +26,7 @@ export function BoardCanvas() {
 
   const [spaceDown, setSpaceDown] = useState(false);
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
+  const [dragIds, setDragIds] = useState<string[]>([]);
   const [box, setBox] = useState<Box | null>(null);
 
   // Interaction bookkeeping kept in a ref so window listeners read latest values.
@@ -87,6 +88,7 @@ export function BoardCanvas() {
       const dy = (e.clientY - st.startY) / zoom;
       moveNodesCmd(st.dragIds, dx, dy);
       setDrag(null);
+      setDragIds([]);
     } else if (st.mode === 'box') {
       const cur = toWorld(e.clientX, e.clientY);
       const x0 = Math.min(cur.x, st.boxStartWorld.x);
@@ -151,9 +153,33 @@ export function BoardCanvas() {
         .map((n) => n.id);
       b.setSelection(ids);
     }
-    it.current = { ...it.current, mode: 'drag', startX: e.clientX, startY: e.clientY, dragIds: ids };
+    // dragging a frame carries every card overlapping it (frame group-move)
+    let moveIds = ids;
+    if (b.nodes[id]?.type === 'frame') {
+      moveIds = [id, ...containedNodeIds(id)];
+    }
+    it.current = { ...it.current, mode: 'drag', startX: e.clientX, startY: e.clientY, dragIds: moveIds };
+    setDragIds(moveIds);
     setDrag({ dx: 0, dy: 0 });
     beginWindowTracking();
+  }
+
+  /** Cards overlapping a frame (move together with it). */
+  function containedNodeIds(frameId: string): string[] {
+    const b = useBoardStore.getState();
+    const f = b.nodes[frameId];
+    if (!f) return [];
+    return Object.values(b.nodes)
+      .filter(
+        (n) =>
+          n.id !== frameId &&
+          n.type !== 'frame' &&
+          n.x < f.x + f.w &&
+          n.x + n.w > f.x &&
+          n.y < f.y + f.h &&
+          n.y + Math.max(n.h, 60) > f.y,
+      )
+      .map((n) => n.id);
   }
 
   function onWheel(e: React.WheelEvent) {
@@ -206,8 +232,8 @@ export function BoardCanvas() {
                 node={n}
                 selected={sel}
                 onPointerDown={onNodePointerDown}
-                dx={sel && drag ? drag.dx : 0}
-                dy={sel && drag ? drag.dy : 0}
+                dx={drag && dragIds.includes(id) ? drag.dx : 0}
+                dy={drag && dragIds.includes(id) ? drag.dy : 0}
               />
             );
           })}
@@ -223,8 +249,8 @@ export function BoardCanvas() {
                 node={n}
                 selected={sel}
                 onPointerDown={onNodePointerDown}
-                dx={sel && drag ? drag.dx : 0}
-                dy={sel && drag ? drag.dy : 0}
+                dx={drag && dragIds.includes(id) ? drag.dx : 0}
+                dy={drag && dragIds.includes(id) ? drag.dy : 0}
               />
             );
           })}

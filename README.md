@@ -194,3 +194,6 @@ npm run preview  # 빌드 결과 미리보기
 ### 후속 개선 (UX)
 - **프롬프트바 중앙 정렬**: 메인 콘텐츠 영역 기준 가로 중앙(LNB·채팅 사이드패널 비킴). `AppShell` 메인 컬럼 내부 `absolute` + `promptBarLeftInset`.
 - **멀티 보드**(`boardsStore` + `board/seed.ts` + `BoardSwitcher`): 즐겨찾기 카드 클릭 → 해당 콘텐츠에 **최적화 시드된 새 보드**(놀이계획=워크플로 레인, 그 외=맞춤 시작 카드)로 이동. 상단 탭으로 보드 전환(상태 보존), **보드 추가** 메뉴(빈 보드 + 5종). 세션 스코프.
+- **보드 하이브리드**(참조 KinderVerse 모델): 프레임(뒤쪽 컨테이너) + 보드 네이티브 카드(이미지/메모/텍스트). 놀이계획 보드 = "새 놀이계획" 프레임 + 러너; 각 단계가 프레임 안에 카드를 생성(아이디어/계획안/활동지=메모, 이미지=실제 Gemini 이미지 카드). 모든 카드 선택·드래그·인라인 편집(스크롤 없이 내용에 맞춰 크기). `board/workflow.ts`, `frame`/`runner` 노드 타입.
+- **보드에서 바로 생성**(`board/prompt.ts` `runBoardPrompt`): 대상을 선택하고 프롬프트바에 입력하면 **AI 채팅으로 이동하지 않고** 그 대상에 바로 생성 — 이미지 카드→`regenImageCard`(제자리 재생성), 메모/텍스트→`genTextCard`(제자리 재작성), 프레임→`generateIntoFrame`(이미지 키워드면 이미지 카드, 아니면 메모). AI 채팅은 프롬프트바 왼쪽 메시지 아이콘으로만.
+- **프레임 그룹 이동 + 자동 확장**: 프레임을 드래그하면 그 위에 겹친 모든 카드가 함께 이동(`BoardCanvas.containedNodeIds`, 되돌리기 1단위). 프레임/워크플로로 생성 시 공간이 부족하면 프레임이 자동 확장(`workflow.ts` `placeInFrame`→`expandFrame`).

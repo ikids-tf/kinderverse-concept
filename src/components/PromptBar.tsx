@@ -5,6 +5,7 @@ import { AI_CHAT_PATH } from '@/lib/nav';
 import { useUIStore } from '@/store/uiStore';
 import { useRouterStore } from '@/store/routerStore';
 import { useBoardStore } from '@/store/boardStore';
+import { runBoardPrompt } from '@/board/prompt';
 import { FavoriteCardRail } from './FavoriteCardRail';
 
 /* Shared prompt bar shell (CLAUDE.md §2 / SKILL.md §7).
@@ -56,19 +57,20 @@ export function PromptBar() {
   // Behavior 2/3 — star (empty) vs send (typed).
   function onStarOrSend() {
     if (hasText) {
-      // Dispatch through the Tier0 router (M2). Selection = scope; the current
-      // page's available_actions bound where it can route.
       const text = draft.trim();
       setDraft('');
       setFavoritesOpen(false);
+
+      // On My Board with a selected target → generate ONTO it in place (no chat nav).
+      if (location.pathname.startsWith('/board') && boardSelection.length > 0 && runBoardPrompt(text)) {
+        return;
+      }
+
+      // Otherwise dispatch through the Tier0 router (M2). Selection = scope.
       void sendToRouter({
         text,
         page: location.pathname,
-        selection: {
-          ids: boardSelection,
-          types: [],
-          count: boardSelection.length,
-        },
+        selection: { ids: boardSelection, types: [], count: boardSelection.length },
         available_actions: availableActions,
       });
       if (!onChatPage) navigate(AI_CHAT_PATH);
