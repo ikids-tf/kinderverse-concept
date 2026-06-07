@@ -1,0 +1,158 @@
+/* =========================================================================
+   Milray Park — Colors & Type
+   Warm, editorial, boutique e-decorating brand.
+   Cream canvas · white cards · charcoal ink · terracotta-coral accent · gold.
+   Display serif (Playfair Display) paired with a clean grotesque (Hanken Grotesk).
+   ========================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&family=Hanken+Grotesk:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;500;600;700&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
+
+:root {
+  /* ---- Font families ----
+     Latin glyphs render in Playfair / Hanken; Korean glyphs fall through
+     per-glyph to Noto Serif KR / Pretendard, so mixed KO+EN copy just works.
+     Use the *-ko variants for fully-Korean blocks if you want tighter control. */
+  --font-display: 'Playfair Display', 'Noto Serif KR', Georgia, serif;
+  --font-sans: 'Hanken Grotesk', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display-ko: 'Noto Serif KR', 'Playfair Display', serif;
+  --font-sans-ko: 'Pretendard', 'Hanken Grotesk', -apple-system, sans-serif;
+
+  /* =======================================================================
+     COLOR — raw palette
+     ======================================================================= */
+
+  /* Warm neutrals / surfaces */
+  --cream:        #F8F7F2;   /* page canvas */
+  --cream-deep:   #F1EEE6;   /* recessed cream / outer frame */
+  --white:        #FFFFFF;   /* cards & primary surfaces */
+  --tan-1:        #F4EDE3;   /* light tan — secondary buttons, soft chips */
+  --tan-2:        #EAE0D2;   /* tan — tags, hover wells */
+  --tan-3:        #DFD2BE;   /* deep tan — pressed / borders on tan */
+  --sand-line:    #E7E0D4;   /* hairline on warm surfaces */
+
+  /* Ink / text */
+  --ink:          #141311;   /* near-black — primary text, dark buttons */
+  --ink-soft:     #2C2A26;   /* strong body */
+  --ink-2:        #56524B;   /* secondary text */
+  --ink-3:        #8C887F;   /* muted labels, placeholders */
+  --ink-4:        #B7B1A6;   /* disabled */
+
+  /* Brand accents */
+  --coral:        #F2733E;   /* primary accent — active tag, links, stars */
+  --coral-strong: #E5602B;   /* coral hover / pressed */
+  --coral-soft:   #FBE6D9;   /* coral tint wells */
+  --gold:         #FFC324;   /* GOLD tier badge */
+  --gold-deep:    #E0A62C;   /* gold text on light */
+
+  /* Semantic status */
+  --success:      #2E7D5B;
+  --success-soft: #E2F0E8;
+  --danger:       #C8472E;
+  --danger-soft:  #F8E3DD;
+
+  /* =======================================================================
+     COLOR — semantic tokens
+     ======================================================================= */
+  --bg:            var(--cream);
+  --bg-deep:       var(--cream-deep);
+  --surface:       var(--white);
+  --surface-2:     var(--tan-1);
+  --surface-3:     var(--tan-2);
+
+  --fg:            var(--ink);
+  --fg-1:          var(--ink-soft);
+  --fg-2:          var(--ink-2);
+  --fg-muted:      var(--ink-3);
+  --fg-disabled:   var(--ink-4);
+
+  --accent:        var(--coral);
+  --accent-hover:  var(--coral-strong);
+  --link:          var(--coral);
+  --on-accent:     #FFFFFF;
+  --on-dark:       #FFFFFF;
+
+  --border:        var(--sand-line);
+  --border-strong: var(--ink);     /* the signature charcoal pill outline */
+  --field-border:  #E3DCD0;
+  --focus-ring:    rgba(242,115,62,0.35);
+
+  /* =======================================================================
+     RADIUS — soft, generous, pill-forward
+     ======================================================================= */
+  --r-xs:    6px;    /* checkboxes, micro badges */
+  --r-sm:    10px;   /* select fields, small inputs */
+  --r-md:    14px;   /* info blocks, inner wells */
+  --r-lg:    20px;   /* nested cards */
+  --r-xl:    26px;   /* primary cards / panels */
+  --r-2xl:   34px;   /* large container frames */
+  --r-pill:  999px;  /* buttons, tags, search inputs */
+
+  /* =======================================================================
+     SHADOW / ELEVATION — whisper-soft, warm-tinted
+     ======================================================================= */
+  --shadow-xs:  0 1px 2px rgba(40,33,24,0.04);
+  --shadow-sm:  0 2px 8px rgba(40,33,24,0.05);
+  --shadow-md:  0 8px 24px rgba(40,33,24,0.06);
+  --shadow-lg:  0 18px 48px rgba(40,33,24,0.08);
+  --shadow-pop: 0 10px 30px rgba(20,19,17,0.18); /* dark tooltips / popovers */
+
+  /* =======================================================================
+     SPACING — 4pt base
+     ======================================================================= */
+  --sp-1: 4px;   --sp-2: 8px;   --sp-3: 12px;  --sp-4: 16px;
+  --sp-5: 20px;  --sp-6: 24px;  --sp-7: 32px;  --sp-8: 40px;
+  --sp-9: 48px;  --sp-10: 64px; --sp-12: 80px;
+
+  /* =======================================================================
+     TYPE SCALE — display serif headings, grotesque UI/body
+     ======================================================================= */
+  --fs-display: 64px;  --lh-display: 1.04;
+  --fs-h1: 44px;       --lh-h1: 1.08;
+  --fs-h2: 32px;       --lh-h2: 1.12;
+  --fs-h3: 24px;       --lh-h3: 1.2;
+  --fs-h4: 20px;       --lh-h4: 1.25;
+  --fs-body-lg: 18px;  --lh-body-lg: 1.55;
+  --fs-body: 16px;     --lh-body: 1.6;
+  --fs-sm: 14px;       --lh-sm: 1.5;
+  --fs-xs: 13px;       --lh-xs: 1.45;
+  --fs-overline: 11px; --lh-overline: 1.2; --tk-overline: 0.14em;
+}
+
+/* =========================================================================
+   SEMANTIC ELEMENT STYLES — opt-in helpers
+   ========================================================================= */
+
+.mp-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--fs-display);
+  line-height: var(--lh-display);
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.mp-h1 { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-h1); line-height: var(--lh-h1); letter-spacing: -0.01em; color: var(--fg); }
+.mp-h2 { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-h2); line-height: var(--lh-h2); color: var(--fg); }
+.mp-h3 { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-h3); line-height: var(--lh-h3); color: var(--fg); }
+.mp-h4 { font-family: var(--font-sans);    font-weight: 600; font-size: var(--fs-h4); line-height: var(--lh-h4); color: var(--fg); }
+
+.mp-body-lg { font-family: var(--font-sans); font-weight: 400; font-size: var(--fs-body-lg); line-height: var(--lh-body-lg); color: var(--fg-1); }
+.mp-body    { font-family: var(--font-sans); font-weight: 400; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--fg-1); }
+.mp-sm      { font-family: var(--font-sans); font-weight: 400; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--fg-2); }
+.mp-label   { font-family: var(--font-sans); font-weight: 500; font-size: var(--fs-sm); line-height: 1.3; color: var(--fg-2); }
+
+/* Tracked uppercase micro-label — used for badges (GOLD, ART DECO, ROOM) and
+   section eyebrows (e.g. "NOVEMBER 2018"). A signature Milray Park detail. */
+.mp-overline {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--fs-overline);
+  line-height: var(--lh-overline);
+  letter-spacing: var(--tk-overline);
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+a, .mp-link { color: var(--link); text-decoration: none; }
+a:hover, .mp-link:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 2px; }

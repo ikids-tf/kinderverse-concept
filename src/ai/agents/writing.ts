@@ -1,0 +1,110 @@
+import { callGateway } from '../client';
+import { extractJson } from '../json';
+import { PEDAGOGY_FOUNDATION } from '../pedagogy';
+import { validateRegistryPayload, type RegistryPayload } from '@/ui-registry/contracts';
+
+/* Tier1 문장 에이전트 (agent.writing). 문장생성·가정통신문·공지·발달평가서.
+   고위험(평가서)은 생성 후 자동 적합성 검증 패스(체크리스트) 1회를 거친다(PROMPTS §5).
+   자율성: 생성=L1 / 발송=L2(통신문·공지) / 외부·평가서 발송=L3 (UI 컴포넌트에서 게이트). */
+
+export type WritingMode = 'letter' | 'notice' | 'text' | 'assessment';
+
+export interface WritingResult {
+  payload: RegistryPayload;
+  mocked?: boolean;
+  warning?: string;
+}
+
+function inferMode(text: string): WritingMode {
+  if (/평가서|발달\s*평가|발달평가/.test(text)) return 'assessment';
+  if (/통신문|가정통신/.test(text)) return 'letter';
+  if (/공지|안내문|안내/.test(text)) return 'notice';
+  return /통신|편지|letter/.test(text) ? 'letter' : 'text';
+}
+
+function system(ctx?: string): string {
+  const l0 = '너는 킨더버스 Tier1 문장 에이전트다. 통신문·공지·문장·발달평가서를 원 톤에 맞춰 쓴다. 적합성은 Pedagogy Foundation이 보장한다.';
+  const l3 = ctx?.trim() ? `[테넌트/교사 컨텍스트 — 우리반]\n${ctx.trim()}\n아동명 마스킹. 사실을 지어내지 마라.` : '';
+  return [l0, PEDAGOGY_FOUNDATION, l3].filter(Boolean).join('\n\n');
+}
+
+function clarify(question: string): RegistryPayload {
+  return { type: 'ClarifyPrompt', props: { question } };
+}
+
+function userPrompt(mode: WritingMode, text: string): string {
+  if (mode === 'assessment') {
+    return `요청: "${text}"\n발달평가서를 작성하라. 근거에 기반해 객관적·비낙인적으로, 영역별 관찰과 종합의견을 쓴다. JSON만:\n{ "type": "AssessmentReport", "props": { "child_label": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "domains": [ { "area": string, "observation": string, "level"?: string } ], "summary": string } }`;
+  }
+  const kind = mode === 'notice' ? 'notice' : mode === 'text' ? 'text' : 'letter';
+  const what = mode === 'notice' ? '공지' : mode === 'text' ? '문장' : '가정통신문';
+  return `요청: "${text}"\n${what}을(를) 작성하라. 따뜻하고 정중한 학부모 대상 톤. JSON만:\n{ "type": "LetterPreview", "props": { "kind": "${kind}", "title": string, "body": string, "tone": "warm"|"formal"|"concise", "audience"?: string } }`;
+}
+
+/* 고위험 산출물 적합성 검증 패스 (체크리스트 1회). */
+async function suitabilityCheck(content: string, ctx?: string): Promise<{ pass: boolean; flags: string[] }> {
+  const res = await callGateway({
+    task: 'suitability',
+    tier: 'low',
+    provider: 'auto',
+    responseFormat: 'json',
+    system: system(ctx),
+    messages: [
+      {
+        role: 'user',
+        content: `다음 발달평가서를 유아교육 적합성 체크리스트로 검토하라.\n체크: [발달 적합성, 무근거 진술 없음, 영역 연계, 낙인적/단정적 표현 없음, 객관적 서술].\n평가서:\n${content}\n\nJSON만: { "pass": boolean, "flags": string[] }`,
+      },
+    ],
+    meta: { kind: 'suitability' },
+    maxTokens: 500,
+  });
+  if (!res.ok || !res.text) return { pass: false, flags: ['적합성 검증을 완료하지 못했습니다.'] };
+  try {
+    const j = extractJson(res.text) as { pass?: boolean; flags?: string[] };
+    return { pass: !!j.pass, flags: Array.isArray(j.flags) ? j.flags : [] };
+  } catch {
+    return { pass: false, flags: ['검증 응답 파싱 실패'] };
+  }
+}
+
+export async function runWriting(text: string, ctx?: string): Promise<WritingResult> {
+  const mode = inferMode(text);
+
+  const first = await callGateway({
+    task: 'writing',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: system(ctx),
+    messages: [{ role: 'user', content: userPrompt(mode, text) }],
+    meta: { kind: mode, title: text, selected: [] },
+    maxTokens: 1800,
+  });
+
+  if (!first.ok || !first.text) {
+    return { payload: clarify('문서 생성에 실패했어요.'), warning: first.error, mocked: first.mocked };
+  }
+
+  let result;
+  try {
+    result = validateRegistryPayload(extractJson(first.text));
+  } catch {
+    result = { ok: false as const, errors: ['unparseable'] };
+  }
+  if (!result.ok || !result.value) {
+    return { payload: clarify('문서를 만들 정보가 부족해요. 무엇을, 누구에게 보낼지 알려주세요.'), mocked: first.mocked };
+  }
+
+  // 고위험: 발달평가서 → 자동 적합성 검증 패스 1회.
+  if (result.value.type === 'AssessmentReport') {
+    const summaryText = [
+      result.value.props.summary,
+      ...result.value.props.domains.map((d) => `${d.area}: ${d.observation}`),
+    ].join('\n');
+    const check = await suitabilityCheck(summaryText, ctx);
+    result.value.props.suitability = { checked: true, pass: check.pass, flags: check.flags };
+  }
+
+  return { payload: result.value, mocked: first.mocked };
+}

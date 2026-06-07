@@ -1,0 +1,96 @@
+import { callGateway } from '../client';
+import { extractJson } from '../json';
+import { PEDAGOGY_FOUNDATION } from '../pedagogy';
+import { validateRegistryPayload, type RegistryPayload } from '@/ui-registry/contracts';
+
+/* Tier1 계획 에이전트 (agent.plan). 놀이계획·주안. Inherits Pedagogy Foundation +
+   tenant context. Outputs an idea list (lane step 1) or a WeeklyPlanGrid payload. */
+
+let seq = 0;
+const id = (p: string) => `${p}_${++seq}_${Date.now().toString(36)}`;
+
+export interface IdeaItem {
+  id: string;
+  label: string;
+  desc: string;
+}
+
+function system(ctx?: string): string {
+  const l0 = '너는 킨더버스 Tier1 계획 에이전트다. 유아 놀이계획을 만든다. 적합성은 공유 Pedagogy Foundation이 보장한다.';
+  const l3 = ctx?.trim() ? `[테넌트/교사 컨텍스트 — 우리반]\n${ctx.trim()}\n아동명은 마스킹 상태. 사실을 지어내지 마라.` : '';
+  return [l0, PEDAGOGY_FOUNDATION, l3].filter(Boolean).join('\n\n');
+}
+
+export async function runPlanIdeas(request: string, ctx?: string): Promise<IdeaItem[]> {
+  const res = await callGateway({
+    task: 'plan',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: system(ctx),
+    messages: [
+      {
+        role: 'user',
+        content: `요청: "${request}"\n이 주제로 유아 놀이 활동 아이디어 4개를 제안하라. desc는 1문장(40자 내외)으로 간결히, 연계 영역만 괄호로. JSON만:\n{ "items": [ { "label": string, "desc": string } ] }`,
+      },
+    ],
+    meta: { kind: 'idea', title: request, selected: [] },
+    maxTokens: 1400,
+  });
+  if (!res.ok || !res.text) return [];
+  try {
+    const parsed = extractJson(res.text) as { items?: Array<{ label: string; desc?: string }> };
+    return (parsed.items ?? []).map((it) => ({ id: id('idea'), label: it.label, desc: it.desc ?? '' }));
+  } catch {
+    return [];
+  }
+}
+
+export interface PlanResult {
+  payload: RegistryPayload;
+  mocked?: boolean;
+  warning?: string;
+}
+
+export async function runPlan(request: string, selected: string[], ctx?: string): Promise<PlanResult> {
+  const sel = selected.length ? `선택된 활동: ${selected.join(' / ')}` : '';
+  const user = `요청: "${request}"\n${sel}\n주간 놀이계획을 작성하라. 각 칸은 간결히(activity 25자·goal 20자 내외). JSON만 출력:\n{ "type": "WeeklyPlanGrid", "props": { "title": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "days": [ { "day": string, "area": string, "activity": string, "materials": string, "goal": string } ], "notes"?: string } }`;
+
+  const first = await callGateway({
+    task: 'plan',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: system(ctx),
+    messages: [{ role: 'user', content: user }],
+    meta: { kind: 'plan', title: request, selected },
+    maxTokens: 2200,
+  });
+
+  if (!first.ok || !first.text) {
+    return { payload: clarify('계획 생성에 실패했어요.'), warning: first.error, mocked: first.mocked };
+  }
+
+  let result;
+  try {
+    result = validateRegistryPayload(extractJson(first.text));
+  } catch {
+    result = { ok: false as const, errors: ['unparseable'] };
+  }
+
+  if (!result.ok || !result.value) {
+    return { payload: clarify('계획안을 만들 정보가 부족해요. 주제·연령을 알려주세요.'), mocked: first.mocked };
+  }
+
+  // Stamp a plan id so a worksheet can link back (link.plan_id, SKILL §4.1).
+  if (result.value.type === 'WeeklyPlanGrid' && !result.value.props.id) {
+    result.value.props.id = id('plan');
+  }
+  return { payload: result.value, mocked: first.mocked };
+}
+
+function clarify(question: string): RegistryPayload {
+  return { type: 'ClarifyPrompt', props: { question } };
+}

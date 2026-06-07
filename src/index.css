@@ -1,0 +1,91 @@
+/* Global stylesheet.
+   1) Milray Park design tokens (fonts + CSS variables) — single source of truth.
+   2) Tailwind layers (utilities are token-backed via tailwind.config.js).
+   Warm cream single theme. White-mode override slot reserved below (do NOT build now). */
+
+@import './styles/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================================
+   White-mode override slot — RESERVED, intentionally empty (CLAUDE.md §2).
+   When added, this is a single token override layer:
+   [data-theme='white'] { --bg: var(--white); --surface: var(--white); ... }
+   ========================================================================= */
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg-1);
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Visible, token-tinted focus ring for keyboard users (accessibility DoD). */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--r-xs);
+  }
+
+  /* Respect reduced-motion preference (CLAUDE.md §5). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Typography helpers mirroring the Milray Park .mp-* classes, token-backed. */
+  .text-display { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; }
+  .text-serif { font-family: var(--font-display); }
+
+  /* App shell responsiveness via container query (CLAUDE.md §5).
+     Wide: left icon rail. Narrow: bottom tab bar. */
+  .kv-shell {
+    container: kvshell / inline-size;
+  }
+  .kv-rail-slot { display: flex; }
+  .kv-bottomtabs-slot { display: none; }
+
+  /* Fixed prompt bar sits flush at the bottom on wide screens… */
+  .kv-promptbar { padding-bottom: var(--sp-4); }
+
+  @container kvshell (max-width: 720px) {
+    .kv-rail-slot { display: none; }
+    .kv-bottomtabs-slot { display: flex; }
+    /* …and clears the bottom tab bar on narrow screens. */
+    .kv-promptbar { padding-bottom: calc(58px + var(--sp-3)); }
+  }
+
+  /* Signature clip-path reveal (CLAUDE.md §5) — opt-in. */
+  .kv-reveal {
+    animation: kv-clip-reveal 200ms var(--kv-ease, cubic-bezier(0.4, 0, 0.2, 1)) both;
+  }
+  @keyframes kv-clip-reveal {
+    from { clip-path: inset(0 0 100% 0); opacity: 0; }
+    to { clip-path: inset(0 0 0 0); opacity: 1; }
+  }
+}
