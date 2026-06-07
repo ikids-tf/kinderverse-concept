@@ -96,4 +96,15 @@
     0%, 80%, 100% { opacity: 0.25; }
     40% { opacity: 1; }
   }
+
+  /* Home page (reference parity): entrance fades + drag gallery. */
+  .kv-gallery::-webkit-scrollbar { display: none; }
+  .kv-gallery { -ms-overflow-style: none; scrollbar-width: none; }
+  .kv-home-in { animation: kv-home-in 0.5s cubic-bezier(0.85, 0, 0.15, 1) 0.12s backwards; }
+  .kv-quick-in { animation: kv-quick-in 0.42s cubic-bezier(0.85, 0, 0.15, 1) backwards; }
+  @keyframes kv-home-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes kv-quick-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 }
