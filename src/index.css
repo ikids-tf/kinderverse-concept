@@ -88,4 +88,12 @@
     from { clip-path: inset(0 0 100% 0); opacity: 0; }
     to { clip-path: inset(0 0 0 0); opacity: 1; }
   }
+
+  /* Streaming chat typing dots (reference parity).
+     Auto-disabled by the prefers-reduced-motion rule above. */
+  .kv-typing-dot { animation: kv-blink 1s infinite both; }
+  @keyframes kv-blink {
+    0%, 80%, 100% { opacity: 0.25; }
+    40% { opacity: 1; }
+  }
 }

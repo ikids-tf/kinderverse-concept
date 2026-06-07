@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Icon } from '@/lib/icons';
 import { useLocation } from 'react-router-dom';
 import { useRouterStore } from '@/store/routerStore';
@@ -64,6 +64,13 @@ export function AIChatPage() {
 
   const hasConversation = turns.length > 0;
 
+  // Keep the conversation pinned to the latest line as the answer streams.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns]);
+
   return (
     <div className="flex h-full min-h-0">
       {/* 좌측 사이드바: 헤더(상단) + 새 대화 + 추천 질문 + 최근 대화 */}
@@ -122,7 +129,10 @@ export function AIChatPage() {
 
         {hasConversation ? (
           /* 대화: 라우터 결정/명확화/추천을 순서대로 렌더 */
-          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-t6 overflow-auto px-t6 pt-t6 pb-40">
+          <div
+            ref={scrollRef}
+            className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-t6 overflow-auto px-t6 pt-t6 pb-40"
+          >
             {turns.map((turn) => (
               <RouterTurnView key={turn.id} turn={turn} />
             ))}

@@ -5,11 +5,22 @@ import { runPlan } from '@/ai/agents/plan';
 import { runStudioWorksheet } from '@/ai/agents/studio';
 import { runWriting } from '@/ai/agents/writing';
 import { buildAgentContext } from '@/ai/context';
+import { streamChat, buildChatSystem, type ChatMsg } from '@/ai/chat';
 import type { RouterInput, RouterOutput, RouteTarget } from '@/ai/contract';
 import type { RegistryPayload } from '@/ui-registry/contracts';
 
 /** Routes whose Tier1 agent runs inline in chat (M3/M6/M7). */
 export const INLINE_ROUTES: RouteTarget[] = ['record', 'plan', 'studio', 'writing'];
+
+/** Conversational answer streamed onto a turn (reference KinderVerse parity). */
+export interface ChatAnswer {
+  content: string;
+  streaming: boolean;
+  error?: boolean;
+}
+
+/* Only one conversational stream is in flight at a time (mirrors the reference). */
+let activeChatAbort: AbortController | null = null;
 
 /* Task-state slice (CLAUDE.md §5 — 전역/보드/태스크 분리).
    Holds the running router conversation surfaced on the AI chat page, plus the
@@ -24,6 +35,8 @@ export interface RouterTurn {
   model?: string;
   mocked?: boolean;
   warning?: string;
+  // Streamed conversational answer (the headline reply, reference style).
+  chat?: ChatAnswer;
   // Tier1 agent result (e.g. record) rendered via the AUI registry.
   resultStatus?: 'running' | 'done' | 'error';
   result?: RegistryPayload;
@@ -42,41 +55,95 @@ interface RouterState {
 let seq = 0;
 const nextId = () => `turn_${++seq}`;
 
-export const useRouterStore = create<RouterState>((set) => ({
+export const useRouterStore = create<RouterState>((set, get) => ({
   turns: [],
 
   send: async (input) => {
     const id = nextId();
+    // Build chat history from prior turns BEFORE appending this one.
+    const history: ChatMsg[] = [];
+    for (const t of get().turns) {
+      history.push({ role: 'user', content: t.text });
+      if (t.chat?.content) history.push({ role: 'assistant', content: t.chat.content });
+    }
+    history.push({ role: 'user', content: input.text });
+
     set((s) => ({
-      turns: [...s.turns, { id, text: input.text, status: 'routing' }],
+      turns: [...s.turns, { id, text: input.text, status: 'routing', chat: { content: '', streaming: true } }],
     }));
 
-    try {
-      const result = await runRouter(input, buildAgentContext('router'));
-      set((s) => ({
-        turns: s.turns.map((t) =>
-          t.id === id
-            ? {
-                ...t,
-                status: 'done',
-                output: result.output,
-                provider: result.provider,
-                model: result.model,
-                mocked: result.mocked,
-                warning: result.warning,
-              }
-            : t,
-        ),
-      }));
-    } catch (e) {
-      set((s) => ({
-        turns: s.turns.map((t) =>
-          t.id === id
-            ? { ...t, status: 'error', warning: e instanceof Error ? e.message : String(e) }
-            : t,
-        ),
-      }));
-    }
+    // (1) Streamed conversational answer — the headline reply (reference style).
+    if (activeChatAbort) activeChatAbort.abort();
+    const ctrl = new AbortController();
+    activeChatAbort = ctrl;
+    const streamP = streamChat(history, {
+      system: buildChatSystem(),
+      signal: ctrl.signal,
+      onDelta: (delta) => {
+        set((s) => ({
+          turns: s.turns.map((t) =>
+            t.id === id ? { ...t, chat: { content: (t.chat?.content ?? '') + delta, streaming: true } } : t,
+          ),
+        }));
+      },
+    })
+      .then(() => {
+        set((s) => ({
+          turns: s.turns.map((t) =>
+            t.id === id && t.chat ? { ...t, chat: { ...t.chat, streaming: false } } : t,
+          ),
+        }));
+      })
+      .catch((e: unknown) => {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        set((s) => ({
+          turns: s.turns.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  chat: {
+                    content: t.chat?.content || `⚠️ ${e instanceof Error ? e.message : String(e)}`,
+                    streaming: false,
+                    error: true,
+                  },
+                }
+              : t,
+          ),
+        }));
+      })
+      .finally(() => {
+        if (activeChatAbort === ctrl) activeChatAbort = null;
+      });
+
+    // (2) Router (task detection) runs in parallel → surfaced as a contextual action.
+    const routerP = (async () => {
+      try {
+        const result = await runRouter(input, buildAgentContext('router'));
+        set((s) => ({
+          turns: s.turns.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  status: 'done',
+                  output: result.output,
+                  provider: result.provider,
+                  model: result.model,
+                  mocked: result.mocked,
+                  warning: result.warning,
+                }
+              : t,
+          ),
+        }));
+      } catch (e) {
+        set((s) => ({
+          turns: s.turns.map((t) =>
+            t.id === id ? { ...t, status: 'error', warning: e instanceof Error ? e.message : String(e) } : t,
+          ),
+        }));
+      }
+    })();
+
+    await Promise.allSettled([streamP, routerP]);
   },
 
   runResult: async (turnId) => {

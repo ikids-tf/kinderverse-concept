@@ -2,6 +2,7 @@ import type { Plugin } from 'vite';
 import { loadEnv } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleGatewayRequest, type GatewayConfig } from '../server/gateway/handler';
+import { streamChatResponse, type ChatStreamBody } from '../server/gateway/chat';
 
 /* Dev-only thin gateway: mounts POST /api/ai/run in the Vite dev server so the
    browser never sees provider keys. The same handler moves to a serverless /
@@ -67,6 +68,23 @@ export function devGateway(): Plugin {
           .catch((e) =>
             sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }),
           );
+      });
+
+      // Streaming conversational answer (SSE) — reference KinderVerse parity.
+      server.middlewares.use('/api/ai/chat', (req, res) => {
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { ok: false, error: 'method not allowed' });
+          return;
+        }
+        readJsonBody(req)
+          .then((body) => streamChatResponse(res, body as ChatStreamBody, config))
+          .catch((e) => {
+            if (!res.headersSent) {
+              sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) });
+            } else {
+              res.end();
+            }
+          });
       });
     },
   };

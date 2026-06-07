@@ -1,14 +1,69 @@
+import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Icon } from '@/lib/icons';
 import { pathForRoute, ROUTE_LABEL } from '@/ai/actions';
-import { SUGGESTION_HIDE_BELOW, type RouterOutput } from '@/ai/contract';
-import { useRouterStore, INLINE_ROUTES, type RouterTurn } from '@/store/routerStore';
+import { SUGGESTION_HIDE_BELOW, CONFIDENCE_THRESHOLD, type RouterOutput } from '@/ai/contract';
+import { useRouterStore, INLINE_ROUTES, type RouterTurn, type ChatAnswer } from '@/store/routerStore';
 import { useUIStore } from '@/store/uiStore';
 import { RegistryRenderer } from '@/ui-registry/registry';
+import { MarkdownMessage } from './MarkdownMessage';
 
-/* Renders one router turn on the AI chat page: the teacher's message + the
-   router's decision (route card / clarify prompt) + suggested_next chips.
-   Surfaces the M2 loop end-to-end. */
+/* Renders one chat turn on the AI 채팅 page (reference KinderVerse parity):
+   the teacher's message (right bubble) + the assistant's streamed editorial
+   markdown answer (left, coral sparkle avatar). The Tier0 router runs in
+   parallel and is surfaced UNDER the answer as a contextual action (route card /
+   clarify chips) so the structured agent + AUI path stays intact. */
+
+/** What contextual action the router decision warrants below the prose answer. */
+function actionMode(o: RouterOutput): 'decision' | 'clarify' | 'none' {
+  if (o.route_to && INLINE_ROUTES.includes(o.route_to) && o.confidence >= CONFIDENCE_THRESHOLD) return 'decision';
+  if (o.clarify?.options && o.clarify.options.length > 0) return 'clarify';
+  return 'none';
+}
+
+function TypingDots({ className = '' }: { className?: string }) {
+  return (
+    <div className={`flex items-center gap-1.5 py-t1 ${className}`} aria-label="작성 중">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="kv-typing-dot h-1.5 w-1.5 rounded-pill bg-fg-muted"
+          style={{ animationDelay: `${i * 0.16}s` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1400);
+        });
+      }}
+      className="mt-t2 inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface px-t3 py-t1 text-overline text-fg-2 transition-colors duration-150 ease-soft hover:bg-surface-2 hover:text-fg"
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={13} />
+      {copied ? '복사됨' : '복사'}
+    </button>
+  );
+}
+
+function ChatAnswerView({ chat }: { chat: ChatAnswer }) {
+  if (!chat.content && chat.streaming) return <TypingDots />;
+  return (
+    <div className={chat.error ? 'text-danger' : undefined}>
+      {chat.content && <MarkdownMessage content={chat.content} />}
+      {chat.streaming && <TypingDots className={chat.content ? 'mt-t2' : ''} />}
+      {!chat.streaming && !chat.error && chat.content && <CopyButton text={chat.content} />}
+    </div>
+  );
+}
 
 function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
@@ -41,57 +96,45 @@ function SuggestedNext({ output }: { output: RouterOutput }) {
   );
 }
 
-function ClarifyView({ output, contextText }: { output: RouterOutput; contextText: string }) {
+function ClarifyChips({ output, contextText }: { output: RouterOutput; contextText: string }) {
   const location = useLocation();
   const send = useRouterStore((s) => s.send);
   const availableActions = useUIStore((s) => s.availableActions);
-
-  const question = output.clarify?.question ?? '조금 더 구체적으로 알려주세요.';
   const options = output.clarify?.options ?? [];
-
-  // Carry the original request forward so the answer keeps full context.
   const compose = (opt: string) => (contextText ? `${contextText} (${opt})` : opt);
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-t4 shadow-sm">
-      <div className="mb-t2 flex items-center gap-t2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-pill bg-accent-soft text-accent">
-          <Icon name="message" size={14} />
-        </span>
-        <span className="text-overline text-fg-muted">명확화 필요 · 확신도 낮음</span>
+    <div className="rounded-xl border border-border bg-surface p-t3 shadow-sm">
+      <div className="mb-t2 flex items-center gap-t2 text-overline text-fg-muted">
+        <Icon name="message" size={13} /> 더 정확히 도우려면
       </div>
-      <p className="text-body text-fg">{question}</p>
-      {options.length > 0 && (
-        <div className="mt-t3 flex flex-wrap gap-t2">
-          {options.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => {
-                void send({
-                  text: compose(opt),
-                  page: location.pathname,
-                  selection: { ids: [], types: [], count: 0 },
-                  available_actions: availableActions,
-                });
-              }}
-              className="rounded-pill border border-border-strong bg-surface px-t4 py-t2 text-sm font-medium text-fg transition-colors duration-150 ease-soft hover:bg-surface-2"
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="flex flex-wrap gap-t2">
+        {options.map((opt) => (
+          <button
+            key={opt}
+            onClick={() =>
+              void send({
+                text: compose(opt),
+                page: location.pathname,
+                selection: { ids: [], types: [], count: 0 },
+                available_actions: availableActions,
+              })
+            }
+            className="rounded-pill border border-border-strong bg-surface px-t4 py-t2 text-sm font-medium text-fg transition-colors duration-150 ease-soft hover:bg-surface-2"
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
-function DecisionView({ turn }: { turn: RouterTurn }) {
+function DecisionCard({ turn }: { turn: RouterTurn }) {
   const navigate = useNavigate();
   const runResult = useRouterStore((s) => s.runResult);
   const output = turn.output!;
-  const route = output.route_to!; // non-null here (clarify handled separately)
-
-  // record/plan/studio run inline (M3/M6); other agents land on My Board.
+  const route = output.route_to!;
   const isInline = INLINE_ROUTES.includes(route);
   const running = turn.resultStatus === 'running';
   const hasResult = turn.resultStatus === 'done' && !!turn.result;
@@ -102,26 +145,19 @@ function DecisionView({ turn }: { turn: RouterTurn }) {
         <span className="rounded-pill bg-accent-soft px-t3 py-t1 text-overline text-accent">
           {ROUTE_LABEL[route]} 에이전트
         </span>
-        <span className="rounded-pill bg-surface-2 px-t3 py-t1 text-overline text-fg-2">
-          {output.intent}
-        </span>
+        <span className="rounded-pill bg-surface-2 px-t3 py-t1 text-overline text-fg-2">{output.intent}</span>
         {output.mode && (
           <span className="rounded-pill bg-surface-2 px-t3 py-t1 text-overline text-fg-2">
             {output.mode === 'observation' ? '관찰기록' : '놀이기록'}
           </span>
         )}
-        <span className="rounded-pill bg-surface-2 px-t3 py-t1 text-overline text-fg-2">
-          범위: {output.scope}
-        </span>
         <ConfidenceBar value={output.confidence} />
       </div>
 
       {!hasResult && (
         <button
           disabled={running}
-          onClick={() =>
-            isInline ? void runResult(turn.id) : navigate(pathForRoute(route, output.mode))
-          }
+          onClick={() => (isInline ? void runResult(turn.id) : navigate(pathForRoute(route, output.mode)))}
           className="inline-flex items-center gap-t2 rounded-pill bg-fg px-t4 py-t2 font-sans text-sm font-semibold text-on-dark transition-colors duration-150 ease-soft hover:bg-fg-1 disabled:opacity-60"
         >
           {running ? (
@@ -148,7 +184,6 @@ export function RouterTurnView({ turn }: { turn: RouterTurn }) {
   const send = useRouterStore((s) => s.send);
   const availableActions = useUIStore((s) => s.availableActions);
 
-  // Re-route a record-result clarify answer through the router with full context.
   const onResultClarify = (opt: string) =>
     void send({
       text: `${turn.text} (${opt})`,
@@ -157,70 +192,66 @@ export function RouterTurnView({ turn }: { turn: RouterTurn }) {
       available_actions: availableActions,
     });
 
+  const mode = turn.status === 'done' && turn.output ? actionMode(turn.output) : 'none';
+
   return (
     <div className="flex flex-col gap-t3">
-      {/* Teacher message */}
-      <div className="self-end max-w-[80%] rounded-2xl rounded-br-md bg-accent-soft px-t4 py-t3 text-body text-fg">
+      {/* Teacher message (right bubble) */}
+      <div className="max-w-[80%] self-end whitespace-pre-wrap rounded-2xl rounded-br-md bg-accent-soft px-t4 py-t3 text-body text-fg">
         {turn.text}
       </div>
 
-      {/* Router response */}
-      <div className="max-w-[85%] self-start">
-        {turn.status === 'routing' && (
-          <div className="flex items-center gap-t2 rounded-xl border border-border bg-surface px-t4 py-t3 text-sm text-fg-muted">
-            <span className="h-3 w-3 animate-spin rounded-full border-2 border-surface-3 border-t-accent" />
-            라우팅 중…
-          </div>
-        )}
+      {/* Assistant: coral sparkle avatar + streamed editorial answer */}
+      <div className="flex w-full max-w-[92%] gap-t3 self-start">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-on-accent shadow-sm">
+          <Icon name="sparkle" size={16} fill="currentColor" />
+        </span>
+        <div className="min-w-0 flex-1">
+          {turn.chat && <ChatAnswerView chat={turn.chat} />}
 
-        {turn.status === 'done' && turn.output && (
-          <>
-            {turn.output.needs_confirmation || !turn.output.route_to ? (
-              <ClarifyView output={turn.output} contextText={turn.text} />
-            ) : (
-              <DecisionView turn={turn} />
-            )}
+          {/* Contextual action from the Tier0 router (runs in parallel) */}
+          {mode === 'decision' && (
+            <div className="mt-t3">
+              <DecisionCard turn={turn} />
+            </div>
+          )}
+          {mode === 'clarify' && turn.output && (
+            <div className="mt-t3">
+              <ClarifyChips output={turn.output} contextText={turn.text} />
+            </div>
+          )}
 
-            {/* Tier1 agent result rendered via the AUI registry. */}
-            {turn.result && (
-              <div className="mt-t3">
-                <RegistryRenderer
-                  payload={turn.result}
-                  state={turn.resultStatus === 'running' ? 'streaming' : 'ready'}
-                  onClarifyOption={onResultClarify}
-                />
-                {(turn.resultMocked || turn.resultWarning) && (
-                  <div className="mt-t2 flex flex-wrap items-center gap-t2 text-overline text-fg-muted">
-                    {turn.resultMocked && (
-                      <span className="rounded-pill bg-surface-2 px-t2 py-0.5">MOCK (키 미설정)</span>
-                    )}
-                    {turn.resultWarning && <span className="text-danger">{turn.resultWarning}</span>}
-                  </div>
-                )}
-              </div>
-            )}
-            {turn.resultStatus === 'error' && !turn.result && (
-              <div className="mt-t3 rounded-xl border border-border bg-danger-soft px-t4 py-t3 text-sm text-danger">
-                기록 생성 오류: {turn.resultWarning ?? '알 수 없는 오류'}
-              </div>
-            )}
-            {(turn.mocked || turn.warning) && (
-              <div className="mt-t2 flex flex-wrap items-center gap-t2 text-overline text-fg-muted">
-                {turn.mocked && (
-                  <span className="rounded-pill bg-surface-2 px-t2 py-0.5">MOCK (키 미설정)</span>
-                )}
-                {turn.provider && <span>{turn.provider}{turn.model ? ` · ${turn.model}` : ''}</span>}
-                {turn.warning && <span className="text-danger">{turn.warning}</span>}
-              </div>
-            )}
-          </>
-        )}
+          {/* Tier1 agent result via the AUI registry (after the action is run) */}
+          {turn.result && (
+            <div className="mt-t3">
+              <RegistryRenderer
+                payload={turn.result}
+                state={turn.resultStatus === 'running' ? 'streaming' : 'ready'}
+                onClarifyOption={onResultClarify}
+              />
+              {(turn.resultMocked || turn.resultWarning) && (
+                <div className="mt-t2 flex flex-wrap items-center gap-t2 text-overline text-fg-muted">
+                  {turn.resultMocked && <span className="rounded-pill bg-surface-2 px-t2 py-0.5">MOCK (키 미설정)</span>}
+                  {turn.resultWarning && <span className="text-danger">{turn.resultWarning}</span>}
+                </div>
+              )}
+            </div>
+          )}
+          {turn.resultStatus === 'error' && !turn.result && (
+            <div className="mt-t3 rounded-xl border border-border bg-danger-soft px-t4 py-t3 text-sm text-danger">
+              생성 오류: {turn.resultWarning ?? '알 수 없는 오류'}
+            </div>
+          )}
 
-        {turn.status === 'error' && (
-          <div className="rounded-xl border border-border bg-danger-soft px-t4 py-t3 text-sm text-danger">
-            오류: {turn.warning ?? '알 수 없는 오류'}
-          </div>
-        )}
+          {/* Meta: provider/model + mock badge */}
+          {(turn.mocked || turn.provider || turn.warning) && (
+            <div className="mt-t2 flex flex-wrap items-center gap-t2 text-overline text-fg-muted">
+              {turn.mocked && <span className="rounded-pill bg-surface-2 px-t2 py-0.5">MOCK (키 미설정)</span>}
+              {turn.provider && <span>{turn.provider}{turn.model ? ` · ${turn.model}` : ''}</span>}
+              {turn.warning && <span className="text-danger">{turn.warning}</span>}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
