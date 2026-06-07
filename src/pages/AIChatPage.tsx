@@ -155,11 +155,7 @@ export function AIChatPage() {
             </div>
           </div>
         )}
-
-        {/* 푸터 면책 문구 — 전역 프롬프트바 위로 올림 */}
-        <footer className="mb-24 px-t6 pt-t2 text-center text-xs text-fg-muted">
-          AI가 생성한 내용은 부정확할 수 있어요. 아동 관찰·평가는 근거(사진·메모)를 확인하세요.
-        </footer>
+        {/* 면책 문구는 공용 프롬프트바 아래로 이동 (PromptBar) */}
       </div>
     </div>
   );

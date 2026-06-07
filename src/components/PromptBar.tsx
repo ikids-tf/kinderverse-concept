@@ -183,6 +183,11 @@ export function PromptBar() {
             <Icon name="chevronDown" size={18} />
           </button>
         </form>
+
+        {/* AI 면책 안내 — 프롬프트바 바로 아래 (클릭은 아래 콘텐츠로 통과) */}
+        <p className="pointer-events-none mt-t2 px-t4 text-center text-xs leading-snug text-fg-muted">
+          AI가 생성한 내용은 부정확할 수 있어요. 아동 관찰·평가는 근거(사진·메모)를 확인하세요.
+        </p>
       </div>
     </div>
   );
