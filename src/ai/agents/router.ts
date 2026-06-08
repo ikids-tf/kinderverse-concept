@@ -1,5 +1,6 @@
 import { callGateway } from '../client';
 import { buildRouterPrompt } from '../prompt';
+import { extractJson } from '../json';
 import {
   validateRouterOutput,
   type RouterInput,
@@ -18,21 +19,6 @@ export interface RouterResult {
   mocked?: boolean;
   /** Soft error note (e.g. fell back to a local clarify). */
   warning?: string;
-}
-
-/** Pull a JSON object out of a model reply that may be fenced or prefixed. */
-function extractJson(text: string): unknown {
-  const trimmed = text.trim();
-  // Strip ```json ... ``` fences if present.
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1] : trimmed;
-  // Find the outermost {...}.
-  const start = candidate.indexOf('{');
-  const end = candidate.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error('no JSON object found');
-  }
-  return JSON.parse(candidate.slice(start, end + 1));
 }
 
 function localClarify(input: RouterInput, question: string): RouterOutput {

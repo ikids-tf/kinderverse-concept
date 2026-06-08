@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 128" width="192" height="128" role="img" aria-label="발달 평가 문구 썸네일">
+  <defs>
+    <linearGradient id="as-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBEEE7"/>
+      <stop offset="1" stop-color="#F8F7F2"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="128" fill="url(#as-bg)"/>
+  <rect x="48" y="22" width="96" height="84" rx="8" fill="#FFFFFF" stroke="#E7E0D4"/>
+  <rect x="62" y="34" width="44" height="6" rx="3" fill="#56524B"/>
+  <rect x="62" y="46" width="68" height="4" rx="2" fill="#E2D9CC"/>
+  <!-- bar chart -->
+  <g>
+    <rect x="64" y="80" width="12" height="14" rx="2" fill="#FBE6D9"/>
+    <rect x="82" y="72" width="12" height="22" rx="2" fill="#FFC324"/>
+    <rect x="100" y="64" width="12" height="30" rx="2" fill="#F2733E"/>
+    <rect x="118" y="74" width="12" height="20" rx="2" fill="#2E7D5B" opacity="0.8"/>
+  </g>
+  <line x1="60" y1="94" x2="134" y2="94" stroke="#E7E0D4" stroke-width="2"/>
+  <!-- check badge -->
+  <circle cx="128" cy="34" r="13" fill="#2E7D5B"/>
+  <path d="M122 34l4 4 8-9" fill="none" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

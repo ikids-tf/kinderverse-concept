@@ -13,6 +13,11 @@ function system(ctx?: string): string {
   return [l0, PEDAGOGY_FOUNDATION, l3].filter(Boolean).join('\n\n');
 }
 
+/* Shared art-style descriptors (Design Director — style-locked illustration, P3).
+   Appended to every image prompt so a frame's generated art is tonally cohesive. */
+export const KV_ART_STYLE = '밝고 따뜻한 유아 그림책 일러스트 스타일, 부드러운 파스텔 색감, 둥근 형태, 단순하고 깔끔한 배경';
+export const KV_COLORING_STYLE = '유아용 흑백 색칠 도안, 굵고 선명한 윤곽선, 색과 음영 없음, 깨끗한 흰 배경';
+
 export interface StudioResult {
   payload: RegistryPayload;
   mocked?: boolean;
@@ -107,12 +112,13 @@ export async function runStudioImages(
   // Generate (or placeholder) one image per caption via the image plugin.
   const items: StudioItem[] = [];
   let anyMock = false;
+  const style = kind === '도안' ? KV_COLORING_STYLE : KV_ART_STYLE;
   for (const s of specs) {
     const img = await callGateway({
       task: 'image',
       provider: 'auto',
       messages: [],
-      meta: { prompt: s.prompt, caption: s.caption },
+      meta: { prompt: `${s.prompt} — ${style}`, caption: s.caption },
     });
     anyMock = anyMock || !!img.mocked;
     items.push({ caption: s.caption, kind, url: img.image });

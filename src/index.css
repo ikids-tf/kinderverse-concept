@@ -97,6 +97,90 @@
     40% { opacity: 1; }
   }
 
+  /* Prompt-bar send button spinner while a prompt is generating. */
+  .kv-spin { animation: kv-spin 0.7s linear infinite; }
+  @keyframes kv-spin { to { transform: rotate(360deg); } }
+
+  /* A4 document cards on My Board — light markdown typography (가정통신문·활동지·계획). */
+  .kv-doc-md p { margin: 0 0 0.5rem; }
+  .kv-doc-md p:last-child { margin-bottom: 0; }
+  .kv-doc-md strong { font-weight: 600; color: var(--fg); }
+  .kv-doc-md em { font-style: italic; }
+  .kv-doc-md h1, .kv-doc-md h2, .kv-doc-md h3 { font-family: var(--font-display); font-weight: 600; font-size: 1.0625rem; margin: 0.25rem 0 0.6rem; }
+  .kv-doc-md hr { border: 0; border-top: 1px solid var(--border); margin: 0.75rem 0; }
+  .kv-doc-md ul { list-style: disc; padding-left: 1.15rem; margin: 0 0 0.5rem; }
+  .kv-doc-md ol { list-style: decimal; padding-left: 1.15rem; margin: 0 0 0.5rem; }
+  .kv-doc-md li { margin: 0.12rem 0; }
+  .kv-doc-md a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+  /* 주간 놀이계획 grid table (요일×영역) — professional document look. */
+  .kv-doc-md table { width: 100%; border-collapse: collapse; margin: 0.15rem 0 0.7rem; font-size: 0.78rem; }
+  .kv-doc-md th, .kv-doc-md td { border: 1px solid var(--border); padding: 5px 7px; text-align: left; vertical-align: top; line-height: 1.4; }
+  .kv-doc-md thead th { background: var(--surface-2); font-weight: 600; color: var(--fg); white-space: nowrap; }
+  .kv-doc-md td:first-child { white-space: nowrap; font-weight: 600; }
+
+  /* Decoration primitives (Design Director — editing design; pure token CSS, $0).
+     The document generators emit standard markdown; these style it like a designed
+     sheet: a title CoverBand, section accents, an ornamented Divider, Callout box. */
+  /* CoverBand — the doc title as a soft warm band. */
+  .kv-doc-md h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.45rem;
+    line-height: 1.2;
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.9rem;
+    background: var(--surface-2);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--r-md);
+    color: var(--fg);
+  }
+  /* Section heading — a small coral accent bar. */
+  .kv-doc-md h2 { border-left: 3px solid var(--accent); padding-left: 0.5rem; }
+  /* Divider — dotted rule with a centered ornament. */
+  .kv-doc-md hr {
+    border: 0;
+    border-top: 2px dotted var(--tan-2);
+    margin: 1rem 0;
+    position: relative;
+    overflow: visible;
+  }
+  .kv-doc-md hr::after {
+    content: '❀';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    transform: translate(-50%, -55%);
+    background: var(--surface);
+    color: var(--accent);
+    padding: 0 0.45rem;
+    font-size: 0.78rem;
+    line-height: 1;
+  }
+  /* Callout — tinted box for highlighted notes (유의점·가정 연계·팁). */
+  .kv-doc-md blockquote {
+    margin: 0.7rem 0;
+    padding: 0.6rem 0.85rem;
+    background: var(--coral-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--r-sm);
+    color: var(--fg);
+  }
+  .kv-doc-md blockquote p { margin: 0; }
+  .kv-doc-md blockquote p + p { margin-top: 0.35rem; }
+
+  /* Persistent prompt bar — shared element so it morphs between page positions
+     (e.g. Home mid-page → AI 채팅 bottom) on view-transition navigations. */
+  .kv-pbar-vt { view-transition-name: kv-promptbar; }
+  @media (prefers-reduced-motion: reduce) {
+    .kv-pbar-vt { view-transition-name: none; }
+  }
+
+  /* Gallery card maximize affordance — hidden until the card is hovered/focused
+     (keeps the grid clean / less busy). */
+  .kv-galmax { opacity: 0; transition: opacity 150ms var(--kv-ease, ease); }
+  .kv-galcard:hover .kv-galmax,
+  .kv-galcard:focus-visible .kv-galmax { opacity: 1; }
+
   /* Home page (reference parity): entrance fades + drag gallery. */
   .kv-gallery::-webkit-scrollbar { display: none; }
   .kv-gallery { -ms-overflow-style: none; scrollbar-width: none; }

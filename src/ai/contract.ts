@@ -2,7 +2,7 @@
    Agents emit JSON only — this is the schema + a dependency-free runtime
    validator with one self-repair pass handled by the caller (router agent). */
 
-export type RouteTarget = 'router' | 'record' | 'plan' | 'studio' | 'writing';
+export type RouteTarget = 'router' | 'record' | 'plan' | 'studio' | 'writing' | 'mindmap';
 export type Scope = 'selection' | 'page' | 'new';
 export type RecordMode = 'observation' | 'story';
 
@@ -67,7 +67,7 @@ export interface RouterInput {
 export const CONFIDENCE_THRESHOLD = 0.7; // SKILL §3 rule 4
 export const SUGGESTION_HIDE_BELOW = 0.6; // SKILL §3 rule 7
 
-const ROUTE_TARGETS: RouteTarget[] = ['router', 'record', 'plan', 'studio', 'writing'];
+const ROUTE_TARGETS: RouteTarget[] = ['router', 'record', 'plan', 'studio', 'writing', 'mindmap'];
 const SCOPES: Scope[] = ['selection', 'page', 'new'];
 
 export interface ValidationResult {

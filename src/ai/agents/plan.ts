@@ -21,7 +21,7 @@ function system(ctx?: string): string {
   return [l0, PEDAGOGY_FOUNDATION, l3].filter(Boolean).join('\n\n');
 }
 
-export async function runPlanIdeas(request: string, ctx?: string): Promise<IdeaItem[]> {
+export async function runPlanIdeas(request: string, ctx?: string, count = 4): Promise<IdeaItem[]> {
   const res = await callGateway({
     task: 'plan',
     tier: 'mid',
@@ -32,7 +32,7 @@ export async function runPlanIdeas(request: string, ctx?: string): Promise<IdeaI
     messages: [
       {
         role: 'user',
-        content: `요청: "${request}"\n이 주제로 유아 놀이 활동 아이디어 4개를 제안하라. desc는 1문장(40자 내외)으로 간결히, 연계 영역만 괄호로. JSON만:\n{ "items": [ { "label": string, "desc": string } ] }`,
+        content: `요청: "${request}"\n이 주제로 서로 겹치지 않는 유아 놀이 활동 아이디어 ${count}개를 제안하라. label은 활동 이름(10자 내외), desc는 놀이 방법·전개가 드러나는 1~2문장(50~80자)으로 구체적으로 쓰고 끝에 연계 누리 영역을 괄호로 표기. 단순 명사 나열 금지. JSON만:\n{ "items": [ { "label": string, "desc": string } ] }`,
       },
     ],
     meta: { kind: 'idea', title: request, selected: [] },
@@ -55,7 +55,7 @@ export interface PlanResult {
 
 export async function runPlan(request: string, selected: string[], ctx?: string): Promise<PlanResult> {
   const sel = selected.length ? `선택된 활동: ${selected.join(' / ')}` : '';
-  const user = `요청: "${request}"\n${sel}\n주간 놀이계획을 작성하라. 각 칸은 간결히(activity 25자·goal 20자 내외). JSON만 출력:\n{ "type": "WeeklyPlanGrid", "props": { "title": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "days": [ { "day": string, "area": string, "activity": string, "materials": string, "goal": string } ], "notes"?: string } }`;
+  const user = `요청: "${request}"\n${sel}\n유아 교사가 실제로 사용하는 수준의 주간 놀이계획을 작성하라.\n- days: 월~금 5일. 누리과정 영역(area)을 요일별로 골고루 배분.\n- activity: 놀이의 전개가 드러나게 구체적으로(1문장, 35~55자). 단순 명사·주제 나열 금지.\n- goal: 발달·학습 목표를 명확한 문장으로(예: "~을 통해 ~을 기른다").\n- materials: 실제 준비물 2~4가지를 구체적으로.\n- notes: 안전·유의점과 개별 배려(알레르기·결석 등 컨텍스트가 있으면 반영)를 1~2문장.\nJSON만 출력:\n{ "type": "WeeklyPlanGrid", "props": { "title": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "days": [ { "day": string, "area": string, "activity": string, "materials": string, "goal": string } ], "notes": string } }`;
 
   const first = await callGateway({
     task: 'plan',

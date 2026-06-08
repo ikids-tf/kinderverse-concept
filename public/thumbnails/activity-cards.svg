@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 128" width="192" height="128" role="img" aria-label="놀이 활동 카드 썸네일">
+  <defs>
+    <linearGradient id="ac-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FCEEE6"/>
+      <stop offset="1" stop-color="#F8F7F2"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="128" fill="url(#ac-bg)"/>
+  <rect x="40" y="40" width="50" height="62" rx="10" fill="#FFFFFF" stroke="#E7E0D4" transform="rotate(-9 65 71)"/>
+  <rect x="118" y="40" width="50" height="62" rx="10" fill="#FFFFFF" stroke="#E7E0D4" transform="rotate(9 143 71)"/>
+  <rect x="71" y="30" width="50" height="68" rx="10" fill="#FFFFFF" stroke="#E7E0D4"/>
+  <circle cx="58" cy="66" r="11" fill="#F2733E" transform="rotate(-9 65 71)"/>
+  <path d="M143 54l11 19h-22z" fill="#FFC324" transform="rotate(9 143 71)"/>
+  <rect x="84" y="52" width="24" height="24" rx="5" fill="#56524B"/>
+  <rect x="82" y="86" width="28" height="5" rx="2.5" fill="#E2D9CC"/>
+</svg>

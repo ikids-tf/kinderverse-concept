@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 128" width="192" height="128" role="img" aria-label="색칠 도안 썸네일">
+  <defs>
+    <linearGradient id="cl-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDEFE6"/>
+      <stop offset="1" stop-color="#F8F7F2"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="128" fill="url(#cl-bg)"/>
+  <rect x="50" y="22" width="92" height="84" rx="7" fill="#FFFFFF" stroke="#E7E0D4"/>
+  <!-- apple outline, half-colored -->
+  <path d="M96 48c-6-8-22-7-24 5-2 12 8 26 18 30 2 1 4 1 6 0 10-4 20-18 18-30-2-12-18-13-24-5z" fill="#FBE6D9" stroke="#141311" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M96 48c-6-8-22-7-24 5-1 6 1 13 5 19" fill="#F2733E" opacity="0.55"/>
+  <path d="M96 48c0-7 4-12 11-13" fill="none" stroke="#2E7D5B" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M96 48c-6-8-22-7-24 5-2 12 8 26 18 30 2 1 4 1 6 0 10-4 20-18 18-30-2-12-18-13-24-5z" fill="none" stroke="#141311" stroke-width="2.2" stroke-linejoin="round"/>
+  <!-- crayon -->
+  <g transform="rotate(38 120 92)">
+    <rect x="104" y="86" width="38" height="11" rx="3" fill="#F2733E"/>
+    <path d="M142 86l9 5.5-9 5.5z" fill="#E5602B"/>
+    <rect x="104" y="86" width="7" height="11" rx="2" fill="#E5602B"/>
+  </g>
+</svg>

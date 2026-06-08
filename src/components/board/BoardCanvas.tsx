@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBoardStore } from '@/store/boardStore';
 import { moveNodesCmd } from '@/board/commands';
+import { frameMoveSet, rebindFrameMembership } from '@/board/frames';
 import { NodeView } from './NodeView';
 import { LaneView } from './LaneView';
 
@@ -23,6 +24,18 @@ export function BoardCanvas() {
   const laneOrder = useBoardStore((s) => s.laneOrder);
   const selection = useBoardStore((s) => s.selection);
   const viewport = useBoardStore((s) => s.viewport);
+
+  // Mind-map connection edges (frame.data.edges). Recompute only when nodes/order
+  // change — NOT on every drag frame (drag is local state, doesn't touch the store).
+  const edgeList = useMemo(() => {
+    const out: Array<{ from: string; to: string }> = [];
+    for (const id of order) {
+      const n = nodes[id];
+      const edges = n?.type === 'frame' ? (n.data?.edges as Array<{ from: string; to: string }> | undefined) : undefined;
+      if (Array.isArray(edges)) out.push(...edges);
+    }
+    return out;
+  }, [order, nodes]);
 
   const [spaceDown, setSpaceDown] = useState(false);
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
@@ -87,6 +100,7 @@ export function BoardCanvas() {
       const dx = (e.clientX - st.startX) / zoom;
       const dy = (e.clientY - st.startY) / zoom;
       moveNodesCmd(st.dragIds, dx, dy);
+      rebindFrameMembership(st.dragIds); // re-parent cards dragged onto/off a frame
       setDrag(null);
       setDragIds([]);
     } else if (st.mode === 'box') {
@@ -153,33 +167,15 @@ export function BoardCanvas() {
         .map((n) => n.id);
       b.setSelection(ids);
     }
-    // dragging a frame carries every card overlapping it (frame group-move)
+    // dragging a frame carries its children (tagged + overlapping) — frame group-move
     let moveIds = ids;
     if (b.nodes[id]?.type === 'frame') {
-      moveIds = [id, ...containedNodeIds(id)];
+      moveIds = [id, ...frameMoveSet(id)];
     }
     it.current = { ...it.current, mode: 'drag', startX: e.clientX, startY: e.clientY, dragIds: moveIds };
     setDragIds(moveIds);
     setDrag({ dx: 0, dy: 0 });
     beginWindowTracking();
-  }
-
-  /** Cards overlapping a frame (move together with it). */
-  function containedNodeIds(frameId: string): string[] {
-    const b = useBoardStore.getState();
-    const f = b.nodes[frameId];
-    if (!f) return [];
-    return Object.values(b.nodes)
-      .filter(
-        (n) =>
-          n.id !== frameId &&
-          n.type !== 'frame' &&
-          n.x < f.x + f.w &&
-          n.x + n.w > f.x &&
-          n.y < f.y + f.h &&
-          n.y + Math.max(n.h, 60) > f.y,
-      )
-      .map((n) => n.id);
   }
 
   function onWheel(e: React.WheelEvent) {
@@ -237,6 +233,33 @@ export function BoardCanvas() {
               />
             );
           })}
+
+        {/* mind-map connection lines — above the frame bg, below the cards. Edges
+            live on the mind-map frame as data.edges = [{from,to}] node-id pairs. */}
+        <svg className="pointer-events-none absolute left-0 top-0" width="1" height="1" style={{ overflow: 'visible' }}>
+          {edgeList.map((e) => {
+            const a = nodes[e.from];
+            const z = nodes[e.to];
+            if (!a || !z) return null;
+            const oa = drag && dragIds.includes(a.id) ? drag : { dx: 0, dy: 0 };
+            const oz = drag && dragIds.includes(z.id) ? drag : { dx: 0, dy: 0 };
+            const ah = typeof a.data?.renderH === 'number' ? a.data.renderH : a.h;
+            const zh = typeof z.data?.renderH === 'number' ? z.data.renderH : z.h;
+            return (
+              <line
+                key={`${e.from}-${e.to}`}
+                x1={a.x + oa.dx + a.w / 2}
+                y1={a.y + oa.dy + ah / 2}
+                x2={z.x + oz.dx + z.w / 2}
+                y2={z.y + oz.dy + zh / 2}
+                stroke="var(--accent)"
+                strokeWidth={2}
+                strokeLinecap="round"
+                opacity={0.45}
+              />
+            );
+          })}
+        </svg>
 
         {order
           .filter((id) => nodes[id] && nodes[id].type !== 'frame')

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 128" width="192" height="128" role="img" aria-label="생일 축하 카드 썸네일">
+  <defs>
+    <linearGradient id="bd-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FCEAF0"/>
+      <stop offset="1" stop-color="#F8F7F2"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="128" fill="url(#bd-bg)"/>
+  <!-- confetti -->
+  <g opacity="0.9">
+    <rect x="40" y="26" width="7" height="7" rx="1.5" fill="#F2733E" transform="rotate(20 43 29)"/>
+    <circle cx="150" cy="30" r="4" fill="#FFC324"/>
+    <rect x="146" y="58" width="6" height="6" rx="1.5" fill="#2E7D5B" transform="rotate(30 149 61)"/>
+    <circle cx="44" cy="64" r="3.5" fill="#FFC324"/>
+  </g>
+  <!-- candles -->
+  <g>
+    <rect x="83" y="40" width="5" height="20" rx="2" fill="#F2733E"/>
+    <rect x="103" y="40" width="5" height="20" rx="2" fill="#F2733E"/>
+    <path d="M85.5 40c0-4 0-6-2-8 4 1 5 4 2 8z" fill="#FFC324"/>
+    <path d="M105.5 40c0-4 0-6-2-8 4 1 5 4 2 8z" fill="#FFC324"/>
+  </g>
+  <!-- cake tiers -->
+  <rect x="62" y="60" width="68" height="24" rx="8" fill="#FFFFFF" stroke="#E7E0D4"/>
+  <rect x="56" y="80" width="80" height="26" rx="9" fill="#FBE6D9" stroke="#E7E0D4"/>
+  <g fill="#F2733E">
+    <circle cx="72" cy="92" r="3"/><circle cx="86" cy="96" r="3"/>
+    <circle cx="100" cy="92" r="3"/><circle cx="114" cy="96" r="3"/>
+  </g>
+</svg>

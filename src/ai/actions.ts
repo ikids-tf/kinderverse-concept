@@ -7,7 +7,7 @@ import type { RouteTarget } from './contract';
 export const PAGE_ACTIONS: Record<string, string[]> = {
   '/': ['start_task', 'chat'],
   '/chat': ['chat', 'start_task'],
-  '/board': ['generate', 'merge', 'relayout', 'restyle', 'add_media', 'start_task'],
+  '/board': ['generate', 'mindmap', 'merge', 'relayout', 'restyle', 'add_media', 'start_task'],
   '/gallery': ['classify', 'search', 'add_media'],
   '/class': ['add_child', 'note', 'start_task'],
   '/calendar': ['create_event', 'generate', 'start_task'],
@@ -32,6 +32,8 @@ export function pathForRoute(route: RouteTarget, mode?: string): string {
       return '/board?new=studio';
     case 'writing':
       return '/board?new=writing';
+    case 'mindmap':
+      return '/board?new=mindmap';
     case 'router':
     default:
       return '/chat';
@@ -44,4 +46,5 @@ export const ROUTE_LABEL: Record<RouteTarget, string> = {
   plan: '계획',
   studio: '스튜디오',
   writing: '문장',
+  mindmap: '생각그물',
 };

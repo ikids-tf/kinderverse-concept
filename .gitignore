@@ -16,3 +16,6 @@ npm-debug.log*
 
 # TS build info
 *.tsbuildinfo
+
+# Claude Code local settings (per-machine; not shared)
+.claude/settings.local.json

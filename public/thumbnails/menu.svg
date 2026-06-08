@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 128" width="192" height="128" role="img" aria-label="주간 식단표 썸네일">
+  <defs>
+    <linearGradient id="mn-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FCEEE5"/>
+      <stop offset="1" stop-color="#F8F7F2"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="128" fill="url(#mn-bg)"/>
+  <!-- plate -->
+  <circle cx="84" cy="64" r="40" fill="#FFFFFF" stroke="#E7E0D4"/>
+  <circle cx="84" cy="64" r="29" fill="none" stroke="#EFE7DA" stroke-width="2"/>
+  <circle cx="74" cy="56" r="11" fill="#F2733E"/>
+  <circle cx="96" cy="54" r="8" fill="#FFC324"/>
+  <circle cx="90" cy="74" r="9" fill="#2E7D5B" opacity="0.8"/>
+  <circle cx="73" cy="76" r="6" fill="#EAD9C8"/>
+  <!-- fork & knife -->
+  <g stroke="#8C887F" stroke-width="2.4" stroke-linecap="round">
+    <path d="M138 38v52"/>
+    <path d="M150 38v52"/>
+  </g>
+  <rect x="134" y="36" width="20" height="3" rx="1.5" fill="#8C887F"/>
+  <!-- mini weekly grid -->
+  <g transform="translate(30 96)">
+    <rect x="0" y="0" width="60" height="4" rx="2" fill="#E2D9CC"/>
+  </g>
+</svg>

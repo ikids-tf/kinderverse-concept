@@ -9,7 +9,6 @@ export type IconName =
   | 'chevronLeft'
   | 'arrowRight'
   | 'arrowLeft'
-  | 'arrowUp'
   | 'plus'
   | 'minus'
   | 'check'
@@ -35,6 +34,7 @@ export type IconName =
   | 'cursor'
   | 'present'
   | 'frame'
+  | 'external'
   | 'copy';
 
 const ICON_PATHS: Record<IconName, string> = {
@@ -44,7 +44,6 @@ const ICON_PATHS: Record<IconName, string> = {
   chevronLeft: '<path d="m15 6-6 6 6 6"/>',
   arrowRight: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   arrowLeft: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
-  arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   minus: '<path d="M5 12h14"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
@@ -70,6 +69,7 @@ const ICON_PATHS: Record<IconName, string> = {
   cursor: '<path d="m4 4 7.5 16 2.3-6.7L20.5 11z"/>',
   present: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20M12 16v4"/>',
   frame: '<path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/>',
+  external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   copy: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
 };
 

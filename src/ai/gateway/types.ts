@@ -31,12 +31,20 @@ export interface GatewayRequest {
   maxTokens?: number;
 }
 
+/** A web-search citation (task "search" — Gemini Google Search grounding). */
+export interface SearchSource {
+  title?: string;
+  url: string;
+}
+
 export interface GatewayResponse {
   ok: boolean;
   /** Raw model text (for router: a JSON string to be parsed/validated). */
   text?: string;
   /** Image data URI (for task "image"). */
   image?: string;
+  /** Grounding citations (for task "search"). */
+  sources?: SearchSource[];
   provider?: Provider;
   model?: string;
   tier?: Tier;

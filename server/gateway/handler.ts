@@ -13,6 +13,7 @@ import type { RecordInput } from '../../src/ai/prompt-record';
 import {
   anthropicComplete,
   geminiComplete,
+  geminiSearch,
   DEFAULT_ANTHROPIC_MODELS,
   DEFAULT_GEMINI_MODELS,
   type ProviderCallResult,
@@ -73,6 +74,25 @@ export async function handleGatewayRequest(
       caption: meta.caption ?? '활동',
     });
     return { ok: true, image, mocked: !real, error: real ? undefined : detail };
+  }
+
+  // ---- Web search task: Gemini Google Search grounding (real when keyed). ----
+  if (req.task === 'search') {
+    const query = req.messages.map((m) => m.content).filter(Boolean).join('\n').trim();
+    if (!config.geminiKey) {
+      return {
+        ok: true,
+        mocked: true,
+        text: `“${query.slice(0, 40)}” 관련 웹 검색은 Gemini 키가 설정되면 켜집니다(데모).`,
+      };
+    }
+    try {
+      const model = resolveModel(config, 'gemini', 'low');
+      const { text, sources } = await geminiSearch(config.geminiKey, model, query, req.system);
+      return { ok: true, text, sources, provider: 'gemini', model };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   const provider = pickProvider(req, config);

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '@/lib/icons';
+import { PageHero } from '@/components/PageHero';
 import {
   useClassStore,
   type Attendance,
@@ -210,12 +211,13 @@ export function OurClassPage() {
   const selected = selectedChildId ? children[selectedChildId] : null;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-t6 pt-t7 pb-40">
-      <header className="mb-t6">
-        <div className="text-overline mb-t2 text-fg-muted">아동 등록·관리</div>
-        <h1 className="font-display text-display font-semibold tracking-[-0.01em] text-fg">우리반</h1>
-      </header>
-
+    <div style={{ paddingBottom: 4 }}>
+      <PageHero
+        eyebrow="아동 등록·관리"
+        title="우리반"
+        description="반별 아동 명부와 출결·하원·투약·특이사항·사진 동의를 한곳에서 관리하세요."
+      />
+      <div style={{ padding: '0 28px 130px' }}>
       {/* 반 선택 */}
       <div className="mb-t5 flex flex-wrap gap-t2">
         {classes.map((c) => (
@@ -295,6 +297,7 @@ export function OurClassPage() {
             <p className="text-body text-fg-muted">왼쪽에서 원아를 선택하세요.</p>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

@@ -130,6 +130,79 @@ export function editTextCmd(id: string, before: string, after: string) {
   });
 }
 
+/** Record nodes the composer/chips already spawned (raw) as ONE undoable step.
+   The spawn helpers add nodes immediately (placeInFrame needs them present for
+   collision checks), so we push an already-applied command: undo removes the
+   batch, redo re-adds it. One compose / chip click = one ⌘Z. */
+export function recordSpawnedNodes(ids: string[], label = 'AI 생성') {
+  const snapshot = ids.map((id) => board().nodes[id]).filter(Boolean) as BoardNode[];
+  if (snapshot.length === 0) return;
+  history().push({
+    id: newId('cmd'),
+    label,
+    do: () => snapshot.forEach((n) => board().addNodeRaw(n)),
+    undo: () => snapshot.forEach((n) => board().removeNodeRaw(n.id)),
+  });
+}
+
+/* ---- undoable redesign (Design Director P4) ---- */
+export interface NodeSnap {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  data?: Record<string, unknown>;
+}
+
+function snapNodes(ids: string[]): NodeSnap[] {
+  const b = board();
+  const out: NodeSnap[] = [];
+  for (const id of ids) {
+    const n = b.nodes[id];
+    if (n) out.push({ id, x: n.x, y: n.y, w: n.w, h: n.h, data: n.data ? { ...n.data } : undefined });
+  }
+  return out;
+}
+
+function restoreNodes(snaps: NodeSnap[]) {
+  snaps.forEach((s) => board().updateNodeRaw(s.id, { x: s.x, y: s.y, w: s.w, h: s.h, data: s.data }));
+}
+
+/** Capture a before-snapshot of node geometry+data (for an undoable redesign). */
+export function captureNodes(ids: string[]): NodeSnap[] {
+  return snapNodes(ids);
+}
+
+/** Push an already-applied layout/decoration change as ONE undoable step (the
+    redesign mutates positions+data in place, so we record before→after). */
+export function pushRedesign(ids: string[], before: NodeSnap[], label = '디자인 변경') {
+  const after = snapNodes(ids);
+  history().push({
+    id: newId('cmd'),
+    label,
+    do: () => restoreNodes(after),
+    undo: () => restoreNodes(before),
+  });
+}
+
+/** Delete a frame AND its child cards (data.frameId) as one undoable step. */
+export function deleteFrameCmd(frameId: string) {
+  const b = board();
+  const frame = b.nodes[frameId];
+  if (!frame || frame.type !== 'frame') return;
+  const all = [frame, ...Object.values(b.nodes).filter((n) => n.data?.frameId === frameId)].filter(
+    (n) => !n.locked,
+  );
+  if (all.length === 0) return;
+  history().execute({
+    id: newId('cmd'),
+    label: '프레임 삭제',
+    do: () => all.forEach((n) => board().removeNodeRaw(n.id)),
+    undo: () => all.forEach((n) => board().addNodeRaw(n)),
+  });
+}
+
 /** Toggle lock on the selection (lock itself is reversible; not L3). */
 export function toggleLockCmd(ids: string[]) {
   const snap = ids.map((id) => ({ id, locked: board().nodes[id]?.locked }));

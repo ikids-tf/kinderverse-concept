@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 128" width="192" height="128" role="img" aria-label="안전 교육 자료 썸네일">
+  <defs>
+    <linearGradient id="sf-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDEEE4"/>
+      <stop offset="1" stop-color="#F8F7F2"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="128" fill="url(#sf-bg)"/>
+  <!-- shield -->
+  <path d="M88 24l32 11v25c0 22-15 34-32 42-17-8-32-20-32-42V35z" fill="#F2733E"/>
+  <path d="M88 24l32 11v25c0 22-15 34-32 42-17-8-32-20-32-42V35z" fill="none" stroke="#E5602B" stroke-width="2"/>
+  <path d="M74 64l9 9 18-20" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- traffic cone -->
+  <g transform="translate(132 56)">
+    <path d="M16 0l14 40H2z" fill="#FFC324"/>
+    <rect x="6" y="22" width="20" height="6" fill="#FFFFFF" opacity="0.85"/>
+    <rect x="-2" y="40" width="36" height="7" rx="3" fill="#E0A62C"/>
+  </g>
+</svg>

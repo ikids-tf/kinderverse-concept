@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '@/lib/icons';
 import { useUIStore } from '@/store/uiStore';
+import { PromptBar } from '@/components/PromptBar';
 
 /* Home / landing (reference KinderVerse parity): centered greeting + a
    horizontally-scrollable gallery of recommended resources (drag / wheel / page
@@ -15,19 +16,20 @@ interface Resource {
   sub: string;
   icon: IconName;
   prompt: string;
+  thumb: string; // temporary placeholder thumbnail (SVG in /public/thumbnails)
 }
 
 const RESOURCES: Resource[] = [
-  { title: '가정통신문 양식', sub: '10월 · 가을 운동회', icon: 'writing', prompt: '10월 가정통신문 초안을 만들어줘' },
-  { title: '놀이 활동 카드', sub: '신체 · 표현 · 탐구', icon: 'board', prompt: '이번 주 실내 놀이 활동 3가지를 추천해줘' },
-  { title: '색칠 도안', sub: '가을 · 동물 · 과일', icon: 'studio', prompt: '가을 단풍 색칠 도안을 만들어줘' },
-  { title: '관찰 기록 양식', sub: '누리과정 5영역', icon: 'observation', prompt: '자유놀이 관찰 기록을 누리과정으로 분류해줘' },
-  { title: '주간 식단표', sub: '알레르기 표시 포함', icon: 'plan', prompt: '알레르기 표시가 포함된 주간 식단표를 만들어줘' },
-  { title: '안전 교육 자료', sub: '교통 · 화재 · 생활', icon: 'present', prompt: '유아 교통안전 교육 자료를 만들어줘' },
-  { title: '동화 삽화', sub: 'AI 생성 일러스트', icon: 'gallery', prompt: '가을 숲에서 노는 아이들 동화풍 삽화를 그려줘' },
-  { title: '생일 축하 카드', sub: '이름 넣기 템플릿', icon: 'star', prompt: '우리반 친구 생일 축하 카드를 만들어줘' },
-  { title: '월간 학습 계획', sub: '주제별 활동 구성', icon: 'calendar', prompt: '이번 달 주제별 월간 학습 계획안을 만들어줘' },
-  { title: '발달 평가 문구', sub: '영역별 제언 문장', icon: 'record', prompt: '유아 발달 평가 제언 문구를 영역별로 만들어줘' },
+  { title: '가정통신문 양식', sub: '10월 · 가을 운동회', icon: 'writing', prompt: '10월 가정통신문 초안을 만들어줘', thumb: '/thumbnails/newsletter.svg' },
+  { title: '놀이 활동 카드', sub: '신체 · 표현 · 탐구', icon: 'board', prompt: '이번 주 실내 놀이 활동 3가지를 추천해줘', thumb: '/thumbnails/activity-cards.svg' },
+  { title: '색칠 도안', sub: '가을 · 동물 · 과일', icon: 'studio', prompt: '가을 단풍 색칠 도안을 만들어줘', thumb: '/thumbnails/coloring.svg' },
+  { title: '관찰 기록 양식', sub: '누리과정 5영역', icon: 'observation', prompt: '자유놀이 관찰 기록을 누리과정으로 분류해줘', thumb: '/thumbnails/observation.svg' },
+  { title: '주간 식단표', sub: '알레르기 표시 포함', icon: 'plan', prompt: '알레르기 표시가 포함된 주간 식단표를 만들어줘', thumb: '/thumbnails/menu.svg' },
+  { title: '안전 교육 자료', sub: '교통 · 화재 · 생활', icon: 'present', prompt: '유아 교통안전 교육 자료를 만들어줘', thumb: '/thumbnails/safety.svg' },
+  { title: '동화 삽화', sub: 'AI 생성 일러스트', icon: 'gallery', prompt: '가을 숲에서 노는 아이들 동화풍 삽화를 그려줘', thumb: '/thumbnails/storybook.svg' },
+  { title: '생일 축하 카드', sub: '이름 넣기 템플릿', icon: 'star', prompt: '우리반 친구 생일 축하 카드를 만들어줘', thumb: '/thumbnails/birthday.svg' },
+  { title: '월간 학습 계획', sub: '주제별 활동 구성', icon: 'calendar', prompt: '이번 달 주제별 월간 학습 계획안을 만들어줘', thumb: '/thumbnails/monthly-plan.svg' },
+  { title: '발달 평가 문구', sub: '영역별 제언 문장', icon: 'record', prompt: '유아 발달 평가 제언 문구를 영역별로 만들어줘', thumb: '/thumbnails/assessment.svg' },
 ];
 
 const QUICK: Array<{ label: string; icon: IconName; to: string }> = [
@@ -176,8 +178,14 @@ export function HomePage() {
               onClick={() => onPick(r.prompt)}
               className="flex w-56 flex-none flex-col rounded-2xl border border-border bg-surface p-t4 text-left shadow-sm transition-[transform,box-shadow,border-color] duration-150 ease-soft hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md"
             >
-              <div className="mb-t3 flex h-32 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                <Icon name={r.icon} size={36} />
+              <div className="mb-t3 h-32 overflow-hidden rounded-xl border border-border/60 bg-accent-soft">
+                <img
+                  src={r.thumb}
+                  alt=""
+                  draggable={false}
+                  loading="lazy"
+                  className="h-full w-full object-cover"
+                />
               </div>
               <div className="truncate font-sans text-body font-semibold text-fg">{r.title}</div>
               <div className="mt-0.5 truncate text-sm text-fg-muted">{r.sub}</div>
@@ -200,6 +208,13 @@ export function HomePage() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Prompt bar — inline on Home, between the resource thumbnails above and
+          the quick-action pills below (the docked bottom bar is suppressed on
+          this route in AppShell). */}
+      <div className="mt-t8 w-full">
+        <PromptBar variant="inline" />
       </div>
 
       {/* Quick actions */}

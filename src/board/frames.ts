@@ -1,0 +1,263 @@
+import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
+import { useFolderStore, bundleFromFrame } from '@/store/folderStore';
+import type { LayoutVariant } from './design-spec';
+
+/* Frame ↔ child association for My Board. `data.frameId` is authoritative
+   (set by the composer/workflow when spawning into a frame, and re-derived from
+   geometry on drag-end via rebindFrameMembership). Geometry is the fallback used
+   for move-together and drop re-parenting. */
+
+/** Cards explicitly tagged to this frame (authoritative membership). */
+export function childrenOf(frameId: string): BoardNode[] {
+  const b = useBoardStore.getState();
+  return Object.values(b.nodes).filter((n) => n.data?.frameId === frameId);
+}
+
+/** Cards geometrically inside the frame box (fallback / rebinder). */
+export function geometryChildrenOf(frameId: string): string[] {
+  const b = useBoardStore.getState();
+  const f = b.nodes[frameId];
+  if (!f || f.type !== 'frame') return [];
+  return Object.values(b.nodes)
+    .filter(
+      (n) =>
+        n.id !== frameId &&
+        n.type !== 'frame' &&
+        n.x < f.x + f.w &&
+        n.x + n.w > f.x &&
+        n.y < f.y + f.h &&
+        n.y + Math.max(n.h, 60) > f.y,
+    )
+    .map((n) => n.id);
+}
+
+/** Union of tagged + geometric children — the set that moves with the frame. */
+export function frameMoveSet(frameId: string): string[] {
+  const ids = new Set<string>(geometryChildrenOf(frameId));
+  childrenOf(frameId).forEach((n) => ids.add(n.id));
+  return [...ids];
+}
+
+/** Topmost frame whose box contains the point (for drop re-parenting). */
+export function frameOfPoint(x: number, y: number): string | undefined {
+  const b = useBoardStore.getState();
+  for (let i = b.order.length - 1; i >= 0; i--) {
+    const n = b.nodes[b.order[i]];
+    if (n?.type === 'frame' && x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.h) return n.id;
+  }
+  return undefined;
+}
+
+/** After a drag, (re)assign each moved non-frame node's data.frameId by where it
+    now sits — so dragging a card onto/off a frame updates membership. */
+export function rebindFrameMembership(movedIds: string[]): void {
+  const b = useBoardStore.getState();
+  for (const id of movedIds) {
+    const n = b.nodes[id];
+    if (!n || n.type === 'frame') continue;
+    const fid = frameOfPoint(n.x + n.w / 2, n.y + n.h / 2);
+    const cur = n.data?.frameId as string | undefined;
+    if (fid === cur) continue;
+    const data = { ...(n.data ?? {}) };
+    if (fid) data.frameId = fid;
+    else delete data.frameId;
+    b.updateNodeRaw(id, { data });
+  }
+}
+
+const FRAME_PAD = 28; // breathing room between the frame border and its content
+
+/** A card's REAL rendered height for layout. `node.h` can understate the true
+    footprint (e.g. an image card's h is only the image area — the caption adds
+    height below). NodeView's size observer stores the measured outer height in
+    `data.renderH`; fall back to node.h before it's measured. */
+function layoutH(n: BoardNode): number {
+  const r = n.data?.renderH;
+  return typeof r === 'number' && r > 0 ? r : n.h;
+}
+
+/** Grow/shrink the frame so it wraps ALL its child cards with even padding.
+    Uses the children's REAL heights (kept current by NodeView's size observer),
+    so tall auto-height documents are fully enclosed. */
+export function fitFrameToChildren(frameId: string, seen?: Set<string>): void {
+  const visited = seen ?? new Set<string>();
+  if (visited.has(frameId)) return; // guard against any frameId cycle in the bubble-up
+  visited.add(frameId);
+  const b = useBoardStore.getState();
+  const f = b.nodes[frameId];
+  if (!f || f.type !== 'frame') return;
+  const kids = Object.values(b.nodes).filter((n) => n.data?.frameId === frameId);
+  if (kids.length === 0) return;
+  const minX = Math.min(...kids.map((n) => n.x));
+  const minY = Math.min(...kids.map((n) => n.y));
+  const maxX = Math.max(...kids.map((n) => n.x + n.w));
+  const maxY = Math.max(...kids.map((n) => n.y + layoutH(n)));
+  const x = minX - FRAME_PAD;
+  const y = minY - FRAME_PAD;
+  const w = maxX - minX + FRAME_PAD * 2;
+  const h = maxY - minY + FRAME_PAD * 2;
+  if (f.x !== x || f.y !== y || f.w !== w || f.h !== h) {
+    b.updateNodeRaw(frameId, { x, y, w, h });
+  }
+  // A nested frame's new bounds change its parent's footprint — bubble the fit up.
+  const parentId = f.data?.frameId as string | undefined;
+  if (parentId && parentId !== frameId) fitFrameToChildren(parentId, visited);
+}
+
+/* ---------------- designed composition layout ---------------- */
+
+const D_COLGAP = 26; // gap between columns of the designed layout
+const D_VGAP = 14; // vertical gap between stacked cards (ideas / images / materials)
+const SUB_TAB_CLEAR = 30; // headroom above the 아이디어 sub-frame for its title tab
+const IDEA_W = 240; // idea card width inside the sub-frame (matches spawn width)
+
+/** Compose a frame as a designed, professional sheet rather than a raw wrap:
+ *   ┌ HEADER (top-left) ──────────────────────────────────────────────────┐
+ *   │  [아이디어]   [ 계획안 (full doc) ]   [컨셉이미지]   [활동지/웹 자료]   │
+ *   │   idea ▸      detailed weekly plan    stacked img     활동지 A4        │
+ *   │   idea ▸      (landscape A4 grid)     stacked img     🔎 웹 자료 카드   │
+ *   └─────────────────────────────────────────────────────────────────────┘
+ * Ideas are nested in a real child frame (selectable, vertical). The main
+ * document is the centerpiece; concept images and companion materials (활동지,
+ * clickable 웹 자료) sit in columns to its right. Reuses each card's REAL
+ * measured height for tight spacing. */
+export function designComposedFrame(frameId: string, variant: LayoutVariant = 'default'): void {
+  const b = useBoardStore.getState();
+  const frame = b.nodes[frameId];
+  if (!frame || frame.type !== 'frame') return;
+  if (frame.data?.mindmap) return; // mind maps use a radial layout, not the column grid
+
+  const members = Object.values(b.nodes).filter((n) => n.data?.frameId === frameId && n.id !== frameId);
+  const byRole = (r: string) => members.filter((n) => n.data?.role === r);
+  const firstRole = (r: string) => members.find((n) => n.data?.role === r);
+
+  const header = firstRole('header');
+  // The 아이디어 sub-frame may already exist (re-layout via a chip). Its idea cards
+  // are grandchildren (frameId === sub-frame), invisible to the parent's direct
+  // members — so gather ideas from BOTH sources, else a re-run sees "no ideas" and
+  // would wrongly delete the sub-frame. Track the sub-frame by ID only (never
+  // re-read b.nodes[id] after addNodeRaw — the captured `b` snapshot is stale).
+  let ideaFrameId = members.find((n) => n.type === 'frame' && n.data?.sub)?.id;
+  const nestedIdeas = ideaFrameId
+    ? Object.values(b.nodes).filter((n) => n.data?.frameId === ideaFrameId && n.data?.role === 'idea')
+    : [];
+  const ideas = [...byRole('idea'), ...nestedIdeas];
+  const mainDoc = firstRole('plan') || firstRole('letter') || firstRole('record') || firstRole('worksheet');
+  const worksheet = firstRole('worksheet');
+  const extraDoc = worksheet && worksheet !== mainDoc ? worksheet : undefined;
+  const images = byRole('image');
+  const source = firstRole('source');
+  const clarify = firstRole('clarify');
+  const newsletter = firstRole('newsletter'); // decorated parent newsletter
+  const memos = members.filter((n) => !n.data?.role && (n.type === 'sticky' || n.type === 'text'));
+
+  const ox = frame.x + FRAME_PAD;
+  const oy = frame.y + FRAME_PAD;
+  let y = oy;
+
+  // 1) Header band (top-left).
+  if (header) {
+    b.updateNodeRaw(header.id, { x: ox, y, w: Math.max(420, header.w) });
+    y += layoutH(header) + 20;
+  }
+
+  // (variant: gallery-first) image-led layouts (studio 활동지·도안) get a prominent
+  // horizontal image band right under the header; the doc/materials sit below it.
+  let imagesPlaced = false;
+  if (variant === 'gallery-first' && images.length) {
+    let gx = ox;
+    let gBottom = y;
+    for (const img of images) {
+      b.updateNodeRaw(img.id, { x: gx, y });
+      gx += img.w + D_COLGAP;
+      gBottom = Math.max(gBottom, y + layoutH(img));
+    }
+    y = gBottom + D_VGAP + 6;
+    imagesPlaced = true;
+  }
+
+  // Everything below the header is one row of side-by-side columns, left→right:
+  //   [아이디어 sub-frame] [계획안 (full doc)] [컨셉 이미지] [활동지 · 웹 자료]
+  const rowY = y + (ideas.length ? SUB_TAB_CLEAR : 0);
+  let colX = ox;
+
+  // (variant: hero-doc) the main document LEADS — placed first/left so it reads as
+  // the hero; ideas, images and materials follow to its right.
+  let mainDocPlaced = false;
+  if (variant === 'hero-doc' && mainDoc) {
+    b.updateNodeRaw(mainDoc.id, { x: colX, y: rowY });
+    colX += mainDoc.w + D_COLGAP;
+    mainDocPlaced = true;
+  }
+
+  // Column 1 — 아이디어 sub-frame (nested, vertical, selectable).
+  if (ideas.length) {
+    if (!ideaFrameId) {
+      ideaFrameId = newId('frame');
+      b.addNodeRaw({
+        id: ideaFrameId, type: 'frame', x: colX, y: rowY, w: IDEA_W + FRAME_PAD * 2, h: 160,
+        data: { title: '아이디어', frameId, sub: true },
+      });
+    }
+    let iy = rowY + FRAME_PAD;
+    const ix = colX + FRAME_PAD;
+    for (const idea of ideas) {
+      b.updateNodeRaw(idea.id, { x: ix, y: iy, w: IDEA_W, data: { ...(idea.data ?? {}), role: 'idea', frameId: ideaFrameId } });
+      iy += layoutH(idea) + D_VGAP;
+    }
+    const subW = IDEA_W + FRAME_PAD * 2;
+    const subH = iy - D_VGAP + FRAME_PAD - rowY;
+    b.updateNodeRaw(ideaFrameId, { x: colX, y: rowY, w: subW, h: subH });
+    colX += subW + D_COLGAP;
+  } else if (ideaFrameId) {
+    b.removeNodeRaw(ideaFrameId); // ideas all gone → drop the empty sub-frame
+    ideaFrameId = undefined;
+  }
+
+  // Column 2 — the main document (계획안/통신문/관찰기록); skipped if hero-doc
+  // already placed it first.
+  if (mainDoc && !mainDocPlaced) {
+    b.updateNodeRaw(mainDoc.id, { x: colX, y: rowY });
+    colX += mainDoc.w + D_COLGAP;
+  }
+
+  // Column 3 — concept images / 도안, stacked vertically beside the plan
+  // (skipped when already laid out as a gallery-first band above).
+  if (images.length && !imagesPlaced) {
+    let iy = rowY;
+    let imgW = 0;
+    for (const img of images) {
+      b.updateNodeRaw(img.id, { x: colX, y: iy });
+      iy += layoutH(img) + D_VGAP;
+      imgW = Math.max(imgW, img.w);
+    }
+    colX += imgW + D_COLGAP;
+  }
+
+  // Column 4 — companion materials beside the plan (per the teacher's request):
+  // 활동지 · 웹 자료 카드 · 안내 메모, stacked top-down (NOT a row below the plan).
+  const rightStack = [extraDoc, newsletter, source, clarify, ...memos].filter(Boolean) as BoardNode[];
+  if (rightStack.length) {
+    let sy = rowY;
+    for (const it of rightStack) {
+      b.updateNodeRaw(it.id, { x: colX, y: sy });
+      sy += layoutH(it) + D_VGAP;
+    }
+  }
+
+  // Fit the inner sub-frame first, then the parent (fitFrameToChildren bubbles up).
+  if (ideaFrameId) fitFrameToChildren(ideaFrameId);
+  fitFrameToChildren(frameId);
+}
+
+/** Save a frame's child cards as one folder bundle; mark the frame saved.
+    Returns the new bundle id (or null if the frame is empty/invalid). */
+export function saveFrameToFolder(frameId: string): string | null {
+  const bundle = bundleFromFrame(frameId);
+  if (!bundle) return null;
+  useFolderStore.getState().addBundle(bundle);
+  const b = useBoardStore.getState();
+  const frame = b.nodes[frameId];
+  if (frame) b.updateNodeRaw(frameId, { data: { ...(frame.data ?? {}), savedBundleId: bundle.id } });
+  return bundle.id;
+}

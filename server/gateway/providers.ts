@@ -113,3 +113,51 @@ export async function geminiComplete(opts: ProviderCallOpts): Promise<ProviderCa
     },
   };
 }
+
+/* ---- Gemini grounded web search (Google Search tool) ---- */
+
+export interface SearchResult {
+  text: string;
+  sources: Array<{ title?: string; url: string }>;
+}
+
+export async function geminiSearch(
+  apiKey: string,
+  model: string,
+  query: string,
+  system?: string,
+): Promise<SearchResult> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const body: Record<string, unknown> = {
+    contents: [{ role: 'user', parts: [{ text: query }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: { maxOutputTokens: 900 },
+  };
+  if (system) body.systemInstruction = { parts: [{ text: system }] };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`gemini search ${res.status}: ${detail.slice(0, 300)}`);
+  }
+
+  const data = (await res.json()) as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+      groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string; title?: string } }> };
+    }>;
+  };
+  const cand = data.candidates?.[0];
+  const text = (cand?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+  const sources = (cand?.groundingMetadata?.groundingChunks ?? [])
+    .map((c) => ({ title: c.web?.title, url: c.web?.uri ?? '' }))
+    .filter((s) => s.url);
+  return { text, sources };
+}
