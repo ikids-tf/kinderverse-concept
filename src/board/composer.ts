@@ -96,13 +96,16 @@ export async function composeFromPrompt(text: string): Promise<void> {
     // Seed the frame — beside ALL existing content (panning there), else viewport
     // center. The frame appears IMMEDIATELY with a loading state so the teacher sees
     // it land and knows generation is running (cleared once the content is laid out).
+    // If a previous composer frame exists, TOP-ALIGN the new frame to it (and match
+    // heights at the end) so the frames sit neatly side by side.
+    const refFrame = rightmostComposerFrame();
     const c = composeOrigin();
     frameId = newId('frame');
     b.addNodeRaw({
       id: frameId,
       type: 'frame',
       x: Math.round(c.x - 360),
-      y: Math.round(c.y - 200),
+      y: refFrame ? Math.round(refFrame.y) : Math.round(c.y - 200),
       w: 720,
       h: 420,
       data: { title: frameTitle(text, template), templateId: template.id, composer: true, variant, loading: true, loadingLabel: '✨ AI가 자료를 만들고 있어요…' },
@@ -153,6 +156,7 @@ export async function composeFromPrompt(text: string): Promise<void> {
     designComposedFrame(frameId, spec.variant);
     decorateComposedFrame(frameId, text, spec.stickers);
     clearFrameLoading(frameId); // content is laid out → drop the in-frame loading state
+    if (refFrame) alignFrameToReference(frameId, refFrame.id); // neat side-by-side: top + equal height
     if (spec.coverRole) void generateCoverFor(frameId, spec.coverRole, text);
     recordSpawnedNodes(created, 'AI 보드 생성');
   } finally {
@@ -171,6 +175,53 @@ function clearFrameLoading(frameId: string): void {
     delete data.loadingLabel;
     useBoardStore.getState().updateNodeRaw(frameId, { data });
   }
+}
+
+/** The rightmost top-level composer frame (the "parent" a new frame lands beside).
+    Excludes mind-map and nested sub-frames. */
+function rightmostComposerFrame(): BoardNode | undefined {
+  const frames = Object.values(useBoardStore.getState().nodes).filter(
+    (n) => n.type === 'frame' && n.data?.composer && !n.data?.sub && !n.data?.mindmap,
+  );
+  if (frames.length === 0) return undefined;
+  return frames.reduce((a, f) => (f.x + f.w > a.x + a.w ? f : a));
+}
+
+/** Every node that belongs to a frame (direct children + sub-frame grandchildren). */
+function frameDescendants(frameId: string): string[] {
+  const nodes = Object.values(useBoardStore.getState().nodes);
+  const direct = nodes.filter((n) => n.data?.frameId === frameId);
+  const out = direct.map((n) => n.id);
+  const subIds = direct.filter((n) => n.type === 'frame').map((n) => n.id);
+  for (const n of nodes) if (subIds.includes(n.data?.frameId as string)) out.push(n.id);
+  return out;
+}
+
+/** Make `newFrameId` sit neatly beside `refFrameId`: same TOP edge + equal HEIGHT
+    (the taller of the two, so neither clips). The existing parent frame grows to
+    match if the new one is taller — so the two read as an aligned pair. */
+function alignFrameToReference(newFrameId: string, refFrameId: string): void {
+  const b = useBoardStore.getState();
+  const nf = b.nodes[newFrameId];
+  const rf = b.nodes[refFrameId];
+  if (!nf || !rf || nf.type !== 'frame' || rf.type !== 'frame') return;
+
+  // Top-align: shift the new frame + all its children so its top matches the ref.
+  const dy = Math.round(rf.y - nf.y);
+  if (dy !== 0) {
+    b.updateNodeRaw(newFrameId, { y: nf.y + dy });
+    frameDescendants(newFrameId).forEach((id) => {
+      const k = b.nodes[id];
+      if (k) b.updateNodeRaw(id, { y: k.y + dy });
+    });
+  }
+  // Equal height — grow whichever frame is shorter to the taller one. Pin it via
+  // data.alignedH so a later content re-fit (e.g. an async cover image) can't break
+  // the alignment by shrinking the frame back to its own content height.
+  const h = Math.max(rf.h, nf.h);
+  const nfCur = b.nodes[newFrameId];
+  b.updateNodeRaw(newFrameId, { h, data: { ...(nfCur?.data ?? {}), alignedH: h } });
+  if (rf.h !== h) b.updateNodeRaw(refFrameId, { h, data: { ...(rf.data ?? {}), alignedH: h } });
 }
 
 /* ---------------- mind map (생각그물 — radial layout + connection lines) ---------------- */

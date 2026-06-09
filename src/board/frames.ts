@@ -95,7 +95,10 @@ export function fitFrameToChildren(frameId: string, seen?: Set<string>): void {
   const x = minX - FRAME_PAD;
   const y = minY - FRAME_PAD;
   const w = maxX - minX + FRAME_PAD * 2;
-  const h = maxY - minY + FRAME_PAD * 2;
+  // Respect a pinned aligned height (set when this frame was aligned beside another)
+  // so a content re-fit never shrinks it below its neat side-by-side height.
+  const alignedH = typeof f.data?.alignedH === 'number' ? f.data.alignedH : 0;
+  const h = Math.max(maxY - minY + FRAME_PAD * 2, alignedH);
   if (f.x !== x || f.y !== y || f.w !== w || f.h !== h) {
     b.updateNodeRaw(frameId, { x, y, w, h });
   }
