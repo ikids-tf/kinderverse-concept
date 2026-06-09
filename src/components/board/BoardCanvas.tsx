@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useBoardStore } from '@/store/boardStore';
+import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { moveNodesCmd } from '@/board/commands';
 import { mindMapSubtree } from '@/board/composer';
 import { frameMoveSet, rebindFrameMembership } from '@/board/frames';
@@ -43,6 +43,50 @@ export function BoardCanvas() {
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
   const [dragIds, setDragIds] = useState<string[]>([]);
   const [box, setBox] = useState<Box | null>(null);
+
+  // Canvas size — tracked for viewport culling (recompute the visible rect on resize).
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // ── Viewport culling (SKILL §6 / perf) ──────────────────────────────────────
+  // Only render nodes whose AABB intersects the visible board rect, expanded by a
+  // 50% margin on each side so cards never pop in at the edge mid-pan.
+  const visible = useMemo(() => {
+    const cw = size.w || (typeof window !== 'undefined' ? window.innerWidth : 1200);
+    const ch = size.h || (typeof window !== 'undefined' ? window.innerHeight : 800);
+    const { zoom, panX, panY } = viewport;
+    const left = -panX / zoom;
+    const top = -panY / zoom;
+    const right = (cw - panX) / zoom;
+    const bottom = (ch - panY) / zoom;
+    const mx = (right - left) * 0.5;
+    const my = (bottom - top) * 0.5;
+    return { left: left - mx, top: top - my, right: right + mx, bottom: bottom + my };
+  }, [size, viewport]);
+
+  // Always render these regardless of the viewport: the current selection (covers
+  // the card being edited — editing starts from a click that selects it), nodes
+  // being dragged, and mind-map edge endpoints (so connection lines never dangle).
+  const keepIds = useMemo(() => {
+    const s = new Set<string>(selection);
+    for (const id of dragIds) s.add(id);
+    for (const e of edgeList) {
+      s.add(e.from);
+      s.add(e.to);
+    }
+    return s;
+  }, [selection, dragIds, edgeList]);
+
+  const inView = (n: BoardNode | undefined): boolean =>
+    !!n && n.x < visible.right && n.x + n.w > visible.left && n.y < visible.bottom && n.y + n.h > visible.top;
 
   // Interaction bookkeeping kept in a ref so window listeners read latest values.
   const it = useRef<{
@@ -233,6 +277,7 @@ export function BoardCanvas() {
         {/* frames render behind (back container layer), other cards on top */}
         {order
           .filter((id) => nodes[id]?.type === 'frame')
+          .filter((id) => keepIds.has(id) || inView(nodes[id]))
           .map((id) => {
             const n = nodes[id];
             const sel = selection.includes(id);
@@ -277,6 +322,7 @@ export function BoardCanvas() {
 
         {order
           .filter((id) => nodes[id] && nodes[id].type !== 'frame')
+          .filter((id) => keepIds.has(id) || inView(nodes[id]))
           .map((id) => {
             const n = nodes[id];
             const sel = selection.includes(id);
