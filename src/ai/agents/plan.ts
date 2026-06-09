@@ -15,6 +15,71 @@ export interface IdeaItem {
   desc: string;
 }
 
+/** One mind-map activity branch — concrete enough for a teacher to run as-is. */
+export interface MindActivity {
+  id: string;
+  label: string; // 활동 이름
+  method: string; // 놀이 전개 (어떻게 노는지)
+  materials: string; // 준비물
+  area: string; // 연계 누리과정 영역
+}
+
+/** Generate rich, field-usable play activities for a mind map. Each is a concrete
+    놀이 a teacher can run immediately (전개 + 준비물 + 연계 영역), grounded by an
+    optional reference document so the map reflects a chat plan/문서. */
+export async function runMindMapActivities(
+  topic: string,
+  ctx?: string,
+  count = 7,
+  grounding?: string,
+): Promise<MindActivity[]> {
+  const ground = grounding?.trim()
+    ? `\n[참고 문서 — 아래 내용을 적극 반영해 활동을 뽑아라]\n${grounding.trim().slice(0, 1400)}\n`
+    : '';
+  const res = await callGateway({
+    task: 'plan',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: system(ctx),
+    messages: [
+      {
+        role: 'user',
+        content: `주제: "${topic}"${ground}
+이 주제로 유아(만 3~5세)가 교실·바깥에서 바로 할 수 있는 '놀이 중심' 활동 ${count}개를 마인드맵 가지로 제안하라.
+서로 겹치지 않게 놀이 유형(탐색·조작·신체·역할·표현·관찰 등)과 누리 영역을 골고루 다양하게.
+교사가 이 카드 하나만 보고 바로 수업할 수 있을 만큼 구체적으로 쓴다. 단순 명사·영역명 나열 절대 금지.
+- label: 활동 이름 (8~16자, 놀이임이 드러나게. 예: "씨앗 심기 놀이", "텃밭 채소 가게 놀이")
+- method: 놀이 전개 2문장 (아이들이 무엇을 어떻게 하는지 + 교사의 발문/확장 1가지, 50~90자)
+- materials: 실제 준비물 2~4가지 (쉼표로 구분)
+- area: 연계 누리과정 영역 1개 (신체운동·건강 / 의사소통 / 사회관계 / 예술경험 / 자연탐구 중 하나)
+JSON만 출력:
+{ "items": [ { "label": string, "method": string, "materials": string, "area": string } ] }`,
+      },
+    ],
+    meta: { kind: 'idea', title: topic, selected: [] },
+    maxTokens: 2600,
+  });
+  if (!res.ok || !res.text) return [];
+  try {
+    const parsed = extractJson(res.text) as {
+      items?: Array<{ label?: string; method?: string; materials?: string; area?: string }>;
+    };
+    return (parsed.items ?? [])
+      .filter((it) => it.label)
+      .map((it) => ({
+        id: id('act'),
+        label: String(it.label).trim(),
+        method: (it.method ?? '').trim(),
+        materials: (it.materials ?? '').trim(),
+        area: (it.area ?? '').trim(),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 function system(ctx?: string): string {
   const l0 = '너는 킨더버스 Tier1 계획 에이전트다. 유아 놀이계획을 만든다. 적합성은 공유 Pedagogy Foundation이 보장한다.';
   const l3 = ctx?.trim() ? `[테넌트/교사 컨텍스트 — 우리반]\n${ctx.trim()}\n아동명은 마스킹 상태. 사실을 지어내지 마라.` : '';

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBoardStore } from '@/store/boardStore';
 import { moveNodesCmd } from '@/board/commands';
+import { mindMapSubtree } from '@/board/composer';
 import { frameMoveSet, rebindFrameMembership } from '@/board/frames';
 import { NodeView } from './NodeView';
 import { LaneView } from './LaneView';
@@ -168,9 +169,21 @@ export function BoardCanvas() {
         .map((n) => n.id);
       b.setSelection(ids);
     }
-    // dragging a frame carries its children (tagged + overlapping) — frame group-move
+    // Mind-map hierarchy: clicking a parent card selects + moves its whole subtree
+    // (center → branches → sub-branches + their images/docs), like a frame's children.
+    const clicked = b.nodes[id];
+    const mmFrame =
+      clicked?.data?.role === 'mm-branch' || clicked?.data?.role === 'mm-center'
+        ? (clicked.data?.frameId as string | undefined)
+        : undefined;
     let moveIds = ids;
-    if (b.nodes[id]?.type === 'frame') {
+    if (mmFrame && !e.shiftKey) {
+      const subtree = [id, ...mindMapSubtree(mmFrame, id)];
+      ids = subtree;
+      b.setSelection(subtree);
+      moveIds = subtree;
+    } else if (b.nodes[id]?.type === 'frame') {
+      // dragging a frame carries its children (tagged + overlapping) — frame group-move
       moveIds = [id, ...frameMoveSet(id)];
     }
     it.current = { ...it.current, mode: 'drag', startX: e.clientX, startY: e.clientY, dragIds: moveIds };

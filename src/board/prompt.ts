@@ -1,9 +1,12 @@
 import { useBoardStore } from '@/store/boardStore';
 import { generateIntoFrame, regenImageCard, genTextCard } from './workflow';
-import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode } from './composer';
+import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
 
 /** "make a worksheet from this activity" on a selected idea/mind-map branch. */
 const WORKSHEET_RE = /활동지|워크시트|학습지/;
+
+/** "make a plan from this activity" on a selected idea/mind-map branch. */
+const PLAN_RE = /계획안?|주간\s*계획|주안|수업\s*계획/;
 
 /** "make it pretty / share with parents / add images" intent on a selected doc. */
 const DECORATE_RE = /꾸며|꾸미|예쁘게|예쁘|이쁘|소식지|부모|학부모|공유|장식|디자인|이미지\s*(넣|추가|삽입)/;
@@ -36,14 +39,18 @@ export function handleBoardPrompt(text: string): boolean {
     void decorateDocCard(sel[0].id, text);
     return true;
   }
-  // Single idea / mind-map branch + "활동지 만들기" → a worksheet connected to it.
-  if (
-    sel.length === 1 &&
-    sel[0].type === 'sticky' &&
-    (sel[0].data?.role === 'mm-branch' || sel[0].data?.role === 'idea') &&
-    WORKSHEET_RE.test(text)
-  ) {
-    void worksheetFromNode(sel[0].id);
+  // Idea / mind-map branch (primary selection) + "활동지/계획안 만들기" → a connected
+  // worksheet or plan. The primary is selection[0] — a branch click co-selects its
+  // subtree, so we act on the clicked branch, not require a single selection.
+  const primary = sel[0];
+  const isActivityCard =
+    primary && primary.type === 'sticky' && (primary.data?.role === 'mm-branch' || primary.data?.role === 'idea');
+  if (isActivityCard && WORKSHEET_RE.test(text)) {
+    void worksheetFromNode(primary.id);
+    return true;
+  }
+  if (isActivityCard && PLAN_RE.test(text)) {
+    void planFromNode(primary.id);
     return true;
   }
   // Single memo/text selected → write into it.

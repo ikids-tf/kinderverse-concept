@@ -115,14 +115,17 @@ export function spawnTextCard(frameId: string, text: string, color = 'accent-sof
   return id;
 }
 
-/** Frame header — a large display-serif title placed top-left inside the frame. */
+/** Frame header — a large display-serif title placed top-left inside the frame.
+    Anchored to the frame's actual origin (NOT 0,0) so an early fitFrameToChildren
+    during fill can't drag the whole frame back to the canvas origin. */
 export function spawnHeaderCard(frameId: string, text: string): string {
+  const f = useBoardStore.getState().nodes[frameId];
   const id = newId('text');
   useBoardStore.getState().addNodeRaw({
     id,
     type: 'text',
-    x: 0,
-    y: 0,
+    x: f ? f.x + PAD : 0,
+    y: f ? f.y + PAD : 0,
     w: 560,
     h: 44,
     autoH: true,
@@ -374,16 +377,17 @@ export function viewportCenterBoardPoint(): { x: number; y: number } {
   return { x: (cw / 2 - panX) / zoom, y: (ch / 2 - panY) / zoom };
 }
 
-/** Center point for NEW composed content. If the board already has content frames,
-    place it to the RIGHT of the rightmost one and pan the viewport there (so each
-    new request lands beside the last, in view). Empty board → viewport center. */
+/** Center point for NEW composed content. Place it to the RIGHT of ALL existing
+    content — every frame AND every loose card (e.g. a seeded studio board's starter
+    cards) — so a new frame never lands on top of what's already there, and pan the
+    viewport to it. Empty board → viewport center. */
 export function composeOrigin(): { x: number; y: number } {
   const b = useBoardStore.getState();
-  const frames = Object.values(b.nodes).filter((n) => n.type === 'frame' && !n.data?.sub);
-  if (frames.length === 0) return viewportCenterBoardPoint();
-  const rightEdge = Math.max(...frames.map((f) => f.x + f.w));
-  const topEdge = Math.min(...frames.map((f) => f.y));
-  const cx = rightEdge + 140 + 460; // gap + ~half a default frame width
+  const nodes = Object.values(b.nodes);
+  if (nodes.length === 0) return viewportCenterBoardPoint();
+  const rightEdge = Math.max(...nodes.map((n) => n.x + n.w));
+  const topEdge = Math.min(...nodes.map((n) => n.y));
+  const cx = rightEdge + 160 + 460; // clear gap + ~half a default frame width
   const cy = topEdge + 320;
   const { zoom } = b.viewport;
   const railW = 64;

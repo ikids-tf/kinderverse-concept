@@ -6,7 +6,7 @@ import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { editTextCmd } from '@/board/commands';
 import { runWorkflowStep, type RunnerData, type StepKind } from '@/board/workflow';
 import { saveFrameToFolder, fitFrameToChildren } from '@/board/frames';
-import { runComposerChip, expandMindMapBranch, type ComposerChip } from '@/board/composer';
+import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, type ComposerChip } from '@/board/composer';
 
 /* Renders one board node (reference board model): frame container, runner control,
    image card (real src), and content-sized sticky/text memos. Selection ring +
@@ -103,6 +103,16 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
         style={{ left, top, width: node.w, height: node.h, pointerEvents: 'none' }}
       >
         <div className={`absolute inset-0 rounded-lg ${frameBg}`} />
+        {/* in-frame loading state — shown while the composer fills this frame, so the
+            teacher sees the frame land and knows generation is running. */}
+        {!!node.data?.loading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-t3 rounded-lg" style={{ pointerEvents: 'none' }}>
+            <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-accent-soft border-t-accent" />
+            <span className="rounded-pill border border-border bg-surface px-t3 py-t1 text-sm font-medium text-fg-2 shadow-sm">
+              {(node.data?.loadingLabel as string) ?? 'AI가 자료를 만들고 있어요…'}
+            </span>
+          </div>
+        )}
         {/* edge grab strips — drag to move the frame */}
         {FRAME_EDGE_STRIPS.map((pos, i) => (
           <div key={i} onPointerDown={down} style={{ position: 'absolute', ...pos, pointerEvents: 'auto', cursor: 'grab' }} />
@@ -353,16 +363,35 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
             {selected && <Icon name="check" size={12} />}
           </span>
         )}
-        {/* mind-map branch → click ＋ to expand into sub-activities (connected) */}
+        {/* mind-map branch → hover toolbar: 확장(하위활동) · 계획안 · 활동지.
+            One idea → expand the map, or generate a connected plan/worksheet. */}
         {node.data?.role === 'mm-branch' && (
-          <button
+          <div
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); void expandMindMapBranch(node.id); }}
-            title="하위 활동으로 확장"
-            className="absolute -bottom-3.5 -right-3.5 z-10 flex h-9 w-9 items-center justify-center rounded-full border-2 border-surface bg-accent text-on-accent opacity-0 shadow-lg transition-all duration-150 ease-soft hover:scale-110 hover:bg-accent-hover group-hover:opacity-100"
+            className="absolute -bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-pill border border-border bg-surface px-1 py-1 opacity-0 shadow-lg transition-opacity duration-150 ease-soft group-hover:opacity-100"
           >
-            <Icon name="plus" size={20} />
-          </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); void expandMindMapBranch(node.id); }}
+              title="하위 활동으로 확장"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-fg-2 transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
+            >
+              <Icon name="plus" size={16} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); void planFromNode(node.id); }}
+              title="이 활동으로 계획안 만들기"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-fg-2 transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
+            >
+              <Icon name="calendar" size={15} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); void worksheetFromNode(node.id); }}
+              title="이 활동으로 활동지 만들기"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-fg-2 transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
+            >
+              <Icon name="writing" size={15} />
+            </button>
+          </div>
         )}
         {/* Design Director — decorate: theme stickers "stuck" on the corners. */}
         <StickerDecos items={decorations} />

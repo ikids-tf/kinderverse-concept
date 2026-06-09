@@ -26,7 +26,7 @@ import { ruleBasedVariant, asLayoutVariant, ruleBasedSpec } from './design-spec'
 import { runDesignDirector } from '@/ai/agents/design';
 import { pickTemplate, type FrameTemplate, type FrameRegion, type FillAgent } from './templates';
 import { runRouter } from '@/ai/agents/router';
-import { runPlanIdeas, runPlan } from '@/ai/agents/plan';
+import { runPlanIdeas, runPlan, runMindMapActivities, type MindActivity } from '@/ai/agents/plan';
 import { runStudioImages, runStudioWorksheet, KV_ART_STYLE } from '@/ai/agents/studio';
 import { runRecord } from '@/ai/agents/record';
 import { runWriting } from '@/ai/agents/writing';
@@ -62,6 +62,7 @@ export async function composeFromPrompt(text: string): Promise<void> {
   composing = true;
   useBoardStore.getState().setGenerating('✨ 보드를 만들고 있어요…');
   const created: string[] = [];
+  let frameId: string | undefined; // hoisted so `finally` can clear the loading flag
   try {
     const b = useBoardStore.getState();
     const routerRes = await runRouter(
@@ -88,9 +89,11 @@ export async function composeFromPrompt(text: string): Promise<void> {
     const complexity = estimateComplexity(text, out);
     const recordMode: RecordMode = out.mode ?? 'story';
 
-    // Seed the frame — beside existing content (panning there), else viewport center.
+    // Seed the frame — beside ALL existing content (panning there), else viewport
+    // center. The frame appears IMMEDIATELY with a loading state so the teacher sees
+    // it land and knows generation is running (cleared once the content is laid out).
     const c = composeOrigin();
-    const frameId = newId('frame');
+    frameId = newId('frame');
     b.addNodeRaw({
       id: frameId,
       type: 'frame',
@@ -98,7 +101,7 @@ export async function composeFromPrompt(text: string): Promise<void> {
       y: Math.round(c.y - 200),
       w: 720,
       h: 420,
-      data: { title: frameTitle(text, template), templateId: template.id, composer: true, variant },
+      data: { title: frameTitle(text, template), templateId: template.id, composer: true, variant, loading: true, loadingLabel: '✨ AI가 자료를 만들고 있어요…' },
     });
     created.push(frameId);
 
@@ -145,11 +148,24 @@ export async function composeFromPrompt(text: string): Promise<void> {
     }
     designComposedFrame(frameId, spec.variant);
     decorateComposedFrame(frameId, text, spec.stickers);
+    clearFrameLoading(frameId); // content is laid out → drop the in-frame loading state
     if (spec.coverRole) void generateCoverFor(frameId, spec.coverRole, text);
     recordSpawnedNodes(created, 'AI 보드 생성');
   } finally {
     composing = false;
     useBoardStore.getState().setGenerating(null);
+    if (frameId) clearFrameLoading(frameId); // safety: never leave a frame stuck loading
+  }
+}
+
+/** Clear a frame's in-progress loading overlay (data.loading / loadingLabel). */
+function clearFrameLoading(frameId: string): void {
+  const f = useBoardStore.getState().nodes[frameId];
+  if (f?.data?.loading) {
+    const data = { ...f.data };
+    delete data.loading;
+    delete data.loadingLabel;
+    useBoardStore.getState().updateNodeRaw(frameId, { data });
   }
 }
 
@@ -177,17 +193,26 @@ function mindMapTopic(text: string): string {
 async function buildMindMap(text: string): Promise<string[]> {
   const topic = mindMapTopic(text);
   const ctx = buildAgentContext('plan');
-  const ideas = await runPlanIdeas(topic, ctx, 7);
-  return seedMindMap(topic, ideas.slice(0, 8), composeOrigin(), ctx);
+  const acts = await runMindMapActivities(topic, ctx, 7);
+  return seedMindMap(topic, acts.slice(0, 8), composeOrigin(), ctx);
 }
 
-/** Render a radial mind map at center `c` from pre-supplied branches — NO model
-    call here; the caller supplies branches (from runPlanIdeas, or parsed from an
-    existing document). Builds frame + center + branch cards + connection lines +
-    concept images + a web-source node. Returns the spawned node ids. */
+/** Format a mind-map branch card: bold 활동명 + 놀이 전개 + 준비물 + 연계 영역. */
+function branchText(a: MindActivity): string {
+  const lines = [a.label];
+  if (a.method) lines.push(a.method);
+  if (a.materials) lines.push(`🧰 ${a.materials}`);
+  if (a.area) lines.push(`🔗 ${a.area}`);
+  return lines.join('\n');
+}
+
+/** Render a radial mind map at center `c` from pre-supplied activities — NO model
+    call here; the caller supplies the activities (buildMindMap / openDocOnBoard).
+    Builds frame + center + rich activity branches + concept images + a web-source
+    node, then lays everything out as a clean radial tree. Returns spawned ids. */
 async function seedMindMap(
   topic: string,
-  branches: Array<{ label: string; desc: string }>,
+  acts: MindActivity[],
   c: { x: number; y: number },
   ctx: string,
 ): Promise<string[]> {
@@ -212,52 +237,42 @@ async function seedMindMap(
   created.push(centerId);
 
   const edges: Array<{ from: string; to: string }> = [];
+  const persistEdges = () => {
+    const fr = useBoardStore.getState().nodes[frameId];
+    if (fr) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(fr.data ?? {}), edges: [...edges] } });
+  };
 
-  // Activity branches, radial around the center.
-  const N = Math.max(branches.length, 1);
-  const R = 360, BW = 220;
+  // Activity branches — rich, field-usable cards (positioned by layoutMindMap).
+  const BW = 220;
   const branchIds: string[] = [];
-  branches.forEach((idea, i) => {
-    const ang = -Math.PI / 2 + (2 * Math.PI / N) * i;
+  acts.forEach((a) => {
     const id = newId('sticky');
     b.addNodeRaw({
-      id, type: 'sticky',
-      x: Math.round(c.x + R * Math.cos(ang) - BW / 2),
-      y: Math.round(c.y + R * Math.sin(ang) - 44),
-      w: BW, h: 84, autoH: true,
-      text: `${idea.label}\n${idea.desc}`, color: 'accent-soft', data: { role: 'mm-branch', frameId },
+      id, type: 'sticky', x: Math.round(c.x), y: Math.round(c.y), w: BW, h: 96, autoH: true,
+      text: branchText(a), color: 'accent-soft', data: { role: 'mm-branch', frameId, activity: a },
     });
     branchIds.push(id);
     edges.push({ from: centerId, to: id });
     created.push(id);
   });
 
-  const persistEdges = () => {
-    const fr = useBoardStore.getState().nodes[frameId];
-    if (fr) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(fr.data ?? {}), edges: [...edges] } });
-  };
   decorateMindMapStickers(frameId, topic); // one theme sticker per card
 
   // Image leaf placeholders (loading spinner) appear immediately; filled when ready.
-  // Placed outward along each branch's ray, nudged clear of any card it would hit.
   const leafIds: string[] = [];
   for (let i = 0; i < 3 && branchIds[i]; i++) {
-    const ang = -Math.PI / 2 + (2 * Math.PI / N) * i;
-    const spot = freeRadialSpot(frameId, c.x, c.y, ang, 160, 140, R + 200);
     const id = newId('image');
-    b.addNodeRaw({
-      id, type: 'image', x: spot.x, y: spot.y,
-      w: 160, h: 140, loading: true, data: { role: 'mm-leaf', frameId },
-    });
+    b.addNodeRaw({ id, type: 'image', x: Math.round(c.x), y: Math.round(c.y), w: 160, h: 140, loading: true, data: { role: 'mm-leaf', frameId } });
     leafIds.push(id);
     edges.push({ from: branchIds[i], to: id });
     created.push(id);
   }
-  persistEdges(); // center→branch (+ leaf) lines appear immediately, before images/web resolve
+  persistEdges();
+  layoutMindMap(frameId); // clean radial-tree placement, lines appear immediately
 
   // Concept images + a web 자료 node, fetched in parallel; fill the placeholders.
   const [imgRes, web] = await Promise.all([
-    runStudioImages(topic, branches.slice(0, 3).map((i) => i.label), ctx, 'image'),
+    runStudioImages(topic, acts.slice(0, 3).map((a) => a.label), ctx, 'image'),
     buildWebSource(topic).catch(() => null),
   ]);
   const items = imgRes.payload.type === 'StudioGallery' ? imgRes.payload.props.items : [];
@@ -271,21 +286,106 @@ async function seedMindMap(
   if (web) {
     const wid = newId('sticky');
     b.addNodeRaw({
-      id: wid, type: 'sticky',
-      x: Math.round(c.x - 170), y: Math.round(c.y + R + 160),
-      w: 340, h: 200, autoH: true, color: 'surface-2',
+      id: wid, type: 'sticky', x: Math.round(c.x), y: Math.round(c.y), w: 340, h: 200, autoH: true, color: 'surface-2',
       data: { role: 'source', frameId, links: web.links, thumbs: web.thumbs, summary: web.summary },
     });
     edges.push({ from: centerId, to: wid });
     created.push(wid);
   }
-
-  persistEdges(); // final edges (incl. branch-leaf images + web source)
+  persistEdges();
 
   useBoardStore.getState().setSelection([frameId]);
   await new Promise((r) => setTimeout(r, 260));
-  fitFrameToChildren(frameId);
+  layoutMindMap(frameId); // re-layout now heights are measured + images/source added
   return created;
+}
+
+/* ---------------- mind-map tree + radial layout ---------------- */
+
+type MindEdge = { from: string; to: string };
+
+/** parent → [child ids] map from a frame's stored edges. */
+function childrenMap(frameId: string): Map<string, string[]> {
+  const edges = (useBoardStore.getState().nodes[frameId]?.data?.edges as MindEdge[]) ?? [];
+  const m = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!m.has(e.from)) m.set(e.from, []);
+    m.get(e.from)!.push(e.to);
+  }
+  return m;
+}
+
+/** All descendant node ids of `id` in the mind-map tree (excludes `id` itself).
+    Used for hierarchy select/move — a parent carries its whole subtree. */
+export function mindMapSubtree(frameId: string, id: string): string[] {
+  const cm = childrenMap(frameId);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const stack = [...(cm.get(id) ?? [])];
+  while (stack.length) {
+    const x = stack.pop()!;
+    if (seen.has(x)) continue;
+    seen.add(x);
+    out.push(x);
+    for (const c of cm.get(x) ?? []) stack.push(c);
+  }
+  return out;
+}
+
+/** Lay the mind map out as a clean radial tree: the center stays fixed; top-level
+    branches get even angular slots; each branch's sub-branches fan within its own
+    sector (so edges radiate outward and never cross); concept images sit beside
+    their branch; the web-source gets its own slot. Wide doc cards (worksheet/plan)
+    keep their manual placement. Re-run after any structural change so existing
+    cards re-arrange neatly. A final overlap pass guarantees no collisions. */
+function layoutMindMap(frameId: string): void {
+  const b = useBoardStore.getState();
+  const center = Object.values(b.nodes).find((n) => n.data?.frameId === frameId && n.data?.role === 'mm-center');
+  if (!center) return;
+  const cm = childrenMap(frameId);
+  const cx = center.x + center.w / 2;
+  const cy = center.y + cardHeight(center) / 2;
+  const place = (id: string, ang: number, R: number) => {
+    const n = b.nodes[id];
+    if (!n) return;
+    b.updateNodeRaw(id, { x: Math.round(cx + R * Math.cos(ang) - n.w / 2), y: Math.round(cy + R * Math.sin(ang) - cardHeight(n) / 2) });
+  };
+  const angleOf = (id: string) => {
+    const n = b.nodes[id];
+    return n ? Math.atan2(n.y + cardHeight(n) / 2 - cy, n.x + n.w / 2 - cx) : 0;
+  };
+
+  const direct = cm.get(center.id) ?? [];
+  const topBranches = direct.filter((id) => b.nodes[id]?.data?.role === 'mm-branch');
+  const sideNodes = direct.filter((id) => b.nodes[id] && b.nodes[id].data?.role !== 'mm-branch'); // web source etc.
+  topBranches.sort((a, z) => angleOf(a) - angleOf(z)); // stable angular order
+
+  const total = Math.max(topBranches.length + sideNodes.length, 1);
+  const R1 = 380;
+  const slotAng = (i: number) => -Math.PI / 2 + ((2 * Math.PI) / total) * i;
+  const sectorHalf = Math.min(0.6, (Math.PI / total) * 0.8);
+  let slot = 0;
+
+  topBranches.forEach((bid) => {
+    const ang = slotAng(slot++);
+    place(bid, ang, R1);
+    const kids = cm.get(bid) ?? [];
+    const subs = kids.filter((id) => b.nodes[id]?.data?.role === 'mm-branch');
+    const leaves = kids.filter((id) => b.nodes[id]?.data?.role === 'mm-leaf');
+    subs.forEach((sid, j) => {
+      const t = subs.length === 1 ? 0 : (j / (subs.length - 1) - 0.5) * 2; // -1..1 across the sector
+      place(sid, ang + t * sectorHalf, R1 + 250 + (j % 2) * 64);
+    });
+    leaves.forEach((lid, j) => place(lid, ang + (j % 2 ? sectorHalf : -sectorHalf) * 0.9, R1 + 195));
+  });
+  sideNodes.forEach((sid) => place(sid, slotAng(slot++), R1 + 40));
+
+  // Backstop: nudge any residual overlaps outward (skip wide docs so they stay put).
+  const movable = Object.values(b.nodes)
+    .filter((n) => n.data?.frameId === frameId && n.type !== 'frame' && n.data?.role !== 'mm-center' && !n.data?.doc)
+    .map((n) => n.id);
+  resolveOverlaps(frameId, movable, cx, cy);
+  fitFrameToChildren(frameId);
 }
 
 /* ---------------- document → board ("마이보드에서 보기") ---------------- */
@@ -295,29 +395,6 @@ function docTopic(title: string): string {
   const noEmoji = title.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}️\u{1F1E6}-\u{1F1FF}]/gu, ' ');
   const s = noEmoji.replace(MINDMAP_RE, ' ').replace(/계획안?|문서|주제/g, ' ');
   return s.replace(/\s+/g, ' ').trim() || mindMapTopic(title);
-}
-
-/** Parse markdown H2/H3 sections into mind-map branches (heading → label, first
-    descriptive line → desc) so the map reflects the document's actual structure. */
-function parseDocBranches(markdown: string): Array<{ label: string; desc: string }> {
-  const out: Array<{ label: string; desc: string }> = [];
-  let cur: { label: string; desc: string } | null = null;
-  for (const raw of markdown.split('\n')) {
-    const line = raw.trim();
-    const h = line.match(/^#{2,3}\s+(.*)$/);
-    if (h) {
-      if (cur) out.push(cur);
-      const label = h[1].replace(/[*`#]/g, '').replace(/\s+/g, ' ').trim();
-      cur = { label: label.slice(0, 22), desc: '' };
-      continue;
-    }
-    if (cur && !cur.desc && line) {
-      const txt = line.replace(/^[-*>+\d.]+\s*/, '').replace(/\|.*$/, '').replace(/[*`]/g, '').trim();
-      if (txt && !/^[-|:\s]+$/.test(txt)) cur.desc = txt.slice(0, 54);
-    }
-  }
-  if (cur) out.push(cur);
-  return out.filter((bn) => bn.label);
 }
 
 /** From a chat document (markdown) → open a fresh, dedicated board with the FULL
@@ -365,13 +442,10 @@ export async function openDocOnBoard(doc: { title: string; markdown: string }): 
     };
     frameBoth();
 
-    // Right — mind map reflecting the document's sections (fallback to model ideas).
-    let branches = parseDocBranches(doc.markdown);
-    if (branches.length < 3) {
-      const ideas = await runPlanIdeas(topic, ctx, 7);
-      branches = ideas.slice(0, 8);
-    }
-    const mapIds = await seedMindMap(topic, branches.slice(0, 8), center, ctx);
+    // Right — a mind map of concrete, runnable activities grounded in THIS document
+    // (so the teacher gets actionable play ideas, not a copy of the doc's headers).
+    const acts = await runMindMapActivities(topic, ctx, 7, doc.markdown);
+    const mapIds = await seedMindMap(topic, acts.slice(0, 8), center, ctx);
     created.push(...mapIds);
     frameBoth(); // final framing once the whole composition exists
     recordSpawnedNodes(created, '문서 → 보드');
@@ -449,32 +523,22 @@ export async function expandMindMapBranch(branchId: string): Promise<void> {
   const branch = b.nodes[branchId];
   const frameId = branch?.data?.frameId as string | undefined;
   if (!branch || !frameId) return;
-  const center = Object.values(b.nodes).find((n) => n.data?.frameId === frameId && n.data?.role === 'mm-center');
-  if (!center) return;
 
-  const bx = branch.x + branch.w / 2;
-  const by = branch.y + (typeof branch.data?.renderH === 'number' ? branch.data.renderH : branch.h) / 2;
-  const cx = center.x + center.w / 2;
-  const cy = center.y + center.h / 2;
-  const ang = Math.atan2(by - cy, bx - cx);
-  const dist = Math.hypot(bx - cx, by - cy) || 360;
-
-  const label = (branch.text ?? '').split('\n')[0].trim() || '활동';
+  const act = branch.data?.activity as MindActivity | undefined;
+  const label = act?.label || (branch.text ?? '').split('\n')[0].trim() || '활동';
+  const ground = act ? `${act.method}\n준비물: ${act.materials}` : (branch.text ?? '');
   useBoardStore.getState().setGenerating('🌱 하위 활동을 펼치고 있어요…');
   try {
-    const subs = (await runPlanIdeas(label, buildAgentContext('plan'), 3)).slice(0, 3);
+    const subs = (await runMindMapActivities(label, buildAgentContext('plan'), 3, ground)).slice(0, 3);
     if (subs.length === 0) return;
 
-    const SW = 184, SH = 100; // SH is a generous height for the collision check
     const created: string[] = [];
     const edges: Array<{ from: string; to: string }> = [];
-    subs.forEach((idea, i) => {
-      const a = ang + (i - (subs.length - 1) / 2) * 0.45; // fan around the branch direction
-      const pos = freeRadialSpot(frameId, cx, cy, a, SW, SH, dist + 210); // never overlap existing cards
+    subs.forEach((a) => {
       const id = newId('sticky');
       b.addNodeRaw({
-        id, type: 'sticky', x: pos.x, y: pos.y, w: SW, h: 60, autoH: true,
-        text: `${idea.label}\n${idea.desc}`, color: 'surface-2', data: { role: 'mm-branch', frameId },
+        id, type: 'sticky', x: branch.x, y: branch.y, w: 190, h: 84, autoH: true,
+        text: branchText(a), color: 'surface-2', data: { role: 'mm-branch', frameId, activity: a },
       });
       edges.push({ from: branchId, to: id });
       created.push(id);
@@ -483,8 +547,7 @@ export async function expandMindMapBranch(branchId: string): Promise<void> {
     addMindMapEdges(frameId, edges);
     decorateMindMapStickers(frameId, label); // sticker the new sub-branches
     await new Promise((r) => setTimeout(r, 240)); // let cards render so heights are measured
-    resolveOverlaps(frameId, created, cx, cy); // nudge any still-overlapping sub-card outward
-    fitFrameToChildren(frameId);
+    layoutMindMap(frameId); // re-arrange the WHOLE map cleanly — no crossing lines / overlaps
     recordSpawnedNodes(created, '가지 확장');
   } finally {
     useBoardStore.getState().setGenerating(null);
@@ -498,7 +561,8 @@ export async function worksheetFromNode(nodeId: string): Promise<void> {
   const node = b.nodes[nodeId];
   if (!node) return;
   const frameId = node.data?.frameId as string | undefined;
-  const activity = (node.text ?? '').split('\n')[0].trim() || (node.text ?? '활동');
+  const act = node.data?.activity as MindActivity | undefined;
+  const activity = act?.label || (node.text ?? '').split('\n')[0].trim() || (node.text ?? '활동');
 
   // Loading doc placed to the right of the source card.
   const id = newId('sticky');
@@ -532,6 +596,50 @@ export async function worksheetFromNode(nodeId: string): Promise<void> {
     fitFrameToChildren(frameId);
   }
   recordSpawnedNodes([id], '활동지 만들기');
+}
+
+/** Make a full A4 주간 놀이계획안 from a selected idea/branch and connect it — the
+    mind-map idea → a ready-to-use plan in one click ("이 활동으로 계획안 만들기"). */
+export async function planFromNode(nodeId: string): Promise<void> {
+  const b = useBoardStore.getState();
+  const node = b.nodes[nodeId];
+  if (!node) return;
+  const frameId = node.data?.frameId as string | undefined;
+  const act = node.data?.activity as MindActivity | undefined;
+  const activity = act?.label || (node.text ?? '').split('\n')[0].trim() || '활동';
+  const seed = [activity, act?.method, act?.area].filter((s): s is string => !!s && !!s.trim());
+
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id, type: 'sticky',
+    x: Math.round(node.x + node.w + 48), y: Math.round(node.y), w: PLAN_DOC_W, h: 260, autoH: true,
+    text: '📋 계획안을 만들고 있어요…', color: 'paper',
+    data: { doc: true, role: 'plan', loadingDoc: true, ...(frameId ? { frameId } : {}) },
+  });
+  if (frameId && Array.isArray(useBoardStore.getState().nodes[frameId]?.data?.edges)) {
+    addMindMapEdges(frameId, [{ from: nodeId, to: id }]);
+  }
+  useBoardStore.getState().setSelection([id]);
+  useBoardStore.getState().setGenerating('📋 계획안을 만들고 있어요…');
+
+  try {
+    const res = await runPlan(activity, seed, buildAgentContext('plan'));
+    const cur = useBoardStore.getState().nodes[id];
+    b.updateNodeRaw(id, {
+      text: planDocMarkdown(res.payload),
+      data: { ...(cur?.data ?? {}), doc: true, role: 'plan', payload: res.payload, loadingDoc: false },
+    });
+  } catch {
+    const cur = useBoardStore.getState().nodes[id];
+    b.updateNodeRaw(id, { text: `‘${activity}’ 계획안 생성에 실패했어요.`, data: { ...(cur?.data ?? {}), loadingDoc: false } });
+  } finally {
+    useBoardStore.getState().setGenerating(null);
+  }
+  if (frameId) {
+    await new Promise((r) => setTimeout(r, 260));
+    fitFrameToChildren(frameId);
+  }
+  recordSpawnedNodes([id], '계획안 만들기');
 }
 
 /* ---------------- classification ---------------- */
