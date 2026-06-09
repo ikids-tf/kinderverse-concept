@@ -51,6 +51,10 @@ export interface ComposerChip {
 }
 
 const COLORING_RE = /도안|색칠|컬러링/;
+/** A pure image/video/illustration request (standalone media, not a worksheet). */
+const MEDIA_RE = /이미지|그림|사진|일러스트|캐릭터|배경|삽화|포스터|영상|동영상|비디오|움짤|gif/i;
+/** An explicit worksheet/learning-sheet request. */
+const WORKSHEET_REQ_RE = /활동지|워크시트|학습지|문제지|학습\s*자료/;
 /** Mind-map synonyms (생각그물·주제망·놀이 확장맵·아이디어 맵·관심사 확장 …). */
 const MINDMAP_RE = /마인드\s*맵|생각\s*그물|주제\s*망|놀이\s*확장\s*맵?|놀이\s*아이디어\s*맵|아이디어\s*맵|관심사\s*확장|확장\s*맵/;
 let composing = false; // guard against double-submit racing frame creation
@@ -664,7 +668,12 @@ function frameTitle(text: string, t: FrameTemplate): string {
 
 function effectiveAgent(region: FrameRegion, template: FrameTemplate, prompt: string): FillAgent {
   if (template.id === 'studio' && region.id === 'core') {
-    return COLORING_RE.test(prompt) ? 'studio.coloring' : 'studio.worksheet';
+    // Studio covers BOTH media and learning sheets — pick by the request:
+    //   색칠/도안 → coloring · 활동지/워크시트 → worksheet · 그림/사진/영상 등 → 단독 이미지.
+    if (COLORING_RE.test(prompt)) return 'studio.coloring';
+    if (WORKSHEET_REQ_RE.test(prompt)) return 'studio.worksheet';
+    if (MEDIA_RE.test(prompt)) return 'studio.images';
+    return 'studio.worksheet';
   }
   return region.agent;
 }
