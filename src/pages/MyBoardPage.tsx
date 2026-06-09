@@ -7,6 +7,7 @@ import { BoardCanvas } from '@/components/board/BoardCanvas';
 import { BoardToolbar } from '@/components/board/BoardToolbar';
 import { BoardControls } from '@/components/board/BoardControls';
 import { BoardSwitcher } from '@/components/board/BoardSwitcher';
+import { PromptChoiceDialog } from '@/components/board/PromptChoiceDialog';
 
 /* My Board = 통합 캔버스 (SKILL §6, PRD §4.2). 멀티 보드: 즐겨찾기/추가로 만든
    각 보드(캔버스)를 전환하며 사용. `?new=<kind>`는 시드된 새 보드를 만든다.
@@ -50,6 +51,7 @@ export function MyBoardPage() {
         <BoardSwitcher />
         <BoardToolbar />
         <BoardControls />
+        <PromptChoiceDialog />
         {empty && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
             <p className="font-display text-h2 text-fg-2">빈 보드</p>
