@@ -1,10 +1,9 @@
 import { Icon } from '@/lib/icons';
 import { useBoardStore } from '@/store/boardStore';
 import { useHistoryStore } from '@/store/historyStore';
-import { addNodeCmd } from '@/board/commands';
 
 /* Always-visible edge controls (PRD §4.3, R9 — keep minimal):
-   top-right 수업 모드 · bottom-right zoom/Fit · +추가 · undo/redo. */
+   top-right 수업 모드 · bottom-right zoom/Fit · undo/redo. */
 
 export function BoardControls() {
   const viewport = useBoardStore((s) => s.viewport);
@@ -17,13 +16,6 @@ export function BoardControls() {
   const canRedo = useHistoryStore((s) => s.future.length > 0);
   const undo = useHistoryStore((s) => s.undo);
   const redo = useHistoryStore((s) => s.redo);
-
-  const addSticky = () => {
-    const { zoom, panX, panY } = useBoardStore.getState().viewport;
-    const cx = (window.innerWidth - 124) / 2;
-    const cy = (window.innerHeight - 120) / 2;
-    addNodeCmd('sticky', (cx - panX) / zoom - 90, (cy - panY) / zoom - 70);
-  };
 
   const cx = window.innerWidth / 2;
   const cy = window.innerHeight / 2;
@@ -63,15 +55,8 @@ export function BoardControls() {
         </button>
       </div>
 
-      {/* bottom-right: zoom + Fit + 추가 */}
+      {/* bottom-right: zoom + Fit */}
       <div className="pointer-events-auto absolute bottom-28 right-t4 z-20 flex items-center gap-t2">
-        <button
-          onClick={addSticky}
-          title="추가"
-          className="flex h-10 items-center gap-t1 rounded-pill bg-fg px-t4 text-sm font-semibold text-on-dark shadow-md transition-colors duration-150 ease-soft hover:bg-fg-1"
-        >
-          <Icon name="plus" size={16} /> 추가
-        </button>
         <div className="flex items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-md backdrop-blur">
           <button
             title="축소 (⌘/Ctrl+-)"
