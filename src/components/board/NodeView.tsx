@@ -240,7 +240,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
                 className="w-full resize-none bg-transparent text-overline text-fg focus:outline-none"
               />
             ) : (
-              <span className="block truncate text-xs font-semibold text-fg" title={node.text ?? ''}>{imgTitle(node.text)}</span>
+              <span className="block truncate text-xs font-semibold text-fg" title={imgTitle(node.text)}>{imgTitle(node.text)}</span>
             )}
           </div>
         )}
@@ -468,7 +468,9 @@ function MemoText({ text }: { text?: string }) {
 /** A clean, short title from an image caption (before "—" / "(" separators). */
 function imgTitle(text?: string): string {
   const first = (text ?? '').split('\n')[0];
-  const cut = first.split(/\s*[—–(]/)[0].trim();
+  // Keep only the title — drop any trailing annotation: a 누리과정 영역 tag in
+  // brackets ([...]/【...】), an em-dash note, or a parenthetical.
+  const cut = first.split(/\s*[—–([【]/)[0].trim();
   return (cut || first).slice(0, 30);
 }
 
