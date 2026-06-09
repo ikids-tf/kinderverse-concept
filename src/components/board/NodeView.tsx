@@ -79,7 +79,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
   const top = node.y + dy;
   const ring = selected ? 'ring-2 ring-accent' : 'ring-1 ring-transparent';
 
-  const down = (e: React.PointerEvent) => onPointerDown(e, node.id);
+  const down = (e: React.PointerEvent) => {
+    // A pointer-down inside an editing field (textarea/input) must NOT start a card
+    // drag — let the field handle drag-to-select text instead.
+    if ((e.target as HTMLElement)?.closest?.('[data-kv-editable]')) return;
+    onPointerDown(e, node.id);
+  };
   const dbl = (e: React.MouseEvent) => {
     if (editable && !node.locked) {
       e.stopPropagation();
@@ -229,7 +234,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
           )}
         </div>
         {(node.text || editing) && (
-          <div className="px-t2 py-t1">
+          <div className="group/cap relative px-t2 py-t1">
             {editing ? (
               <textarea
                 ref={ref}
@@ -240,7 +245,18 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
                 className="w-full resize-none bg-transparent text-overline text-fg focus:outline-none"
               />
             ) : (
-              <span className="block truncate text-xs font-semibold text-fg" title={imgTitle(node.text)}>{imgTitle(node.text)}</span>
+              <>
+                <span className="block truncate pr-5 text-xs font-semibold text-fg" title={imgTitle(node.text)}>{imgTitle(node.text)}</span>
+                {/* hover the caption → X to delete the text (undoable) */}
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); editTextCmd(node.id, node.text ?? '', ''); }}
+                  title="텍스트 삭제"
+                  className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-fg-2 opacity-0 shadow-sm transition-opacity duration-150 ease-soft hover:border-danger hover:bg-danger-soft hover:text-danger group-hover/cap:opacity-100"
+                >
+                  <Icon name="x" size={11} />
+                </button>
+              </>
             )}
           </div>
         )}
