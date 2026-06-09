@@ -52,7 +52,7 @@ export interface ComposerChip {
 
 const COLORING_RE = /도안|색칠|컬러링/;
 /** A pure image/video/illustration request (standalone media, not a worksheet). */
-const MEDIA_RE = /이미지|그림|사진|일러스트|캐릭터|배경|삽화|포스터|영상|동영상|비디오|움짤|gif/i;
+const MEDIA_RE = /이미지|그림|그려|그리기|드로잉|사진|일러스트|캐릭터|배경|삽화|포스터|영상|동영상|비디오|움짤|gif/i;
 /** An explicit worksheet/learning-sheet request. */
 const WORKSHEET_REQ_RE = /활동지|워크시트|학습지|문제지|학습\s*자료/;
 /** Mind-map synonyms (생각그물·주제망·놀이 확장맵·아이디어 맵·관심사 확장 …). */
@@ -762,7 +762,10 @@ async function fillRegion(
     }
     case 'studio.images':
     case 'studio.coloring': {
-      const res = await runStudioImages(topic, [], ctx, agent === 'studio.coloring' ? '도안' : 'image');
+      // A pure "draw X" request → ONE simple drawing of the subject (no worksheet,
+      // no activity captions); expansion lives in the frame's action chips.
+      const simple = agent === 'studio.images' && MEDIA_RE.test(topic) && !WORKSHEET_REQ_RE.test(topic);
+      const res = await runStudioImages(topic, [], ctx, agent === 'studio.coloring' ? '도안' : 'image', simple ? { simple: true } : undefined);
       if (res.payload.type === 'StudioGallery') {
         res.payload.props.items.forEach((it) => ids.push(spawnImageCard(frameId, it.url, it.caption)));
       }

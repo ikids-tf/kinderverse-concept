@@ -102,22 +102,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
     const renameTitle = (v: string) =>
       useBoardStore.getState().updateNodeRaw(node.id, { data: { ...node.data, title: v.trim() || '프레임' } });
     const frameBg = `border-2 ${selected ? 'border-accent' : isSub ? 'border-border/70' : 'border-border'} ${isSub ? 'bg-surface-2/50' : 'bg-surface/40'} shadow-md`;
+    const loading = !!node.data?.loading;
     return (
       <div
         className="absolute"
-        style={{ left, top, width: node.w, height: node.h, pointerEvents: 'none' }}
+        // While loading, lift the whole frame above the content cards (which render
+        // later in the canvas) so the spinner overlay sits on top — not behind text.
+        style={{ left, top, width: node.w, height: node.h, pointerEvents: 'none', zIndex: loading ? 50 : undefined }}
       >
         <div className={`absolute inset-0 rounded-lg ${frameBg}`} />
-        {/* in-frame loading state — shown while the composer fills this frame, so the
-            teacher sees the frame land and knows generation is running. */}
-        {!!node.data?.loading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-t3 rounded-lg" style={{ pointerEvents: 'none' }}>
-            <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-accent-soft border-t-accent" />
-            <span className="rounded-pill border border-border bg-surface px-t3 py-t1 text-sm font-medium text-fg-2 shadow-sm">
-              {(node.data?.loadingLabel as string) ?? 'AI가 자료를 만들고 있어요…'}
-            </span>
-          </div>
-        )}
         {/* edge grab strips — drag to move the frame */}
         {FRAME_EDGE_STRIPS.map((pos, i) => (
           <div key={i} onPointerDown={down} style={{ position: 'absolute', ...pos, pointerEvents: 'auto', cursor: 'grab' }} />
@@ -196,6 +189,14 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
                 {chip.label}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* in-frame loading — an opaque spinner-only overlay on TOP of everything in
+            the frame (frame is z-lifted above the content cards while loading). */}
+        {loading && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-surface" style={{ pointerEvents: 'none' }}>
+            <span className="h-9 w-9 animate-spin rounded-full border-[3px] border-accent-soft border-t-accent" />
           </div>
         )}
       </div>

@@ -73,7 +73,29 @@ export async function runStudioImages(
   selected: string[],
   ctx?: string,
   kind: 'image' | '도안' = 'image',
+  opts?: { simple?: boolean; count?: number },
 ): Promise<StudioResult> {
+  const style = kind === '도안' ? KV_COLORING_STYLE : KV_ART_STYLE;
+
+  // Simple mode ("사자 그려줘") — just ONE clean drawing of the subject, with the
+  // subject as the caption. No activity framing, no extra explanation.
+  if (opts?.simple) {
+    const subject =
+      request
+        .replace(/(을|를|좀|한\s*장|하나)?\s*(그려\s*주세요|그려\s*줘|그려|그림\s*그려|그림|그리기|만들어\s*주세요|만들어\s*줘|만들어|해\s*줘)\s*$/u, '')
+        .trim() || request;
+    const img = await callGateway({
+      task: 'image',
+      provider: 'auto',
+      messages: [],
+      meta: { prompt: `${subject} — ${style}`, caption: subject },
+    });
+    return {
+      payload: { type: 'StudioGallery', props: { title: subject, items: [{ caption: subject, kind, url: img.image }] } },
+      mocked: !!img.mocked,
+    };
+  }
+
   const sel = selected.length ? `참고 활동: ${selected.join(', ')}` : '';
   const capRes = await callGateway({
     task: 'studio',
@@ -112,7 +134,6 @@ export async function runStudioImages(
   // Generate (or placeholder) one image per caption via the image plugin.
   const items: StudioItem[] = [];
   let anyMock = false;
-  const style = kind === '도안' ? KV_COLORING_STYLE : KV_ART_STYLE;
   for (const s of specs) {
     const img = await callGateway({
       task: 'image',
