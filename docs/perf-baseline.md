@@ -82,11 +82,26 @@
 | 팬/줌 FPS | | | |
 | 이미지 디코드/메모리 | | | |
 
-### 2-3. memo + CSS contain/will-change
-| 지표 | 전 | 후 | Δ |
+### 2-3. memo (NodeView) ✅
+측정: 500노드 보드, 줌 100%. "전"=컬링만(2-1), "후"=컬링+memo.
+
+| 지표 | 전(컬링만) | 후(컬링+memo) | Δ |
 |---|---|---|---|
-| 팬 FPS (avg/min) | | | |
-| 드래그 FPS (avg/min) | | | |
+| 팬 FPS (avg/min) | 46 / 18 | **60 / 43** | **+30% / +139%** |
+| 최악 프레임(ms) | 55 | 23 | −58% |
+
+구현: `BoardCanvas`에서 `MemoNodeView = memo(NodeView)`로 래핑 + `onPointerDown`을
+latest-ref 패턴으로 **안정 콜백**화(매 렌더 새 핸들러가 memo를 무력화하던 문제 제거).
+팬/줌 시 카메라만 바뀌고 각 카드의 props(node/selected/dx/dy/onPointerDown)는 불변 →
+memo가 렌더된 ~300개 NodeView 본문 재실행을 전부 건너뜀. **NodeView.tsx는 세션 시작
+전 무관 변경이 있어 건드리지 않음** → memo 래핑을 BoardCanvas 측에서 처리.
+
+> ✅ **DoD 충족**: 팬 평균 60 / 최저 43 fps ≥ 55fps 목표 (500노드 @ 줌100%, dev+StrictMode).
+> 컬링 단독 46fps → memo 합산 60fps로 달성.
+>
+> 미적용(보류): 카드 `contain: layout paint` / 드래그 `will-change`는 NodeView.tsx 직접
+> 수정이 필요한데 해당 파일에 기존 미커밋 변경이 섞여 있어, 분리 커밋을 위해 보류.
+> 현재 FPS가 목표를 넘겨 필수는 아님(추후 NodeView 변경이 커밋되면 추가).
 
 ### 2-4. 저장 경로 (localStorage 디바운스 영속화)
 | 지표 | 전 | 후 | 비고 |

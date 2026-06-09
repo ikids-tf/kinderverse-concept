@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { moveNodesCmd } from '@/board/commands';
 import { mindMapSubtree } from '@/board/composer';
 import { frameMoveSet, rebindFrameMembership } from '@/board/frames';
 import { NodeView } from './NodeView';
 import { LaneView } from './LaneView';
+
+// Memoized node — on pan/zoom the viewport changes but each node's props (node,
+// selected, dx, dy, onPointerDown) don't, so memo skips re-rendering every card.
+// Requires a STABLE onPointerDown (see onNodePointerDownStable below).
+const MemoNodeView = memo(NodeView);
 
 /* The infinite canvas surface (SKILL §6). Pan (space+drag / wheel), zoom
    (ctrl/⌘+wheel toward cursor), drag-box selection on empty space, node drag
@@ -87,6 +92,17 @@ export function BoardCanvas() {
 
   const inView = (n: BoardNode | undefined): boolean =>
     !!n && n.x < visible.right && n.x + n.w > visible.left && n.y < visible.bottom && n.y + n.h > visible.top;
+
+  // Stable identity for the node pointer-down handler (latest-ref pattern) so
+  // memo(NodeView) can skip unchanged cards on the pan/zoom hot path — a fresh
+  // inline handler each render would otherwise defeat the memo.
+  const nodePointerDownRef = useRef<(e: React.PointerEvent, id: string) => void>(() => {});
+  const onNodePointerDownStable = useCallback(
+    (e: React.PointerEvent, id: string) => nodePointerDownRef.current(e, id),
+    [],
+  );
+  // onNodePointerDown is a hoisted function declaration below; keep the ref current.
+  nodePointerDownRef.current = onNodePointerDown;
 
   // Interaction bookkeeping kept in a ref so window listeners read latest values.
   const it = useRef<{
@@ -282,11 +298,11 @@ export function BoardCanvas() {
             const n = nodes[id];
             const sel = selection.includes(id);
             return (
-              <NodeView
+              <MemoNodeView
                 key={id}
                 node={n}
                 selected={sel}
-                onPointerDown={onNodePointerDown}
+                onPointerDown={onNodePointerDownStable}
                 dx={drag && dragIds.includes(id) ? drag.dx : 0}
                 dy={drag && dragIds.includes(id) ? drag.dy : 0}
               />
@@ -327,11 +343,11 @@ export function BoardCanvas() {
             const n = nodes[id];
             const sel = selection.includes(id);
             return (
-              <NodeView
+              <MemoNodeView
                 key={id}
                 node={n}
                 selected={sel}
-                onPointerDown={onNodePointerDown}
+                onPointerDown={onNodePointerDownStable}
                 dx={drag && dragIds.includes(id) ? drag.dx : 0}
                 dy={drag && dragIds.includes(id) ? drag.dy : 0}
               />
