@@ -194,7 +194,9 @@ async function buildMindMap(text: string): Promise<string[]> {
   const topic = mindMapTopic(text);
   const ctx = buildAgentContext('plan');
   const acts = await runMindMapActivities(topic, ctx, 7);
-  return seedMindMap(topic, acts.slice(0, 8), composeOrigin(), ctx);
+  // 660 = a radial map reaches ~660px left of its center (branch + image leaf);
+  // reserving it keeps the whole map clear of existing content.
+  return seedMindMap(topic, acts.slice(0, 8), composeOrigin(660), ctx);
 }
 
 /** Format a mind-map branch card: bold 활동명 + 놀이 전개 + 준비물 + 연계 영역. */

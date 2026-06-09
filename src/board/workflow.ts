@@ -377,22 +377,26 @@ export function viewportCenterBoardPoint(): { x: number; y: number } {
   return { x: (cw / 2 - panX) / zoom, y: (ch / 2 - panY) / zoom };
 }
 
-/** Center point for NEW composed content. Place it to the RIGHT of ALL existing
-    content — every frame AND every loose card (e.g. a seeded studio board's starter
-    cards) — so a new frame never lands on top of what's already there, and pan the
-    viewport to it. Empty board → viewport center. */
-export function composeOrigin(): { x: number; y: number } {
+/** Anchor point for NEW composed content. Returns a CENTER point whose content —
+    which may extend up to `reserveLeft` px to the LEFT of that center (a composer
+    frame ≈360; a radial mind map ≈660) — starts cleanly to the RIGHT of ALL
+    existing content (every frame AND every loose card), with a fixed gap. The
+    viewport pans so that start edge sits near the left of the canvas, so the teacher
+    sees generation begin in empty space. Empty board → viewport center. */
+export function composeOrigin(reserveLeft = 360): { x: number; y: number } {
   const b = useBoardStore.getState();
   const nodes = Object.values(b.nodes);
   if (nodes.length === 0) return viewportCenterBoardPoint();
+  const GAP = 220; // clear breathing room between existing content and the new start
   const rightEdge = Math.max(...nodes.map((n) => n.x + n.w));
   const topEdge = Math.min(...nodes.map((n) => n.y));
-  const cx = rightEdge + 160 + 460; // clear gap + ~half a default frame width
+  const leftStart = rightEdge + GAP; // left edge of the new content
+  const cx = leftStart + reserveLeft; // center = start + how far the content reaches left
   const cy = topEdge + 320;
   const { zoom } = b.viewport;
-  const railW = 64;
-  const cw = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) - railW);
   const ch = Math.max(320, typeof window !== 'undefined' ? window.innerHeight : 800);
-  b.setViewport({ panX: cw / 2 - cx * zoom, panY: ch / 2 - cy * zoom });
+  // Pan so the new content's START edge is ~180px from the canvas left (in view),
+  // pushing the existing content off to the left.
+  b.setViewport({ panX: 180 - leftStart * zoom, panY: ch / 2 - cy * zoom });
   return { x: cx, y: cy };
 }
