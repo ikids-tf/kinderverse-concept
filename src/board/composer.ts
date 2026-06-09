@@ -1,4 +1,4 @@
-import { useBoardStore, newId } from '@/store/boardStore';
+import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { recordSpawnedNodes, captureNodes, pushRedesign } from './commands';
 import {
   spawnTextCard,
@@ -20,7 +20,7 @@ import {
   type SourceThumb,
 } from './workflow';
 import { designComposedFrame, fitFrameToChildren } from './frames';
-import { decorateComposedFrame, decorateDocStickers } from './decorate';
+import { decorateComposedFrame, decorateDocStickers, decorateMindMapStickers } from './decorate';
 import { ruleBasedVariant, asLayoutVariant, ruleBasedSpec } from './design-spec';
 import { runDesignDirector } from '@/ai/agents/design';
 import { pickTemplate, type FrameTemplate, type FrameRegion, type FillAgent } from './templates';
@@ -59,6 +59,7 @@ let composing = false; // guard against double-submit racing frame creation
 export async function composeFromPrompt(text: string): Promise<void> {
   if (composing) return;
   composing = true;
+  useBoardStore.getState().setGenerating('✨ 보드를 만들고 있어요…');
   const created: string[] = [];
   try {
     const b = useBoardStore.getState();
@@ -75,6 +76,7 @@ export async function composeFromPrompt(text: string): Promise<void> {
 
     // Mind map (생각그물·주제망·놀이 확장맵) — a radial map, built separately.
     if (out.route_to === 'mindmap' || MINDMAP_RE.test(text)) {
+      useBoardStore.getState().setGenerating('🧠 생각그물을 그리고 있어요…');
       const ids = await buildMindMap(text);
       recordSpawnedNodes(ids, '마인드맵 생성');
       return;
@@ -146,18 +148,25 @@ export async function composeFromPrompt(text: string): Promise<void> {
     recordSpawnedNodes(created, 'AI 보드 생성');
   } finally {
     composing = false;
+    useBoardStore.getState().setGenerating(null);
   }
 }
 
 /* ---------------- mind map (생각그물 — radial layout + connection lines) ---------------- */
 
 function mindMapTopic(text: string): string {
-  const cleaned = text
-    .replace(MINDMAP_RE, '')
-    .replace(/(만들어\s*줘|만들어|그려\s*줘|해\s*줘|짜\s*줘|주제|에\s*대한|에\s*대해|로|을|를|으로)\s*$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned || '오늘의 주제';
+  // Drop "…에 대한 / 관련" connectors and the mind-map words anywhere, then strip
+  // trailing request verbs/particles repeatedly (one pass leaves residue like
+  // "공룡에 대한" → keep looping until only the subject remains).
+  let s = text
+    .replace(/에\s*대한|에\s*대해|에\s*관한|에\s*관해|관련(된)?/g, ' ')
+    .replace(MINDMAP_RE, ' ');
+  let prev = '';
+  while (s !== prev) {
+    prev = s;
+    s = s.replace(/\s*(만들어\s*줘|만들어|그려\s*줘|그려|해\s*줘|짜\s*줘|작성해?\s*줘?|보여\s*줘|주제로|주제|로|으로)\s*$/u, '');
+  }
+  return s.replace(/\s+/g, ' ').trim() || '오늘의 주제';
 }
 
 /** Build a radial mind map: the topic at the center, activity branches around it
@@ -215,28 +224,36 @@ async function buildMindMap(text: string): Promise<string[]> {
     const fr = useBoardStore.getState().nodes[frameId];
     if (fr) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(fr.data ?? {}), edges: [...edges] } });
   };
-  persistEdges(); // center→branch lines appear immediately (before images/web resolve)
+  decorateMindMapStickers(frameId, topic); // one theme sticker per card
 
-  // Concept images (branch leaves) + a web 자료 node, fetched in parallel.
+  // Image leaf placeholders (loading spinner) appear immediately; filled when ready.
+  // Placed outward along each branch's ray, nudged clear of any card it would hit.
+  const leafIds: string[] = [];
+  for (let i = 0; i < 3 && branchIds[i]; i++) {
+    const ang = -Math.PI / 2 + (2 * Math.PI / N) * i;
+    const spot = freeRadialSpot(frameId, c.x, c.y, ang, 160, 140, R + 200);
+    const id = newId('image');
+    b.addNodeRaw({
+      id, type: 'image', x: spot.x, y: spot.y,
+      w: 160, h: 140, loading: true, data: { role: 'mm-leaf', frameId },
+    });
+    leafIds.push(id);
+    edges.push({ from: branchIds[i], to: id });
+    created.push(id);
+  }
+  persistEdges(); // center→branch (+ leaf) lines appear immediately, before images/web resolve
+
+  // Concept images + a web 자료 node, fetched in parallel; fill the placeholders.
   const [imgRes, web] = await Promise.all([
     runStudioImages(topic, branches.slice(0, 3).map((i) => i.label), ctx, 'image'),
     buildWebSource(topic).catch(() => null),
   ]);
-  if (imgRes.payload.type === 'StudioGallery') {
-    imgRes.payload.props.items.slice(0, 3).forEach((it, i) => {
-      if (!branchIds[i]) return;
-      const ang = -Math.PI / 2 + (2 * Math.PI / N) * i;
-      const id = newId('image');
-      b.addNodeRaw({
-        id, type: 'image',
-        x: Math.round(c.x + (R + 215) * Math.cos(ang) - 80),
-        y: Math.round(c.y + (R + 215) * Math.sin(ang) - 70),
-        w: 160, h: 140, src: it.url, text: it.caption, data: { role: 'mm-leaf', frameId },
-      });
-      edges.push({ from: branchIds[i], to: id });
-      created.push(id);
-    });
-  }
+  const items = imgRes.payload.type === 'StudioGallery' ? imgRes.payload.props.items : [];
+  leafIds.forEach((lid, i) => {
+    const it = items[i];
+    const cur = useBoardStore.getState().nodes[lid];
+    if (cur) useBoardStore.getState().updateNodeRaw(lid, { loading: false, src: it?.url, text: it?.caption ?? '' });
+  });
 
   // Web 자료 node — clickable links/thumbnails, connected to the center.
   if (web) {
@@ -267,6 +284,60 @@ function addMindMapEdges(frameId: string, more: Array<{ from: string; to: string
   useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(fr.data ?? {}), edges } });
 }
 
+/** Effective height of a card for collision: prefer the measured renderH; for an
+    unmeasured auto-height card assume a generous minimum so freshly-added siblings
+    (still at their seed height) are treated as tall as they will render. */
+function cardHeight(n: BoardNode): number {
+  if (typeof n.data?.renderH === 'number') return n.data.renderH;
+  if (n.type === 'sticky') return Math.max(n.h, 120);
+  return n.h;
+}
+
+/** True if a w×h box at (x,y) overlaps any card in the frame (with a gap).
+    `excludeId` skips one node (used when re-placing a card already in the store). */
+function overlapsFrameNode(frameId: string, x: number, y: number, w: number, h: number, excludeId?: string): boolean {
+  const b = useBoardStore.getState();
+  const GAP = 28;
+  for (const n of Object.values(b.nodes)) {
+    if (n.type === 'frame' || n.id === excludeId || n.data?.frameId !== frameId) continue;
+    const nh = cardHeight(n);
+    if (x < n.x + n.w + GAP && x + w + GAP > n.x && y < n.y + nh + GAP && y + h + GAP > n.y) return true;
+  }
+  return false;
+}
+
+/** Find a non-overlapping spot near a ray from (cx,cy): push outward, fanning the
+    angle slightly if blocked, so expanded cards never collide with existing ones. */
+function freeRadialSpot(frameId: string, cx: number, cy: number, angle: number, w: number, h: number, startR: number, excludeId?: string): { x: number; y: number } {
+  for (let r = startR; r < startR + 1500; r += 44) {
+    for (const da of [0, 0.16, -0.16, 0.32, -0.32, 0.5, -0.5, 0.7, -0.7]) {
+      const x = Math.round(cx + r * Math.cos(angle + da) - w / 2);
+      const y = Math.round(cy + r * Math.sin(angle + da) - h / 2);
+      if (!overlapsFrameNode(frameId, x, y, w, h, excludeId)) return { x, y };
+    }
+  }
+  return { x: Math.round(cx + startR * Math.cos(angle) - w / 2), y: Math.round(cy + startR * Math.sin(angle) - h / 2) };
+}
+
+/** After cards have rendered (heights now measured), push any still-overlapping
+    card outward along its own ray from (cx,cy) until it clears. Guarantees no
+    overlap regardless of how tall the text wrapped. */
+function resolveOverlaps(frameId: string, ids: string[], cx: number, cy: number): void {
+  const b = useBoardStore.getState();
+  for (const id of ids) {
+    const n = b.nodes[id];
+    if (!n) continue;
+    const h = cardHeight(n);
+    const ccx = n.x + n.w / 2;
+    const ccy = n.y + h / 2;
+    if (!overlapsFrameNode(frameId, n.x, n.y, n.w, h, id)) continue;
+    const ang = Math.atan2(ccy - cy, ccx - cx);
+    const r0 = Math.hypot(ccx - cx, ccy - cy);
+    const spot = freeRadialSpot(frameId, cx, cy, ang, n.w, h, r0 + 24, id);
+    b.updateNodeRaw(id, { x: spot.x, y: spot.y });
+  }
+}
+
 /** Expand a mind-map branch into 3 sub-activities, fanned further out along the
     branch's outward direction and connected to it (click the ＋ on a branch). */
 export async function expandMindMapBranch(branchId: string): Promise<void> {
@@ -285,30 +356,35 @@ export async function expandMindMapBranch(branchId: string): Promise<void> {
   const dist = Math.hypot(bx - cx, by - cy) || 360;
 
   const label = (branch.text ?? '').split('\n')[0].trim() || '활동';
-  const subs = (await runPlanIdeas(label, buildAgentContext('plan'), 3)).slice(0, 3);
-  if (subs.length === 0) return;
+  useBoardStore.getState().setGenerating('🌱 하위 활동을 펼치고 있어요…');
+  try {
+    const subs = (await runPlanIdeas(label, buildAgentContext('plan'), 3)).slice(0, 3);
+    if (subs.length === 0) return;
 
-  const SW = 184, R2 = dist + 210;
-  const created: string[] = [];
-  const edges: Array<{ from: string; to: string }> = [];
-  subs.forEach((idea, i) => {
-    const a = ang + (i - (subs.length - 1) / 2) * 0.5; // fan around the branch direction
-    const id = newId('sticky');
-    b.addNodeRaw({
-      id, type: 'sticky',
-      x: Math.round(cx + R2 * Math.cos(a) - SW / 2),
-      y: Math.round(cy + R2 * Math.sin(a) - 32),
-      w: SW, h: 60, autoH: true,
-      text: `${idea.label}\n${idea.desc}`, color: 'surface-2', data: { role: 'mm-branch', frameId },
+    const SW = 184, SH = 100; // SH is a generous height for the collision check
+    const created: string[] = [];
+    const edges: Array<{ from: string; to: string }> = [];
+    subs.forEach((idea, i) => {
+      const a = ang + (i - (subs.length - 1) / 2) * 0.45; // fan around the branch direction
+      const pos = freeRadialSpot(frameId, cx, cy, a, SW, SH, dist + 210); // never overlap existing cards
+      const id = newId('sticky');
+      b.addNodeRaw({
+        id, type: 'sticky', x: pos.x, y: pos.y, w: SW, h: 60, autoH: true,
+        text: `${idea.label}\n${idea.desc}`, color: 'surface-2', data: { role: 'mm-branch', frameId },
+      });
+      edges.push({ from: branchId, to: id });
+      created.push(id);
     });
-    edges.push({ from: branchId, to: id });
-    created.push(id);
-  });
 
-  addMindMapEdges(frameId, edges);
-  await new Promise((r) => setTimeout(r, 220));
-  fitFrameToChildren(frameId);
-  recordSpawnedNodes(created, '가지 확장');
+    addMindMapEdges(frameId, edges);
+    decorateMindMapStickers(frameId, label); // sticker the new sub-branches
+    await new Promise((r) => setTimeout(r, 240)); // let cards render so heights are measured
+    resolveOverlaps(frameId, created, cx, cy); // nudge any still-overlapping sub-card outward
+    fitFrameToChildren(frameId);
+    recordSpawnedNodes(created, '가지 확장');
+  } finally {
+    useBoardStore.getState().setGenerating(null);
+  }
 }
 
 /** Make an A4 activity worksheet from a selected idea/branch and connect it (in a
@@ -332,6 +408,7 @@ export async function worksheetFromNode(nodeId: string): Promise<void> {
     addMindMapEdges(frameId, [{ from: nodeId, to: id }]);
   }
   useBoardStore.getState().setSelection([id]);
+  useBoardStore.getState().setGenerating('✏️ 활동지를 만들고 있어요…');
 
   try {
     const res = await runStudioWorksheet(activity, buildAgentContext('studio'));
@@ -343,6 +420,8 @@ export async function worksheetFromNode(nodeId: string): Promise<void> {
   } catch {
     const cur = useBoardStore.getState().nodes[id];
     b.updateNodeRaw(id, { text: `‘${activity}’ 활동지 생성에 실패했어요.`, data: { ...(cur?.data ?? {}), loadingDoc: false } });
+  } finally {
+    useBoardStore.getState().setGenerating(null);
   }
   if (frameId) {
     await new Promise((r) => setTimeout(r, 260));
@@ -689,12 +768,18 @@ export async function redesignFrame(frameId: string, command: string): Promise<v
   const before = captureNodes(ids);
 
   const routeTo: RouteTarget | null = frame.data?.templateId === 'studio' ? 'studio' : null;
-  const spec = await runDesignDirector({
-    topic,
-    routeTo,
-    components: summarizeComponents(frameId),
-    instruction: command,
-  });
+  useBoardStore.getState().setGenerating('🎨 보드를 다시 디자인하고 있어요…');
+  let spec;
+  try {
+    spec = await runDesignDirector({
+      topic,
+      routeTo,
+      components: summarizeComponents(frameId),
+      instruction: command,
+    });
+  } finally {
+    useBoardStore.getState().setGenerating(null);
+  }
 
   const fnode = useBoardStore.getState().nodes[frameId];
   if (fnode) {
@@ -747,6 +832,7 @@ export async function decorateDocCard(nodeId: string, _prompt: string): Promise<
     data: { doc: true, role: 'newsletter', loadingDoc: true, ...(frameId ? { frameId } : {}) },
   });
   b.setSelection([id]);
+  useBoardStore.getState().setGenerating('✨ 학부모용 소식지를 꾸미고 있어요…');
 
   try {
     // Warm parent newsletter text + themed illustrations, in parallel.
@@ -770,6 +856,8 @@ export async function decorateDocCard(nodeId: string, _prompt: string): Promise<
   } catch {
     const cur = useBoardStore.getState().nodes[id];
     b.updateNodeRaw(id, { text: source, data: { ...(cur?.data ?? {}), loadingDoc: false } });
+  } finally {
+    useBoardStore.getState().setGenerating(null);
   }
 
   if (frameId) {

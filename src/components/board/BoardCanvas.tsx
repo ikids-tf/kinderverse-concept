@@ -24,6 +24,7 @@ export function BoardCanvas() {
   const laneOrder = useBoardStore((s) => s.laneOrder);
   const selection = useBoardStore((s) => s.selection);
   const viewport = useBoardStore((s) => s.viewport);
+  const generating = useBoardStore((s) => s.generating);
 
   // Mind-map connection edges (frame.data.edges). Recompute only when nodes/order
   // change — NOT on every drag frame (drag is local state, doesn't touch the store).
@@ -286,6 +287,18 @@ export function BoardCanvas() {
           />
         )}
       </div>
+
+      {/* generating status pill — screen-fixed, above the world (SKILL §6: 5 states).
+          Floats at top-center while any AI generation is running so the board never
+          looks frozen. pointer-events-none so it never blocks canvas interaction. */}
+      {generating && (
+        <div className="pointer-events-none absolute left-1/2 top-5 z-30 -translate-x-1/2">
+          <div className="flex items-center gap-2.5 rounded-pill border border-border bg-surface py-2 pl-3 pr-4 shadow-lg">
+            <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-accent-soft border-t-accent" />
+            <span className="text-sm font-medium text-fg">{generating}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

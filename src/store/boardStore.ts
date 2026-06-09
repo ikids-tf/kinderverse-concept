@@ -81,6 +81,8 @@ interface BoardState {
   selection: string[];
   viewport: Viewport;
   classroomMode: boolean;
+  /** Non-null while an AI generation is running → board shows a status pill. */
+  generating: string | null;
 
   // ---- raw node ops ----
   addNodeRaw: (node: BoardNode) => void;
@@ -95,6 +97,7 @@ interface BoardState {
   selectAll: () => void;
 
   // ---- viewport ----
+  setGenerating: (label: string | null) => void;
   setViewport: (v: Partial<Viewport>) => void;
   zoomBy: (factor: number, cx?: number, cy?: number) => void;
   resetView: () => void;
@@ -124,6 +127,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   selection: [],
   viewport: { zoom: 1, panX: 0, panY: 0 },
   classroomMode: false,
+  generating: null,
+
+  setGenerating: (label) => set({ generating: label }),
 
   addNodeRaw: (node) =>
     set((s) => ({ nodes: { ...s.nodes, [node.id]: node }, order: [...s.order, node.id] })),
@@ -217,6 +223,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       laneOrder: snap.laneOrder,
       viewport: snap.viewport,
       selection: [],
+      generating: null,
     }),
 
   addLaneRaw: (lane) =>

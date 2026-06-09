@@ -38,6 +38,26 @@ export function decorateDocStickers(nodeId: string, topic: string, count = 4, em
   b.updateNodeRaw(nodeId, { data: { ...(n.data ?? {}), decorations } });
 }
 
+/** Give each mind-map card (center + branches) a single relevant corner sticker
+    from the topic palette. Cards that already carry decorations are left alone, so
+    re-running after a branch expansion only dresses the new sub-branches. */
+export function decorateMindMapStickers(frameId: string, topic: string): void {
+  const b = useBoardStore.getState();
+  const palette = pickStickersForTopic(topic, 8);
+  if (palette.length === 0) return;
+  const cards = Object.values(b.nodes).filter(
+    (n) => n.data?.frameId === frameId && (n.data?.role === 'mm-branch' || n.data?.role === 'mm-center'),
+  );
+  cards.forEach((card, i) => {
+    if (Array.isArray(card.data?.decorations) && (card.data.decorations as unknown[]).length) return;
+    const isCenter = card.data?.role === 'mm-center';
+    const decorations: StickerDeco[] = [
+      { emoji: palette[i % palette.length], anchor: 'tr', rot: i % 2 ? 9 : -9, size: isCenter ? 34 : 28 },
+    ];
+    b.updateNodeRaw(card.id, { data: { ...(card.data ?? {}), decorations } });
+  });
+}
+
 /** Decorate every document card in a composed frame with stickers. Pass `emojis`
     (Design Director palette) to override the keyword-based theme pick. */
 export function decorateComposedFrame(frameId: string, topic: string, emojis?: string[]): void {

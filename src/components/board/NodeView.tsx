@@ -263,6 +263,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
           ) : (
             <p className="font-display text-h4 font-semibold leading-tight text-on-accent">{node.text || '주제'}</p>
           )}
+          {Array.isArray(node.data?.decorations) && <StickerDecos items={node.data.decorations as StickerDecoData[]} />}
           {node.locked && <LockBadge />}
         </div>
       );
@@ -358,35 +359,13 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); void expandMindMapBranch(node.id); }}
             title="하위 활동으로 확장"
-            className="absolute -bottom-2 -right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-surface text-accent opacity-0 shadow-md transition-opacity duration-150 ease-soft hover:bg-accent-soft group-hover:opacity-100"
+            className="absolute -bottom-3.5 -right-3.5 z-10 flex h-9 w-9 items-center justify-center rounded-full border-2 border-surface bg-accent text-on-accent opacity-0 shadow-lg transition-all duration-150 ease-soft hover:scale-110 hover:bg-accent-hover group-hover:opacity-100"
           >
-            <Icon name="plus" size={14} />
+            <Icon name="plus" size={20} />
           </button>
         )}
         {/* Design Director — decorate: theme stickers "stuck" on the corners. */}
-        {decorations.map((d, i) => (
-          <span
-            key={`deco-${i}`}
-            aria-hidden
-            className="pointer-events-none absolute z-10 flex items-center justify-center rounded-full border border-border bg-surface shadow-md"
-            style={{
-              ...(d.anchor === 'tl'
-                ? { left: -14, top: -14 }
-                : d.anchor === 'tr'
-                  ? { right: -14, top: -14 }
-                  : d.anchor === 'bl'
-                    ? { left: -14, bottom: -14 }
-                    : { right: -14, bottom: -14 }),
-              width: d.size,
-              height: d.size,
-              transform: `rotate(${d.rot}deg)`,
-              fontSize: Math.round(d.size * 0.56),
-              lineHeight: 1,
-            }}
-          >
-            {d.emoji}
-          </span>
-        ))}
+        <StickerDecos items={decorations} />
         {node.locked && <LockBadge />}
       </div>
     );
@@ -470,6 +449,35 @@ interface StickerDecoData {
   anchor: 'tl' | 'tr' | 'bl' | 'br';
   rot: number;
   size: number;
+}
+function StickerDecos({ items }: { items: StickerDecoData[] }) {
+  return (
+    <>
+      {items.map((d, i) => (
+        <span
+          key={i}
+          aria-hidden
+          className="pointer-events-none absolute z-10 flex items-center justify-center rounded-full border border-border bg-surface shadow-md"
+          style={{
+            ...(d.anchor === 'tl'
+              ? { left: -14, top: -14 }
+              : d.anchor === 'tr'
+                ? { right: -14, top: -14 }
+                : d.anchor === 'bl'
+                  ? { left: -14, bottom: -14 }
+                  : { right: -14, bottom: -14 }),
+            width: d.size,
+            height: d.size,
+            transform: `rotate(${d.rot}deg)`,
+            fontSize: Math.round(d.size * 0.56),
+            lineHeight: 1,
+          }}
+        >
+          {d.emoji}
+        </span>
+      ))}
+    </>
+  );
 }
 
 /* ---- web-source card: topic thumbnails (free image sites) + search link rows ---- */
