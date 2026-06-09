@@ -1,4 +1,5 @@
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
+import { useBoardsStore } from '@/store/boardsStore';
 import { recordSpawnedNodes, captureNodes, pushRedesign } from './commands';
 import {
   spawnTextCard,
@@ -174,11 +175,24 @@ function mindMapTopic(text: string): string {
     (the caller records them as one undoable step). No `composing` guard — it runs
     inside composeFromPrompt's guard. */
 async function buildMindMap(text: string): Promise<string[]> {
-  const b = useBoardStore.getState();
-  const created: string[] = [];
   const topic = mindMapTopic(text);
   const ctx = buildAgentContext('plan');
-  const c = composeOrigin(); // beside existing content (pans there), else viewport center
+  const ideas = await runPlanIdeas(topic, ctx, 7);
+  return seedMindMap(topic, ideas.slice(0, 8), composeOrigin(), ctx);
+}
+
+/** Render a radial mind map at center `c` from pre-supplied branches — NO model
+    call here; the caller supplies branches (from runPlanIdeas, or parsed from an
+    existing document). Builds frame + center + branch cards + connection lines +
+    concept images + a web-source node. Returns the spawned node ids. */
+async function seedMindMap(
+  topic: string,
+  branches: Array<{ label: string; desc: string }>,
+  c: { x: number; y: number },
+  ctx: string,
+): Promise<string[]> {
+  const b = useBoardStore.getState();
+  const created: string[] = [];
 
   // Frame container (groups + saves + holds the edge list).
   const frameId = newId('frame');
@@ -200,8 +214,6 @@ async function buildMindMap(text: string): Promise<string[]> {
   const edges: Array<{ from: string; to: string }> = [];
 
   // Activity branches, radial around the center.
-  const ideas = await runPlanIdeas(topic, ctx, 7);
-  const branches = ideas.slice(0, 8);
   const N = Math.max(branches.length, 1);
   const R = 360, BW = 220;
   const branchIds: string[] = [];
@@ -274,6 +286,98 @@ async function buildMindMap(text: string): Promise<string[]> {
   await new Promise((r) => setTimeout(r, 260));
   fitFrameToChildren(frameId);
   return created;
+}
+
+/* ---------------- document → board ("마이보드에서 보기") ---------------- */
+
+/** Strip emoji + mind-map/document filler words from a title to get the subject. */
+function docTopic(title: string): string {
+  const noEmoji = title.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}️\u{1F1E6}-\u{1F1FF}]/gu, ' ');
+  const s = noEmoji.replace(MINDMAP_RE, ' ').replace(/계획안?|문서|주제/g, ' ');
+  return s.replace(/\s+/g, ' ').trim() || mindMapTopic(title);
+}
+
+/** Parse markdown H2/H3 sections into mind-map branches (heading → label, first
+    descriptive line → desc) so the map reflects the document's actual structure. */
+function parseDocBranches(markdown: string): Array<{ label: string; desc: string }> {
+  const out: Array<{ label: string; desc: string }> = [];
+  let cur: { label: string; desc: string } | null = null;
+  for (const raw of markdown.split('\n')) {
+    const line = raw.trim();
+    const h = line.match(/^#{2,3}\s+(.*)$/);
+    if (h) {
+      if (cur) out.push(cur);
+      const label = h[1].replace(/[*`#]/g, '').replace(/\s+/g, ' ').trim();
+      cur = { label: label.slice(0, 22), desc: '' };
+      continue;
+    }
+    if (cur && !cur.desc && line) {
+      const txt = line.replace(/^[-*>+\d.]+\s*/, '').replace(/\|.*$/, '').replace(/[*`]/g, '').trim();
+      if (txt && !/^[-|:\s]+$/.test(txt)) cur.desc = txt.slice(0, 54);
+    }
+  }
+  if (cur) out.push(cur);
+  return out.filter((bn) => bn.label);
+}
+
+/** From a chat document (markdown) → open a fresh, dedicated board with the FULL
+    document on the LEFT and a mind map reflecting its structure on the RIGHT.
+    Sections become branches (fallback: model ideas). Called by the chat
+    "마이보드에서 보기" action; the page then navigates to /board. */
+export async function openDocOnBoard(doc: { title: string; markdown: string }): Promise<void> {
+  const topic = docTopic(doc.title);
+  // Dedicated board so the document + map present cleanly side by side.
+  useBoardsStore.getState().createBoard('general', topic.slice(0, 16) || '문서 보드');
+  useBoardStore.getState().setGenerating('🧠 문서를 보드로 펼치고 있어요…');
+  const created: string[] = [];
+  try {
+    const ctx = buildAgentContext('plan');
+    const base = viewportCenterBoardPoint();
+
+    // Left — the full document, as an A4 paper card (kv-doc-md markdown).
+    const docW = PLAN_DOC_W;
+    const docX = Math.round(base.x - docW - 360);
+    const docY = Math.round(base.y - 320);
+    const docId = newId('sticky');
+    useBoardStore.getState().addNodeRaw({
+      id: docId, type: 'sticky', x: docX, y: docY, w: docW, h: 360, autoH: true,
+      text: doc.markdown, color: 'paper', data: { doc: true, role: 'plan' },
+    });
+    created.push(docId);
+
+    const center = { x: Math.round(base.x + 360), y: Math.round(base.y) };
+
+    // Frame the document (left) + map (right) into view at a readable zoom, anchored
+    // near the top — the document is tall, so the teacher scrolls down to read on.
+    // Deterministic (no measured-height dependency); run now for the generating
+    // period and again at the end so the final framing wins decisively.
+    const cw = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 64);
+    const frameBoth = () => {
+      const minX = docX;
+      const maxX = center.x + 580; // map extent incl. outer image leaves
+      const midX = (minX + maxX) / 2;
+      const zoom = Math.min(0.82, Math.max(0.3, cw / (maxX - minX + 240)));
+      useBoardStore.getState().setViewport({
+        zoom,
+        panX: cw / 2 - midX * zoom,
+        panY: 96 - (docY - 40) * zoom,
+      });
+    };
+    frameBoth();
+
+    // Right — mind map reflecting the document's sections (fallback to model ideas).
+    let branches = parseDocBranches(doc.markdown);
+    if (branches.length < 3) {
+      const ideas = await runPlanIdeas(topic, ctx, 7);
+      branches = ideas.slice(0, 8);
+    }
+    const mapIds = await seedMindMap(topic, branches.slice(0, 8), center, ctx);
+    created.push(...mapIds);
+    frameBoth(); // final framing once the whole composition exists
+    recordSpawnedNodes(created, '문서 → 보드');
+  } finally {
+    useBoardStore.getState().setGenerating(null);
+  }
 }
 
 /** Append edges to a mind-map frame's edge list (re-reads fresh state). */

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Icon } from '@/lib/icons';
+import { openDocOnBoard } from '@/board/composer';
 import { pathForRoute, ROUTE_LABEL } from '@/ai/actions';
 import { SUGGESTION_HIDE_BELOW, CONFIDENCE_THRESHOLD, type RouterOutput } from '@/ai/contract';
 import { useRouterStore, INLINE_ROUTES, type RouterTurn, type ChatAnswer } from '@/store/routerStore';
@@ -54,13 +55,44 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/** A streamed answer is "board-worthy" (a plan / mind map / structured document)
+    when it carries markdown headings or runs long — worth opening on My Board. */
+function looksLikeDoc(s: string): boolean {
+  return /(^|\n)#{1,3}\s/.test(s) || s.length > 320;
+}
+
+/** "마이보드에서 보기" — opens a fresh board with this document laid out in full on
+    the left + a mind map reflecting its structure on the right, then navigates. */
+function ViewOnBoardButton({ content }: { content: string }) {
+  const navigate = useNavigate();
+  const title = content.match(/^#\s+(.+)$/m)?.[1]?.trim() || '문서';
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void openDocOnBoard({ title, markdown: content });
+        navigate('/board');
+      }}
+      className="mt-t2 inline-flex items-center gap-1.5 rounded-pill border border-accent bg-accent-soft px-t3 py-t1 text-overline font-semibold text-accent transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
+    >
+      <Icon name="board" size={13} /> 마이보드에서 보기
+    </button>
+  );
+}
+
 function ChatAnswerView({ chat }: { chat: ChatAnswer }) {
   if (!chat.content && chat.streaming) return <TypingDots />;
+  const done = !chat.streaming && !chat.error;
   return (
     <div className={chat.error ? 'text-danger' : undefined}>
       {chat.content && <MarkdownMessage content={chat.content} />}
       {chat.streaming && <TypingDots className={chat.content ? 'mt-t2' : ''} />}
-      {!chat.streaming && !chat.error && chat.content && <CopyButton text={chat.content} />}
+      {done && chat.content && (
+        <div className="flex flex-wrap items-center gap-t2">
+          <CopyButton text={chat.content} />
+          {looksLikeDoc(chat.content) && <ViewOnBoardButton content={chat.content} />}
+        </div>
+      )}
     </div>
   );
 }
