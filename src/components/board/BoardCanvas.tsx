@@ -12,6 +12,25 @@ import { LaneView } from './LaneView';
 // Requires a STABLE onPointerDown (see onNodePointerDownStable below).
 const MemoNodeView = memo(NodeView);
 
+/** Walk up from the wheel target to the canvas root: is the cursor over an element
+    with its own vertical scroll that can STILL scroll in this wheel direction?
+    If so, the wheel should scroll that content (doc/frame) instead of zooming. */
+function scrollableUnderCursor(target: EventTarget | null, deltaY: number, root: HTMLElement | null): boolean {
+  let el = target as HTMLElement | null;
+  while (el && el !== root) {
+    if (el.scrollHeight > el.clientHeight + 1) {
+      const oy = getComputedStyle(el).overflowY;
+      if (oy === 'auto' || oy === 'scroll') {
+        const atTop = el.scrollTop <= 0;
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+        if (deltaY < 0 ? !atTop : !atBottom) return true; // room to scroll this way
+      }
+    }
+    el = el.parentElement;
+  }
+  return false;
+}
+
 /* The infinite canvas surface (SKILL §6). Pan (space+drag / wheel), zoom
    (ctrl/⌘+wheel toward cursor), drag-box selection on empty space, node drag
    (committed as one undoable move). Renders free primitives + workflow lanes. */
@@ -271,16 +290,16 @@ export function BoardCanvas() {
   }
 
   function onWheel(e: React.WheelEvent) {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      const rect = ref.current!.getBoundingClientRect();
-      useBoardStore.getState().zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
-    } else {
-      useBoardStore
-        .getState()
-        .setViewport({ panX: viewport.panX - e.deltaX, panY: viewport.panY - e.deltaY });
-    }
+    if (e.deltaY === 0) return; // horizontal-only wheel/trackpad — ignore
+    const forceZoom = e.ctrlKey || e.metaKey;
+    // Over scrollable content (a doc/frame with its own scroll) that can still move
+    // in this direction → let the browser scroll it natively. ctrl/⌘ forces zoom.
+    if (!forceZoom && scrollableUnderCursor(e.target, e.deltaY, ref.current)) return;
+    // Default: zoom toward the cursor (background or non-scrolling content).
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const rect = ref.current!.getBoundingClientRect();
+    useBoardStore.getState().zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
   }
 
   return (
