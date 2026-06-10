@@ -120,7 +120,17 @@ export interface PlanResult {
 
 export async function runPlan(request: string, selected: string[], ctx?: string): Promise<PlanResult> {
   const sel = selected.length ? `선택된 활동: ${selected.join(' / ')}` : '';
-  const user = `요청: "${request}"\n${sel}\n유아 교사가 실제로 사용하는 수준의 주간 놀이계획을 작성하라.\n- days: 월~금 5일. 누리과정 영역(area)을 요일별로 골고루 배분.\n- activity: 놀이의 전개가 드러나게 구체적으로(1문장, 35~55자). 단순 명사·주제 나열 금지.\n- goal: 발달·학습 목표를 명확한 문장으로(예: "~을 통해 ~을 기른다").\n- materials: 실제 준비물 2~4가지를 구체적으로.\n- notes: 안전·유의점과 개별 배려(알레르기·결석 등 컨텍스트가 있으면 반영)를 1~2문장.\nJSON만 출력:\n{ "type": "WeeklyPlanGrid", "props": { "title": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "days": [ { "day": string, "area": string, "activity": string, "materials": string, "goal": string } ], "notes": string } }`;
+  const user = `요청: "${request}"\n${sel}
+유아 교사가 실제로 사용하는 수준의 주간 놀이계획을 작성하라.
+[2019 개정 누리과정 결 — 반드시 지킬 것]
+- 유아·놀이 중심: activity는 "유아가 무엇을 하며 노는지"가 주어가 되게 쓴다(예: "비닐봉지 연을 만들어 바람 따라 달리며 날려 본다"). "교사가 ~을 가르친다/시킨다" 같은 교사 주도 서술 금지.
+- goal은 도달 목표가 아니라 '기대하는 경험'으로: "~하며 ~을 경험한다 / ~에 관심을 가진다" 형태.
+- days: 월~금 5일. 누리과정 영역(area)을 골고루 — 단 놀이 하나가 여러 영역을 통합적으로 경험시킴을 전제로 대표 영역 1개만 표기.
+- activity: 놀이 전개가 드러나게 1문장(35~55자). 단순 명사·주제 나열 금지.
+- materials: 교실에서 실제 구할 수 있는 준비물 2~4가지.
+- notes: ① "유아의 흥미와 놀이 흐름에 따라 계획은 융통성 있게 변경·확장합니다" 취지의 문장 ② 이 주제 놀이의 안전 유의점 1가지 ③ (컨텍스트에 있으면) 알레르기·개별 배려.
+JSON만 출력:
+{ "type": "WeeklyPlanGrid", "props": { "title": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "days": [ { "day": string, "area": string, "activity": string, "materials": string, "goal": string } ], "notes": string } }`;
 
   const first = await callGateway({
     task: 'plan',

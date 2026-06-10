@@ -37,8 +37,27 @@ function userPrompt(mode: WritingMode, text: string): string {
     return `요청: "${text}"\n발달평가서를 작성하라. 근거에 기반해 객관적·비낙인적으로, 영역별 관찰과 종합의견을 쓴다. JSON만:\n{ "type": "AssessmentReport", "props": { "child_label": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "domains": [ { "area": string, "observation": string, "level"?: string } ], "summary": string } }`;
   }
   const kind = mode === 'notice' ? 'notice' : mode === 'text' ? 'text' : 'letter';
-  const what = mode === 'notice' ? '공지' : mode === 'text' ? '문장' : '가정통신문';
-  return `요청: "${text}"\n${what}을(를) 작성하라. 따뜻하고 정중한 학부모 대상 톤. JSON만:\n{ "type": "LetterPreview", "props": { "kind": "${kind}", "title": string, "body": string, "tone": "warm"|"formal"|"concise", "audience"?: string } }`;
+  if (mode === 'text') {
+    return `요청: "${text}"\n요청한 글(문장/메모/인사말 등)을 작성하라. 따뜻하고 정중한 톤, 군더더기 없이. JSON만:\n{ "type": "LetterPreview", "props": { "kind": "text", "title": string, "body": string, "tone": "warm"|"formal"|"concise", "audience"?: string } }`;
+  }
+  const what = mode === 'notice' ? '안내문/공지' : '가정통신문';
+  return `요청: "${text}"
+실제 유치원에서 발송하는 수준의 ${what}을(를) 작성하라.
+
+[현장 통신문 형식 — body 구성을 반드시 따른다]
+1) 계절·시기 인사말 2~3문장 — 지금 시기의 구체적 계절감을 담아 따뜻하게(상투적 과장 금지).
+2) 본문 — 목적과 내용을 명확히. 일시·장소·대상·준비물·신청 방법·회신 기한 같은 항목 정보는 줄을 바꿔 "· " 목록으로 정리한다.
+3) 가정의 협조 요청 1~2문장.
+4) 맺음 감사 인사 1문장.
+5) 마지막 줄: 날짜와 발신처 — "20__년 __월 __일" / "○○유치원장" (placeholder 그대로 둘 것).
+
+[어조·사실 규칙]
+- "~해 주시기 바랍니다", "~하오니" 등 정중한 통신문체. 느낌표·이모지 남용 금지(0~1개).
+- 원 이름·교사명·아동명은 ○○ placeholder. 알 수 없는 날짜·시간·장소는 임의로 정하지 말고 "__월 __일(_)요일" 식 빈칸으로 둔다.
+- 길이 280~550자. 제목(title)은 "OO 안내" 형식으로 간결하게.
+
+JSON만:
+{ "type": "LetterPreview", "props": { "kind": "${kind}", "title": string, "body": string, "tone": "warm"|"formal"|"concise", "audience"?: string } }`;
 }
 
 /* 고위험 산출물 적합성 검증 패스 (체크리스트 1회). */

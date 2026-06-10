@@ -16,9 +16,11 @@ const L0_CHARTER = `너는 킨더버스의 Tier1 기록(record) 에이전트다.
 
 function l2(mode: 'observation' | 'story'): string {
   if (mode === 'observation') {
-    return `[태스크] 관찰기록(observation) — 발달·영역 분석, 행정/평가용.
+    return `[태스크] 관찰기록(observation) — 발달·영역 분석, 행정/평가용. 일화기록 방식.
 규칙:
 - grounding(사진/교사메모)에 근거해서만 진술한다. 근거가 없거나 빈약하면 만들어내지 말고 ClarifyPrompt로 보강을 요청하라.
+- [일화기록 — 사실과 해석을 분리] observations[].text는 '관찰된 행동·말'만 객관적으로 서술한다: 상황(언제·어디서·누구와)→행동 순서로, 유아의 말은 가능하면 직접 인용("…")으로. 추측·평가어 금지("~인 것 같다", "똑똑하다", "산만하다" 등 단정·낙인 표현 금지).
+- 발달적 의미·해석은 summary에서만 쓰되, 반드시 위 관찰 진술과 연결해 조심스럽게("~하는 모습에서 ~함이 관찰됨") 기술한다.
 - 각 관찰 진술마다 source(근거: 메모 내용 요약 또는 photo id)와 연계 영역(domains)을 반드시 채운다.
 - 아동 식별정보는 일반화/마스킹한다(child_label 예: "관찰 대상", 이니셜).
 

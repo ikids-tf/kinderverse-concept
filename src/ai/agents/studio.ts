@@ -21,8 +21,10 @@ function system(ctx?: string): string {
 
 /* Shared art-style descriptors (Design Director — style-locked illustration, P3).
    Appended to every image prompt so a frame's generated art is tonally cohesive. */
-export const KV_ART_STYLE = '밝고 따뜻한 유아 그림책 일러스트 스타일, 부드러운 파스텔 색감, 둥근 형태, 단순하고 깔끔한 배경';
-export const KV_COLORING_STYLE = '유아용 흑백 색칠 도안, 굵고 선명한 윤곽선, 색과 음영 없음, 깨끗한 흰 배경';
+export const KV_ART_STYLE =
+  '밝고 따뜻한 유아 그림책 일러스트 스타일, 부드러운 파스텔 색감, 둥근 형태, 단순하고 깔끔한 배경, 한 장면·단일 주제, 유아가 무서워할 요소 없음, 이미지 안에 글자·숫자·문자 절대 없음';
+export const KV_COLORING_STYLE =
+  '유아용 흑백 색칠 도안, 굵고 선명한 윤곽선, 색과 음영 없음, 깨끗한 흰 배경, 닫힌 면으로 칠하기 쉬운 큰 영역, 이미지 안에 글자·숫자 없음';
 
 export interface StudioResult {
   payload: RegistryPayload;
@@ -62,7 +64,18 @@ export async function runStudioWorksheet(
   });
 
   // 2) 교육 내용(목표/준비물/진행/영역)은 LLM이 선택된 유형·연령에 맞게 작성.
-  const user = `활동지 설계 요청.\n- 주제: "${reco.topic}"\n- 활동 유형: "${reco.type}"\n- 대상 연령: ${reco.age_band === '0-2' ? '0~2세(영아)' : '3~5세(유아)'}\n위 유형·연령에 맞는 A4 활동지의 교육 내용을 작성하라. 무근거 난이도 상향 금지. JSON만 출력:\n{ "type": "WorksheetCard", "props": { "title": string, "age_band": "${reco.age_band}", "curriculum": "standard"|"nuri", "objective": string, "materials": string[], "steps": string[], "domains": string[] } }`;
+  const user = `활동지 설계 요청.
+- 주제: "${reco.topic}"
+- 활동 유형: "${reco.type}"
+- 대상 연령: ${reco.age_band === '0-2' ? '0~2세(영아)' : '3~5세(유아)'}
+위 유형·연령에 맞는 A4 활동지의 교육 내용을 작성하라.
+[현장 기준]
+- 활동지는 그림 중심 한 장이다 — 유아는 글을 못 읽으므로 steps는 '교사가 진행하며 하는 말·행동' 기준으로 3~4단계(예: "그림을 함께 보며 '어떤 친구들이 있니?' 묻는다").
+- 연령별 난이도: 같은 활동이라도 만3세는 항목 수 적고 크게·단순하게, 만5세는 심화·확장(비교/이유 묻기). 대상 연령에 맞춰 objective와 steps의 수준을 조절하고 무근거 난이도 상향 금지.
+- objective는 '기대 경험'으로: "~하며 ~을 경험한다 / ~에 관심을 가진다" 1문장.
+- materials는 활동지 외 실제 필요한 것만(색연필·가위·풀 등 2~4가지).
+JSON만 출력:
+{ "type": "WorksheetCard", "props": { "title": string, "age_band": "${reco.age_band}", "curriculum": "standard"|"nuri", "objective": string, "materials": string[], "steps": string[], "domains": string[] } }`;
 
   const first = await callGateway({
     task: 'studio',
