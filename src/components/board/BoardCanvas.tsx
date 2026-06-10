@@ -309,6 +309,7 @@ export function BoardCanvas() {
   return (
     <div
       ref={ref}
+      data-kv-canvas
       onPointerDown={onBackgroundPointerDown}
       onWheel={onWheel}
       onDoubleClick={() => useBoardStore.getState().fit()}

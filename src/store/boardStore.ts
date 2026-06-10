@@ -222,22 +222,33 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     if (!n) return;
     // Tall auto-height cards report their real height as data.renderH.
     const h = typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : n.h;
-    // Visible canvas box = window minus the left rail+toolbar and the bottom prompt bar.
-    const railL = 124;
-    const padT = 24;
-    const padB = 140;
+    // Measure the ACTUAL canvas box (not a window heuristic) and the bottom prompt
+    // bar, so the focused item lands exactly where the user sees center — and its
+    // horizontal center lines up with the prompt bar's center.
+    const doc = typeof document !== 'undefined' ? document : null;
+    const canvas = doc?.querySelector('[data-kv-canvas]') as HTMLElement | null;
+    const cr = canvas
+      ? canvas.getBoundingClientRect()
+      : ({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } as DOMRect);
+    const pbar = doc?.querySelector('.kv-pbar-vt') as HTMLElement | null;
+    const pr = pbar ? pbar.getBoundingClientRect() : undefined;
+    const padX = 48;
+    const padTop = 24;
     const gap = 40; // breathing room around the focused node
-    const vw = Math.max(240, window.innerWidth - railL - 40);
-    const vh = Math.max(240, window.innerHeight - padT - padB);
+    // Usable area ends just above the prompt bar (fallback: a fixed bottom inset).
+    const bottomY = pr ? pr.top - 16 : cr.top + cr.height - 140;
+    const availW = Math.max(240, cr.width - padX * 2);
+    const availH = Math.max(240, bottomY - cr.top - padTop);
     // Fill the view but never zoom past 2× (keeps small cards from over-magnifying).
-    const zoom = clampZoom(Math.min(vw / (n.w + gap * 2), vh / (h + gap * 2), 2));
-    const scx = railL + (window.innerWidth - railL) / 2; // screen center of the canvas area
-    const scy = padT + vh / 2;
+    const zoom = clampZoom(Math.min(availW / (n.w + gap * 2), availH / (h + gap * 2), 2));
+    // Horizontal target = the prompt bar's center; vertical = canvas area above it.
+    const targetX = pr ? pr.left + pr.width / 2 : cr.left + cr.width / 2;
+    const targetY = cr.top + padTop + availH / 2;
     set({
       viewport: {
         zoom,
-        panX: scx - (n.x + n.w / 2) * zoom,
-        panY: scy - (n.y + h / 2) * zoom,
+        panX: targetX - cr.left - (n.x + n.w / 2) * zoom,
+        panY: targetY - cr.top - (n.y + h / 2) * zoom,
       },
     });
   },
