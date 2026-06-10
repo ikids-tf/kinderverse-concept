@@ -281,8 +281,16 @@ export function planDocMarkdown(p: RegistryPayload): string {
 }
 
 export function worksheetText(p: RegistryPayload): string {
-  if (p.type === 'WorksheetCard')
-    return [`📝 ${p.props.title}`, `목표: ${p.props.objective}`, `준비물: ${p.props.materials.join(', ')}`, ...p.props.steps.map((s, i) => `${i + 1}. ${s}`)].join('\n');
+  if (p.type === 'WorksheetCard') {
+    const meta = [p.props.type, p.props.style_label].filter(Boolean).join(' · ');
+    return [
+      `📝 ${p.props.title}`,
+      ...(meta ? [meta] : []),
+      `목표: ${p.props.objective}`,
+      `준비물: ${p.props.materials.join(', ')}`,
+      ...p.props.steps.map((s, i) => `${i + 1}. ${s}`),
+    ].join('\n');
+  }
   if (p.type === 'ClarifyPrompt') return p.props.question;
   return '활동지';
 }

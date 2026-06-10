@@ -25,7 +25,7 @@ import {
   mockAgentStep,
   type LaneStepMeta,
 } from './mock';
-import { generateImage } from './image';
+import { generateImage, detectImageElements } from './image';
 
 export interface GatewayConfig {
   anthropicKey?: string;
@@ -66,14 +66,26 @@ export async function handleGatewayRequest(
 
   // ---- Image task: dedicated plugin (real when configured, else placeholder). ----
   if (req.task === 'image') {
-    const meta = (req.meta ?? {}) as { prompt?: string; caption?: string };
+    const meta = (req.meta ?? {}) as { prompt?: string; caption?: string; aspectRatio?: string };
     const { image, real, detail } = await generateImage({
       geminiKey: config.geminiKey,
       model: config.imageModel,
       prompt: meta.prompt ?? meta.caption ?? '유아 활동 개념 일러스트',
       caption: meta.caption ?? '활동',
+      aspectRatio: meta.aspectRatio,
     });
     return { ok: true, image, mocked: !real, error: real ? undefined : detail };
+  }
+
+  // ---- Detect task: Gemini vision element detection (레이어 분리용 경계상자). ----
+  if (req.task === 'detect') {
+    const meta = (req.meta ?? {}) as { image?: string; max?: number };
+    const { regions, mocked, detail } = await detectImageElements({
+      geminiKey: config.geminiKey,
+      image: meta.image ?? '',
+      max: meta.max,
+    });
+    return { ok: true, regions, mocked, error: mocked ? detail : undefined };
   }
 
   // ---- Web search task: Gemini Google Search grounding (real when keyed). ----

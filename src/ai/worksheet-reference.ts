@@ -1,0 +1,487 @@
+/* worksheet-reference.ts — 활동지 추천 레퍼런스 (단일 출처)
+   docs/worksheet_match_reference.md(v1.2)의 머신 리더블 미러.
+   agent.worksheet(studio)의 추천 로직(주제→유형→스타일)·프롬프트 조립이 참조한다.
+   ※ 데이터는 여기 한 곳에만. 프롬프트 본문/에이전트에 하드코딩 금지(CLAUDE §2, PROMPTS §4).
+
+   ★ 활동지 = 교사가 인쇄해 아이들과 오리거나 그려서 활동하는 "한 장의 종이" 그 자체.
+     따라서 image_prompt는 삽화 한 컷이 아니라 "완성된 인쇄용 A4 활동지 한 장"
+     (제목 + 안내문 + 활동 영역 + 오리기 칸/절취선 + 캐릭터)을 통째로 묘사한다. */
+
+export type AgeBand = '0-2' | '3-5';
+export type StyleCode = 'watercolor' | 'round_character' | 'pastel' | 'black_and_white';
+export type SelectedBy = 'user' | 'recommended';
+export type WorksheetMode = 'instant' | 'guided';
+export type Difficulty = 'basic' | 'standard' | 'extended';
+
+export interface StyleDef {
+  code: StyleCode;
+  label: string;
+  /** image_prompt 말미에 덧붙는 화풍 접미사(전체 시트에 적용). */
+  suffix: string;
+}
+
+export interface TypeDef {
+  label: string;
+  recommended_style: StyleCode;
+  recommended_age_band: AgeBand;
+  /** 절취/카드 도안 여부(막대인형·작은 책·색칠 겸용 등). */
+  needs_cut_layout: boolean;
+  /** 활동지 큰 제목 템플릿({주제} 치환). */
+  title_template: string;
+  /** 제목 아래 한 줄 활동 안내문({주제} 치환). */
+  instruction: string;
+  /** 활동 영역(본문) 레이아웃 묘사 — {주제} 치환. 전체 시트 앵커와 결합된다. */
+  master_prompt: string;
+  /** 주제 매칭용 키워드(유형 추천 시 가산점). */
+  keywords?: string[];
+}
+
+/* ── 전체 시트 앵커: 활동지 "그림(활동) 영역" — 제목·안내는 앱이 텍스트 레이어로 덧입힌다 ── */
+const WORKSHEET_PAGE_ANCHOR =
+  '한국 유아 교육용 인쇄 활동지 한 장, A4 세로(portrait), 깨끗한 흰 배경. ' +
+  '요소(바구니·카드·그림)를 큼직하게, 지면을 가득 채우도록 배치해 빈 여백을 최소화한다. ' +
+  '맨 위 가운데는 제목이 들어갈 자리이므로 비워 두고, 좌우 위쪽 모서리에 {주제}와 어울리는 귀엽고 통통한 캐릭터를 하나씩(예: 다람쥐·곰) 장식으로 배치해 활동지를 꾸민다. ' +
+  '★반드시 지킬 것: (1) 활동지 어디에도 한글·영문 글자, 단어, 라벨, 설명 문구를 절대 렌더하지 말 것(빈 라벨 모양만 허용, 안은 비움). 점 잇기·숫자 따라쓰기의 숫자만 예외. ' +
+  '(2) 오려 쓰는 카드 칸 안과 바구니 안에는 캐릭터·스티커·글자를 절대 넣지 말 것(오릴 그림 하나씩만 또렷하게). ';
+
+/* ── 오리기/절취 영역 앵커 (needs_cut_layout 유형) ── */
+const CUT_AREA_ANCHOR =
+  '시트 하단(또는 별도 영역)은 가위로 오려서 쓰는 카드 영역이다: 영역 시작에 가위 ✂️ 아이콘과 점선(dashed) 가이드, ' +
+  '각 그림은 점선 절취선 테두리의 네모 칸 안에 들어 있고 인접 칸은 절취선을 공유한다. ';
+
+/* ── 인쇄 적합성 공통 접미사 ── */
+const PRINT_SUFFIX =
+  ' 인쇄용 활동지 디자인, 유아가 쓰기 쉬운 크고 단순한 요소, 깨끗하고 정돈된 레이아웃, 고품질.';
+
+/* ── 스타일 4종 (md §2) — 전체 시트에 적용되는 질감 ─────────────── */
+export const STYLES: Record<StyleCode, StyleDef> = {
+  watercolor: {
+    code: 'watercolor',
+    label: '수채화',
+    suffix:
+      '활동지 전체를 부드러운 수채화 질감으로, 따뜻하고 서정적인 색감, 번지는 손그림 느낌.',
+  },
+  round_character: {
+    code: 'round_character',
+    label: '캐릭터 친구들',
+    suffix:
+      '점토(클레이)로 빚은 듯한 입체적이고 귀여운 3D 렌더 스타일. 매끈하고 부드러운 점토 질감, 둥근 형태, 또렷하고 굵은 외곽선, 따뜻하고 명랑한 가을 색감, 은은한 그림자로 입체감, 고품질·고해상도 디테일, 정돈된 구성.',
+  },
+  pastel: {
+    code: 'pastel',
+    label: '파스텔',
+    suffix:
+      '활동지 전체를 부드러운 파스텔 색조로, 은은한 그라데이션, 밝고 사랑스러운 분위기.',
+  },
+  black_and_white: {
+    code: 'black_and_white',
+    label: '흑백',
+    suffix:
+      '활동지 전체를 굵고 선명한 흑백 선화로, 색과 음영 없음, 색칠·탐색 활동에 최적화된 깔끔한 라인아트.',
+  },
+};
+
+export const STYLE_FALLBACK: StyleCode = 'black_and_white';
+
+/* ── 유형 ↔ 권장 스타일/연령/절취 + 활동 영역 레이아웃 (md §3) ──── */
+export const TYPES: Record<string, TypeDef> = {
+  분류하기: {
+    label: '분류하기',
+    recommended_style: 'round_character',
+    recommended_age_band: '3-5',
+    needs_cut_layout: false,
+    title_template: '{주제}{을를} 분류해요!',
+    instruction: '아래 그림을 오려서 알맞은 바구니에 붙여 보세요.',
+    master_prompt:
+      '위쪽 절반에는 폭이 넓고 키가 큰 빈 바구니 3개를 지면 가로폭을 가득 채우도록 나란히 둔다. ' +
+      '바구니 안쪽은 크고 텅 빈 크림색으로 반드시 비워 둔다(오린 그림을 붙일 자리, 안에 아무 그림도 넣지 말 것). 바구니 위에는 서로 색이 다른 빈 라벨 모양만(글자 없이 색으로만 구분). ' +
+      '아래쪽 절반에는 맨 위에 큼직한 가위 아이콘과 가로 점선만 두고, 그 아래 {주제} 그림 카드를 점선 네모 칸 격자(4열·3~4줄)로 큼직하게 배치한다(카드와 그림을 크게, 작게 흩뿌리지 말 것). ' +
+      '카드마다 그림 하나씩 또렷하게. 위·아래 영역이 분명히 구분되도록.',
+    keywords: ['분류', '나누', '모으', '종류', '같은', '다른'],
+  },
+  '미로 찾기': {
+    label: '미로 찾기',
+    recommended_style: 'black_and_white',
+    recommended_age_band: '3-5',
+    needs_cut_layout: false,
+    title_template: '{주제} 미로',
+    instruction: '길을 따라가 도착점까지 가 보세요.',
+    master_prompt:
+      '활동 영역 중앙에 큰 미로 하나. 왼쪽 위 출발점에 {주제} 캐릭터, 오른쪽 아래 도착점에 목표 그림. 길은 넓고 또렷하게, 막다른 길 몇 개 포함.',
+    keywords: ['미로', '길찾기', '길 찾', '탈출'],
+  },
+  '색 혼합 실험': {
+    label: '색 혼합 실험',
+    recommended_style: 'watercolor',
+    recommended_age_band: '0-2',
+    needs_cut_layout: false,
+    title_template: '색을 섞어 봐요',
+    instruction: '두 색을 섞으면 무슨 색이 될까요? 색칠해 보세요.',
+    master_prompt:
+      '활동 영역에 "색 물방울 + 색 물방울 = 빈 원" 형태의 색 혼합 줄 3개를 세로로 배치(빈 원은 아이가 결과색을 칠함). {주제} 모티프로 가장자리를 장식.',
+    keywords: ['색', '물감', '섞', '혼합', '무지개'],
+  },
+  '반쪽 완성하기': {
+    label: '반쪽 완성하기',
+    recommended_style: 'pastel',
+    recommended_age_band: '0-2',
+    needs_cut_layout: false,
+    title_template: '반쪽을 완성해요',
+    instruction: '왼쪽 그림을 보고 오른쪽을 똑같이 그려 완성해 보세요.',
+    master_prompt:
+      '활동 영역 중앙에 세로 점선. 왼쪽 절반에 {주제} 그림이 그려져 있고(연한 격자 보조선 포함), 오른쪽 절반은 같은 격자만 있는 빈 칸이라 아이가 대칭으로 따라 그린다.',
+    keywords: ['반쪽', '대칭', '완성', '따라 그리'],
+  },
+  '점 잇기': {
+    label: '점 잇기',
+    recommended_style: 'pastel',
+    recommended_age_band: '0-2',
+    needs_cut_layout: false,
+    title_template: '점을 이어 봐요',
+    instruction: '1부터 순서대로 점을 이어 보세요.',
+    master_prompt:
+      '활동 영역 중앙에 {주제} 윤곽을 따라 번호가 매겨진 점들을 배치(순서대로 이으면 {주제} 그림 완성). 점과 번호는 크고 또렷하게.',
+    keywords: ['점잇기', '점 잇', '숫자 따라', '연결'],
+  },
+  '막대인형 만들기': {
+    label: '막대인형 만들기',
+    recommended_style: 'round_character',
+    recommended_age_band: '0-2',
+    needs_cut_layout: true,
+    title_template: '{주제} 막대인형',
+    instruction: '오려서 막대에 붙여 인형을 만들어요.',
+    master_prompt:
+      '오리기 영역에 {주제} 캐릭터 본체(크게)와 막대 손잡이 조각을 점선 절취선 네모 안에 배치해 오려 붙여 막대인형을 완성한다. 조각은 크고 윤곽선은 굵게.',
+    keywords: ['인형', '막대', '역할', '손인형'],
+  },
+  '그림 찾기': {
+    label: '그림 찾기',
+    recommended_style: 'black_and_white',
+    recommended_age_band: '3-5',
+    needs_cut_layout: false,
+    title_template: '숨은 그림을 찾아요',
+    instruction: '그림 속에 숨은 물건을 모두 찾아보세요.',
+    master_prompt:
+      '활동 영역에 {주제} 풍경 큰 그림 하나, 그 안에 찾아야 할 사물 6개를 자연스럽게 숨긴다. 하단에 "찾을 그림" 작은 목록 칸(체크용)을 둔다.',
+    keywords: ['찾기', '숨은', '관찰', '같은 그림'],
+  },
+  '빙고·탐색': {
+    label: '빙고·탐색',
+    recommended_style: 'pastel',
+    recommended_age_band: '3-5',
+    needs_cut_layout: false,
+    title_template: '{주제} 빙고',
+    instruction: '찾은 것을 하나씩 표시해 보세요.',
+    master_prompt:
+      '활동 영역 중앙에 3x3 격자 빙고판. 각 칸에 {주제} 관련 사물 그림과 발견 시 표시할 동그라미 표가 있다.',
+    keywords: ['빙고', '탐색', '찾아보', '관찰'],
+  },
+  '필요한 물건 고르기': {
+    label: '필요한 물건 고르기',
+    recommended_style: 'round_character',
+    recommended_age_band: '3-5',
+    needs_cut_layout: false,
+    title_template: '무엇이 필요할까요?',
+    instruction: '{주제}에 필요한 것을 골라 동그라미 해 보세요.',
+    master_prompt:
+      '활동 영역 위에 {주제} 상황 그림 하나, 아래에 여러 사물 그림 8개를 늘어놓아(필요한 것/아닌 것 섞음) 아이가 필요한 것에 동그라미를 치도록 한다.',
+    keywords: ['고르', '필요', '준비물', '선택'],
+  },
+  '그림자 짝짓기': {
+    label: '그림자 짝짓기',
+    recommended_style: 'black_and_white',
+    recommended_age_band: '0-2',
+    needs_cut_layout: false,
+    title_template: '그림자를 찾아요',
+    instruction: '그림과 알맞은 그림자를 선으로 이어 보세요.',
+    master_prompt:
+      '활동 영역 왼쪽 열에 {주제} 컬러 그림 4개, 오른쪽 열에 순서를 섞은 검은 실루엣(그림자) 4개를 두고, 사이를 선으로 잇도록 점을 배치. 형태 대비를 또렷하게.',
+    keywords: ['그림자', '짝', '실루엣', '연결'],
+  },
+  '작은 책 만들기': {
+    label: '작은 책 만들기',
+    recommended_style: 'watercolor',
+    recommended_age_band: '3-5',
+    needs_cut_layout: true,
+    title_template: '{주제} 미니북',
+    instruction: '오리고 접어 작은 책을 만들어요.',
+    master_prompt:
+      '시트에 접고 오리는 미니북 펼침면을 배치: 4~8개의 칸 격자, 각 칸에 {주제} 장면 그림과 쪽 번호, 칸 경계에 점선 접는선/절취선 표시.',
+    keywords: ['작은 책', '미니북', '책 만들', '이야기'],
+  },
+  색칠하기: {
+    label: '색칠하기',
+    recommended_style: 'black_and_white',
+    recommended_age_band: '0-2',
+    needs_cut_layout: true,
+    title_template: '{주제} 색칠하기',
+    instruction: '예쁘게 색칠해 보세요.',
+    master_prompt:
+      '활동 영역에 {주제} 큰 선화 그림 한두 개를 색칠할 수 있게 굵은 윤곽선·빈 내부로 배치. 가장자리에 오려서 액자처럼 쓰는 점선 테두리.',
+    keywords: ['색칠', '컬러링', '칠하'],
+  },
+  '관찰 미션': {
+    label: '관찰 미션',
+    recommended_style: 'pastel',
+    recommended_age_band: '3-5',
+    needs_cut_layout: false,
+    title_template: '{주제}{을를} 관찰해요',
+    instruction: '자세히 보고 빈 칸을 채워 보세요.',
+    master_prompt:
+      '활동 영역에 {주제} 큰 관찰 그림 하나, 옆이나 아래에 "색 / 모양 / 개수" 같은 관찰 항목 칸 3~4개(아이가 적거나 표시).',
+    keywords: ['관찰', '미션', '살펴', '탐구'],
+  },
+  '숫자 따라쓰기': {
+    label: '숫자 따라쓰기',
+    recommended_style: 'pastel',
+    recommended_age_band: '0-2',
+    needs_cut_layout: false,
+    title_template: '숫자를 따라 써요',
+    instruction: '점선 숫자를 따라 쓰고 개수만큼 세어 보세요.',
+    master_prompt:
+      '활동 영역에 1~5 점선 숫자 따라쓰기 줄을 세로로 배치, 각 숫자 옆에 그 개수만큼 {주제} 그림을 둔다. 점선 숫자는 크게.',
+    keywords: ['숫자', '따라쓰기', '쓰기', '수세기'],
+  },
+};
+
+/* ── 연령대별 후보 유형 (md §1) ──────────────────────────────── */
+export const AGE_BAND_RULES: Record<AgeBand, string[]> = {
+  '0-2': ['색칠하기', '반쪽 완성하기', '점 잇기', '그림자 짝짓기', '숫자 따라쓰기', '막대인형 만들기', '색 혼합 실험'],
+  '3-5': [
+    '분류하기',
+    '미로 찾기',
+    '그림 찾기',
+    '빙고·탐색',
+    '필요한 물건 고르기',
+    '작은 책 만들기',
+    '관찰 미션',
+    // 0-2 단순형도 3-5에서 사용 가능 (md §1)
+    '색칠하기',
+    '반쪽 완성하기',
+    '점 잇기',
+    '그림자 짝짓기',
+    '숫자 따라쓰기',
+    '막대인형 만들기',
+    '색 혼합 실험',
+  ],
+};
+
+/* ── 유형/스타일 별칭(자연어 파싱용) ─────────────────────────── */
+const TYPE_ALIASES: Record<string, string> = {
+  색칠: '색칠하기',
+  컬러링: '색칠하기',
+  미로: '미로 찾기',
+  빙고: '빙고·탐색',
+  분류: '분류하기',
+  점잇기: '점 잇기',
+  미니북: '작은 책 만들기',
+  인형: '막대인형 만들기',
+  그림자: '그림자 짝짓기',
+  숨은그림: '그림 찾기',
+  관찰: '관찰 미션',
+};
+const STYLE_ALIASES: Record<string, StyleCode> = {
+  수채화: 'watercolor',
+  캐릭터: 'round_character',
+  '캐릭터 친구들': 'round_character',
+  클레이: 'round_character',
+  점토: 'round_character',
+  파스텔: 'pastel',
+  흑백: 'black_and_white',
+  선화: 'black_and_white',
+};
+
+export interface WorksheetReco {
+  age_band: AgeBand;
+  topic: string;
+  type: string;
+  title: string;
+  instruction: string;
+  style: StyleCode;
+  style_label: string;
+  selection: { type_by: SelectedBy; style_by: SelectedBy; mode: WorksheetMode };
+  difficulty: Difficulty;
+  needs_cut_layout: boolean;
+  image_prompt: string;
+  cut_layout: CutLayout | null;
+}
+
+export interface CutLayout {
+  pieces: string[];
+  shared_edges: string[][];
+  cut_line_style: 'solid' | 'dashed';
+}
+
+/** 자연어 요청에서 슬롯(연령·유형·스타일·주제) 추출. */
+export function parseWorksheetRequest(
+  request: string,
+  ctx?: string,
+): { age_band: AgeBand; type?: string; style?: StyleCode; topic: string } {
+  const text = `${request} ${ctx ?? ''}`;
+
+  // 연령대
+  let age_band: AgeBand = '3-5';
+  if (/0\s*[-~]\s*2|영아|0세|1세|2세|돌\b/.test(text)) age_band = '0-2';
+  else if (/3\s*[-~]\s*5|유아|만?\s*[345]\s*세|3세|4세|5세/.test(text)) age_band = '3-5';
+
+  // 유형
+  let type: string | undefined;
+  for (const label of Object.keys(TYPES)) {
+    if (request.includes(label)) { type = label; break; }
+  }
+  if (!type) {
+    for (const [alias, label] of Object.entries(TYPE_ALIASES)) {
+      if (request.includes(alias)) { type = label; break; }
+    }
+  }
+
+  // 스타일
+  let style: StyleCode | undefined;
+  for (const [alias, code] of Object.entries(STYLE_ALIASES)) {
+    if (request.includes(alias)) { style = code; break; }
+  }
+
+  // 주제: 유형/스타일/연령/지시어 토큰 제거 후 남는 핵심
+  let topic = request;
+  if (type) topic = topic.replace(type, ' ');
+  for (const alias of Object.keys(TYPE_ALIASES)) topic = topic.replace(alias, ' ');
+  for (const alias of Object.keys(STYLE_ALIASES)) topic = topic.replace(alias, ' ');
+  topic = topic
+    .replace(/0\s*[-~]\s*2세?|3\s*[-~]\s*5세?|만?\s*[0-5]\s*세|영아|유아/g, ' ')
+    .replace(/활동지|워크시트|도안|만들어\s*줘|만들어|그려\s*줘|그려|해\s*줘|주세요|용\b|의\b|스타일|로\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!topic) topic = request.trim();
+
+  return { age_band, type, style, topic };
+}
+
+/** 유형 추천: 연령 후보군 + 주제 키워드 가산. */
+function recommendType(age_band: AgeBand, topic: string): string {
+  const candidates = AGE_BAND_RULES[age_band];
+  let best = candidates[0];
+  let bestScore = -1;
+  for (const label of candidates) {
+    const kws = TYPES[label]?.keywords ?? [];
+    const score = kws.reduce((acc, kw) => (topic.includes(kw) ? acc + 1 : acc), 0);
+    if (score > bestScore) { bestScore = score; best = label; }
+  }
+  return best;
+}
+
+/* 한글 조사 자동 선택 — 앞 글자의 받침 유무로 을/를·이/가·은/는·과/와 결정.
+   템플릿에 {을를} 등 토큰을 두면 {주제} 치환 후 자연스러운 조사로 바뀐다. */
+function hasJongseong(ch: string): boolean {
+  const c = ch.charCodeAt(0);
+  if (c < 0xac00 || c > 0xd7a3) return true; // 한글 외(영문·숫자)는 받침 있는 것으로 간주
+  return (c - 0xac00) % 28 !== 0;
+}
+const JOSA: Record<string, [string, string]> = {
+  '{을를}': ['를', '을'],
+  '{이가}': ['가', '이'],
+  '{은는}': ['는', '은'],
+  '{과와}': ['와', '과'],
+};
+export function applyJosa(s: string): string {
+  return s.replace(/(.)(\{을를\}|\{이가\}|\{은는\}|\{과와\})/g, (_, ch: string, tok: string) => {
+    const [no, yes] = JOSA[tok];
+    return ch + (hasJongseong(ch) ? yes : no);
+  });
+}
+
+/** 활동지 큰 제목 생성. */
+export function buildTitle(type: string, topic: string): string {
+  const tpl = TYPES[type]?.title_template ?? '{주제} 활동지';
+  return applyJosa(tpl.replace(/\{주제\}/g, topic));
+}
+
+/** 활동지 그림 영역 image_prompt 조립 — 화풍을 앞세워 품질 신호를 강하게.
+   [스타일] → [시트 포맷·규칙] → [활동 레이아웃] → (오리기) → [인쇄 마감]. */
+export function assembleImagePrompt(type: string, topic: string, style: StyleCode): string {
+  const def = TYPES[type];
+  const styleDef = STYLES[style];
+  const body = (def?.master_prompt ?? '활동 영역에 {주제} 관련 활동을 배치한다.').replace(/\{주제\}/g, topic);
+  const anchor = WORKSHEET_PAGE_ANCHOR.replace(/\{주제\}/g, topic);
+  const cut = def?.needs_cut_layout ? CUT_AREA_ANCHOR : '';
+  return applyJosa(
+    `${styleDef.suffix} ${anchor}구성: ${body} ${cut}${PRINT_SUFFIX}`,
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** 활동지 안내문(텍스트 레이어용) — {주제} 치환 + 조사 정리. */
+export function buildInstruction(type: string, topic: string): string {
+  const ins = (TYPES[type]?.instruction ?? '').replace(/\{주제\}/g, topic);
+  return applyJosa(ins);
+}
+
+/** 절취 도안의 cut_layout 합성 — 인접 조각이 절취선 공유(shared edge). */
+function buildCutLayout(type: string, age_band: AgeBand): CutLayout {
+  // 0-2: 큰 조각·직선 위주(가위질 난이도 하향) → solid. 3-5: 곡선 허용 → dashed 가이드.
+  const cut_line_style: CutLayout['cut_line_style'] = age_band === '0-2' ? 'solid' : 'dashed';
+  let pieces: string[];
+  switch (type) {
+    case '막대인형 만들기':
+      pieces = ['인형 본체', '막대 손잡이'];
+      break;
+    case '작은 책 만들기':
+      pieces = ['표지', '본문 1', '본문 2', '뒷면'];
+      break;
+    case '색칠하기':
+      pieces = ['색칠 그림', '액자 테두리'];
+      break;
+    default:
+      pieces = ['조각 1', '조각 2'];
+  }
+  // 인접 조각끼리 변 공유(한 번 자르면 두 조각 동시 분리).
+  const shared_edges: string[][] = [];
+  for (let i = 0; i < pieces.length - 1; i++) shared_edges.push([pieces[i], pieces[i + 1]]);
+  return { pieces, shared_edges, cut_line_style };
+}
+
+/** 핵심: 슬롯 → 추천 조합(유형·스타일·난이도·image_prompt·cut_layout). */
+export function recommendWorksheet(input: {
+  age_band: AgeBand;
+  topic: string;
+  type?: string;
+  style?: StyleCode;
+  mode?: WorksheetMode;
+}): WorksheetReco {
+  const { age_band, topic } = input;
+
+  // 유형
+  const hasUserType = !!input.type && !!TYPES[input.type];
+  const type = hasUserType ? input.type! : recommendType(age_band, topic);
+  const type_by: SelectedBy = hasUserType ? 'user' : 'recommended';
+
+  // 스타일
+  const hasUserStyle = !!input.style && !!STYLES[input.style];
+  const style: StyleCode = hasUserStyle
+    ? input.style!
+    : TYPES[type]?.recommended_style ?? STYLE_FALLBACK;
+  const style_by: SelectedBy = hasUserStyle ? 'user' : 'recommended';
+
+  // 모드: 명시 없으면 사용자가 유형/스타일을 줬는지로 추론
+  const mode: WorksheetMode = input.mode ?? (hasUserType || hasUserStyle ? 'guided' : 'instant');
+
+  const needs_cut_layout = TYPES[type]?.needs_cut_layout ?? false;
+  const image_prompt = assembleImagePrompt(type, topic, style);
+  const difficulty: Difficulty = age_band === '0-2' ? 'basic' : 'standard';
+  const cut_layout = needs_cut_layout ? buildCutLayout(type, age_band) : null;
+
+  return {
+    age_band,
+    topic,
+    type,
+    title: buildTitle(type, topic),
+    instruction: buildInstruction(type, topic),
+    style,
+    style_label: STYLES[style].label,
+    selection: { type_by, style_by, mode },
+    difficulty,
+    needs_cut_layout,
+    image_prompt,
+    cut_layout,
+  };
+}

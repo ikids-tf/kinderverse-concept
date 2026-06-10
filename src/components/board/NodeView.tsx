@@ -7,6 +7,9 @@ import { editTextCmd } from '@/board/commands';
 import { runWorkflowStep, type RunnerData, type StepKind } from '@/board/workflow';
 import { saveFrameToFolder, fitFrameToChildren } from '@/board/frames';
 import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, type ComposerChip } from '@/board/composer';
+import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
+import { WorksheetSheet, downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-sheet';
+import { separateImageLayers } from '@/ai/layers';
 
 /* Renders one board node (reference board model): frame container, runner control,
    image card (real src), and content-sized sticky/text memos. Selection ring +
@@ -39,6 +42,7 @@ interface Props {
 export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(node.text ?? '');
+  const [layerBusy, setLayerBusy] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const editable = node.type === 'sticky' || node.type === 'text' || node.type === 'image';
@@ -86,6 +90,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
     onPointerDown(e, node.id);
   };
   const dbl = (e: React.MouseEvent) => {
+    // 활동지는 제목·안내를 인라인 텍스트로 직접 수정하므로 node.text 편집을 막는다.
+    if ((node.data?.payload as RegistryPayload | undefined)?.type === 'WorksheetCard') return;
     if (editable && !node.locked) {
       e.stopPropagation();
       setDraft(node.text ?? '');
@@ -298,9 +304,56 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
     const isDoc = !!node.data?.doc;
     const isIdea = node.data?.role === 'idea'; // selectable idea pick (in the 아이디어 sub-frame)
     const coverImage = node.data?.coverImage as string | undefined; // newsletter cover
+    // 활동지 = 인쇄용 A4 한 장. 제목·안내는 텍스트 레이어, 그림은 생성 이미지.
+    const wsPayload = node.data?.payload as RegistryPayload | undefined;
+    const worksheetProps: WorksheetCardProps | undefined =
+      wsPayload?.type === 'WorksheetCard' ? wsPayload.props : undefined;
+    const worksheetImg = worksheetProps?.image_url;
+    const heroImage = coverImage;
+    const heroContain = false;
     const docImages = Array.isArray(node.data?.docImages) ? (node.data.docImages as string[]) : [];
     const loadingDoc = !!node.data?.loadingDoc;
-    const decorations = Array.isArray(node.data?.decorations) ? (node.data.decorations as StickerDecoData[]) : [];
+    // 활동지엔 장식 스티커를 붙이지 않는다(인쇄·오리기에 방해).
+    const decorations = worksheetProps
+      ? []
+      : Array.isArray(node.data?.decorations)
+        ? (node.data.decorations as StickerDecoData[])
+        : [];
+    // 활동지 제목·안내 인라인 수정 → 노드 payload 갱신.
+    const editWorksheet = (patch: Partial<WorksheetCardProps>) => {
+      const cur = useBoardStore.getState().nodes[node.id];
+      const p = cur?.data?.payload as RegistryPayload | undefined;
+      if (p?.type !== 'WorksheetCard') return;
+      useBoardStore.getState().updateNodeRaw(node.id, {
+        data: { ...cur.data, payload: { ...p, props: { ...p.props, ...patch } } },
+      });
+    };
+    // 레이어 분리 — 그림을 요소별로 나눠 이동·스케일. node.data에 편집 상태 보관.
+    const wsLayers = Array.isArray(node.data?.layers) ? (node.data.layers as WorksheetLayer[]) : undefined;
+    const layersOn = !!node.data?.layersOn;
+    const setLayers = (next: WorksheetLayer[]) => {
+      const cur = useBoardStore.getState().nodes[node.id];
+      useBoardStore.getState().updateNodeRaw(node.id, { data: { ...cur?.data, layers: next } });
+    };
+    const toggleLayers = async () => {
+      const cur = useBoardStore.getState().nodes[node.id];
+      if (layersOn) {
+        useBoardStore.getState().updateNodeRaw(node.id, { data: { ...cur?.data, layersOn: false } });
+        return;
+      }
+      const cached = cur?.data?.layers as WorksheetLayer[] | undefined;
+      if (cached?.length) {
+        useBoardStore.getState().updateNodeRaw(node.id, { data: { ...cur?.data, layersOn: true } });
+        return;
+      }
+      if (!worksheetImg) return;
+      setLayerBusy(true);
+      const { layers } = await separateImageLayers(worksheetImg);
+      setLayerBusy(false);
+      if (!layers.length) return;
+      const c2 = useBoardStore.getState().nodes[node.id];
+      useBoardStore.getState().updateNodeRaw(node.id, { data: { ...c2?.data, layers, layersOn: true } });
+    };
     const srcLinks = node.data?.role === 'source' && Array.isArray(node.data?.links)
       ? (node.data.links as SourceLinkData[])
       : null;
@@ -311,7 +364,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
         onDoubleClick={srcLinks ? undefined : dbl}
         className={`group absolute select-none shadow-md ${ring} ${isIdea ? 'cursor-pointer' : ''} ${
           isDoc
-            ? 'rounded-lg border border-border bg-surface p-t6'
+            ? `rounded-lg border border-border bg-surface ${worksheetProps ? 'overflow-hidden p-0' : 'p-t6'}`
             : srcLinks
               ? 'rounded-lg border border-border bg-surface-2 p-t4'
               : `rounded-md ${COLOR_BG[node.color ?? 'accent-soft'] ?? 'bg-accent-soft'} p-t3`
@@ -334,15 +387,63 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
             rows={Math.max(3, draft.split('\n').length)}
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-fg focus:outline-none"
           />
+        ) : isDoc && worksheetProps ? (
+          // 활동지 = 인쇄용 A4 한 장(제목·안내=텍스트 레이어, 그림=생성 이미지).
+          // 호버 시 A4 PNG 다운로드/인쇄 버튼.
+          <div className="group/ws relative">
+            <WorksheetSheet
+              props={worksheetProps}
+              editable={!node.locked && !layersOn}
+              onEdit={editWorksheet}
+              layers={layersOn ? (wsLayers ?? []) : undefined}
+              onLayersChange={setLayers}
+            />
+            {worksheetImg && (
+              <div className="absolute right-2 top-2 z-20 flex gap-1 opacity-0 transition-opacity duration-150 group-hover/ws:opacity-100">
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); void toggleLayers(); }}
+                  disabled={layerBusy}
+                  className={`inline-flex items-center gap-t1 rounded-pill px-t3 py-1 text-xs font-semibold shadow-md disabled:opacity-70 ${
+                    layersOn
+                      ? 'bg-surface text-fg ring-1 ring-border hover:bg-surface-2'
+                      : 'bg-fg text-on-dark hover:opacity-90'
+                  }`}
+                  title={layersOn ? '원본 그림으로 되돌리기' : '그림을 요소별 레이어로 분리(이동·크기 조절)'}
+                >
+                  {layerBusy ? (
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-on-dark/40 border-t-on-dark" />
+                  ) : (
+                    <Icon name="layers" size={14} />
+                  )}
+                  {layersOn ? '원본' : layerBusy ? '분석 중' : '레이어 분리'}
+                </button>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); void downloadWorksheetA4(worksheetProps, layersOn ? wsLayers : undefined); }}
+                  className="inline-flex items-center gap-t1 rounded-pill bg-accent px-t3 py-1 text-xs font-semibold text-on-accent shadow-md hover:bg-accent-hover"
+                >
+                  <Icon name="download" size={14} /> 다운로드
+                </button>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); void printWorksheetA4(worksheetProps, layersOn ? wsLayers : undefined); }}
+                  className="inline-flex items-center gap-t1 rounded-pill bg-fg px-t3 py-1 text-xs font-semibold text-on-dark shadow-md hover:opacity-90"
+                >
+                  <Icon name="print" size={14} /> 인쇄
+                </button>
+              </div>
+            )}
+          </div>
         ) : isDoc ? (
           <div className="kv-doc-md text-sm leading-relaxed text-fg">
-            {coverImage && (
+            {heroImage && (
               <img
-                src={coverImage}
+                src={heroImage}
                 alt=""
                 draggable={false}
-                className="mb-t4 block w-full rounded-md border border-border object-cover"
-                style={{ maxHeight: 220 }}
+                className={`mb-t4 block w-full rounded-md border border-border ${heroContain ? 'bg-white object-contain' : 'object-cover'}`}
+                style={heroContain ? { maxHeight: 640 } : { maxHeight: 220 }}
               />
             )}
             <Markdown remarkPlugins={[remarkGfm]}>{node.text || ''}</Markdown>

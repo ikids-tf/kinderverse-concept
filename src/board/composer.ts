@@ -1009,6 +1009,9 @@ async function generateCoverFor(frameId: string, role: string, topic: string): P
     (n) => n.data?.frameId === frameId && n.data?.role === role,
   );
   if (!doc || doc.data?.coverImage) return;
+  // 활동지는 생성된 시트 이미지 자체가 시각물 — 일반 표지 일러스트를 덧붙이지 않는다.
+  const dp = doc.data?.payload as { type?: string; props?: { image_url?: string } } | undefined;
+  if (dp?.type === 'WorksheetCard' && dp.props?.image_url) return;
   try {
     const img = await callGateway({
       task: 'image',

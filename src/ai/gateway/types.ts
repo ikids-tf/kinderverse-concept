@@ -37,6 +37,16 @@ export interface SearchSource {
   url: string;
 }
 
+/** A detected element region (task "detect" — Gemini vision object detection).
+   `box` is [ymin, xmin, ymax, xmax] normalized to 0–1000 (Gemini convention).
+   `mask`, when present, is a base64 PNG segmentation mask sized to the box
+   (white=object) → applied as alpha for a shape-accurate transparent cutout. */
+export interface DetectedRegion {
+  label: string;
+  box: [number, number, number, number];
+  mask?: string;
+}
+
 export interface GatewayResponse {
   ok: boolean;
   /** Raw model text (for router: a JSON string to be parsed/validated). */
@@ -45,6 +55,8 @@ export interface GatewayResponse {
   image?: string;
   /** Grounding citations (for task "search"). */
   sources?: SearchSource[];
+  /** Detected element regions (for task "detect"). */
+  regions?: DetectedRegion[];
   provider?: Provider;
   model?: string;
   tier?: Tier;

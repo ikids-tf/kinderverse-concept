@@ -69,7 +69,32 @@ export interface WeeklyPlanGridProps {
   notes?: string;
 }
 
-/* 활동지/워크시트 (agent.studio) — A4·인쇄·다운로드, 연결 계획 표시. */
+/* 활동지/워크시트 (agent.studio) — A4·인쇄·다운로드, 연결 계획 표시.
+   확장 필드(유형·스타일·image_prompt·cut_layout 등)는 worksheet-reference 추천 결과.
+   PROMPTS §4 / worksheet_match_reference 스키마와 1:1. */
+export interface WorksheetCutLayout {
+  pieces: string[];
+  shared_edges: string[][];
+  cut_line_style: 'solid' | 'dashed';
+}
+export interface WorksheetSelection {
+  type_by: 'user' | 'recommended';
+  style_by: 'user' | 'recommended';
+  mode: 'instant' | 'guided';
+}
+
+/** 레이어 분리 결과의 한 조각(이동·스케일 편집 상태). 에이전트 출력이 아니라
+    보드 편집 상태라 payload가 아닌 node.data에 보관한다. x/y/w/h는 시트 대비 %. */
+export interface WorksheetLayer {
+  id: string;
+  label: string;
+  src: string; // 잘라낸 요소 이미지(dataURI)
+  x: number; // left, 시트 너비의 % (0–100)
+  y: number; // top, 시트 높이의 %
+  w: number; // width, 시트 너비의 %
+  h: number; // height, 시트 높이의 %
+  scale: number; // 사용자 확대/축소 배율(기본 1)
+}
 export interface WorksheetCardProps {
   title: string;
   age_band: AgeBand;
@@ -79,6 +104,19 @@ export interface WorksheetCardProps {
   steps: string[];
   domains?: string[];
   link_plan_id?: string;
+  // ── 레퍼런스 추천 확장 ──
+  topic?: string;
+  instruction?: string; // 활동지 안내문(텍스트 레이어로 표시)
+  type?: string; // 활동 유형(분류하기 등)
+  style?: string; // 스타일 code(round_character 등)
+  style_label?: string; // 스타일 표시명(캐릭터 친구들 등)
+  selection?: WorksheetSelection;
+  difficulty?: 'basic' | 'standard' | 'extended';
+  image_prompt?: string; // 조립 완료된 studio 호출용 프롬프트
+  image_url?: string; // studio가 렌더한 활동지 시각물
+  needs_cut_layout?: boolean;
+  cut_layout?: WorksheetCutLayout | null;
+  visual_status?: 'pending' | 'filled';
 }
 
 /* 이미지/도안 (agent.studio). AI 생성 라벨 필수 — 실제 아동 사진 아님(§9.5). */
@@ -279,6 +317,32 @@ export function validateRegistryPayload(raw: unknown): RegistryValidation {
     if (!objective.trim() || steps.length === 0) {
       return { ok: false, errors: ['objective and steps are required'] };
     }
+    const cut = p.cut_layout as Record<string, unknown> | null | undefined;
+    const cut_layout: WorksheetCutLayout | null | undefined =
+      cut && typeof cut === 'object'
+        ? {
+            pieces: isStringArray(cut.pieces) ? cut.pieces : [],
+            shared_edges: Array.isArray(cut.shared_edges)
+              ? (cut.shared_edges as unknown[]).filter(isStringArray)
+              : [],
+            cut_line_style: cut.cut_line_style === 'dashed' ? 'dashed' : 'solid',
+          }
+        : cut === null
+          ? null
+          : undefined;
+    const sel = p.selection as Record<string, unknown> | undefined;
+    const selection: WorksheetSelection | undefined =
+      sel && typeof sel === 'object'
+        ? {
+            type_by: sel.type_by === 'user' ? 'user' : 'recommended',
+            style_by: sel.style_by === 'user' ? 'user' : 'recommended',
+            mode: sel.mode === 'guided' ? 'guided' : 'instant',
+          }
+        : undefined;
+    const difficulty =
+      p.difficulty === 'basic' || p.difficulty === 'standard' || p.difficulty === 'extended'
+        ? p.difficulty
+        : undefined;
     return {
       ok: true,
       errors: [],
@@ -293,6 +357,19 @@ export function validateRegistryPayload(raw: unknown): RegistryValidation {
           steps,
           domains: isStringArray(p.domains) ? p.domains : undefined,
           link_plan_id: typeof p.link_plan_id === 'string' ? p.link_plan_id : undefined,
+          topic: typeof p.topic === 'string' ? p.topic : undefined,
+          instruction: typeof p.instruction === 'string' ? p.instruction : undefined,
+          type: typeof p.type === 'string' ? p.type : undefined,
+          style: typeof p.style === 'string' ? p.style : undefined,
+          style_label: typeof p.style_label === 'string' ? p.style_label : undefined,
+          selection,
+          difficulty,
+          image_prompt: typeof p.image_prompt === 'string' ? p.image_prompt : undefined,
+          image_url: typeof p.image_url === 'string' ? p.image_url : undefined,
+          needs_cut_layout: typeof p.needs_cut_layout === 'boolean' ? p.needs_cut_layout : undefined,
+          cut_layout,
+          visual_status:
+            p.visual_status === 'filled' || p.visual_status === 'pending' ? p.visual_status : undefined,
         },
       },
     };

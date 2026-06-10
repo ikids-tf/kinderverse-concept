@@ -244,16 +244,21 @@ export function mockAgentStep(meta: LaneStepMeta): string {
         },
       });
     case 'worksheet':
+      // 교육 내용만 생성(유형·스타일·image_prompt·cut_layout은 worksheet-reference가 채움).
       return JSON.stringify({
         type: 'WorksheetCard',
         props: {
           title: `${ctx} 활동지`,
           age_band: '3-5',
           curriculum: 'nuri',
-          objective: '가족에 대한 사랑을 표현한다.',
-          materials: ['색종이', '가위', '풀', '빨대'],
-          steps: ['카네이션 모양을 따라 오린다.', '빨대에 붙여 꽃을 완성한다.', '가족에게 전할 한마디를 적는다.'],
-          domains: ['예술경험', '의사소통'],
+          objective: `${ctx}을(를) 탐색하며 관찰하고 표현한다.`,
+          materials: ['활동지', '색연필', '가위', '풀'],
+          steps: [
+            `${ctx}을(를) 자세히 살펴본다.`,
+            '활동지의 안내에 따라 활동을 해 본다.',
+            '완성한 결과를 친구들과 이야기 나눈다.',
+          ],
+          domains: ['자연탐구', '예술경험'],
         },
       });
     case 'image_captions':
