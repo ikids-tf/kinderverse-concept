@@ -28,6 +28,24 @@ const L2_TASK = `역할: 교사의 입력과 "현재 페이지 + 선택 대상 +
 5. 근거(사진/메모) 유무는 라우팅 단계에서 따지지 마라 — grounding 확인·보강 요청은 전문 에이전트(기록 등)의 책임이다. 교사가 활동·관찰 내용을 입력에 담았으면 record로 라우팅하라(연령/사진을 되묻지 말 것).
 6. suggested_next는 0~2개. 상황 맥락(완료 단계·선택·연령·계절)에 따른 *제안*일 뿐, 기본 다음단계와 별개. 확신도<0.6 제안은 넣지 마라.
 
+intent 어휘: 가능하면 다음 중 하나로 — worksheet | coloring | image | plan | letter | record_story | record_observation | mindmap. 화면 조작(선택 대상 변형)은 board.move | board.resize_up | board.resize_down | board.align | board.arrange | board.delete | board.duplicate | board.recolor | board.group (이때 route_to=null, scope="selection").
+
+유아교육 현장 어휘 가이드 (교사의 말 → 라우팅):
+- **"활동지"는 글 문서가 아니다.** 인쇄용 A4 한 장 — 그림이 중심이고 글자는 제목·짧은 안내뿐, 아이들이 색칠하고·선을 잇고·오리고 붙이고·짝을 맞추는 종이다. "선잇기/점잇기/미로/짝맞추기/같은그림찾기/오리기/따라그리기" 같은 활동 유형 단어만 있어도 활동지 요청 → studio, intent="worksheet".
+- 환경판·게시판·융판 자료·이름표·가랜드·메달·왕관·상장·초대장 등 교실 시각물 → studio, intent="image". 색칠 도안 → studio, intent="coloring".
+- 알림장·가정통신문·동의서·신청서·명렬표·주간안내·인사말·동시·동요 가사·손유희 → writing, intent="letter".
+- "뭐 할만한 거", "활동 추천", "다음 주에 하면 좋을" → plan. 주제만 던져도("가을 나뭇잎") 보통 plan 아이디어 요청.
+- "오늘 ○○놀이 했어요" 식 활동 서술 → record(story). "관찰/발달" → record(observation).
+
+예시(요지 — 나머지 필드는 스키마대로):
+"공룡 선잇기 만들어줘" → {"intent":"worksheet","route_to":"studio","confidence":0.92}
+"교실 환경판에 붙일 가을 나무 그림" → {"intent":"image","route_to":"studio","confidence":0.9}
+"비 오는 날 실내에서 뭐 하지?" → {"intent":"plan","route_to":"plan","confidence":0.85}
+"현장학습 동의서 써줘" → {"intent":"letter","route_to":"writing","confidence":0.92}
+"어제 블록놀이 관찰한 거 정리해줘" → {"intent":"record_observation","route_to":"record","mode":"observation","confidence":0.85}
+(카드 2개 선택) "이거 둘 다 좀 더 크게" → {"intent":"board.resize_up","route_to":null,"scope":"selection","confidence":0.9}
+(이미지 선택) "이걸로 활동지 만들어줘" → {"intent":"worksheet","route_to":"studio","scope":"selection","confidence":0.9}
+
 출력: 아래 JSON 스키마를 정확히 따른다. JSON 외 다른 텍스트 출력 금지.
 {
   "page": string,

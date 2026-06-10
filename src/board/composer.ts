@@ -86,7 +86,10 @@ export async function composeFromPrompt(text: string): Promise<void> {
     const out = routerRes.output;
 
     // Mind map (생각그물·주제망·놀이 확장맵) — a radial map, built separately.
-    if (out.route_to === 'mindmap' || MINDMAP_RE.test(text)) {
+    // 라우터가 확신 있게(≥0.7) 다른 에이전트로 보냈으면 정규식이 덮어쓰지 않는다(P1-6);
+    // 정규식은 라우터가 라우팅하지 못했을 때의 보조 신호로만 쓴다.
+    const routerConfident = !!out.route_to && out.confidence >= 0.7;
+    if (out.route_to === 'mindmap' || (!routerConfident && MINDMAP_RE.test(text))) {
       useBoardStore.getState().setGenerating('🧠 생각그물을 그리고 있어요…');
       const ids = await buildMindMap(text);
       recordSpawnedNodes(ids, '마인드맵 생성');

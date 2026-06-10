@@ -12,6 +12,10 @@ import {
   type ContentIntent,
 } from '@/ai/intent-lexicon';
 import { runBoardOp } from './actions';
+import { runRouter } from '@/ai/agents/router';
+import { PAGE_ACTIONS } from '@/ai/actions';
+import { buildAgentContext } from '@/ai/context';
+import type { RouteTarget } from '@/ai/contract';
 
 /** Map the lexicon's rich intent onto the popup's ReqIntent vocabulary.
     coloring is generated through the image path (도안 스타일은 프롬프트에 실림);
@@ -55,7 +59,8 @@ export function handleBoardPrompt(text: string): boolean {
     return true;
   }
 
-  const intent = toReqIntent(contentIntentFast(text));
+  const fast = contentIntentFast(text);
+  const intent = toReqIntent(fast);
 
   // ── specialized single-target cases (unchanged) ──
   // Single document card + a "decorate / share with parents" prompt → newsletter.
@@ -94,7 +99,20 @@ export function handleBoardPrompt(text: string): boolean {
     if (done) return true; // 실행 불가 시(대상 없음) 아래 콘텐츠 분기로 폴백
   }
 
-  // ── homogeneous content selection: match → act in place; mismatch → popup ──
+  // ── 사전(fast-path) 미스 → Tier-0 라우터 폴백(P1-4) ──
+  // 이전에는 미스가 곧 'text'로 간주되어 선택 카드를 조용히 덮어썼다. 이제
+  // 모델에게 의도를 묻고, 모델도 모호하면 기존 'text' 휴리스틱으로 폴백한다.
+  if (fast === null) {
+    void routeSelectionFallback(sel, text);
+    return true;
+  }
+
+  applyContentIntent(sel, text, intent);
+  return true;
+}
+
+/** Homogeneous-selection content application: match → act in place; mismatch → popup. */
+function applyContentIntent(sel: BoardNode[], text: string, intent: ReqIntent): void {
   const allImages = sel.every((n) => n.type === 'image');
   const allTextLike = sel.every((n) => n.type === 'sticky' || n.type === 'text');
 
@@ -102,22 +120,74 @@ export function handleBoardPrompt(text: string): boolean {
     // image card(s) + an image or generic-style request → regenerate EACH in place.
     if (intent === 'image' || intent === 'text') {
       sel.forEach((n) => void regenImageCard(n.id, text));
-      return true;
+      return;
     }
     openMismatch(sel, text, intent, 'image'); // images + a doc request → ask
-    return true;
+    return;
   }
   if (allTextLike) {
     // memo/text card(s) + a text request → (re)write EACH in place.
     if (intent === 'text') {
       sel.forEach((n) => void genTextCard(n.id, text));
-      return true;
+      return;
     }
     openMismatch(sel, text, intent, 'text'); // memos + an image/doc request → ask
-    return true;
+    return;
   }
-
   // Mixed types / shapes / anything else with a selection → popup.
   openMismatch(sel, text, intent, 'mixed');
-  return true;
+}
+
+const CI_SET = new Set<string>([
+  'worksheet', 'coloring', 'image', 'plan', 'letter', 'record_story', 'record_observation', 'mindmap',
+]);
+
+/** 라우터 route_to → 선택 적용용 기본 ReqIntent (intent 어휘가 비표준일 때). */
+function routeDefault(route: RouteTarget | null): ReqIntent {
+  switch (route) {
+    case 'studio': return 'image';
+    case 'plan': return 'plan';
+    case 'writing': return 'letter';
+    default: return 'text';
+  }
+}
+
+/** 사전이 못 알아들은 선택+프롬프트 → Tier-0 라우터(선택 컨텍스트 포함)로 의도
+    분류 후 동일 적용 경로 재사용. 라우터마저 모호하면 'text'(제자리 수정) 폴백 —
+    "겨울 느낌으로" 같은 스타일 지시의 기존 동작을 보존한다. */
+async function routeSelectionFallback(sel: BoardNode[], text: string): Promise<void> {
+  useBoardStore.getState().setGenerating('🧭 요청을 파악하고 있어요…');
+  let intent: ReqIntent = 'text';
+  let boardIntent: string | null = null;
+  try {
+    const selTypes = [...new Set(sel.map((n) => String((n.data?.role as string) ?? n.type)))];
+    const res = await runRouter(
+      {
+        text,
+        page: '/board',
+        selection: { ids: sel.map((n) => n.id), types: selTypes, count: sel.length },
+        available_actions: PAGE_ACTIONS['/board'],
+      },
+      buildAgentContext('router'),
+    );
+    const out = res.output;
+    if (out.intent?.startsWith('board.')) {
+      boardIntent = out.intent.slice('board.'.length);
+    } else if (CI_SET.has(out.intent)) {
+      intent = toReqIntent(out.intent as ContentIntent);
+    } else if (out.route_to && out.confidence >= 0.7) {
+      intent = routeDefault(out.route_to);
+    }
+  } catch {
+    intent = 'text'; // 라우터 실패 → 기존 휴리스틱 보존
+  } finally {
+    useBoardStore.getState().setGenerating(null);
+  }
+
+  // 모델이 화면 조작으로 판단(어휘에 없던 표현, 예: "요만하게 해줘") → 실행기로.
+  if (boardIntent) {
+    const done = runBoardOp(sel.map((n) => n.id), { op: boardIntent as never });
+    if (done) return;
+  }
+  applyContentIntent(sel, text, intent);
 }
