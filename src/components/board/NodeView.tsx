@@ -113,10 +113,13 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     const t = e.target as HTMLElement | null;
     if (t?.closest?.('[data-kv-editable], [contenteditable="true"], input, textarea')) return;
     e.stopPropagation(); // 배경의 "전체 맞춤" 더블클릭이 같이 발동하지 않게
-    // 더블클릭 → 이 카드를 화면 중앙에 풀로(센터 + 줌). 활동지는 시트 자체가 인라인 편집.
+    // 더블클릭 → 이 카드를 화면 중앙에 풀로(센터 + 줌).
     useBoardStore.getState().focusNode(node.id);
-    const isWorksheet = (node.data?.payload as RegistryPayload | undefined)?.type === 'WorksheetCard';
-    if (editable && !node.locked && !isWorksheet) {
+    // 인라인 편집은 평문 카드(메모/텍스트/이미지 캡션)에서만. 문서 카드(계획안·통신문·
+    // 관찰기록·활동지 등 data.doc)는 렌더된 형태를 유지하고 raw 마크다운 textarea를
+    // 띄우지 않는다(활동지는 시트 내부의 제목·안내가 인라인 편집됨).
+    const isDocCard = !!node.data?.doc;
+    if (editable && !node.locked && !isDocCard) {
       setDraft(node.text ?? '');
       setEditing(true);
     }
