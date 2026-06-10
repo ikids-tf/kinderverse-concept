@@ -109,10 +109,14 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     onPointerDown(e, node.id);
   };
   const dbl = (e: React.MouseEvent) => {
-    // 활동지는 제목·안내를 인라인 텍스트로 직접 수정하므로 node.text 편집을 막는다.
-    if ((node.data?.payload as RegistryPayload | undefined)?.type === 'WorksheetCard') return;
-    if (editable && !node.locked) {
-      e.stopPropagation();
+    // 인라인 편집 필드(활동지 제목·안내 등) 안의 더블클릭은 그 필드가 처리하게 둔다.
+    const t = e.target as HTMLElement | null;
+    if (t?.closest?.('[data-kv-editable], [contenteditable="true"], input, textarea')) return;
+    e.stopPropagation(); // 배경의 "전체 맞춤" 더블클릭이 같이 발동하지 않게
+    // 더블클릭 → 이 카드를 화면 중앙에 풀로(센터 + 줌). 활동지는 시트 자체가 인라인 편집.
+    useBoardStore.getState().focusNode(node.id);
+    const isWorksheet = (node.data?.payload as RegistryPayload | undefined)?.type === 'WorksheetCard';
+    if (editable && !node.locked && !isWorksheet) {
       setDraft(node.text ?? '');
       setEditing(true);
     }
@@ -138,7 +142,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         <div className={`absolute inset-0 rounded-lg ${frameBg}`} />
         {/* edge grab strips — drag to move the frame */}
         {FRAME_EDGE_STRIPS.map((pos, i) => (
-          <div key={i} onPointerDown={down} style={{ position: 'absolute', ...pos, pointerEvents: 'auto', cursor: 'grab' }} />
+          <div
+            key={i}
+            onPointerDown={down}
+            onDoubleClick={(e) => { e.stopPropagation(); useBoardStore.getState().focusNode(node.id); }}
+            style={{ position: 'absolute', ...pos, pointerEvents: 'auto', cursor: 'grab' }}
+          />
         ))}
         {/* title tab — drag to move, double-click to rename */}
         <div

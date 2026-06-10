@@ -307,6 +307,7 @@ export function BoardCanvas() {
       ref={ref}
       onPointerDown={onBackgroundPointerDown}
       onWheel={onWheel}
+      onDoubleClick={() => useBoardStore.getState().fit()}
       className="relative h-full w-full overflow-hidden bg-bg"
       style={{ cursor: spaceDown ? 'grab' : 'default', touchAction: 'none' }}
     >

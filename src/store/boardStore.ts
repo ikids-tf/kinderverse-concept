@@ -102,6 +102,8 @@ interface BoardState {
   zoomBy: (factor: number, cx?: number, cy?: number) => void;
   resetView: () => void;
   fit: () => void;
+  /** Center one node in the visible canvas and zoom so it fills the view. */
+  focusNode: (id: string) => void;
   toggleClassroomMode: () => void;
 
   // ---- multi-board snapshot ----
@@ -206,6 +208,31 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         zoom,
         panX: -minX * zoom + pad,
         panY: -minY * zoom + pad,
+      },
+    });
+  },
+  focusNode: (id) => {
+    const s = get();
+    const n = s.nodes[id];
+    if (!n) return;
+    // Tall auto-height cards report their real height as data.renderH.
+    const h = typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : n.h;
+    // Visible canvas box = window minus the left rail+toolbar and the bottom prompt bar.
+    const railL = 124;
+    const padT = 24;
+    const padB = 140;
+    const gap = 40; // breathing room around the focused node
+    const vw = Math.max(240, window.innerWidth - railL - 40);
+    const vh = Math.max(240, window.innerHeight - padT - padB);
+    // Fill the view but never zoom past 2× (keeps small cards from over-magnifying).
+    const zoom = clampZoom(Math.min(vw / (n.w + gap * 2), vh / (h + gap * 2), 2));
+    const scx = railL + (window.innerWidth - railL) / 2; // screen center of the canvas area
+    const scy = padT + vh / 2;
+    set({
+      viewport: {
+        zoom,
+        panX: scx - (n.x + n.w / 2) * zoom,
+        panY: scy - (n.y + h / 2) * zoom,
       },
     });
   },
