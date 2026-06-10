@@ -196,8 +196,12 @@ export function BoardCanvas() {
       const x1 = Math.max(cur.x, st.boxStartWorld.x);
       const y1 = Math.max(cur.y, st.boxStartWorld.y);
       const b = useBoardStore.getState();
+      // Frames are NOT box-selectable — their large box always intersects a box drawn
+      // over their interior, which would wrongly pull the frame into the selection and
+      // move it when the inner cards are dragged. A frame is selected/moved only via
+      // its border strips or title tab. Box-select grabs loose cards/content only.
       const hits = Object.values(b.nodes)
-        .filter((n) => n.x < x1 && n.x + n.w > x0 && n.y < y1 && n.y + n.h > y0)
+        .filter((n) => n.type !== 'frame' && n.x < x1 && n.x + n.w > x0 && n.y < y1 && n.y + n.h > y0)
         .map((n) => n.id);
       if (hits.length || !e.shiftKey) b.setSelection(hits);
       setBox(null);
