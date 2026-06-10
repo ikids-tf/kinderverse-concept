@@ -103,8 +103,18 @@ memo가 렌더된 ~300개 NodeView 본문 재실행을 전부 건너뜀. **NodeV
 > 수정이 필요한데 해당 파일에 기존 미커밋 변경이 섞여 있어, 분리 커밋을 위해 보류.
 > 현재 FPS가 목표를 넘겨 필수는 아님(추후 NodeView 변경이 커밋되면 추가).
 
-### 2-4. 저장 경로 (localStorage 디바운스 영속화)
+### 2-4. localStorage 디바운스 영속화 ✅ (결정 C)
 | 지표 | 전 | 후 | 비고 |
 |---|---|---|---|
-| 새로고침 후 복원 | 불가(인메모리) | | 기능 성립 여부 |
-| 저장 트리거 빈도 | 언마운트 1회 | | dirty-set + 디바운스 |
+| 새로고침 후 복원 | **불가**(인메모리) | **복원됨** | 검증: 카드 2개 추가→리로드→텍스트 그대로 복원 |
+| 저장 트리거 | 보드 전환/언마운트 1회 | 라이브 편집마다 **800ms 디바운스** + 탭 종료 flush | |
+
+구현: `src/board/persist.ts` — `initBoardPersistence()`를 `main.tsx`에서 렌더 전 호출.
+부팅 시 localStorage(`kv:boards:v1`)에서 보드 목록+스냅샷+activeId를 하이드레이트(복원된
+activeId가 MyBoardPage의 "보드 1개 보장" 이펙트보다 먼저 자리잡아 중복 생성 없음).
+이후 `useBoardStore` 변경을 구독해 800ms 디바운스로 `saveActiveLive()`→전체 스냅샷을
+localStorage에 기록. **스키마 변경 없음**(boardsStore/boardStore 미수정, `setState`로 주입).
+
+> ⚠️ **알려진 한계**: 이미지가 base64 data URI라 이미지 많은 보드는 localStorage 쿼터
+> (~5MB) 초과 가능 → `QuotaExceededError`는 catch 후 경고(1회 재시도), 보드는 유지되되
+> 그 사이클 미저장. **2-2(이미지 LOD 썸네일)** 적용 시 페이로드가 크게 줄어 해소됨.
