@@ -279,6 +279,19 @@ const TYPE_ALIASES: Record<string, string> = {
   그림자: '그림자 짝짓기',
   숨은그림: '그림 찾기',
   관찰: '관찰 미션',
+  // 교사 현장 표면형 보강(intent-lexicon과 동일 어휘) — "공룡 선잇기"처럼
+  // 활동 유형 단어만으로도 올바른 유형이 추천되게 한다.
+  선잇기: '그림자 짝짓기',
+  '선 잇기': '그림자 짝짓기',
+  선긋기: '그림자 짝짓기',
+  짝짓기: '그림자 짝짓기',
+  짝맞추기: '그림자 짝짓기',
+  '짝 맞추기': '그림자 짝짓기',
+  연결하기: '그림자 짝짓기',
+  따라쓰기: '숫자 따라쓰기',
+  '따라 쓰기': '숫자 따라쓰기',
+  '같은 그림': '그림 찾기',
+  길찾기: '미로 찾기',
 };
 const STYLE_ALIASES: Record<string, StyleCode> = {
   수채화: 'watercolor',
@@ -348,7 +361,7 @@ export function parseWorksheetRequest(
   for (const alias of Object.keys(STYLE_ALIASES)) topic = topic.replace(alias, ' ');
   topic = topic
     .replace(/0\s*[-~]\s*2세?|3\s*[-~]\s*5세?|만?\s*[0-5]\s*세|영아|유아/g, ' ')
-    .replace(/활동지|워크시트|도안|만들어\s*줘|만들어|그려\s*줘|그려|해\s*줘|주세요|용\b|의\b|스타일|로\b/g, ' ')
+    .replace(/활동지|워크시트|학습지|문제지|놀이지|도안|만들어\s*줘|만들어|그려\s*줘|그려|해\s*줘|주세요|같은|용\b|의\b|스타일|로\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (!topic) topic = request.trim();
