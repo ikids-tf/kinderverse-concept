@@ -9,10 +9,11 @@ import './index.css';
 // restored activeId is in place ahead of MyBoardPage's "ensure one board" effect.
 initBoardPersistence();
 
-// DEV 전용 성능 측정 도구(시드 + FPS 오버레이). 프로덕션 빌드에서는
-// import.meta.env.DEV가 false로 치환되어 통째로 트리셰이킹된다. (Phase 1)
+// DEV 전용 도구: 성능 측정(시드+FPS) · 의도 골든셋 평가(__kvIntentEval).
+// 프로덕션 빌드에서는 import.meta.env.DEV가 false로 치환되어 트리셰이킹된다.
 if (import.meta.env.DEV) {
   void import('./dev/perfTools');
+  void import('./dev/intentGolden');
 }
 
 createRoot(document.getElementById('root')!).render(
