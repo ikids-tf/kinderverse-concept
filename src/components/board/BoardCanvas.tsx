@@ -36,6 +36,22 @@ function scrollableUnderCursor(target: EventTarget | null, deltaY: number, root:
    (ctrl/⌘+wheel toward cursor), drag-box selection on empty space, node drag
    (committed as one undoable move). Renders free primitives + workflow lanes. */
 
+/** Suppress the browser's native text selection (blue highlight) while a board
+    drag is in flight — a background/box drag must not sweep-select node text.
+    Applied synchronously on pointer-down so no selection ever starts; restored on
+    pointer-up. Editing fields re-enable selection via CSS (user-select:text). */
+function lockTextSelection() {
+  if (typeof document === 'undefined') return;
+  document.body.style.userSelect = 'none';
+  (document.body.style as unknown as { webkitUserSelect: string }).webkitUserSelect = 'none';
+  window.getSelection?.()?.removeAllRanges();
+}
+function unlockTextSelection() {
+  if (typeof document === 'undefined') return;
+  document.body.style.userSelect = '';
+  (document.body.style as unknown as { webkitUserSelect: string }).webkitUserSelect = '';
+}
+
 interface Box {
   x: number;
   y: number;
@@ -185,6 +201,7 @@ export function BoardCanvas() {
 
   const onHandleUp = useCallback(() => {
     const st = ht.current;
+    unlockTextSelection();
     window.removeEventListener('pointermove', onHandleMove);
     window.removeEventListener('pointerup', onHandleUp);
     if (st.mode && st.before.length) pushRedesign([st.id], st.before, st.mode === 'resize' ? '크기 조절' : '회전');
@@ -211,6 +228,7 @@ export function BoardCanvas() {
         startAng: Math.atan2(w.y - cy, w.x - cx),
         before: captureNodes([id]),
       };
+      lockTextSelection();
       window.addEventListener('pointermove', onHandleMove);
       window.addEventListener('pointerup', onHandleUp);
     },
@@ -286,11 +304,13 @@ export function BoardCanvas() {
       setBox(null);
     }
     st.mode = 'idle';
+    unlockTextSelection();
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
   }
 
   function beginWindowTracking() {
+    lockTextSelection(); // 배경/박스/노드 드래그 중 텍스트가 파랑색으로 선택되지 않게
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
   }
