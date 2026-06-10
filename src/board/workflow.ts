@@ -319,11 +319,18 @@ export async function runWorkflowStep(runnerId: string, kind: StepKind): Promise
       const res = await runStudioImages(topic, ideaTexts(runnerId), ctx);
       if (res.payload.type === 'StudioGallery') res.payload.props.items.forEach((it) => spawnImageCard(frameId, it.url, it.caption));
     } else if (kind === 'plan') {
+      // 정식 주간 놀이계획 문서(A4 가로) — 요약 텍스트가 아니라 composer와 동일한 문서 카드.
       const res = await runPlan(topic, ideaTexts(runnerId), ctx);
-      spawnTextCard(frameId, planText(res.payload), 'surface-3', 300, 'plan');
+      const id = spawnDocCard(frameId, planDocMarkdown(res.payload), 'plan', PLAN_DOC_W);
+      const cur = useBoardStore.getState().nodes[id];
+      if (cur) useBoardStore.getState().updateNodeRaw(id, { data: { ...(cur.data ?? {}), payload: res.payload } });
     } else if (kind === 'worksheet') {
+      // 활동지 = 인쇄용 A4 시트(생성 그림 + 제목/안내 텍스트 레이어). payload를 카드에
+      // 실어야 NodeView가 WorksheetSheet로 렌더한다 — 텍스트 문서로 떨어지지 않게.
       const res = await runStudioWorksheet(topic, ctx);
-      spawnTextCard(frameId, worksheetText(res.payload), 'gold', 300, 'worksheet');
+      const id = spawnDocCard(frameId, worksheetText(res.payload), 'worksheet');
+      const cur = useBoardStore.getState().nodes[id];
+      if (cur) useBoardStore.getState().updateNodeRaw(id, { data: { ...(cur.data ?? {}), payload: res.payload } });
     }
     setStep(runnerId, kind, 'done');
   } catch (e) {
