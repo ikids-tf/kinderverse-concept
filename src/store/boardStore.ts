@@ -89,6 +89,8 @@ interface BoardState {
   removeNodeRaw: (id: string) => void;
   updateNodeRaw: (id: string, patch: Partial<BoardNode>) => void;
   moveNodesRaw: (ids: string[], dx: number, dy: number) => void;
+  /** Send a node to the back of the z-order (e.g. a frame that wraps others). */
+  moveToBackRaw: (id: string) => void;
 
   // ---- selection ----
   setSelection: (ids: string[]) => void;
@@ -159,6 +161,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       }
       return { nodes };
     }),
+
+  moveToBackRaw: (id) =>
+    set((s) => (s.nodes[id] ? { order: [id, ...s.order.filter((x) => x !== id)] } : {})),
 
   setSelection: (ids) => set({ selection: ids }),
   toggleSelection: (id) =>

@@ -51,6 +51,62 @@ export function addFrameCmd(x: number, y: number, title = '프레임'): string {
   return id;
 }
 
+/** Wrap the selected nodes in a new frame that encloses them (toolbar 프레임 on a
+    selection). Tags each as a child (data.frameId) so they move together, and sends
+    the frame to the back so it sits behind its contents (incl. nested frames). */
+const WRAP_PAD = 36;
+function realH(n: BoardNode): number {
+  const r = n.data?.renderH;
+  return typeof r === 'number' && r > 0 ? r : n.h;
+}
+export function wrapSelectionInFrameCmd(ids: string[], title = '새 프레임'): string | undefined {
+  const b = board();
+  const nodes = ids.map((id) => b.nodes[id]).filter(Boolean) as BoardNode[];
+  if (nodes.length === 0) return undefined;
+  const minX = Math.min(...nodes.map((n) => n.x));
+  const minY = Math.min(...nodes.map((n) => n.y));
+  const maxX = Math.max(...nodes.map((n) => n.x + n.w));
+  const maxY = Math.max(...nodes.map((n) => n.y + realH(n)));
+  const fid = newId('frame');
+  const frame: BoardNode = {
+    id: fid,
+    type: 'frame',
+    x: Math.round(minX - WRAP_PAD),
+    y: Math.round(minY - WRAP_PAD),
+    w: Math.round(maxX - minX + WRAP_PAD * 2),
+    h: Math.round(maxY - minY + WRAP_PAD * 2),
+    data: { title },
+  };
+  // Prior frameId per child, to restore on undo.
+  const prev = nodes.map((n) => ({ id: n.id, frameId: n.data?.frameId as string | undefined }));
+  const tag = () => {
+    board().addNodeRaw(frame);
+    board().moveToBackRaw(fid); // behind its contents
+    prev.forEach((p) => {
+      const n = board().nodes[p.id];
+      if (n) board().updateNodeRaw(p.id, { data: { ...(n.data ?? {}), frameId: fid } });
+    });
+    board().setSelection([fid]);
+  };
+  history().execute({
+    id: newId('cmd'),
+    label: '프레임으로 묶기',
+    do: tag,
+    undo: () => {
+      prev.forEach((p) => {
+        const n = board().nodes[p.id];
+        if (!n) return;
+        const data = { ...(n.data ?? {}) };
+        if (p.frameId) data.frameId = p.frameId;
+        else delete data.frameId;
+        board().updateNodeRaw(p.id, { data });
+      });
+      board().removeNodeRaw(fid);
+    },
+  });
+  return fid;
+}
+
 /** Commit a finished drag as one undoable move (call once on drag end). */
 export function moveNodesCmd(ids: string[], dx: number, dy: number) {
   if ((dx === 0 && dy === 0) || ids.length === 0) return;

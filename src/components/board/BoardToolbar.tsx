@@ -1,6 +1,6 @@
 import { Icon, type IconName } from '@/lib/icons';
 import { useBoardStore } from '@/store/boardStore';
-import { addNodeCmd, addFrameCmd, toggleLockCmd, type PrimitiveType } from '@/board/commands';
+import { addNodeCmd, addFrameCmd, wrapSelectionInFrameCmd, toggleLockCmd, type PrimitiveType } from '@/board/commands';
 
 /* Left vertical board toolbar (SKILL §6, PRD §4.3). Select + primitive adders +
    (bottom) lock/home. Every tool has a button path (no keyboard required). */
@@ -30,6 +30,13 @@ export function BoardToolbar() {
   };
 
   const addFrame = () => {
+    // 선택된 요소가 있으면 그 요소들을 감싸는 프레임을, 없으면 화면 중앙에 빈 프레임.
+    // 선택은 클릭 시점의 store 값을 직접 읽는다(렌더 클로저의 stale 값 회피).
+    const sel = useBoardStore.getState().selection;
+    if (sel.length > 0) {
+      wrapSelectionInFrameCmd(sel, '새 프레임');
+      return;
+    }
     const c = viewCenterWorld();
     addFrameCmd(c.x - 260, c.y - 200, '새 프레임');
   };
