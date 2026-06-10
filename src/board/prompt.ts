@@ -4,12 +4,14 @@ import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, p
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import {
   contentIntentFast,
+  boardOp,
   WORKSHEET_RE,
   PLAN_RE,
   DESIGN_CMD_RE,
   DECORATE_RE,
   type ContentIntent,
 } from '@/ai/intent-lexicon';
+import { runBoardOp } from './actions';
 
 /** Map the lexicon's rich intent onto the popup's ReqIntent vocabulary.
     coloring is generated through the image path (도안 스타일은 프롬프트에 실림);
@@ -80,6 +82,16 @@ export function handleBoardPrompt(text: string): boolean {
     if (frame.data?.composer && DESIGN_CMD_RE.test(text)) void redesignFrame(frame.id, text);
     else void generateIntoFrame(frame.id, text);
     return true;
+  }
+
+  // ── 화면 조작 지시(P2): "크게/왼쪽으로/정렬/지워/복사/노란색으로" ──
+  // 생성 동사(만들/그려/써…)가 함께 있으면 콘텐츠 요청으로 본다
+  // ("크게 그려줘" = 큰 그림 생성, "크게 해줘" = 크기 조절).
+  const op = boardOp(text);
+  const generative = /만들|생성|그려|작성|써\s*줘|추가|넣어/.test(text);
+  if (op && !generative) {
+    const done = runBoardOp(sel.map((n) => n.id), op);
+    if (done) return true; // 실행 불가 시(대상 없음) 아래 콘텐츠 분기로 폴백
   }
 
   // ── homogeneous content selection: match → act in place; mismatch → popup ──

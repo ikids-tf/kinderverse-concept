@@ -152,6 +152,7 @@ export interface NodeSnap {
   y: number;
   w: number;
   h: number;
+  color?: string;
   data?: Record<string, unknown>;
 }
 
@@ -160,13 +161,13 @@ function snapNodes(ids: string[]): NodeSnap[] {
   const out: NodeSnap[] = [];
   for (const id of ids) {
     const n = b.nodes[id];
-    if (n) out.push({ id, x: n.x, y: n.y, w: n.w, h: n.h, data: n.data ? { ...n.data } : undefined });
+    if (n) out.push({ id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color, data: n.data ? { ...n.data } : undefined });
   }
   return out;
 }
 
 function restoreNodes(snaps: NodeSnap[]) {
-  snaps.forEach((s) => board().updateNodeRaw(s.id, { x: s.x, y: s.y, w: s.w, h: s.h, data: s.data }));
+  snaps.forEach((s) => board().updateNodeRaw(s.id, { x: s.x, y: s.y, w: s.w, h: s.h, color: s.color, data: s.data }));
 }
 
 /** Capture a before-snapshot of node geometry+data (for an undoable redesign). */

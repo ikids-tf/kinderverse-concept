@@ -98,6 +98,7 @@ export function contentIntentFast(text: string): ContentIntent | null {
 export type BoardOpType =
   | 'resize_up' | 'resize_down'
   | 'move'
+  | 'group'
   | 'align' | 'arrange'
   | 'delete' | 'duplicate'
   | 'recolor';
@@ -115,10 +116,12 @@ const OP_RE: Array<{ op: BoardOpType; re: RegExp }> = [
   { op: 'resize_down', re: /작게|줄여|축소/ },
   { op: 'delete', re: /지워|삭제|없애|치워/ },
   { op: 'duplicate', re: /복사|복제|하나 ?더|똑같이 ?만들/ },
+  { op: 'group', re: /묶어|그룹|합쳐/ },
   { op: 'align', re: /정렬|나란히|줄 ?맞/ },
   { op: 'arrange', re: /정리해|보기 ?좋게|가지런/ },
   { op: 'move', re: /(왼쪽|오른쪽|위|아래)(으?로)|옮겨|이동/ },
-  { op: 'recolor', re: /색(깔)? ?(을|로|으로)? ?바꿔|색칠해 ?줘$|(노란|노랑|초록|연두|회색|베이지|갈색|주황|코랄|분홍|흰|하얀)색?(으?로)/ },
+  // '색칠'은 coloring(도안) 의도와 충돌하므로 recolor에 포함하지 않는다.
+  { op: 'recolor', re: /색(깔)? ?(을|로|으로)? ?바꿔|(노란|노랑|초록|연두|회색|베이지|갈색|주황|코랄|분홍|흰|하얀)색(으?로)/ },
 ];
 
 const DIR_RE: Array<{ dir: BoardOpMatch['dir']; re: RegExp }> = [
@@ -146,9 +149,12 @@ export function boardOp(text: string): BoardOpMatch | null {
     if (op === 'recolor') m.color = COLOR_TOKEN.find((c) => c.re.test(text))?.token ?? 'accent-soft';
     return m;
   }
-  // 색상어 단독("노란색으로")도 recolor로.
+  // 색상어 + 변경 어미("노란색으로 해줘") — '노란색 카네이션 그려줘' 같은
+  // 생성 요청과 혼동하지 않도록 변경 동사/어미를 요구한다.
   const color = COLOR_TOKEN.find((c) => c.re.test(text));
-  if (color && /으로|로 바꿔|색/.test(text)) return { op: 'recolor', color: color.token };
+  if (color && /(으?로)\s*(바꿔|해\s*줘|변경|만들어\s*줘)?\s*$/.test(text)) {
+    return { op: 'recolor', color: color.token };
+  }
   return null;
 }
 

@@ -7,7 +7,11 @@ import type { RouteTarget } from './contract';
 export const PAGE_ACTIONS: Record<string, string[]> = {
   '/': ['start_task', 'chat'],
   '/chat': ['chat', 'start_task'],
-  '/board': ['generate', 'mindmap', 'merge', 'relayout', 'restyle', 'add_media', 'start_task'],
+  // 보드: 콘텐츠 생성 + 화면 조작(board/actions.ts 실행기와 1:1 — P2-8).
+  '/board': [
+    'generate', 'mindmap', 'add_media', 'start_task',
+    'move', 'resize', 'align', 'arrange', 'delete', 'duplicate', 'recolor', 'group',
+  ],
   '/gallery': ['classify', 'search', 'add_media'],
   '/class': ['add_child', 'note', 'start_task'],
   '/calendar': ['create_event', 'generate', 'start_task'],
