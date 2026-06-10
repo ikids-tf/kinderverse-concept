@@ -61,7 +61,7 @@ let composing = false; // guard against double-submit racing frame creation
 
 /* ---------------- entry ---------------- */
 
-export async function composeFromPrompt(text: string): Promise<void> {
+export async function composeFromPrompt(text: string, forceRoute?: RouteTarget): Promise<void> {
   if (composing) return;
   composing = true;
   useBoardStore.getState().setGenerating('✨ 보드를 만들고 있어요…');
@@ -69,21 +69,36 @@ export async function composeFromPrompt(text: string): Promise<void> {
   let frameId: string | undefined; // hoisted so `finally` can clear the loading flag
   try {
     const b = useBoardStore.getState();
-    // 선택의 '내용'(타입/role)을 라우터에 전달 — 의도 판단 근거 강화(P0-2).
-    const selTypes = [...new Set(b.selection.map((id) => {
-      const n = b.nodes[id];
-      return n ? String((n.data?.role as string) ?? n.type) : '';
-    }).filter(Boolean))];
-    const routerRes = await runRouter(
-      {
-        text,
+    let out: RouterOutput;
+    if (forceRoute) {
+      // 정정 칩(P3-10) 등에서 유형을 직접 지정 — 라우터 호출 생략.
+      out = {
         page: '/board',
-        selection: { ids: b.selection, types: selTypes, count: b.selection.length },
+        selection: { ids: [], types: [], count: 0 },
         available_actions: PAGE_ACTIONS['/board'],
-      },
-      buildAgentContext('router'),
-    );
-    const out = routerRes.output;
+        intent: 'generate',
+        scope: 'new',
+        route_to: forceRoute,
+        suggested_next: [],
+        confidence: 1,
+      };
+    } else {
+      // 선택의 '내용'(타입/role)을 라우터에 전달 — 의도 판단 근거 강화(P0-2).
+      const selTypes = [...new Set(b.selection.map((id) => {
+        const n = b.nodes[id];
+        return n ? String((n.data?.role as string) ?? n.type) : '';
+      }).filter(Boolean))];
+      const routerRes = await runRouter(
+        {
+          text,
+          page: '/board',
+          selection: { ids: b.selection, types: selTypes, count: b.selection.length },
+          available_actions: PAGE_ACTIONS['/board'],
+        },
+        buildAgentContext('router'),
+      );
+      out = routerRes.output;
+    }
 
     // Mind map (생각그물·주제망·놀이 확장맵) — a radial map, built separately.
     // 라우터가 확신 있게(≥0.7) 다른 에이전트로 보냈으면 정규식이 덮어쓰지 않는다(P1-6);
@@ -116,7 +131,7 @@ export async function composeFromPrompt(text: string): Promise<void> {
       y: refFrame ? Math.round(refFrame.y) : Math.round(c.y - 200),
       w: 720,
       h: 420,
-      data: { title: frameTitle(text, template), templateId: template.id, composer: true, variant, loading: true, loadingLabel: '✨ AI가 자료를 만들고 있어요…' },
+      data: { title: frameTitle(text, template), templateId: template.id, composer: true, variant, loading: true, loadingLabel: '✨ AI가 자료를 만들고 있어요…', sourcePrompt: text },
     });
     created.push(frameId);
 

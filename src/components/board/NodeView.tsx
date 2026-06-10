@@ -6,7 +6,8 @@ import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { editTextCmd } from '@/board/commands';
 import { runWorkflowStep, type RunnerData, type StepKind } from '@/board/workflow';
 import { saveFrameToFolder, fitFrameToChildren } from '@/board/frames';
-import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, type ComposerChip } from '@/board/composer';
+import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, type ComposerChip } from '@/board/composer';
+import type { RouteTarget } from '@/ai/contract';
 import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
 import { WorksheetSheet, downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-sheet';
 import { separateImageLayers } from '@/ai/layers';
@@ -23,6 +24,15 @@ const COLOR_BG: Record<string, string> = {
   gold: 'bg-gold',
   'success-soft': 'bg-success-soft',
 };
+
+/* 정정 칩(P3-10): 라우팅이 틀렸을 때 한 번의 클릭으로 같은 프롬프트를 다른
+   유형으로 다시 생성한다(원본 프레임은 유지 — 새 프레임이 옆에 생김). */
+const REROUTES: Array<{ route: RouteTarget; tid: string; label: string }> = [
+  { route: 'studio', tid: 'studio', label: '활동지·이미지로' },
+  { route: 'plan', tid: 'play_plan', label: '놀이계획으로' },
+  { route: 'writing', tid: 'writing', label: '통신문으로' },
+  { route: 'mindmap', tid: 'mindmap', label: '생각그물로' },
+];
 
 /** Static drag-strips along a frame's 4 edges (hoisted — never changes). */
 const FRAME_EDGE_STRIPS = [
@@ -202,6 +212,31 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                   <Icon name="sparkle" size={12} className="text-accent" />
                 )}
                 {chip.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 정정 칩(P3-10) — 라우팅이 틀렸을 때 같은 프롬프트를 다른 유형으로 */}
+        {!isSub && typeof node.data?.sourcePrompt === 'string' && (
+          <div
+            className="absolute left-0 flex flex-wrap items-center gap-t1"
+            style={{ top: node.h + (chips.length > 0 ? 44 : 8), width: node.w, pointerEvents: 'auto' }}
+          >
+            <span className="text-overline text-fg-muted">다른 결과를 원하셨나요?</span>
+            {REROUTES.filter(
+              (r) => r.tid !== (node.data?.mindmap ? 'mindmap' : (node.data?.templateId as string)),
+            ).map((r) => (
+              <button
+                key={r.route}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void composeFromPrompt(node.data?.sourcePrompt as string, r.route);
+                }}
+                className="inline-flex items-center gap-t1 rounded-pill border border-border bg-surface/80 px-t2 py-0.5 text-overline text-fg-muted hover:border-accent hover:text-accent"
+              >
+                {r.label}
               </button>
             ))}
           </div>
