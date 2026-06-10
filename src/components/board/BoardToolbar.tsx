@@ -35,7 +35,7 @@ export function BoardToolbar() {
   };
 
   return (
-    <div className="pointer-events-auto absolute left-t3 top-t3 z-20 flex flex-col items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-md backdrop-blur">
+    <div className="pointer-events-auto absolute left-t3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-md backdrop-blur">
       <button
         title="선택"
         className="flex h-10 w-10 items-center justify-center rounded-pill bg-surface-3 text-fg"
