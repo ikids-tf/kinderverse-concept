@@ -2,35 +2,28 @@ import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { generateIntoFrame, regenImageCard, genTextCard } from './workflow';
 import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
+import {
+  contentIntentFast,
+  WORKSHEET_RE,
+  PLAN_RE,
+  DESIGN_CMD_RE,
+  DECORATE_RE,
+  type ContentIntent,
+} from '@/ai/intent-lexicon';
 
-/** "make a worksheet from this activity" on a selected idea/mind-map branch. */
-const WORKSHEET_RE = /활동지|워크시트|학습지/;
-
-/** "make a plan from this activity" on a selected idea/mind-map branch. */
-const PLAN_RE = /계획안?|주간\s*계획|주안|수업\s*계획/;
-
-/** "make it pretty / share with parents / add images" intent on a selected doc. */
-const DECORATE_RE = /꾸며|꾸미|예쁘게|예쁘|이쁘|소식지|부모|학부모|공유|장식|디자인|이미지\s*(넣|추가|삽입)/;
-
-/** Design/layout command on a selected frame → re-arrange + re-decorate (not add a
-    card). e.g. "사진 크게", "겨울 느낌으로", "2열로 정리", "스티커 더 붙여줘". */
-const DESIGN_CMD_RE = /정리|정렬|배치|배열|레이아웃|꾸며|꾸미|예쁘게|이쁘게|스티커|장식|디자인|느낌|분위기|테마|크게|작게|강조|위주|중심|열로|컬럼|나란히/;
-
-/** A request that names a media artifact (image/illustration/photo/video). */
-const IMAGE_RE = /이미지|그림|그려|그리기|사진|도안|일러스트|캐릭터|배경|삽화|포스터|영상|동영상|비디오/;
-
-/** A request for a parent letter / newsletter / notice. */
-const LETTER_RE = /통신문|가정\s*통신|편지|소식지|안내문|공지/;
-
-/** Classify what artifact TYPE the prompt is asking for. A generic edit/modifier
-    (no artifact keyword, e.g. "겨울 느낌으로", "더 짧게") → 'text' (means "edit the
-    selected thing as it is"). Order matters: doc types before the broad image RE. */
-function detectIntent(text: string): ReqIntent {
-  if (WORKSHEET_RE.test(text)) return 'worksheet';
-  if (PLAN_RE.test(text)) return 'plan';
-  if (LETTER_RE.test(text)) return 'letter';
-  if (IMAGE_RE.test(text)) return 'image';
-  return 'text';
+/** Map the lexicon's rich intent onto the popup's ReqIntent vocabulary.
+    coloring is generated through the image path (도안 스타일은 프롬프트에 실림);
+    mindmap/record don't apply "onto a selection" — treated as text until the
+    router fallback (P1-4) refines them. */
+function toReqIntent(ci: ContentIntent | null): ReqIntent {
+  switch (ci) {
+    case 'worksheet': return 'worksheet';
+    case 'plan': return 'plan';
+    case 'letter': return 'letter';
+    case 'image':
+    case 'coloring': return 'image';
+    default: return 'text';
+  }
 }
 
 function openMismatch(sel: BoardNode[], text: string, intent: ReqIntent, selKind: SelKind): void {
@@ -60,7 +53,7 @@ export function handleBoardPrompt(text: string): boolean {
     return true;
   }
 
-  const intent = detectIntent(text);
+  const intent = toReqIntent(contentIntentFast(text));
 
   // ── specialized single-target cases (unchanged) ──
   // Single document card + a "decorate / share with parents" prompt → newsletter.

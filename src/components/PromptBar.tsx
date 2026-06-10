@@ -174,10 +174,16 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
 
     // 3) Otherwise dispatch through the Tier0 router (scoped to this page +
     //    selection + available_actions) and open AI 채팅.
+    // 선택의 '내용'을 라우터에 전달(P0-2) — 타입/role을 실어 의도 판단 근거로.
+    const bNodes = useBoardStore.getState().nodes;
+    const selTypes = [...new Set(boardSelection.map((id) => {
+      const n = bNodes[id];
+      return n ? String((n.data?.role as string) ?? n.type) : '';
+    }).filter(Boolean))];
     void sendToRouter({
       text,
       page: path,
-      selection: { ids: boardSelection, types: [], count: boardSelection.length },
+      selection: { ids: boardSelection, types: selTypes, count: boardSelection.length },
       available_actions: availableActions,
     });
     if (!onChatPage) navigate(AI_CHAT_PATH, { viewTransition: true });

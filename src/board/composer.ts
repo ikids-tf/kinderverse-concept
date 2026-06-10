@@ -50,13 +50,13 @@ export interface ComposerChip {
   status: 'idle' | 'running' | 'done';
 }
 
-const COLORING_RE = /도안|색칠|컬러링/;
-/** A pure image/video/illustration request (standalone media, not a worksheet). */
-const MEDIA_RE = /이미지|그림|그려|그리기|드로잉|사진|일러스트|캐릭터|배경|삽화|포스터|영상|동영상|비디오|움짤|gif/i;
-/** An explicit worksheet/learning-sheet request. */
-const WORKSHEET_REQ_RE = /활동지|워크시트|학습지|문제지|학습\s*자료/;
-/** Mind-map synonyms (생각그물·주제망·놀이 확장맵·아이디어 맵·관심사 확장 …). */
-const MINDMAP_RE = /마인드\s*맵|생각\s*그물|주제\s*망|놀이\s*확장\s*맵?|놀이\s*아이디어\s*맵|아이디어\s*맵|관심사\s*확장|확장\s*맵/;
+// 의도 표면형은 단일 출처(intent-lexicon)에서 가져온다 — 층간 어휘 불일치 제거(P0-1).
+import {
+  COLORING_RE,
+  IMAGE_RE as MEDIA_RE,
+  WORKSHEET_RE as WORKSHEET_REQ_RE,
+  MINDMAP_RE,
+} from '@/ai/intent-lexicon';
 let composing = false; // guard against double-submit racing frame creation
 
 /* ---------------- entry ---------------- */
@@ -69,11 +69,16 @@ export async function composeFromPrompt(text: string): Promise<void> {
   let frameId: string | undefined; // hoisted so `finally` can clear the loading flag
   try {
     const b = useBoardStore.getState();
+    // 선택의 '내용'(타입/role)을 라우터에 전달 — 의도 판단 근거 강화(P0-2).
+    const selTypes = [...new Set(b.selection.map((id) => {
+      const n = b.nodes[id];
+      return n ? String((n.data?.role as string) ?? n.type) : '';
+    }).filter(Boolean))];
     const routerRes = await runRouter(
       {
         text,
         page: '/board',
-        selection: { ids: b.selection, types: [], count: b.selection.length },
+        selection: { ids: b.selection, types: selTypes, count: b.selection.length },
         available_actions: PAGE_ACTIONS['/board'],
       },
       buildAgentContext('router'),

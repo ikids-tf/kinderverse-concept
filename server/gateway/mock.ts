@@ -11,27 +11,8 @@ import type {
 } from '../../src/ai/contract';
 import type { RecordInput } from '../../src/ai/prompt-record';
 import type { RegistryPayload } from '../../src/ui-registry/contracts';
-
-interface Rule {
-  route: RouteTarget;
-  mode?: 'observation' | 'story';
-  intent: string;
-  keywords: string[];
-}
-
-const RULES: Rule[] = [
-  { route: 'plan', intent: 'generate', keywords: ['놀이계획', '계획', '주안', '월안', '활동 추천', '활동추천', '추천'] },
-  { route: 'record', mode: 'story', intent: 'generate', keywords: ['놀이기록', '놀이이야기', '이야기', '활동기록', '오늘'] },
-  { route: 'record', mode: 'observation', intent: 'generate', keywords: ['관찰', '관찰기록', '발달', '평가'] },
-  { route: 'writing', intent: 'generate', keywords: ['통신문', '가정통신문', '공지', '문장', '평가서', '안내'] },
-  { route: 'studio', intent: 'generate', keywords: ['도안', '그림', '이미지', '활동지', '워크시트', '색칠', '스튜디오'] },
-];
-
-const SELECTION_RULES: Array<{ action: string; keywords: string[] }> = [
-  { action: 'merge', keywords: ['묶', '병합', '한 장', '합치'] },
-  { action: 'relayout', keywords: ['정렬', '배치', '레이아웃'] },
-  { action: 'restyle', keywords: ['스타일', '톤', '색'] },
-];
+// 의도 어휘는 단일 출처(intent-lexicon)를 공유 — 실라우터/보드 정규식과 동일 사전(P0-3).
+import { contentIntentFast, boardOp, INTENT_TO_ROUTE } from '../../src/ai/intent-lexicon';
 
 function suggestionsFor(route: RouteTarget): SuggestedNext[] {
   switch (route) {
@@ -50,49 +31,49 @@ export function mockRouterOutput(input: RouterInput): RouterOutput {
   const text = input.text ?? '';
   const hasSelection = input.selection.count > 0;
 
-  // Selection-scoped verbs take precedence when something is selected.
+  // 화면 조작 지시(크게/옮겨/정렬/지워…) — 선택이 있을 때 board.* 인텐트로.
+  // (이전: merge/relayout이 record로 오라우팅되던 버그 → route_to 없이 인텐트만 전달)
   if (hasSelection) {
-    for (const r of SELECTION_RULES) {
-      if (r.keywords.some((k) => text.includes(k)) && input.available_actions.includes(r.action)) {
-        return {
-          page: input.page,
-          selection: input.selection,
-          available_actions: input.available_actions,
-          intent: r.action,
-          scope: 'selection',
-          route_to: 'record',
-          suggested_next: [],
-          confidence: 0.86,
-        };
-      }
-    }
-  }
-
-  for (const rule of RULES) {
-    if (rule.keywords.some((k) => text.includes(k))) {
-      const out: RouterOutput = {
+    const op = boardOp(text);
+    if (op) {
+      return {
         page: input.page,
         selection: input.selection,
         available_actions: input.available_actions,
-        intent: rule.intent,
-        scope: hasSelection ? 'selection' : 'new',
-        route_to: rule.route,
-        suggested_next: suggestionsFor(rule.route),
-        confidence: 0.88,
+        intent: `board.${op.op}`,
+        scope: 'selection',
+        route_to: null,
+        suggested_next: [],
+        confidence: 0.86,
       };
-      if (rule.mode) out.mode = rule.mode;
-      // Anti-hallucination: observation/eval needs grounding (SKILL §3 rule 5).
-      if (rule.route === 'record' && rule.mode === 'observation' && !hasSelection) {
-        out.confidence = 0.55;
-        out.route_to = null;
-        out.needs_confirmation = true;
-        out.clarify = {
-          question: '관찰기록은 근거가 필요해요. 어떤 사진이나 메모를 바탕으로 작성할까요?',
-          options: ['사진 선택', '교사 메모 입력'],
-        };
-      }
-      return out;
     }
+  }
+
+  const ci = contentIntentFast(text);
+  if (ci) {
+    const m = INTENT_TO_ROUTE[ci];
+    const out: RouterOutput = {
+      page: input.page,
+      selection: input.selection,
+      available_actions: input.available_actions,
+      intent: ci,
+      scope: hasSelection ? 'selection' : 'new',
+      route_to: m.route as RouteTarget,
+      suggested_next: suggestionsFor(m.route as RouteTarget),
+      confidence: 0.88,
+    };
+    if (m.mode) out.mode = m.mode;
+    // Anti-hallucination: observation/eval needs grounding (SKILL §3 rule 5).
+    if (m.route === 'record' && m.mode === 'observation' && !hasSelection) {
+      out.confidence = 0.55;
+      out.route_to = null;
+      out.needs_confirmation = true;
+      out.clarify = {
+        question: '관찰기록은 근거가 필요해요. 어떤 사진이나 메모를 바탕으로 작성할까요?',
+        options: ['사진 선택', '교사 메모 입력'],
+      };
+    }
+    return out;
   }
 
   // No confident match → clarify.
