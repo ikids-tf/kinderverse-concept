@@ -1,8 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { moveNodesCmd } from '@/board/commands';
+import { moveNodesCmd, captureNodes, pushRedesign, type NodeSnap } from '@/board/commands';
 import { mindMapSubtree } from '@/board/composer';
 import { frameMoveSet, rebindFrameMembership, frameOfPoint } from '@/board/frames';
+import { worldBox, renderHeight } from '@/board/geometry';
 import { IMG_PLACEHOLDER_ZOOM } from '@/board/imageLod';
 import { NodeView } from './NodeView';
 import { LaneView } from './LaneView';
@@ -110,8 +111,11 @@ export function BoardCanvas() {
     return s;
   }, [selection, dragIds, edgeList]);
 
-  const inView = (n: BoardNode | undefined): boolean =>
-    !!n && n.x < visible.right && n.x + n.w > visible.left && n.y < visible.bottom && n.y + n.h > visible.top;
+  const inView = (n: BoardNode | undefined): boolean => {
+    if (!n) return false;
+    const b = worldBox(n); // 스케일된 카드도 정확히 컬링되도록 월드 박스 사용
+    return b.x < visible.right && b.x + b.w > visible.left && b.y < visible.bottom && b.y + b.h > visible.top;
+  };
 
   // 저줌 LOD(2-2): 줌이 임계 미만이면 이미지 카드를 플레이스홀더로 강등.
   // boolean이라 임계를 넘나들 때만 prop이 바뀌어 memo 효과를 해치지 않는다.
@@ -137,6 +141,81 @@ export function BoardCanvas() {
     dragIds: string[];
     boxStartWorld: { x: number; y: number };
   }>({ mode: 'idle', startX: 0, startY: 0, startPan: { x: 0, y: 0 }, dragIds: [], boxStartWorld: { x: 0, y: 0 } });
+
+  // ── Scale / rotate handles (single-selection overlay) ───────────────────────
+  // A corner handle scales the node uniformly (중심 기준); the top handle rotates
+  // it. Both write node.scale / node.rot raw during the drag, then commit one
+  // undoable step on release. shift while rotating snaps to 15°.
+  const ht = useRef<{
+    mode: 'resize' | 'rotate' | null;
+    id: string;
+    cx: number;
+    cy: number;
+    startScale: number;
+    startRot: number;
+    startDist: number;
+    startAng: number;
+    before: NodeSnap[];
+  }>({ mode: null, id: '', cx: 0, cy: 0, startScale: 1, startRot: 0, startDist: 1, startAng: 0, before: [] });
+
+  const handlePointerToWorld = useCallback((clientX: number, clientY: number) => {
+    const rect = ref.current?.getBoundingClientRect();
+    const { zoom, panX, panY } = useBoardStore.getState().viewport;
+    return { x: (clientX - (rect?.left ?? 0) - panX) / zoom, y: (clientY - (rect?.top ?? 0) - panY) / zoom };
+  }, []);
+
+  const onHandleMove = useCallback(
+    (e: PointerEvent) => {
+      const st = ht.current;
+      if (!st.mode) return;
+      const w = handlePointerToWorld(e.clientX, e.clientY);
+      if (st.mode === 'resize') {
+        const d = Math.hypot(w.x - st.cx, w.y - st.cy);
+        const scale = Math.min(6, Math.max(0.3, st.startScale * (d / st.startDist)));
+        useBoardStore.getState().updateNodeRaw(st.id, { scale: Math.round(scale * 100) / 100 });
+      } else {
+        const ang = Math.atan2(w.y - st.cy, w.x - st.cx);
+        let deg = st.startRot + ((ang - st.startAng) * 180) / Math.PI;
+        if (e.shiftKey) deg = Math.round(deg / 15) * 15; // shift = 15° 스냅
+        useBoardStore.getState().updateNodeRaw(st.id, { rot: (((Math.round(deg) % 360) + 360) % 360) });
+      }
+    },
+    [handlePointerToWorld],
+  );
+
+  const onHandleUp = useCallback(() => {
+    const st = ht.current;
+    window.removeEventListener('pointermove', onHandleMove);
+    window.removeEventListener('pointerup', onHandleUp);
+    if (st.mode && st.before.length) pushRedesign([st.id], st.before, st.mode === 'resize' ? '크기 조절' : '회전');
+    st.mode = null;
+  }, [onHandleMove]);
+
+  const onHandleDown = useCallback(
+    (e: React.PointerEvent, id: string, kind: 'resize' | 'rotate') => {
+      e.stopPropagation();
+      e.preventDefault();
+      const n = useBoardStore.getState().nodes[id];
+      if (!n) return;
+      const cx = n.x + n.w / 2;
+      const cy = n.y + renderHeight(n) / 2;
+      const w = handlePointerToWorld(e.clientX, e.clientY);
+      ht.current = {
+        mode: kind,
+        id,
+        cx,
+        cy,
+        startScale: n.scale ?? 1,
+        startRot: n.rot ?? 0,
+        startDist: Math.hypot(w.x - cx, w.y - cy) || 1,
+        startAng: Math.atan2(w.y - cy, w.x - cx),
+        before: captureNodes([id]),
+      };
+      window.addEventListener('pointermove', onHandleMove);
+      window.addEventListener('pointerup', onHandleUp);
+    },
+    [handlePointerToWorld, onHandleMove, onHandleUp],
+  );
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -409,6 +488,11 @@ export function BoardCanvas() {
             );
           })}
 
+        {/* 스케일·회전 핸들 — 단일 선택 시에만(드래그/박스 중엔 숨김). 러너 제외. */}
+        {selection.length === 1 && !drag && !box && nodes[selection[0]] && nodes[selection[0]].type !== 'runner' && (
+          <SelectionHandles node={nodes[selection[0]]} zoom={viewport.zoom} onHandleDown={onHandleDown} />
+        )}
+
         {/* selection box */}
         {box && (
           <div
@@ -430,5 +514,78 @@ export function BoardCanvas() {
         </div>
       )}
     </div>
+  );
+}
+
+/* 단일 선택 노드의 스케일·회전 핸들. 노드와 같은 transform(중심 회전·스케일)을 따라
+   네 모서리(스케일)와 상단(회전) 핸들을 월드 좌표에 그린다. 핸들 크기는 zoom으로
+   역보정해 화면상 ~12px로 일정하게 유지한다(world div가 zoom배 스케일되므로). */
+function SelectionHandles({
+  node,
+  zoom,
+  onHandleDown,
+}: {
+  node: BoardNode;
+  zoom: number;
+  onHandleDown: (e: React.PointerEvent, id: string, kind: 'resize' | 'rotate') => void;
+}) {
+  const s = node.scale ?? 1;
+  const r = ((node.rot ?? 0) * Math.PI) / 180;
+  const h = renderHeight(node);
+  const cx = node.x + node.w / 2;
+  const cy = node.y + h / 2;
+  const hw = (node.w * s) / 2;
+  const hh = (h * s) / 2;
+  const cos = Math.cos(r);
+  const sin = Math.sin(r);
+  const rot = (ox: number, oy: number) => ({ x: cx + ox * cos - oy * sin, y: cy + ox * sin + oy * cos });
+  const corners = [rot(-hw, -hh), rot(hw, -hh), rot(hw, hh), rot(-hw, hh)];
+  const cursors = ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize'];
+  const topMid = rot(0, -hh);
+  // 회전된 up 벡터 (sin, -cos) 방향으로 회전 핸들을 30px 띄운다.
+  const rotHandle = { x: topMid.x + sin * (30 / zoom), y: topMid.y - cos * (30 / zoom) };
+  const sz = 12 / zoom; // 화면상 ~12px
+  const bw = Math.max(1, 1.5 / zoom);
+  const dot = (x: number, y: number): React.CSSProperties => ({
+    position: 'absolute',
+    left: x,
+    top: y,
+    width: sz,
+    height: sz,
+    transform: 'translate(-50%, -50%)',
+    borderWidth: bw,
+  });
+  return (
+    <>
+      {/* 회전 핸들로 잇는 가는 선 */}
+      <svg className="pointer-events-none absolute left-0 top-0" width="1" height="1" style={{ overflow: 'visible' }}>
+        <line
+          x1={topMid.x}
+          y1={topMid.y}
+          x2={rotHandle.x}
+          y2={rotHandle.y}
+          stroke="var(--accent)"
+          strokeWidth={1 / zoom}
+          opacity={0.7}
+        />
+      </svg>
+      {/* 모서리 스케일 핸들 */}
+      {corners.map((c, i) => (
+        <div
+          key={i}
+          onPointerDown={(e) => onHandleDown(e, node.id, 'resize')}
+          className="border-accent bg-surface shadow-sm"
+          style={{ ...dot(c.x, c.y), cursor: cursors[i], borderStyle: 'solid', borderRadius: 2 }}
+          title="크기 조절 (드래그)"
+        />
+      ))}
+      {/* 회전 핸들(원형) */}
+      <div
+        onPointerDown={(e) => onHandleDown(e, node.id, 'rotate')}
+        className="border-accent bg-surface shadow-sm"
+        style={{ ...dot(rotHandle.x, rotHandle.y), cursor: 'grab', borderStyle: 'solid', borderRadius: '9999px' }}
+        title="회전 (드래그 · Shift=15°)"
+      />
+    </>
   );
 }

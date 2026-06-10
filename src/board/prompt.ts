@@ -1,5 +1,7 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { generateIntoFrame, regenImageCard, genTextCard } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint } from './workflow';
+import { parseEmptyPrimitiveRequest } from './primitives';
+import { addPrimitivesRowCmd } from './commands';
 import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import {
@@ -52,6 +54,15 @@ function openMismatch(sel: BoardNode[], text: string, intent: ReqIntent, selKind
 export function handleBoardPrompt(text: string): boolean {
   const b = useBoardStore.getState();
   const sel = b.selection.map((id) => b.nodes[id]).filter(Boolean);
+
+  // 주제 없는 "요소 N개 추가" → 빈 툴바 요소를 가로로 배치(AI 생성 안 함).
+  // 선택 유무와 무관하게 가장 먼저 처리 — "이미지 카드 3개 추가해줘"는 항상 빈 카드.
+  const prim = parseEmptyPrimitiveRequest(text);
+  if (prim) {
+    const c = viewportCenterBoardPoint();
+    addPrimitivesRowCmd(prim.type, prim.count, c.x, c.y);
+    return true;
+  }
 
   // Nothing selected → Frame Composer (a new frame is the right behavior here).
   if (sel.length === 0) {

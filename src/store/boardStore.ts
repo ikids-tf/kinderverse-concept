@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { worldBox, renderHeight } from '@/board/geometry';
 
 /* My Board state (SKILL §6, PRD §4.2). The BOARD slice (CLAUDE §5).
    Holds free primitives, workflow lanes, selection, and the viewport. Mutations
@@ -17,6 +18,10 @@ export interface BoardNode {
   text?: string;
   color?: string; // semantic token name for sticky/shape, e.g. 'accent-soft'
   locked?: boolean;
+  /** 균일 스케일 배율(중심 기준). 핸들 드래그로 조절(기본 1). */
+  scale?: number;
+  /** 회전 각(도, 중심 기준). 회전 핸들로 조절(기본 0). */
+  rot?: number;
   /** group id — nodes sharing a groupId move/select together. */
   group?: string;
   // ---- card extras (reference board model) ----
@@ -193,7 +198,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   fit: () => {
     const s = get();
     const items = [
-      ...Object.values(s.nodes),
+      ...Object.values(s.nodes).map(worldBox),
       ...Object.values(s.lanes).map((l) => ({ x: l.x, y: l.y, w: laneWidth(l), h: 320 })),
     ];
     if (items.length === 0) {
@@ -220,8 +225,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const s = get();
     const n = s.nodes[id];
     if (!n) return;
-    // Tall auto-height cards report their real height as data.renderH.
-    const h = typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : n.h;
+    // Tall auto-height cards report their real height as data.renderH; fold in the
+    // node's uniform scale so a scaled-up card still fits the view exactly.
+    const sc = n.scale ?? 1;
+    const h = renderHeight(n) * sc;
+    const w = n.w * sc;
     // Measure the ACTUAL canvas box (not a window heuristic) and the bottom prompt
     // bar, so the focused item lands exactly where the user sees center — and its
     // horizontal center lines up with the prompt bar's center.
@@ -240,15 +248,18 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const availW = Math.max(240, cr.width - padX * 2);
     const availH = Math.max(240, bottomY - cr.top - padTop);
     // Fill the view but never zoom past 2× (keeps small cards from over-magnifying).
-    const zoom = clampZoom(Math.min(availW / (n.w + gap * 2), availH / (h + gap * 2), 2));
+    const zoom = clampZoom(Math.min(availW / (w + gap * 2), availH / (h + gap * 2), 2));
+    // Center is invariant under center-anchored scale — use the geometric center.
+    const ncx = n.x + n.w / 2;
+    const ncy = n.y + renderHeight(n) / 2;
     // Horizontal target = the prompt bar's center; vertical = canvas area above it.
     const targetX = pr ? pr.left + pr.width / 2 : cr.left + cr.width / 2;
     const targetY = cr.top + padTop + availH / 2;
     set({
       viewport: {
         zoom,
-        panX: targetX - cr.left - (n.x + n.w / 2) * zoom,
-        panY: targetY - cr.top - (n.y + h / 2) * zoom,
+        panX: targetX - cr.left - ncx * zoom,
+        panY: targetY - cr.top - ncy * zoom,
       },
     });
   },

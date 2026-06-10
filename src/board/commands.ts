@@ -51,6 +51,48 @@ export function addFrameCmd(x: number, y: number, title = '프레임'): string {
   return id;
 }
 
+/** Toolbar-addable primitive types incl. frame (for bare "N개 추가" prompts). */
+export type AddableType = PrimitiveType | 'frame';
+
+const ADD_LABEL: Record<AddableType, string> = {
+  image: '이미지', text: '텍스트', sticky: '메모', shape: '도형', frame: '프레임',
+};
+
+/** Add N empty primitives in a horizontal row, centered on (cx,cy). Used by the
+    prompt bar's bare "이미지 카드 3개 추가" (no topic) path — same blank cards the
+    toolbar adds, just placed left→right. One undoable step; selects the new row. */
+export function addPrimitivesRowCmd(type: AddableType, count: number, cx: number, cy: number): string[] {
+  const n = Math.max(1, Math.min(count, 12));
+  const dim = type === 'frame'
+    ? { w: 360, h: 280 }
+    : { w: DEFAULTS[type].w ?? 180, h: DEFAULTS[type].h ?? 140 };
+  const gap = 40;
+  const totalW = n * dim.w + (n - 1) * gap;
+  let x = cx - totalW / 2;
+  const y = cy - dim.h / 2;
+  const created: BoardNode[] = [];
+  for (let i = 0; i < n; i++) {
+    const id = newId(type);
+    const node: BoardNode =
+      type === 'frame'
+        ? { id, type: 'frame', x: Math.round(x), y: Math.round(y), w: dim.w, h: dim.h, data: { title: '새 프레임' } }
+        : ({ id, type, x: Math.round(x), y: Math.round(y), w: 180, h: 140, ...DEFAULTS[type] } as BoardNode);
+    created.push(node);
+    x += dim.w + gap;
+  }
+  const ids = created.map((c) => c.id);
+  history().execute({
+    id: newId('cmd'),
+    label: `${ADD_LABEL[type]} ${n}개 추가`,
+    do: () => {
+      created.forEach((c) => board().addNodeRaw(c));
+      board().setSelection(ids);
+    },
+    undo: () => ids.forEach((id) => board().removeNodeRaw(id)),
+  });
+  return ids;
+}
+
 /** Wrap the selected nodes in a new frame that encloses them (toolbar 프레임 on a
     selection). Tags each as a child (data.frameId) so they move together, and sends
     the frame to the back so it sits behind its contents (incl. nested frames). */
@@ -209,6 +251,8 @@ export interface NodeSnap {
   w: number;
   h: number;
   color?: string;
+  scale?: number;
+  rot?: number;
   data?: Record<string, unknown>;
 }
 
@@ -217,13 +261,19 @@ function snapNodes(ids: string[]): NodeSnap[] {
   const out: NodeSnap[] = [];
   for (const id of ids) {
     const n = b.nodes[id];
-    if (n) out.push({ id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color, data: n.data ? { ...n.data } : undefined });
+    if (n)
+      out.push({
+        id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color,
+        scale: n.scale, rot: n.rot, data: n.data ? { ...n.data } : undefined,
+      });
   }
   return out;
 }
 
 function restoreNodes(snaps: NodeSnap[]) {
-  snaps.forEach((s) => board().updateNodeRaw(s.id, { x: s.x, y: s.y, w: s.w, h: s.h, color: s.color, data: s.data }));
+  snaps.forEach((s) =>
+    board().updateNodeRaw(s.id, { x: s.x, y: s.y, w: s.w, h: s.h, color: s.color, scale: s.scale, rot: s.rot, data: s.data }),
+  );
 }
 
 /** Capture a before-snapshot of node geometry+data (for an undoable redesign). */

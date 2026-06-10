@@ -17,6 +17,15 @@ import { ensureThumb } from '@/board/imageLod';
    image card (real src), and content-sized sticky/text memos. Selection ring +
    drag handled by the parent canvas via onPointerDown. */
 
+/** 균일 스케일·회전을 노드 루트에 적용(중심 기준). 핸들(BoardCanvas)이 node.scale/
+    node.rot을 바꾸면 카드 전체가 비율 그대로 커지고 회전한다. 선택 링도 함께 돈다. */
+function rootTransform(n: BoardNode): React.CSSProperties {
+  const s = n.scale ?? 1;
+  const r = n.rot ?? 0;
+  if (s === 1 && !r) return {};
+  return { transform: `rotate(${r}deg) scale(${s})`, transformOrigin: 'center center' };
+}
+
 const COLOR_BG: Record<string, string> = {
   'accent-soft': 'bg-accent-soft',
   'surface-3': 'bg-surface-3',
@@ -140,7 +149,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         className="absolute"
         // While loading, lift the whole frame above the content cards (which render
         // later in the canvas) so the spinner overlay sits on top — not behind text.
-        style={{ left, top, width: node.w, height: node.h, pointerEvents: 'none', zIndex: loading ? 50 : undefined }}
+        style={{ left, top, width: node.w, height: node.h, pointerEvents: 'none', zIndex: loading ? 50 : undefined, ...rootTransform(node) }}
       >
         <div className={`absolute inset-0 rounded-lg ${frameBg}`} />
         {/* edge grab strips — drag to move the frame */}
@@ -278,7 +287,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         onPointerDown={down}
         onDoubleClick={dbl}
         className={`absolute select-none overflow-hidden rounded-md border border-border bg-surface shadow-sm ${ring}`}
-        style={{ left, top, width: node.w }}
+        style={{ left, top, width: node.w, ...rootTransform(node) }}
       >
         <div className="relative" style={{ width: '100%', height: node.h }}>
           {node.loading ? (
@@ -351,7 +360,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           onPointerDown={down}
           onDoubleClick={dbl}
           className={`absolute z-10 flex select-none items-center justify-center rounded-2xl border-2 border-accent bg-accent px-t4 py-t3 text-center shadow-lg ${ring}`}
-          style={{ left, top, width: node.w, ...(node.autoH ? { minHeight: node.h } : { height: node.h }) }}
+          style={{ left, top, width: node.w, ...(node.autoH ? { minHeight: node.h } : { height: node.h }), ...rootTransform(node) }}
         >
           {editing ? (
             <textarea
@@ -438,7 +447,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               ? 'rounded-lg border border-border bg-surface-2 p-t4'
               : `rounded-md ${COLOR_BG[node.color ?? 'accent-soft'] ?? 'bg-accent-soft'} p-t3`
         }`}
-        style={{ left, top, width: node.w, ...(node.autoH ? { minHeight: node.h } : { height: node.h }) }}
+        style={{ left, top, width: node.w, ...(node.autoH ? { minHeight: node.h } : { height: node.h }), ...rootTransform(node) }}
       >
         {srcLinks ? (
           <SourceLinks
@@ -597,7 +606,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         onPointerDown={down}
         onDoubleClick={dbl}
         className={`absolute select-none rounded-sm px-t2 ${ring}`}
-        style={{ left, top, width: node.w, ...(node.autoH ? { minHeight: node.h } : { height: node.h }) }}
+        style={{ left, top, width: node.w, ...(node.autoH ? { minHeight: node.h } : { height: node.h }), ...rootTransform(node) }}
       >
         {editing ? (
           <textarea
@@ -623,7 +632,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     <div
       onPointerDown={down}
       className={`absolute rounded-lg border border-border ${COLOR_BG[node.color ?? 'surface-3'] ?? 'bg-surface-3'} ${ring}`}
-      style={{ left, top, width: node.w, height: node.h }}
+      style={{ left, top, width: node.w, height: node.h, ...rootTransform(node) }}
     >
       {node.locked && <LockBadge />}
     </div>
@@ -809,7 +818,7 @@ function RunnerCard({
   return (
     <div
       className={`absolute select-none rounded-xl border bg-surface shadow-lg ${selected ? 'border-accent' : 'border-border'}`}
-      style={{ left, top, width: node.w }}
+      style={{ left, top, width: node.w, ...rootTransform(node) }}
     >
       {/* drag handle / header */}
       <div

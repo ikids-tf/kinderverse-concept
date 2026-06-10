@@ -1,5 +1,6 @@
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { useFolderStore, bundleFromFrame } from '@/store/folderStore';
+import { worldBox } from './geometry';
 import type { LayoutVariant } from './design-spec';
 
 /* Frame ↔ child association for My Board. `data.frameId` is authoritative
@@ -18,16 +19,13 @@ export function geometryChildrenOf(frameId: string): string[] {
   const b = useBoardStore.getState();
   const f = b.nodes[frameId];
   if (!f || f.type !== 'frame') return [];
+  const fb = worldBox(f);
   return Object.values(b.nodes)
-    .filter(
-      (n) =>
-        n.id !== frameId &&
-        n.type !== 'frame' &&
-        n.x < f.x + f.w &&
-        n.x + n.w > f.x &&
-        n.y < f.y + f.h &&
-        n.y + Math.max(n.h, 60) > f.y,
-    )
+    .filter((n) => {
+      if (n.id === frameId || n.type === 'frame') return false;
+      const nb = worldBox(n);
+      return nb.x < fb.x + fb.w && nb.x + nb.w > fb.x && nb.y < fb.y + fb.h && nb.y + Math.max(nb.h, 60) > fb.y;
+    })
     .map((n) => n.id);
 }
 
@@ -43,7 +41,9 @@ export function frameOfPoint(x: number, y: number): string | undefined {
   const b = useBoardStore.getState();
   for (let i = b.order.length - 1; i >= 0; i--) {
     const n = b.nodes[b.order[i]];
-    if (n?.type === 'frame' && x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.h) return n.id;
+    if (n?.type !== 'frame') continue;
+    const fb = worldBox(n);
+    if (x >= fb.x && x <= fb.x + fb.w && y >= fb.y && y <= fb.y + fb.h) return n.id;
   }
   return undefined;
 }
@@ -88,10 +88,11 @@ export function fitFrameToChildren(frameId: string, seen?: Set<string>): void {
   if (!f || f.type !== 'frame') return;
   const kids = Object.values(b.nodes).filter((n) => n.data?.frameId === frameId);
   if (kids.length === 0) return;
-  const minX = Math.min(...kids.map((n) => n.x));
-  const minY = Math.min(...kids.map((n) => n.y));
-  const maxX = Math.max(...kids.map((n) => n.x + n.w));
-  const maxY = Math.max(...kids.map((n) => n.y + layoutH(n)));
+  const boxes = kids.map(worldBox);
+  const minX = Math.min(...boxes.map((bx) => bx.x));
+  const minY = Math.min(...boxes.map((bx) => bx.y));
+  const maxX = Math.max(...boxes.map((bx) => bx.x + bx.w));
+  const maxY = Math.max(...boxes.map((bx) => bx.y + bx.h));
   const x = minX - FRAME_PAD;
   const y = minY - FRAME_PAD;
   const w = maxX - minX + FRAME_PAD * 2;
