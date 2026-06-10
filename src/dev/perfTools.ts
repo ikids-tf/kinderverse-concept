@@ -27,22 +27,24 @@ import { useBoardsStore } from '@/store/boardsStore';
 
 /* ── 더미 이미지 data URI 생성 ──────────────────────────────────────────────
    실제 이미지 카드는 base64 data URI(node.src)를 쓰므로, 측정이 현실적이려면
-   더미도 같은 형태여야 한다(디코드·메모리 비용 재현). 400×300 JPEG로 생성. */
+   더미도 같은 형태여야 한다(디코드·메모리 비용 재현). 게이트웨이 생성 이미지의
+   통상 해상도를 흉내내 1024×768 JPEG로 생성 — 이미지 LOD(2-2)의 썸네일 축소
+   효과(1024→400)가 실측에 드러나도록. */
 function makeImageDataUri(i: number): string {
   const cv = document.createElement('canvas');
-  cv.width = 400;
-  cv.height = 300;
+  cv.width = 1024;
+  cv.height = 768;
   const ctx = cv.getContext('2d');
   if (!ctx) return '';
   const hue = (i * 47) % 360;
   ctx.fillStyle = `hsl(${hue} 60% 70%)`;
-  ctx.fillRect(0, 0, 400, 300);
+  ctx.fillRect(0, 0, 1024, 768);
   ctx.fillStyle = `hsl(${(hue + 180) % 360} 70% 35%)`;
-  ctx.font = 'bold 96px sans-serif';
+  ctx.font = 'bold 240px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(String(i), 200, 150);
-  // JPEG 0.72 → 카드당 ~10–20KB 수준의 현실적인 페이로드
+  ctx.fillText(String(i), 512, 384);
+  // JPEG 0.72 → 카드당 ~30–60KB 수준의 현실적인 페이로드
   return cv.toDataURL('image/jpeg', 0.72);
 }
 

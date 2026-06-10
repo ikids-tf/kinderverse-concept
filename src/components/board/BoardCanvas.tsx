@@ -3,6 +3,7 @@ import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { moveNodesCmd } from '@/board/commands';
 import { mindMapSubtree } from '@/board/composer';
 import { frameMoveSet, rebindFrameMembership } from '@/board/frames';
+import { IMG_PLACEHOLDER_ZOOM } from '@/board/imageLod';
 import { NodeView } from './NodeView';
 import { LaneView } from './LaneView';
 
@@ -92,6 +93,10 @@ export function BoardCanvas() {
 
   const inView = (n: BoardNode | undefined): boolean =>
     !!n && n.x < visible.right && n.x + n.w > visible.left && n.y < visible.bottom && n.y + n.h > visible.top;
+
+  // 저줌 LOD(2-2): 줌이 임계 미만이면 이미지 카드를 플레이스홀더로 강등.
+  // boolean이라 임계를 넘나들 때만 prop이 바뀌어 memo 효과를 해치지 않는다.
+  const lodImages = viewport.zoom < IMG_PLACEHOLDER_ZOOM;
 
   // Stable identity for the node pointer-down handler (latest-ref pattern) so
   // memo(NodeView) can skip unchanged cards on the pan/zoom hot path — a fresh
@@ -305,6 +310,7 @@ export function BoardCanvas() {
                 onPointerDown={onNodePointerDownStable}
                 dx={drag && dragIds.includes(id) ? drag.dx : 0}
                 dy={drag && dragIds.includes(id) ? drag.dy : 0}
+                lod={lodImages}
               />
             );
           })}
@@ -350,6 +356,7 @@ export function BoardCanvas() {
                 onPointerDown={onNodePointerDownStable}
                 dx={drag && dragIds.includes(id) ? drag.dx : 0}
                 dy={drag && dragIds.includes(id) ? drag.dy : 0}
+                lod={lodImages}
               />
             );
           })}

@@ -10,6 +10,7 @@ import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, 
 import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
 import { WorksheetSheet, downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-sheet';
 import { separateImageLayers } from '@/ai/layers';
+import { ensureThumb } from '@/board/imageLod';
 
 /* Renders one board node (reference board model): frame container, runner control,
    image card (real src), and content-sized sticky/text memos. Selection ring +
@@ -37,9 +38,11 @@ interface Props {
   onPointerDown: (e: React.PointerEvent, id: string) => void;
   dx?: number;
   dy?: number;
+  /** 저줌 LOD — true면 이미지 카드를 플레이스홀더+제목으로 강등(이미지 디코드 0). */
+  lod?: boolean;
 }
 
-export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Props) {
+export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = false }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(node.text ?? '');
   const [layerBusy, setLayerBusy] = useState(false);
@@ -50,6 +53,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
   useEffect(() => {
     if (editing) ref.current?.focus();
   }, [editing]);
+
+  // 이미지 LOD(2-2): 보드 표시용 ~400px 썸네일을 백그라운드 생성(원본 node.src 보존).
+  // 컬링 덕에 화면에 보인 카드만 이 이펙트를 타므로 자연히 lazy하게 처리된다.
+  useEffect(() => {
+    if (node.type === 'image' && node.src && !node.loading) ensureThumb(node.id);
+  }, [node.id, node.type, node.src, node.loading]);
 
   // Content cards report their REAL rendered (outer) height into data.renderH so
   // the containing frame can grow to wrap them exactly. node.h alone understates
@@ -230,13 +239,26 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0 }: Prop
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-surface-3 border-t-accent" />
             </div>
           ) : node.src ? (
-            <img src={node.src} alt={node.text ?? ''} draggable={false} className="h-full w-full object-cover" />
+            lod ? (
+              // 저줌 강등 — 디코드 비용 0의 플레이스홀더 + 제목(2-2)
+              <div className="flex h-full w-full items-center justify-center bg-surface-3 px-t2 text-center">
+                <span className="truncate text-overline text-fg-muted">{node.text || '이미지'}</span>
+              </div>
+            ) : (
+              // 보드 표시는 썸네일(data.thumb), 원본(node.src)은 확대/편집/내보내기용
+              <img
+                src={(node.data?.thumb as string | undefined) || node.src}
+                alt={node.text ?? ''}
+                draggable={false}
+                className="h-full w-full object-cover"
+              />
+            )
           ) : (
             <div className="flex h-full w-full items-center justify-center text-fg-muted">
               <Icon name="studio" size={24} />
             </div>
           )}
-          {node.src && (
+          {node.src && !lod && (
             <span className="absolute left-1 top-1 rounded-pill bg-fg/75 px-t2 py-0.5 text-[10px] text-on-dark">AI 생성</span>
           )}
         </div>
