@@ -193,17 +193,24 @@ export function BoardCanvas() {
     window.addEventListener('pointerup', onPointerUp);
   }
 
+  /** Start a viewport pan from a pointer-down (middle button or space-drag).
+      Shared by the background AND nodes so the middle button only ever pans the
+      canvas — it must never drag a card/frame/image. */
+  function startPan(e: React.PointerEvent) {
+    const vp = useBoardStore.getState().viewport;
+    it.current = {
+      ...it.current,
+      mode: 'pan',
+      startX: e.clientX,
+      startY: e.clientY,
+      startPan: { x: vp.panX, y: vp.panY },
+    };
+    beginWindowTracking();
+  }
+
   function onBackgroundPointerDown(e: React.PointerEvent) {
     if (e.button === 1 || spaceDown) {
-      // pan
-      it.current = {
-        ...it.current,
-        mode: 'pan',
-        startX: e.clientX,
-        startY: e.clientY,
-        startPan: { x: viewport.panX, y: viewport.panY },
-      };
-      beginWindowTracking();
+      startPan(e);
       return;
     }
     // box select
@@ -215,6 +222,12 @@ export function BoardCanvas() {
 
   function onNodePointerDown(e: React.PointerEvent, id: string) {
     e.stopPropagation();
+    // Middle button (or space-drag) over a card = pan the canvas, never move the
+    // card. The node swallows the event (stopPropagation), so handle pan here too.
+    if (e.button === 1 || spaceDown) {
+      startPan(e);
+      return;
+    }
     const b = useBoardStore.getState();
     let ids: string[];
     if (e.shiftKey) {
