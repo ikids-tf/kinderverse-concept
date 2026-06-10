@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { moveNodesCmd } from '@/board/commands';
 import { mindMapSubtree } from '@/board/composer';
-import { frameMoveSet, rebindFrameMembership } from '@/board/frames';
+import { frameMoveSet, rebindFrameMembership, frameOfPoint } from '@/board/frames';
 import { IMG_PLACEHOLDER_ZOOM } from '@/board/imageLod';
 import { NodeView } from './NodeView';
 import { LaneView } from './LaneView';
@@ -293,6 +293,16 @@ export function BoardCanvas() {
     beginWindowTracking();
   }
 
+  function onBackgroundDoubleClick(e: React.MouseEvent) {
+    // Double-click inside a frame's box (click-through interior) → focus that frame;
+    // on truly empty canvas → fit all. (A card's own dblclick stops propagation.)
+    const w = toWorld(e.clientX, e.clientY);
+    const fid = frameOfPoint(w.x, w.y);
+    const b = useBoardStore.getState();
+    if (fid) b.focusNode(fid);
+    else b.fit();
+  }
+
   function onWheel(e: React.WheelEvent) {
     if (e.deltaY === 0) return; // horizontal-only wheel/trackpad — ignore
     const forceZoom = e.ctrlKey || e.metaKey;
@@ -312,7 +322,7 @@ export function BoardCanvas() {
       data-kv-canvas
       onPointerDown={onBackgroundPointerDown}
       onWheel={onWheel}
-      onDoubleClick={() => useBoardStore.getState().fit()}
+      onDoubleClick={onBackgroundDoubleClick}
       className="relative h-full w-full overflow-hidden bg-bg"
       style={{ cursor: spaceDown ? 'grab' : 'default', touchAction: 'none' }}
     >
