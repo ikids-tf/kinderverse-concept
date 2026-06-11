@@ -296,7 +296,9 @@ export function BoardToolbar() {
 
   const addPreset = (type: ToolId, p: PresetItem) => {
     const c = viewCenterWorld();
-    addPresetNodeCmd(p.nodeType ?? type, c.x, c.y, p.patch, `${p.label} 추가`);
+    // 'video' is a tool id, not a node type — its presets are stickies (embed).
+    const fallback: NodeType = type === 'video' ? 'sticky' : type;
+    addPresetNodeCmd(p.nodeType ?? fallback, c.x, c.y, p.patch, `${p.label} 추가`);
     setFly(null);
   };
 

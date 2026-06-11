@@ -413,7 +413,7 @@ export function BoardCanvas() {
   function onPortDown(
     e: React.PointerEvent,
     nodeId: string,
-    side: 'l' | 'r',
+    _side: 'l' | 'r',
     slot: { x: number; y: number },
     detachLink?: BoardLink,
   ) {
