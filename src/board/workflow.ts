@@ -2,7 +2,12 @@ import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { buildAgentContext } from '@/ai/context';
 import { callGateway } from '@/ai/client';
 import { runPlanIdeas, runPlan } from '@/ai/agents/plan';
-import { runStudioImages, runStudioWorksheet } from '@/ai/agents/studio';
+import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImage } from '@/ai/agents/studio';
+// 의도 어휘는 단일 출처(intent-lexicon) — 로컬 정규식은 '그려' 등이 빠져 어긋났었다(P0-1).
+import { IMAGE_RE } from '@/ai/intent-lexicon';
+import { findAsset, saveAsset } from './assets';
+import { recordSpawnedNodes } from './commands';
+import { worldBox } from './geometry';
 import type { RegistryPayload } from '@/ui-registry/contracts';
 
 /* Workflow-to-board (reference board model): a "새 놀이계획" frame holds a runner
@@ -194,7 +199,12 @@ export function spawnSourceCard(
   return id;
 }
 
-export function spawnImageCard(frameId: string, src: string | undefined, caption: string): string {
+export function spawnImageCard(
+  frameId: string,
+  src: string | undefined,
+  caption: string,
+  loading = false,
+): string {
   const pos = placeInFrame(frameId, 220, 200);
   const id = newId('image');
   useBoardStore.getState().addNodeRaw({
@@ -206,6 +216,7 @@ export function spawnImageCard(frameId: string, src: string | undefined, caption
     h: 200,
     src,
     text: caption,
+    loading,
     data: { role: 'image', frameId },
   });
   return id;
@@ -341,7 +352,6 @@ export async function runWorkflowStep(runnerId: string, kind: StepKind): Promise
 }
 
 /* ---- prompt-in-place generation ---- */
-const IMAGE_RE = /이미지|그림|사진|도안|일러스트|캐릭터|배경/;
 
 async function genMemo(prompt: string, ctx: string): Promise<string> {
   const res = await callGateway({
@@ -356,16 +366,267 @@ async function genMemo(prompt: string, ctx: string): Promise<string> {
   return res.ok && res.text ? res.text.trim() : prompt;
 }
 
-/** Generate INTO a frame from a free prompt: image keywords → image cards, else memo. */
+/** Generate INTO a frame from a free prompt: image keywords → image cards, else memo.
+    컴포저와 같은 UX — 카드를 스피너로 먼저 깔고 앞에서부터 채우며, 진행 단계를
+    boardStore.generating으로 스트리밍한다(프롬프트바·상태 필에 표시). */
 export async function generateIntoFrame(frameId: string, prompt: string): Promise<void> {
   const ctx = buildAgentContext('studio');
-  if (IMAGE_RE.test(prompt)) {
-    const res = await runStudioImages(prompt, [], ctx);
-    if (res.payload.type === 'StudioGallery') res.payload.props.items.forEach((it) => spawnImageCard(frameId, it.url, it.caption));
-  } else {
-    const text = await genMemo(prompt, ctx);
-    spawnTextCard(frameId, text, 'surface-2', 280);
+  const say = (m: string) => useBoardStore.getState().setGenerating(m);
+  useBoardStore.getState().beginGen(); // 복수 생성 추적 — 마지막 작업만 메시지를 비운다
+  try {
+    if (IMAGE_RE.test(prompt)) {
+      say('🖼️ 그림 구성을 잡고 있어요…');
+      const plan = await planStudioImages(prompt, [], ctx);
+      // 보관함 조회 — 같은 이름의 단일 요소는 생성 없이 즉시 재사용(컴포저와 동일).
+      const hits = await Promise.all(plan.specs.map((s) => findAsset(s.caption, 'image').catch(() => undefined)));
+      const ids = plan.specs.map((s, i) => spawnImageCard(frameId, hits[i]?.url, s.caption, !hits[i]));
+      const b2 = useBoardStore.getState();
+      ids.forEach((cid, i) => {
+        if (!hits[i]) return;
+        const c = b2.nodes[cid];
+        if (c) b2.updateNodeRaw(cid, { data: { ...(c.data ?? {}), fromLibrary: true } });
+      });
+      const proms = plan.specs.map((s, i) =>
+        hits[i] ? null : renderStudioImage(s, plan.style).catch(() => ({ url: undefined as string | undefined, mocked: false })),
+      );
+      const total = proms.filter(Boolean).length;
+      let done = 0;
+      for (let i = 0; i < proms.length; i++) {
+        const p = proms[i];
+        if (!p) continue;
+        say(`🎨 '${plan.specs[i].caption}' 그리는 중… (${done + 1}/${total})`);
+        const img = await p;
+        done += 1;
+        useBoardStore.getState().updateNodeRaw(ids[i], { loading: false, src: img.url });
+        // 성공작은 캡션 태그로 보관함(자산 DB)에 자동 저장 — 다음 요청에서 재사용.
+        if (img.url && !img.mocked) void saveAsset(plan.specs[i].caption, 'image', img.url, plan.title);
+      }
+    } else {
+      say('🗒️ 메모를 작성하고 있어요…');
+      const text = await genMemo(prompt, ctx);
+      spawnTextCard(frameId, text, 'surface-2', 280);
+    }
+  } finally {
+    useBoardStore.getState().endGen();
   }
+}
+
+/** 보관함 추천 클릭 → 보드 위 빈 자리에 카드 배치(기존 자료·프레임과 겹치지 않게).
+    뷰포트 중앙에서 좌우로 번갈아 벌리며, 자리가 없으면 아래 줄로 내려가며 찾는다. */
+export function placeAssetOnBoard(asset: { tag: string; url: string }): string {
+  const b = useBoardStore.getState();
+  const w = 220;
+  const h = 200;
+  const GAP = 24;
+  const c = viewportCenterBoardPoint();
+  const obstacles = Object.values(b.nodes).map((n) => ({
+    x: n.x,
+    y: n.y,
+    w: n.w,
+    h: Math.max(typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : n.h, 90),
+  }));
+  const hit = (x: number, y: number) =>
+    obstacles.some((o) => x < o.x + o.w + GAP && x + w + GAP > o.x && y < o.y + o.h + GAP && y + h + GAP > o.y);
+  let pos: { x: number; y: number } | null = null;
+  const x0 = c.x - w / 2;
+  const y0 = c.y - h / 2;
+  for (let row = 0; row < 60 && !pos; row++) {
+    for (let i = 0; i < 41; i++) {
+      const x = x0 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (w + GAP);
+      const y = y0 + row * (h + GAP);
+      if (!hit(x, y)) { pos = { x, y }; break; }
+    }
+  }
+  if (!pos) pos = { x: x0, y: y0 };
+  const id = newId('image');
+  b.addNodeRaw({
+    id,
+    type: 'image',
+    x: Math.round(pos.x),
+    y: Math.round(pos.y),
+    w,
+    h,
+    src: asset.url,
+    text: asset.tag,
+    data: { role: 'image', fromLibrary: true },
+  });
+  recordSpawnedNodes([id], '보관함 자료 추가');
+  b.setSelection([id]);
+  return id;
+}
+
+/* ---- 유튜브 뷰어 + 프롬프트 = 영상 검색 → 뷰어 아래 썸네일 가로 배열 ---- */
+
+/** "공룡 영상 검색해줘" → 검색어만 남긴다(영상/검색/지시 어미 제거). */
+function ytQuery(text: string): string {
+  const q = text
+    .replace(/(동영상|영상|비디오|유튜브|유투브)/g, ' ')
+    .replace(/(검색|찾아|틀어|보여|재생|추천|올려)\s*(해|줘|주세요|봐|볼래|줄래)*\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return q || text.trim();
+}
+
+/** 유튜브 뷰어 카드를 선택하고 영상을 요청하면: 로딩 썸네일 카드를 뷰어 바로
+    아래 가로로 깔고 → 검색 결과(제목+썸네일)로 채운다. 썸네일의 ▶를 누르면
+    그 영상이 뷰어에서 바로 재생된다(NodeView의 kv:yt-play 이벤트). */
+export async function searchVideosForViewer(viewerId: string, text: string, count = 3): Promise<void> {
+  const b = useBoardStore.getState();
+  const viewer = b.nodes[viewerId];
+  if (!viewer) return;
+  const q = ytQuery(text);
+  b.beginGen();
+  b.setGenerating(`🔎 유튜브에서 '${q}' 영상을 찾고 있어요…`);
+
+  const W = 168;
+  const H = 94; // 16:9 썸네일 — 제목 캡션은 카드가 아래로 덧그린다
+  const GAPX = 12;
+  const GAPY = 20;
+  const CAPTION = 34; // 캡션이 카드 아래로 차지하는 대략 높이(겹침 판정용)
+  // 뷰어가 리사이즈/스케일된 어떤 크기여도 — 월드 박스 기준으로 그 '아래'에 깐다.
+  const vb = worldBox(viewer);
+  const rowW = count * W + (count - 1) * GAPX;
+  // 이전 검색 결과 등 기존 카드와 겹치면 행 단위로 아래로 비켜 내린다.
+  const others = Object.values(b.nodes).filter((n) => n.id !== viewerId);
+  const rowHits = (yy: number) =>
+    others.some((n) => {
+      const o = worldBox(n);
+      return vb.x < o.x + o.w + GAPX && vb.x + rowW + GAPX > o.x && yy < o.y + o.h + GAPY && yy + H + CAPTION + GAPY > o.y;
+    });
+  let rowY = Math.round(vb.y + vb.h + GAPY);
+  while (rowHits(rowY)) rowY += H + CAPTION + GAPY;
+
+  const ids: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const id = newId('image');
+    b.addNodeRaw({
+      id,
+      type: 'image',
+      x: Math.round(vb.x + i * (W + GAPX)),
+      y: rowY,
+      w: W,
+      h: H,
+      loading: true,
+      data: { role: 'yt-result', ytTarget: viewerId },
+    });
+    ids.push(id);
+  }
+
+  try {
+    const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(q)}&n=${count}`);
+    const json = (await res.json()) as {
+      ok: boolean;
+      results?: { id: string; title: string; channel?: string }[];
+      error?: string;
+    };
+    const results = json.ok && json.results?.length ? json.results : null;
+    if (!results) throw new Error(json.error || '검색 결과 없음');
+    const bb = useBoardStore.getState();
+    ids.forEach((cardId, i) => {
+      if (!bb.nodes[cardId]) return; // 기다리는 동안 사용자가 지운 카드
+      const v = results[i];
+      if (!v) {
+        bb.removeNodeRaw(cardId); // 결과가 모자라면 빈 카드는 거둔다
+        return;
+      }
+      bb.updateNodeRaw(cardId, {
+        src: `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+        text: v.title,
+        loading: false,
+        // thumb: '' — 교차 출처라 캔버스 축소 불가, 원본(이미 480px)을 그대로 표시
+        data: { role: 'yt-result', ytTarget: viewerId, ytId: v.id, thumb: '' },
+      });
+    });
+    recordSpawnedNodes(ids.filter((id) => useBoardStore.getState().nodes[id]), '영상 검색');
+  } catch (e) {
+    // 실패 — 로딩 카드를 거두고 자리에 안내 메모 하나만 남긴다.
+    const bb = useBoardStore.getState();
+    ids.forEach((id) => bb.removeNodeRaw(id));
+    const noteId = newId('sticky');
+    bb.addNodeRaw({
+      id: noteId,
+      type: 'sticky',
+      x: Math.round(vb.x),
+      y: rowY,
+      w: 320,
+      h: 80,
+      autoH: true,
+      text: `⚠️ '${q}' 영상을 찾지 못했어요 — 네트워크를 확인하고 다시 요청해 주세요.\n(${e instanceof Error ? e.message : String(e)})`,
+      data: { color: 'accent-soft' },
+    });
+    recordSpawnedNodes([noteId], '영상 검색 실패 안내');
+  } finally {
+    useBoardStore.getState().endGen();
+  }
+}
+
+/* ---- 프레임으로 묶기 → 내용 분석 자동 제목 ---- */
+
+/** 흔한 일반어 — 제목 키워드로 의미가 없어 제외. */
+const TITLE_STOP = new Set([
+  '영상', '동영상', '유튜브', '이미지', '사진', '자료', '카드', '메모', '프레임', '뷰어',
+  '모음', '모음집', '하이라이트', '전편', '연속', '재생', '인기', '동요', '동화',
+]);
+
+/** LLM 없이도 그럴듯한 제목 — 자식 텍스트에서 최빈 키워드를 뽑는다. */
+function keywordTitle(texts: string[], kids: BoardNode[]): string {
+  const freq = new Map<string, number>();
+  for (const t of texts) {
+    for (const raw of t.split(/[^0-9A-Za-z가-힣]+/)) {
+      const w = raw.trim();
+      if (w.length < 2 || w.length > 10 || TITLE_STOP.has(w)) continue;
+      freq.set(w, (freq.get(w) ?? 0) + 1);
+    }
+  }
+  const top = [...freq.entries()].sort((a, z) => z[1] - a[1])[0];
+  const allVideo = kids.every((n) => n.data?.role === 'yt-result' || typeof n.data?.embed === 'string');
+  if (top && top[1] >= 2) return `${top[0]} ${allVideo ? '동영상' : '자료'} 모음`;
+  if (allVideo) return '동영상 모음';
+  if (kids.every((n) => n.type === 'image')) return '이미지 모음';
+  return '자료 모음';
+}
+
+/** 선택을 프레임으로 묶은 직후 — 자식 내용(캡션·메모·문서·임베드 제목)을 분석해
+    어울리는 짧은 제목을 자동으로 붙인다. 저가 티어 LLM 한 번, 키가 없거나 실패
+    하면 키워드 휴리스틱 폴백. 그새 사용자가 제목을 직접 바꿨으면 덮어쓰지 않는다. */
+export async function autoTitleFrame(frameId: string): Promise<void> {
+  const b = useBoardStore.getState();
+  const frame = b.nodes[frameId];
+  if (!frame) return;
+  const kids = Object.values(b.nodes).filter((n) => n.data?.frameId === frameId);
+  const texts = kids
+    .map((n) => ((typeof n.data?.title === 'string' && n.data.title) || n.text || '').split('\n')[0].trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  if (!kids.length || !texts.length) return;
+
+  let title = '';
+  try {
+    const res = await callGateway({
+      task: 'writing',
+      provider: 'auto',
+      tier: 'low',
+      maxTokens: 40,
+      messages: [{
+        role: 'user',
+        content:
+          `다음은 유아 교사의 보드에서 한 프레임으로 묶인 자료들의 제목/내용이다. ` +
+          `이 묶음 전체에 어울리는 간단한 한국어 제목을 4~12자로 딱 하나만, 따옴표나 설명 없이 출력하라.\n` +
+          texts.map((t) => `- ${t.slice(0, 60)}`).join('\n'),
+      }],
+    });
+    if (res.ok && res.text && !res.mocked) {
+      title = res.text.trim().split('\n')[0].replace(/^["'「『]+|["'」』.]+$/g, '').slice(0, 20);
+    }
+  } catch { /* 키 없음/실패 → 휴리스틱 폴백 */ }
+  if (!title) title = keywordTitle(texts, kids);
+  if (!title) return;
+
+  const cur = useBoardStore.getState().nodes[frameId];
+  if (!cur) return; // 기다리는 동안 프레임이 지워짐(undo 등)
+  const curTitle = (cur.data?.title as string) ?? '';
+  if (curTitle && curTitle !== '새 프레임') return; // 사용자가 먼저 이름 지음
+  useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(cur.data ?? {}), title } });
 }
 
 /** Regenerate an image card from a prompt. */

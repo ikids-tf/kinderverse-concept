@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GLB 뷰어</title>
+<!-- Google model-viewer — GLB/glTF 3D 뷰어 웹컴포넌트 -->
+<script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+<style>
+  /* Milray Park 토큰과 동일 값(독립 HTML이라 변수로 복제) — 임의 색 추가 없음 */
+  :root {
+    --bg: #F8F7F2;
+    --bg-deep: #F1EEE6;
+    --surface: #FFFFFF;
+    --border: #E7E0D4;
+    --fg: #141311;
+    --fg-2: #56524B;
+    --fg-muted: #8C887F;
+    --accent: #F2733E;
+    --accent-hover: #E5602B;
+    --accent-soft: #FBE6D9;
+    --font-sans: 'Pretendard', 'Hanken Grotesk', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex;
+    flex-direction: column;
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--fg);
+  }
+
+  /* ── 상단: 파일 선택 ───────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font: 600 13px var(--font-sans);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--accent-hover); }
+  #name {
+    flex: 1;
+    overflow: hidden;
+    font-size: 12px;
+    color: var(--fg-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── 가운데: 3D 뷰 ─────────────────────────────────────────────── */
+  model-viewer {
+    flex: 1;
+    width: 100%;
+    height: 100%; /* 웹컴포넌트 기본(:host 300×150) 높이 고정 해제 — 영역을 꽉 채운다 */
+    min-height: 0;
+    background: var(--bg-deep);
+  }
+  #empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--fg-muted);
+    font-size: 13px;
+    pointer-events: none;
+  }
+  #empty .cube { font-size: 34px; }
+  .stage { position: relative; flex: 1; display: flex; min-height: 0; }
+
+  /* ── 하단: 애니메이션 목록 ─────────────────────────────────────── */
+  footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  footer .label { font-size: 11px; font-weight: 600; color: var(--fg-muted); margin-right: 2px; }
+  footer .hint { font-size: 12px; color: var(--fg-muted); }
+  footer button {
+    max-width: 150px;
+    overflow: hidden;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-2);
+    font: 500 12px var(--font-sans);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  footer button:hover { border-color: var(--accent); color: var(--accent); }
+  footer button.on {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+
+  /* ── 하단: 3D 보관함 썸네일 — 불러온 모델을 가로로 펼쳐 보여주고, 클릭하면 적용 ── */
+  #thumbs {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+    overflow-x: auto;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  #thumbs:empty { display: none; }
+  .thumb {
+    position: relative;
+    flex: 0 0 auto;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-deep) center / cover no-repeat;
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .thumb:hover { border-color: var(--accent); }
+  .thumb.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .thumb .thumb-x {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-muted);
+    font-size: 8px;
+    line-height: 1;
+  }
+  .thumb:hover .thumb-x { display: inline-flex; }
+  .thumb .thumb-x:hover { border-color: var(--accent); color: var(--accent); }
+  body.present #thumbs { display: none; }
+
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-2);
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── 프레젠테이션(수업) 모드 — 메뉴 숨김 + 배경 투명 → 보드 위에 3D만 ─── */
+  #exit { position: absolute; top: 8px; right: 8px; display: none; z-index: 10; opacity: 0.55; }
+  #exit:hover { opacity: 1; }
+  body.present { background: transparent; }
+  body.present header { display: none; }
+  body.present model-viewer { background: transparent; }
+  body.present #exit { display: inline-flex; }
+
+  /* 프레젠테이션에서 애니메이션 목록은 '하단 중앙의 작은 플로팅 바'로 — 작은 버튼·
+     작은 글씨로 동작을 골라 관찰. (#animToggle로 숨기고 다시 볼 수 있다) */
+  body.present footer {
+    position: fixed;
+    left: 50%;
+    bottom: 6px;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: min(96%, 880px);
+    justify-content: center;
+    gap: 4px;
+    /* 가로 최대 2줄 — 그 이상은 바 안에서 스크롤(3D를 가리지 않는다) */
+    max-height: 52px;
+    overflow-y: auto;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(4px);
+    box-shadow: 0 4px 14px rgba(20, 19, 17, 0.08);
+    z-index: 9;
+  }
+  body.present footer .label { display: none; }
+  body.present footer button { max-width: 110px; padding: 2px 8px; font-size: 10px; }
+  body.present footer .hint { font-size: 10px; }
+  body.present.anims-off footer { display: none; }
+
+  #animToggle {
+    position: fixed;
+    right: 8px;
+    bottom: 64px; /* 2줄 애니메이션 바 바로 위 — 바와 겹치지 않게 */
+    z-index: 10;
+    display: none;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-2);
+    font: 600 10px var(--font-sans);
+    cursor: pointer;
+    opacity: 0.55;
+  }
+  #animToggle:hover { opacity: 1; border-color: var(--accent); color: var(--accent); }
+  body.present #animToggle { display: inline-flex; }
+</style>
+</head>
+<body>
+  <header>
+    <label class="btn">
+      파일 선택
+      <input id="file" type="file" accept=".glb,.gltf,model/gltf-binary" hidden />
+    </label>
+    <span id="name">GLB 파일을 선택하세요</span>
+    <button id="fs" class="icon-btn" type="button" title="전체 화면 (수업용 — 메뉴 숨기고 보드 위에 3D만)">⛶</button>
+  </header>
+
+  <div class="stage">
+    <model-viewer
+      id="mv"
+      camera-controls
+      autoplay
+      interaction-prompt="none"
+      shadow-intensity="0.6"
+      exposure="1"
+    ></model-viewer>
+    <div id="empty">
+      <span class="cube">🧊</span>
+      <span>파일 선택으로 GLB/glTF 모델을 불러오세요</span>
+    </div>
+    <button id="exit" class="icon-btn" type="button" title="프레젠테이션 종료">✕</button>
+    <button id="animToggle" type="button" title="애니메이션 목록 보이기/숨기기">동작 숨기기</button>
+  </div>
+
+  <div id="thumbs"></div>
+  <footer id="anims"><span class="hint">모델을 불러오면 애니메이션 목록이 표시돼요</span></footer>
+
+  <script type="module">
+    const mv = document.getElementById('mv');
+    const file = document.getElementById('file');
+    const nameEl = document.getElementById('name');
+    const animsEl = document.getElementById('anims');
+    const emptyEl = document.getElementById('empty');
+    let objectUrl = null;
+
+    file.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(f);
+      nameEl.textContent = f.name;
+      // 로드가 성공하면 썸네일을 찍어 보관함(IndexedDB)에 저장한다.
+      pendingSave = { id: `${f.name}:${f.size}`, name: f.name, blob: f };
+      mv.src = objectUrl;
+    });
+
+    // ── 3D 보관함 — 불러온 모델을 IndexedDB에 저장, 하단 썸네일 클릭으로 바로 적용 ──
+    const thumbsEl = document.getElementById('thumbs');
+    const STORE = 'models';
+    const idb = () => new Promise((res, rej) => {
+      const r = indexedDB.open('kv-glb-lib', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: 'id' });
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    const idbPut = async (rec) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(rec); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
+    const idbAll = async () => { const d = await idb(); return new Promise((res, rej) => { const q = d.transaction(STORE).objectStore(STORE).getAll(); q.onsuccess = () => res(q.result || []); q.onerror = () => rej(q.error); }); };
+    const idbDel = async (id) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction(STORE, 'readwrite'); t.objectStore(STORE).delete(id); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
+
+    let activeId = null;
+    let pendingSave = null;
+
+    // 현재 프레임을 작은 정사각 썸네일(112px)로 캡처 — IDB 용량 절약.
+    async function captureThumb() {
+      try {
+        await new Promise((r) => setTimeout(r, 350)); // 첫 프레임 렌더 대기
+        const img = new Image();
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = mv.toDataURL('image/png'); });
+        const s = 112;
+        const c = document.createElement('canvas');
+        c.width = s; c.height = s;
+        const k = Math.max(s / img.width, s / img.height);
+        c.getContext('2d').drawImage(img, (s - img.width * k) / 2, (s - img.height * k) / 2, img.width * k, img.height * k);
+        return c.toDataURL('image/png');
+      } catch { return ''; }
+    }
+
+    async function renderThumbs() {
+      let list = [];
+      try { list = (await idbAll()).sort((a, b) => a.createdAt - b.createdAt); } catch { return; }
+      thumbsEl.innerHTML = '';
+      for (const rec of list) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'thumb' + (rec.id === activeId ? ' on' : '');
+        b.title = rec.name;
+        if (rec.thumb) b.style.backgroundImage = `url(${rec.thumb})`;
+        else b.textContent = '🧊';
+        b.addEventListener('click', () => {
+          if (rec.id === activeId) return;
+          pendingSave = null; // 이미 보관함에 있는 모델 — 다시 저장하지 않는다
+          activeId = rec.id;
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+          objectUrl = URL.createObjectURL(rec.blob);
+          nameEl.textContent = rec.name;
+          mv.src = objectUrl;
+          [...thumbsEl.querySelectorAll('.thumb')].forEach((c) => c.classList.toggle('on', c === b));
+        });
+        const x = document.createElement('span');
+        x.className = 'thumb-x';
+        x.textContent = '✕';
+        x.title = '보관함에서 제거';
+        x.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await idbDel(rec.id).catch(() => {});
+          if (activeId === rec.id) activeId = null;
+          renderThumbs();
+        });
+        b.append(x);
+        thumbsEl.append(b);
+      }
+    }
+    renderThumbs();
+
+    // 모델 로드 완료 → 애니메이션 목록을 버튼으로. 클릭하면 그 애니메이션 재생.
+    function renderAnims(list) {
+      animsEl.innerHTML = '';
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = '애니메이션';
+      animsEl.append(label);
+      if (!list.length) {
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = '이 모델에는 애니메이션이 없어요';
+        animsEl.append(hint);
+        return;
+      }
+      // 'HermitCrabAll_Walk'처럼 공통 접두사가 길면 떼고 짧은 이름만 표시(전체는 title).
+      let prefix = '';
+      if (list.length > 1) {
+        prefix = list[0];
+        for (const n of list) {
+          while (prefix && !n.startsWith(prefix)) prefix = prefix.slice(0, -1);
+        }
+        if (prefix.length < 4) prefix = '';
+      }
+      list.forEach((n, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = prefix ? (n.slice(prefix.length).replace(/^[_\-. ]+/, '') || n) : n;
+        b.title = n;
+        b.addEventListener('click', () => {
+          mv.animationName = n;
+          mv.play({ repetitions: Infinity });
+          [...animsEl.querySelectorAll('button')].forEach((c) => c.classList.toggle('on', c === b));
+        });
+        animsEl.append(b);
+        if (i === 0) b.click(); // 첫 애니메이션 자동 재생
+      });
+    }
+
+    mv.addEventListener('load', async () => {
+      emptyEl.style.display = 'none';
+      renderAnims(mv.availableAnimations || []);
+      // 새로 불러온 파일이면 썸네일 캡처 후 보관함에 저장 → 하단 스트립 갱신.
+      if (pendingSave) {
+        const rec = { ...pendingSave, createdAt: Date.now(), thumb: await captureThumb() };
+        pendingSave = null;
+        activeId = rec.id;
+        try { await idbPut(rec); } catch { /* 저장 실패해도 보기에는 지장 없음 */ }
+        renderThumbs();
+      }
+    });
+
+    mv.addEventListener('error', () => {
+      nameEl.textContent = '모델을 불러오지 못했어요 — GLB/glTF 파일인지 확인해 주세요';
+    });
+
+    // ── 프레젠테이션(수업) 모드 — 메뉴 숨김 + 배경 투명. 부모(보드 카드)에도
+    //    postMessage로 알려 카드 테두리·헤더를 함께 숨긴다 → 보드 위에 3D만 보인다.
+    const setPresent = (on) => {
+      document.body.classList.toggle('present', on);
+      try { window.parent?.postMessage({ type: 'kv-embed-present', on }, '*'); } catch { /* standalone */ }
+    };
+    document.getElementById('fs').addEventListener('click', () => setPresent(true));
+    document.getElementById('exit').addEventListener('click', () => setPresent(false));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setPresent(false); });
+
+    // 프레젠테이션 중 애니메이션 바 보이기/숨기기 토글.
+    const animToggle = document.getElementById('animToggle');
+    animToggle.addEventListener('click', () => {
+      const off = document.body.classList.toggle('anims-off');
+      animToggle.textContent = off ? '동작 보기' : '동작 숨기기';
+    });
+
+    // 외부(보드 카드 등)에서 URL로 바로 로드할 수 있게 — 테스트·딥링크용.
+    window.loadSrc = (u) => { mv.src = u; nameEl.textContent = u.split('/').pop(); };
+    window.__renderAnims = renderAnims; // 테스트용(목록 렌더 주입)
+    window.__thumbs = { idbPut, idbAll, idbDel, renderThumbs }; // 테스트용(보관함 주입)
+    const q = new URLSearchParams(location.search).get('src');
+    if (q) window.loadSrc(q);
+  </script>
+</body>
+</html>

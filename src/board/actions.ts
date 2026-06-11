@@ -56,6 +56,27 @@ export function runBoardOp(ids: string[], m: BoardOpMatch): string | null {
       pushRedesign(ids, before, m.op === 'resize_up' ? '크게' : '작게');
       return m.op === 'resize_up' ? '크게' : '작게';
     }
+    case 'match_size': {
+      // 크기 통일: 첫 선택(앵커) 카드의 '월드 크기'(스케일 반영)에 나머지를 맞춘다.
+      // 너비를 기준으로 각 카드의 고유 비율은 유지(16:9 썸네일이 찌그러지지 않게),
+      // 스케일은 1로 접어 명목 크기와 화면 크기를 일치시킨다.
+      const items = nodes.filter((n) => !n.locked);
+      if (items.length < 2) return null;
+      const before = captureNodes(ids);
+      const anchor = items[0];
+      const aw = anchor.w * (anchor.scale ?? 1);
+      for (const n of items.slice(1)) {
+        const k = aw / n.w;
+        const patch: { w: number; h?: number; scale: number } = {
+          w: Math.max(80, Math.round(aw)),
+          scale: 1,
+        };
+        if (!n.autoH) patch.h = Math.max(60, Math.round(n.h * k));
+        b.updateNodeRaw(n.id, patch);
+      }
+      pushRedesign(ids, before, '크기 맞춤');
+      return '크기 맞춤';
+    }
     case 'recolor': {
       const color = m.color ?? 'accent-soft';
       const targets = nodes.filter((n) => (n.type === 'sticky' || n.type === 'shape') && !n.locked);

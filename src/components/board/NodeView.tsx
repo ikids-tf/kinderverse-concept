@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Icon } from '@/lib/icons';
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { editTextCmd } from '@/board/commands';
+import { editTextCmd, captureNodes, pushRedesign } from '@/board/commands';
 import { runWorkflowStep, type RunnerData, type StepKind } from '@/board/workflow';
 import { saveFrameToFolder, fitFrameToChildren } from '@/board/frames';
-import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, type ComposerChip } from '@/board/composer';
+import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
 import type { RouteTarget } from '@/ai/contract';
 import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
 import { WorksheetSheet, downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-sheet';
@@ -16,6 +17,10 @@ import { ensureThumb } from '@/board/imageLod';
 /* Renders one board node (reference board model): frame container, runner control,
    image card (real src), and content-sized sticky/text memos. Selection ring +
    drag handled by the parent canvas via onPointerDown. */
+
+/** 텍스트 스타일 바가 열려 있는 동안 '바닥 고정'으로 동작할 노드 id들(트랜지언트 —
+    스토어/undo/영속화에 포함되지 않는다). 사이즈 옵저버가 높이 변화 시 y를 보정한다. */
+const BOTTOM_ANCHORED = new Set<string>();
 
 /** 균일 스케일·회전을 노드 루트에 적용(중심 기준). 핸들(BoardCanvas)이 node.scale/
     node.rot을 바꾸면 카드 전체가 비율 그대로 커지고 회전한다. 선택 링도 함께 돈다. */
@@ -67,6 +72,52 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const [layerBusy, setLayerBusy] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  // 임베드 카드(GLB 뷰어) 프레젠테이션 모드 — iframe이 postMessage로 켜고 끈다.
+  const [embedPresent, setEmbedPresent] = useState(false);
+  const embedFrameRef = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    if (typeof node.data?.embed !== 'string') return;
+    const onMsg = (e: MessageEvent) => {
+      if (e.source !== embedFrameRef.current?.contentWindow) return;
+      const d = e.data as { type?: string; on?: boolean } | null;
+      if (d?.type === 'kv-embed-present') {
+        setEmbedPresent(!!d.on);
+        // 프레젠테이션 진입 → 카드를 화면 중앙에 풀로(센터+줌) + 선택해서 모서리
+        // 스케일 핸들로 크기를 더 키울 수 있게 한다.
+        if (d.on) {
+          const b = useBoardStore.getState();
+          b.setSelection([node.id]);
+          b.focusNode(node.id);
+        }
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, [node.data?.embed]);
+  // 유튜브 검색 결과 카드의 ▶ → 이 뷰어(iframe)의 loadSrc로 바로 재생.
+  // kv:yt-propose — 다른 요소와 선이 연결되면 뷰어 안에 "영상을 찾아 연결할까요?"
+  // 확인 카드를 띄운다(확인 → 뷰어가 직접 검색해 재생).
+  useEffect(() => {
+    if (typeof node.data?.embed !== 'string') return;
+    const onPlay = (e: Event) => {
+      const d = (e as CustomEvent).detail as { videoId?: string; target?: string } | null;
+      if (!d?.videoId || d.target !== node.id) return;
+      const w = embedFrameRef.current?.contentWindow as (Window & { loadSrc?: (u: string) => void }) | null;
+      w?.loadSrc?.(d.videoId);
+    };
+    const onPropose = (e: Event) => {
+      const d = (e as CustomEvent).detail as { topic?: string; target?: string } | null;
+      if (!d?.topic || d.target !== node.id) return;
+      const w = embedFrameRef.current?.contentWindow as (Window & { proposeSearch?: (t: string) => void }) | null;
+      w?.proposeSearch?.(d.topic);
+    };
+    window.addEventListener('kv:yt-play', onPlay);
+    window.addEventListener('kv:yt-propose', onPropose);
+    return () => {
+      window.removeEventListener('kv:yt-play', onPlay);
+      window.removeEventListener('kv:yt-propose', onPropose);
+    };
+  }, [node.id, node.data?.embed]);
   const editable = node.type === 'sticky' || node.type === 'text' || node.type === 'image';
 
   useEffect(() => {
@@ -89,18 +140,34 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     if (!el) return;
     const sync = () => {
       const h = Math.round(el.offsetHeight);
+      const w = Math.round(el.offsetWidth);
       const cur = useBoardStore.getState().nodes[node.id];
       if (!cur) return;
       const prev = typeof cur.data?.renderH === 'number' ? cur.data.renderH : 0;
-      if (Math.abs(prev - h) <= 1) return;
-      useBoardStore.getState().updateNodeRaw(node.id, { data: { ...(cur.data ?? {}), renderH: h } });
+      // 텍스트 카드는 폭이 내용에 핏(fit-content)이므로 실측 폭을 node.w로 동기화 —
+      // 선택 링·스케일 핸들·프레임 감싸기가 보이는 그대로의 박스를 쓰게 한다.
+      const wDrift = cur.type === 'text' && w > 0 && Math.abs(cur.w - w) > 1;
+      const hDrift = Math.abs(prev - h) > 1;
+      if (!hDrift && !wDrift) return;
+      // 바닥 고정(텍스트 스타일 바가 열려 있는 동안): 높이가 변해도 아래 모서리가
+      // 제자리이도록 y를 보정 → 박스가 '위로' 자라고, 박스 하단에 붙은 스타일 바가
+      // 사이즈 호버/변경에도 움직이지 않는다.
+      const anchor = cur.type === 'text' && BOTTOM_ANCHORED.has(node.id) && prev > 0 && hDrift;
+      useBoardStore.getState().updateNodeRaw(node.id, {
+        ...(wDrift ? { w } : {}),
+        ...(anchor ? { y: cur.y + (prev - h) } : {}),
+        data: { ...(cur.data ?? {}), renderH: h },
+      });
       const fid = cur.data?.frameId as string | undefined;
       if (fid) fitFrameToChildren(fid);
     };
     const ro = new ResizeObserver(sync);
     ro.observe(el);
+    // 외부 코드(레이아웃 등)가 store의 w를 덮어써도 화면 크기는 그대로라 RO가 발화하지
+    // 않는다 — node.w가 바뀔 때 effect를 다시 돌려 실측값으로 즉시 교정한다(텍스트 핏).
+    sync();
     return () => ro.disconnect();
-  }, [node.id, measured]);
+  }, [node.id, measured, node.w]);
 
   function commit() {
     setEditing(false);
@@ -189,6 +256,10 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           ) : (
             title
           )}
+          {/* 생성 작업이 진행 중인 프레임 — 제목 탭에 미니 스피너 */}
+          {!!node.data?.working && !editing && (
+            <span className="ml-t1 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent opacity-80" />
+          )}
         </div>
 
         {/* save the whole frame to one folder (top composer frame only) */}
@@ -208,58 +279,84 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         </button>
         )}
 
-        {/* next-step recommendation chips (subtle, never auto-run) */}
-        {!isSub && chips.length > 0 && (
+        {/* 프레임 하단 안내 행들(추천 칩 · 정정 칩 · 보관함 안내) — 하나의 세로 flex
+            컨테이너로 자연 스택. 칩이 줄바꿈돼도 다음 행이 절대 겹치지 않는다(이전:
+            고정 오프셋 가정이라 칩 두 줄이면 행끼리 겹쳤다). 좁은 프레임에서도 한
+            줄에 담기도록 최소 폭을 보장한다. */}
+        {!isSub &&
+          (chips.length > 0 ||
+            typeof node.data?.sourcePrompt === 'string' ||
+            !!(node.data?.libNotice as { items?: unknown[] } | undefined)?.items?.length) && (
           <div
-            className="absolute left-0 flex flex-wrap items-center gap-t1"
-            style={{ top: node.h + 8, width: node.w, pointerEvents: 'auto' }}
+            className="absolute left-0 flex flex-col items-start gap-t2"
+            style={{ top: node.h + 8, width: Math.max(node.w, 480), pointerEvents: 'auto' }}
           >
-            <span className="text-overline text-fg-muted">추천</span>
-            {chips.map((chip) => (
-              <button
-                key={chip.id}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => { e.stopPropagation(); if (chip.status !== 'running') void runComposerChip(node.id, chip.id); }}
-                disabled={chip.status === 'running'}
-                className={`inline-flex items-center gap-t1 rounded-pill border px-t3 py-t1 text-sm shadow-sm backdrop-blur transition-colors duration-150 ease-soft ${
-                  chip.status === 'done'
-                    ? 'border-border bg-surface/70 text-fg-muted'
-                    : 'border-border bg-surface/95 text-fg-2 hover:border-accent hover:text-accent'
-                }`}
-              >
-                {chip.status === 'running' ? (
-                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-surface-3 border-t-accent" />
-                ) : (
-                  <Icon name="sparkle" size={12} className="text-accent" />
-                )}
-                {chip.label}
-              </button>
-            ))}
-          </div>
-        )}
+            {/* next-step recommendation chips (subtle, never auto-run) */}
+            {chips.length > 0 && (
+              <div className="flex flex-wrap items-center gap-t1">
+                <span className="text-overline text-fg-muted">추천</span>
+                {chips.map((chip) => (
+                  <button
+                    key={chip.id}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); if (chip.status !== 'running') void runComposerChip(node.id, chip.id); }}
+                    disabled={chip.status === 'running'}
+                    className={`inline-flex items-center gap-t1 rounded-pill border px-t3 py-t1 text-sm shadow-sm backdrop-blur transition-colors duration-150 ease-soft ${
+                      chip.status === 'done'
+                        ? 'border-border bg-surface/70 text-fg-muted'
+                        : 'border-border bg-surface/95 text-fg-2 hover:border-accent hover:text-accent'
+                    }`}
+                  >
+                    {chip.status === 'running' ? (
+                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-surface-3 border-t-accent" />
+                    ) : (
+                      <Icon name="sparkle" size={12} className="text-accent" />
+                    )}
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
-        {/* 정정 칩(P3-10) — 라우팅이 틀렸을 때 같은 프롬프트를 다른 유형으로 */}
-        {!isSub && typeof node.data?.sourcePrompt === 'string' && (
-          <div
-            className="absolute left-0 flex flex-wrap items-center gap-t1"
-            style={{ top: node.h + (chips.length > 0 ? 44 : 8), width: node.w, pointerEvents: 'auto' }}
-          >
-            <span className="text-overline text-fg-muted">다른 결과를 원하셨나요?</span>
-            {REROUTES.filter(
-              (r) => r.tid !== (node.data?.mindmap ? 'mindmap' : (node.data?.templateId as string)),
-            ).map((r) => (
-              <button
-                key={r.route}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void composeFromPrompt(node.data?.sourcePrompt as string, r.route);
-                }}
-                className="inline-flex items-center gap-t1 rounded-pill border border-border bg-surface/80 px-t2 py-0.5 text-overline text-fg-muted hover:border-accent hover:text-accent"
-              >
-                {r.label}
-              </button>
-            ))}
+            {/* 정정 칩(P3-10) — 라우팅이 틀렸을 때 같은 프롬프트를 다른 유형으로 */}
+            {typeof node.data?.sourcePrompt === 'string' && (
+              <div className="flex flex-wrap items-center gap-t1">
+                <span className="text-overline text-fg-muted">다른 결과를 원하셨나요?</span>
+                {REROUTES.filter(
+                  (r) => r.tid !== (node.data?.mindmap ? 'mindmap' : (node.data?.templateId as string)),
+                ).map((r) => (
+                  <button
+                    key={r.route}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void composeFromPrompt(node.data?.sourcePrompt as string, r.route);
+                    }}
+                    className="inline-flex items-center gap-t1 rounded-pill border border-border bg-surface/80 px-t2 py-0.5 text-overline text-fg-muted hover:border-accent hover:text-accent"
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* 보관함 재사용 안내 — 같은 이름의 그림을 생성 없이 가져다 썼을 때.
+                [새로 생성]을 누르면 해당 카드들만 새 이미지로 다시 만든다. */}
+            {!!(node.data?.libNotice as { items?: unknown[] } | undefined)?.items?.length && (
+              <div className="flex flex-wrap items-center gap-t1">
+                <span className="inline-flex items-center gap-t1 text-overline text-fg-muted">
+                  <Icon name="folder" size={11} /> 보관함의 그림{' '}
+                  {(node.data!.libNotice as { items: unknown[] }).items.length}장을 재사용했어요
+                </span>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); void regenerateLibraryCards(node.id); }}
+                  className="inline-flex items-center gap-t1 rounded-pill border border-border bg-surface/90 px-t2 py-0.5 text-overline text-fg-2 hover:border-accent hover:text-accent"
+                >
+                  새로 생성
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -287,7 +384,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         onPointerDown={down}
         onDoubleClick={dbl}
         className={`absolute select-none overflow-hidden rounded-md border border-border bg-surface shadow-sm ${ring}`}
-        style={{ left, top, width: node.w, ...rootTransform(node) }}
+        style={{ left, top, width: node.w, ...radiusStyle(node), ...rootTransform(node) }}
       >
         <div className="relative" style={{ width: '100%', height: node.h }}>
           {node.loading ? (
@@ -315,8 +412,29 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             </div>
           )}
           {node.src && !lod && (
-            <span className="absolute left-1 top-1 rounded-pill bg-fg/75 px-t2 py-0.5 text-[10px] text-on-dark">AI 생성</span>
+            <span className="absolute left-1 top-1 rounded-pill bg-fg/75 px-t2 py-0.5 text-[10px] text-on-dark">
+              {typeof node.data?.ytId === 'string' ? '유튜브' : node.data?.fromLibrary ? '보관함' : 'AI 생성'}
+            </span>
           )}
+          {/* 유튜브 검색 결과 — ▶를 누르면 연결된 뷰어 카드에서 바로 재생 */}
+          {!node.loading && !lod && typeof node.data?.ytId === 'string' && (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                window.dispatchEvent(new CustomEvent('kv:yt-play', {
+                  detail: { videoId: node.data?.ytId, target: node.data?.ytTarget },
+                }));
+              }}
+              title="뷰어에서 재생"
+              className="absolute left-1/2 top-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-fg/60 text-on-dark shadow-md transition-colors duration-150 ease-soft hover:bg-accent"
+            >
+              <svg viewBox="0 0 24 24" width={16} height={16} fill="currentColor" aria-hidden>
+                <path d="M8.5 6.2v11.6L18 12z" />
+              </svg>
+            </button>
+          )}
+          {selected && !node.locked && <RadiusHandle node={node} />}
         </div>
         {(node.text || editing) && (
           <div className="group/cap relative px-t2 py-t1">
@@ -327,11 +445,11 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={commit}
-                className="w-full resize-none bg-transparent text-overline text-fg focus:outline-none"
+                className="w-full resize-none bg-transparent text-center text-overline text-fg focus:outline-none"
               />
             ) : (
               <>
-                <span className="block truncate pr-5 text-xs font-semibold text-fg" title={imgTitle(node.text)}>{imgTitle(node.text)}</span>
+                <span className="block truncate px-5 text-center text-xs font-semibold text-fg" title={imgTitle(node.text)}>{imgTitle(node.text)}</span>
                 {/* hover the caption → X to delete the text (undoable) */}
                 <button
                   onPointerDown={(e) => e.stopPropagation()}
@@ -352,6 +470,41 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
 
   /* ---------- sticky / memo · A4 document (data.doc) ---------- */
   if (node.type === 'sticky') {
+    // 임베드 카드(GLB 뷰어 등) — 상단 헤더로만 드래그, 본문은 iframe이 입력을 받는다.
+    // 프레젠테이션 모드(뷰어의 전체 화면 버튼): 카드 테두리·헤더·배경을 모두 숨겨
+    // 3D 모델이 보드 위에 바로 떠 있는 것처럼 보인다.
+    if (typeof node.data?.embed === 'string') {
+      const embedTitle = (node.data?.title as string) ?? '뷰어';
+      return (
+        <div
+          className={`absolute select-none overflow-hidden rounded-xl ${
+            embedPresent
+              ? 'border border-transparent bg-transparent shadow-none'
+              : `border border-border bg-surface shadow-lg ${ring}`
+          }`}
+          style={{ left, top, width: node.w, height: node.h, ...rootTransform(node) }}
+        >
+          {!embedPresent && (
+            <div
+              onPointerDown={down}
+              className="flex items-center gap-t2 border-b border-border bg-bg-deep/60 px-t3 py-t2"
+              style={{ cursor: 'grab' }}
+            >
+              <Icon name="frame" size={14} className="text-accent" />
+              <span className="text-overline text-fg-2">{embedTitle}</span>
+            </div>
+          )}
+          <iframe
+            ref={embedFrameRef}
+            src={node.data.embed as string}
+            title={embedTitle}
+            className="block w-full"
+            style={{ border: 0, height: embedPresent ? '100%' : 'calc(100% - 33px)', background: 'transparent' }}
+          />
+          {node.locked && <LockBadge />}
+        </div>
+      );
+    }
     // Mind-map center — the topic, a prominent coral node.
     if (node.data?.role === 'mm-center') {
       return (
@@ -435,6 +588,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     const srcLinks = node.data?.role === 'source' && Array.isArray(node.data?.links)
       ? (node.data.links as SourceLinkData[])
       : null;
+    // 노트 메모(괘선) — 텍스트가 줄 위에 정확히 얹히도록 26px 줄 높이로 통일 렌더.
+    const isNote = !isDoc && !srcLinks && node.data?.deco === 'note';
     return (
       <div
         ref={cardRef}
@@ -447,7 +602,23 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               ? 'rounded-lg border border-border bg-surface-2 p-t4'
               : `rounded-md ${COLOR_BG[node.color ?? 'accent-soft'] ?? 'bg-accent-soft'} p-t3`
         }`}
-        style={{ left, top, width: node.w, ...(node.autoH ? { minHeight: node.h } : { height: node.h }), ...rootTransform(node) }}
+        style={{
+          left,
+          top,
+          width: node.w,
+          ...(node.autoH ? { minHeight: node.h } : { height: node.h }),
+          // 노트 메모(data.deco='note') — 가로 괘선 노트 배경. 패턴을 패딩(12px)+1px
+          // 내려 그려서 26px 줄 높이의 각 텍스트 줄 '바로 아래'에 괘선이 깔린다.
+          ...(isNote
+            ? {
+                backgroundImage:
+                  'repeating-linear-gradient(transparent, transparent 25px, var(--sand-line) 25px, var(--sand-line) 26px)',
+                backgroundPosition: '0 13px',
+              }
+            : {}),
+          ...(!isDoc && !srcLinks ? radiusStyle(node) : {}),
+          ...rootTransform(node),
+        }}
       >
         {srcLinks ? (
           <SourceLinks
@@ -463,7 +634,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commit}
             rows={Math.max(3, draft.split('\n').length)}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed text-fg focus:outline-none"
+            // 노트는 편집 중에도 괘선과 같은 26px 줄 높이를 유지(타이핑해도 줄 위에 얹힘).
+            style={isNote ? { lineHeight: '26px' } : undefined}
+            className={`w-full resize-none bg-transparent text-sm ${isNote ? '' : 'leading-relaxed'} text-fg focus:outline-none`}
           />
         ) : isDoc && worksheetProps ? (
           // 활동지 = 인쇄용 A4 한 장(제목·안내=텍스트 레이어, 그림=생성 이미지).
@@ -546,6 +719,14 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               </span>
             )}
           </div>
+        ) : isNote ? (
+          // 노트: 제목/본문 구분 없이 모든 줄을 괘선 주기(26px)에 맞춰 정렬.
+          <p
+            className={`whitespace-pre-wrap text-sm ${node.text ? 'text-fg' : 'text-fg-muted'}`}
+            style={{ lineHeight: '26px' }}
+          >
+            {node.text || '노트…'}
+          </p>
         ) : (
           <MemoText text={node.text} />
         )}
@@ -591,6 +772,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         )}
         {/* Design Director — decorate: theme stickers "stuck" on the corners. */}
         <StickerDecos items={decorations} />
+        {/* 우상단 라운드 코너 드래그 핸들 — 일반 메모(포스트잇·노트)만 */}
+        {selected && !editing && !isDoc && !srcLinks && !isIdea && !node.locked && <RadiusHandle node={node} />}
         {node.locked && <LockBadge />}
       </div>
     );
@@ -599,14 +782,59 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   /* ---------- text · frame header (role:header) ---------- */
   if (node.type === 'text') {
     const isHeader = node.data?.role === 'header';
-    const font = isHeader ? 'font-display text-h2 font-semibold' : 'font-display text-h4';
+    const sizeKey = (node.data?.fontSize as TextSizeKey) ?? (isHeader ? 'h2' : 'h4');
+    // px 크기(data.fontPx, T 메뉴 드롭다운)가 있으면 토큰 크기 클래스 대신 적용.
+    const fontPx = typeof node.data?.fontPx === 'number' ? (node.data.fontPx as number) : undefined;
+    // 글씨체(data.fontFam): 세리프(font-display) / 고딕(font-sans) — 디자인 토큰 2종만.
+    const famKey = node.data?.fontFam as 'serif' | 'sans' | undefined;
+    const famCls = famKey
+      ? famKey === 'sans'
+        ? 'font-sans'
+        : 'font-display'
+      : sizeKey === 'base' || sizeKey === 'sm'
+        ? 'font-sans'
+        : 'font-display';
+    const sizeCls = fontPx ? '' : (TEXT_SIZE_ONLY[sizeKey] ?? TEXT_SIZE_ONLY.h4);
+    const font = `${famCls} ${sizeCls}${node.data?.bold ? ' font-bold' : ''}`;
+    const pxStyle: React.CSSProperties = fontPx ? { fontSize: fontPx, lineHeight: 1.35 } : {};
+    // 배경 스타일(data.box): 버튼(코랄 필) · 사각 박스 · 원형(필) 박스 — 환경판 라벨용.
+    const boxKind = node.data?.box as string | undefined;
+    const boxCls =
+      boxKind === 'button'
+        ? 'rounded-pill bg-accent px-t4 py-t2 shadow-sm'
+        : boxKind === 'rect'
+          ? 'rounded-md border border-border bg-surface px-t3 py-t2 shadow-sm'
+          : boxKind === 'round'
+            ? 'rounded-pill border border-border bg-surface px-t4 py-t2 shadow-sm'
+            : 'rounded-sm px-t2';
+    const colorCls =
+      boxKind === 'button'
+        ? 'text-on-accent'
+        : node.data?.accent
+          ? 'text-accent'
+          : sizeKey === 'sm'
+            ? 'text-fg-2'
+            : 'text-fg';
+    // 텍스트 박스는 항상 내용에 핏 — 짧으면 좁게, 길면 줄바꿈 한도(max)까지 늘어난다.
+    // 실측 폭은 사이즈 옵저버가 node.w로 동기화. 편집 중엔 textarea가 기준 폭을
+    // 가져야 하므로 현재 측정 폭(node.w)으로 고정해 점프를 막는다.
+    const fitW: React.CSSProperties = editing
+      ? { width: node.w }
+      : { width: 'max-content', minWidth: 40, maxWidth: 520 };
     return (
       <div
         ref={cardRef}
         onPointerDown={down}
         onDoubleClick={dbl}
-        className={`absolute select-none rounded-sm px-t2 ${ring}`}
-        style={{ left, top, width: node.w, ...(node.autoH ? { minHeight: node.h } : { height: node.h }), ...rootTransform(node) }}
+        className={`absolute select-none ${boxCls} ${ring}`}
+        style={{
+          left,
+          top,
+          ...fitW,
+          ...(node.autoH ? { minHeight: node.h } : { height: node.h }),
+          ...(boxKind ? radiusStyle(node) : {}),
+          ...rootTransform(node),
+        }}
       >
         {editing ? (
           <textarea
@@ -615,28 +843,347 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commit}
-            className={`w-full resize-none bg-transparent ${font} text-fg focus:outline-none`}
+            style={pxStyle}
+            className={`w-full resize-none bg-transparent ${font} ${colorCls} focus:outline-none`}
           />
         ) : (
-          <p className={`whitespace-pre-wrap ${font} text-fg`}>{node.text || '텍스트'}</p>
+          <p style={pxStyle} className={`whitespace-pre-wrap ${font} ${colorCls}`}>{node.text || '텍스트'}</p>
         )}
         {/* designed header rule — a short coral underline */}
         {isHeader && !editing && <span className="mt-t1 block h-[3px] w-14 rounded-pill bg-accent" />}
+        {/* 선택 시 하단 중앙 T 버튼 → 심플한 텍스트 스타일 바 */}
+        {selected && !editing && !node.locked && <TextStyleMenu node={node} sizeKey={sizeKey} />}
+        {/* 배경 박스가 있는 텍스트만 — 우상단 라운드 코너 드래그 핸들 */}
+        {selected && !editing && !node.locked && !!boxKind && (
+          <RadiusHandle node={node} defaultRadius={boxKind === 'rect' ? 10 : 999} />
+        )}
         {node.locked && <LockBadge />}
       </div>
     );
   }
 
-  /* ---------- shape ---------- */
+  /* ---------- shape (사각형 · 원 · 별 · 하트 · 띠 라벨) ---------- */
+  const shapeKind = (node.data?.shape as string) ?? 'rect';
+  // 별·하트는 SVG 패스(fill=색 토큰) — 박스가 아닌 실제 모양으로 그린다.
+  if (shapeKind === 'star' || shapeKind === 'heart') {
+    return (
+      <div
+        onPointerDown={down}
+        className={`absolute ${COLOR_TEXT[node.color ?? (shapeKind === 'heart' ? 'accent-soft' : 'gold')] ?? 'text-surface-3'} ${ring} rounded-md`}
+        style={{ left, top, width: node.w, height: node.h, ...rootTransform(node) }}
+      >
+        <svg viewBox="0 0 24 24" width="100%" height="100%" preserveAspectRatio="none" aria-hidden>
+          <path d={SHAPE_PATHS[shapeKind]} fill="currentColor" stroke="var(--sand-line)" strokeWidth={0.5} />
+        </svg>
+        {node.locked && <LockBadge />}
+      </div>
+    );
+  }
+  const shapeRadius = shapeKind === 'circle' ? 'rounded-full' : shapeKind === 'pill' ? 'rounded-pill' : 'rounded-lg';
   return (
     <div
       onPointerDown={down}
-      className={`absolute rounded-lg border border-border ${COLOR_BG[node.color ?? 'surface-3'] ?? 'bg-surface-3'} ${ring}`}
+      className={`absolute border border-border ${shapeRadius} ${COLOR_BG[node.color ?? 'surface-3'] ?? 'bg-surface-3'} ${ring}`}
       style={{ left, top, width: node.w, height: node.h, ...rootTransform(node) }}
     >
       {node.locked && <LockBadge />}
     </div>
   );
+}
+
+/* 도형 색 토큰 → 텍스트 색 클래스(SVG fill=currentColor용). 임의 hex 금지(CLAUDE §2-1). */
+const COLOR_TEXT: Record<string, string> = {
+  'accent-soft': 'text-accent-soft',
+  'surface-3': 'text-surface-3',
+  'surface-2': 'text-surface-2',
+  gold: 'text-gold',
+  'success-soft': 'text-success-soft',
+};
+
+/** 별·하트 SVG 패스(24×24 viewBox, preserveAspectRatio=none으로 노드 박스에 맞춤). */
+export const SHAPE_PATHS: Record<string, string> = {
+  star: 'M12 1.8l3.1 6.3 6.9 1-5 4.9 1.2 6.9L12 17.6l-6.2 3.3L7 14 2 9.1l6.9-1z',
+  heart:
+    'M12 21.4l-1.5-1.3C5.4 15.4 2 12.3 2 8.5 2 5.4 4.4 3 7.5 3c1.7 0 3.4.8 4.5 2.1C13.1 3.8 14.8 3 16.5 3 19.6 3 22 5.4 22 8.5c0 3.8-3.4 6.9-8.5 11.6z',
+};
+
+/* ---- text style system (toolbar presets + T menu share data.fontSize/fontPx/fontFam/bold/accent) ---- */
+type TextSizeKey = 'h2' | 'h4' | 'base' | 'sm';
+/** 크기 토큰 클래스(글씨체와 분리 — data.fontFam이 family를 따로 정한다). */
+const TEXT_SIZE_ONLY: Record<TextSizeKey, string> = {
+  h2: 'text-h2 font-semibold',
+  h4: 'text-h4',
+  base: 'text-body',
+  sm: 'text-sm',
+};
+/** 레거시 크기 키 → 드롭다운 표시용 근사 px. */
+const LEGACY_PX: Record<TextSizeKey, number> = { h2: 28, h4: 20, base: 16, sm: 14 };
+/** 자주 쓰는 텍스트 크기 10단계(px) — 라벨(12)부터 환경판 큰 제목(48)까지. */
+const FONT_PX_OPTIONS = [12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
+const FONT_FAMS: Array<{ k: 'serif' | 'sans'; label: string; cls: string }> = [
+  { k: 'serif', label: '세리프', cls: 'font-display' },
+  { k: 'sans', label: '고딕', cls: 'font-sans' },
+];
+
+/** 텍스트 데이터 스타일 변경 — 한 클릭 = 한 번의 ⌘Z. */
+function setTextStyle(id: string, patch: Record<string, unknown>) {
+  const before = captureNodes([id]);
+  const cur = useBoardStore.getState().nodes[id];
+  if (!cur) return;
+  useBoardStore.getState().updateNodeRaw(id, { data: { ...(cur.data ?? {}), ...patch } });
+  pushRedesign([id], before, '텍스트 스타일');
+}
+
+/** 선택된 텍스트 박스 하단 중앙의 T 버튼 + 심플 스타일 바
+    (글씨체 드롭다운 · 크기 드롭다운(10단계) · 굵게 · 색 2종). */
+function TextStyleMenu({ node, sizeKey }: { node: BoardNode; sizeKey: TextSizeKey }) {
+  const [open, setOpen] = useState(false);
+  const [dd, setDd] = useState<'font' | 'size' | null>(null);
+  // 바는 '여는 순간'의 화면 좌표에 portal+fixed로 고정 — 텍스트 박스가 어떻게
+  // 자라거나 움직여도(크기 호버 미리보기 포함) 바는 픽셀 하나 움직이지 않는다.
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [barPos, setBarPos] = useState<{ x: number; y: number } | null>(null);
+  const openBar = () => {
+    const r = anchorRef.current?.getBoundingClientRect();
+    setBarPos(
+      r
+        ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top) }
+        : { x: Math.round(window.innerWidth / 2), y: Math.round(window.innerHeight / 2) },
+    );
+    setOpen(true);
+  };
+  const closeBar = () => {
+    setOpen(false);
+    setDd(null);
+    setBarPos(null);
+  };
+  // 바가 열려 있는 동안 박스를 '바닥 고정' — 크기 호버/변경 시 박스가 위로 자라서,
+  // 박스 하단에 붙은 이 스타일 바가 움직이지 않는다(NodeView 옵저버가 y 보정).
+  // 스토어/undo/영속화에 섞이지 않게 트랜지언트 Set으로만 표시한다.
+  useEffect(() => {
+    if (open) BOTTOM_ANCHORED.add(node.id);
+    else BOTTOM_ANCHORED.delete(node.id);
+    return () => { BOTTOM_ANCHORED.delete(node.id); };
+  }, [open, node.id]);
+  // 사이즈 호버 미리보기 — 올리면 그 크기로 즉시 보이고, 클릭 없이 떠나면 원복.
+  // 커밋(클릭) 전에 원래 값으로 되돌린 뒤 setTextStyle을 타야 ⌘Z가 진짜 이전값을 복원한다.
+  const previewRef = useRef<{ orig: number | undefined } | null>(null);
+  const previewSize = (n: number) => {
+    const cur = useBoardStore.getState().nodes[node.id];
+    if (!cur) return;
+    if (!previewRef.current) previewRef.current = { orig: cur.data?.fontPx as number | undefined };
+    useBoardStore.getState().updateNodeRaw(node.id, { data: { ...(cur.data ?? {}), fontPx: n } });
+  };
+  const revertPreview = () => {
+    const p = previewRef.current;
+    if (!p) return;
+    previewRef.current = null;
+    const cur = useBoardStore.getState().nodes[node.id];
+    if (!cur) return;
+    const data = { ...(cur.data ?? {}) };
+    if (p.orig === undefined) delete data.fontPx;
+    else data.fontPx = p.orig;
+    useBoardStore.getState().updateNodeRaw(node.id, { data });
+  };
+  const commitSize = (n: number) => {
+    revertPreview();
+    setTextStyle(node.id, { fontPx: n });
+    setDd(null);
+  };
+  const bold = !!node.data?.bold;
+  const accent = !!node.data?.accent;
+  const fontPx = typeof node.data?.fontPx === 'number' ? (node.data.fontPx as number) : LEGACY_PX[sizeKey];
+  const famKey =
+    (node.data?.fontFam as 'serif' | 'sans' | undefined) ??
+    (sizeKey === 'base' || sizeKey === 'sm' ? 'sans' : 'serif');
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  return (
+    <div
+      ref={anchorRef}
+      onPointerDown={stop}
+      onDoubleClick={stop}
+      className="absolute -bottom-10 left-1/2 z-20 -translate-x-1/2"
+    >
+      {!open && (
+        <button
+          title="텍스트 스타일"
+          onClick={openBar}
+          className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface font-display text-sm font-semibold text-fg-2 shadow-md transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+        >
+          T
+        </button>
+      )}
+      {open && barPos && createPortal(
+        <div
+          onPointerDown={stop}
+          onDoubleClick={stop}
+          style={{ position: 'fixed', left: barPos.x, top: barPos.y, transform: 'translateX(-50%)', zIndex: 60 }}
+        >
+        <div className="flex items-center gap-t1 whitespace-nowrap rounded-pill border border-border bg-surface px-t2 py-t1 shadow-lg">
+          {/* 글씨체 드롭다운 */}
+          <span className="relative">
+            <button
+              title="글씨체"
+              onClick={() => setDd(dd === 'font' ? null : 'font')}
+              className={`flex h-7 items-center gap-t1 rounded-pill px-t2 text-sm transition-colors duration-150 ease-soft ${
+                dd === 'font' ? 'bg-surface-2 text-fg' : 'text-fg-2 hover:bg-surface-2 hover:text-fg'
+              } ${famKey === 'sans' ? 'font-sans' : 'font-display'}`}
+            >
+              {famKey === 'sans' ? '고딕' : '세리프'}
+              <span className="text-[9px] leading-none text-fg-muted">▾</span>
+            </button>
+            {dd === 'font' && (
+              <div className="absolute left-0 top-full z-30 mt-t1 w-24 rounded-md border border-border bg-surface py-t1 shadow-lg">
+                {FONT_FAMS.map((f) => (
+                  <button
+                    key={f.k}
+                    onClick={() => { setTextStyle(node.id, { fontFam: f.k }); setDd(null); }}
+                    className={`flex w-full items-center px-t3 py-t1 text-sm transition-colors duration-150 ease-soft ${f.cls} ${
+                      famKey === f.k ? 'text-accent' : 'text-fg-2 hover:bg-surface-2 hover:text-fg'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+          {/* 크기 드롭다운 — 자주 쓰는 10단계 */}
+          <span className="relative">
+            <button
+              title="크기"
+              onClick={() => setDd(dd === 'size' ? null : 'size')}
+              className={`flex h-7 items-center gap-t1 rounded-pill px-t2 font-sans text-sm tabular-nums transition-colors duration-150 ease-soft ${
+                dd === 'size' ? 'bg-surface-2 text-fg' : 'text-fg-2 hover:bg-surface-2 hover:text-fg'
+              }`}
+            >
+              {fontPx}
+              <span className="text-[9px] leading-none text-fg-muted">▾</span>
+            </button>
+            {dd === 'size' && (
+              // 10단계를 스크롤 없이 '가로 한 줄'로 — 버튼 아래 중앙 정렬 필 바.
+              // 호버 = 그 크기로 라이브 미리보기, 클릭 = 확정, 떠나면 원복.
+              <div
+                onMouseLeave={revertPreview}
+                className="absolute left-1/2 top-full z-30 mt-t1 flex -translate-x-1/2 items-center gap-t1 whitespace-nowrap rounded-pill border border-border bg-surface px-t2 py-t1 shadow-lg"
+              >
+                {FONT_PX_OPTIONS.map((n) => (
+                  <button
+                    key={n}
+                    onMouseEnter={() => previewSize(n)}
+                    onClick={() => commitSize(n)}
+                    className={`flex h-6 min-w-6 items-center justify-center rounded-full px-t1 font-sans text-sm tabular-nums transition-colors duration-150 ease-soft ${
+                      fontPx === n ? 'bg-accent text-on-accent' : 'text-fg-2 hover:bg-surface-2 hover:text-fg'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+          <span className="mx-t1 h-4 w-px bg-border" />
+          <button
+            title="굵게"
+            onClick={() => setTextStyle(node.id, { bold: !bold })}
+            className={`flex h-7 w-7 items-center justify-center rounded-full font-sans text-sm font-bold transition-colors duration-150 ease-soft ${
+              bold ? 'bg-accent text-on-accent' : 'text-fg-2 hover:bg-surface-2 hover:text-fg'
+            }`}
+          >
+            B
+          </button>
+          <span className="mx-t1 h-4 w-px bg-border" />
+          <button
+            title="기본색"
+            onClick={() => setTextStyle(node.id, { accent: false })}
+            className={`flex h-7 w-7 items-center justify-center rounded-full ${!accent ? 'ring-2 ring-accent' : 'hover:bg-surface-2'}`}
+          >
+            <span className="block h-3.5 w-3.5 rounded-full bg-fg" />
+          </button>
+          <button
+            title="코랄색"
+            onClick={() => setTextStyle(node.id, { accent: true })}
+            className={`flex h-7 w-7 items-center justify-center rounded-full ${accent ? 'ring-2 ring-accent' : 'hover:bg-surface-2'}`}
+          >
+            <span className="block h-3.5 w-3.5 rounded-full bg-accent" />
+          </button>
+          <span className="mx-t1 h-4 w-px bg-border" />
+          <button
+            title="닫기"
+            onClick={closeBar}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-fg-2 hover:bg-surface-2 hover:text-fg"
+          >
+            <Icon name="x" size={13} />
+          </button>
+        </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+/* ---- corner-radius drag handle (Figma식) ----
+   선택된 메모·이미지·배경 텍스트 박스의 우상단 안쪽에 작은 핸들을 띄우고,
+   드래그(↙ = 둥글게, ↗ = 각지게)로 data.radius를 보드 위에서 바로 조절한다.
+   한 번의 드래그 = 한 번의 ⌘Z(captureNodes→pushRedesign). */
+function RadiusHandle({ node, defaultRadius = 10 }: { node: BoardNode; defaultRadius?: number }) {
+  const [liveR, setLiveR] = useState<number | null>(null);
+  const realH = typeof node.data?.renderH === 'number' ? (node.data.renderH as number) : node.h;
+  const maxR = Math.max(0, Math.min(node.w, realH) / 2);
+  const cur = typeof node.data?.radius === 'number' ? (node.data.radius as number) : defaultRadius;
+  const shown = Math.min(cur, maxR);
+  const offset = 8 + shown * 0.3; // 라운드가 클수록 핸들이 안쪽으로 따라 들어간다
+
+  const onDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const r0 = shown;
+    const before = captureNodes([node.id]);
+    const move = (ev: PointerEvent) => {
+      const { zoom } = useBoardStore.getState().viewport;
+      const s = node.scale ?? 1;
+      // ↙(왼쪽-아래) 드래그 = 증가, ↗ = 감소 — 화면px → 노드 로컬px 변환.
+      const d = ((sx - ev.clientX) + (ev.clientY - sy)) / 2 / (zoom * s);
+      const r = Math.round(Math.max(0, Math.min(maxR, r0 + d)));
+      setLiveR(r);
+      const c = useBoardStore.getState().nodes[node.id];
+      if (c) useBoardStore.getState().updateNodeRaw(node.id, { data: { ...(c.data ?? {}), radius: r } });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.classList.remove('kv-iframe-shield');
+      pushRedesign([node.id], before, '라운드 조절');
+      setLiveR(null);
+    };
+    document.body.classList.add('kv-iframe-shield'); // 드래그 중 iframe pointerup 유실 방지
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div
+      onPointerDown={onDown}
+      onDoubleClick={(e) => e.stopPropagation()}
+      title="모서리 라운드 (드래그: ↙ 둥글게 · ↗ 각지게)"
+      className="absolute z-20 h-3 w-3 cursor-nwse-resize rounded-full border-2 border-accent bg-surface shadow-sm"
+      style={{ right: offset, top: offset }}
+    >
+      {liveR !== null && (
+        <span className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-pill bg-fg px-t2 py-0.5 text-[10px] text-on-dark">
+          {liveR}px
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** data.radius가 있으면 inline border-radius로 클래스 라운드를 덮어쓴다. */
+function radiusStyle(n: BoardNode): React.CSSProperties {
+  return typeof n.data?.radius === 'number' ? { borderRadius: n.data.radius as number } : {};
 }
 
 function LockBadge() {

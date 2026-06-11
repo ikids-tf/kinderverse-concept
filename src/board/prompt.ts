@@ -1,5 +1,5 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd } from './commands';
 import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
@@ -67,6 +67,17 @@ export function handleBoardPrompt(text: string): boolean {
   // Nothing selected → Frame Composer (a new frame is the right behavior here).
   if (sel.length === 0) {
     void composeFromPrompt(text);
+    return true;
+  }
+
+  // 유튜브 뷰어 카드가 선택된 채 프롬프트 → 영상 검색으로 본다(썸네일 3개를
+  // 뷰어 아래 가로로, ▶ 클릭 = 뷰어에서 재생).
+  const ytViewer =
+    sel.length === 1 && sel[0].type === 'sticky' && String(sel[0].data?.embed ?? '').includes('youtube-viewer')
+      ? sel[0]
+      : null;
+  if (ytViewer) {
+    void searchVideosForViewer(ytViewer.id, text);
     return true;
   }
 
@@ -167,6 +178,7 @@ function routeDefault(route: RouteTarget | null): ReqIntent {
     분류 후 동일 적용 경로 재사용. 라우터마저 모호하면 'text'(제자리 수정) 폴백 —
     "겨울 느낌으로" 같은 스타일 지시의 기존 동작을 보존한다. */
 async function routeSelectionFallback(sel: BoardNode[], text: string): Promise<void> {
+  useBoardStore.getState().beginGen();
   useBoardStore.getState().setGenerating('🧭 요청을 파악하고 있어요…');
   let intent: ReqIntent = 'text';
   let boardIntent: string | null = null;
@@ -192,7 +204,7 @@ async function routeSelectionFallback(sel: BoardNode[], text: string): Promise<v
   } catch {
     intent = 'text'; // 라우터 실패 → 기존 휴리스틱 보존
   } finally {
-    useBoardStore.getState().setGenerating(null);
+    useBoardStore.getState().endGen();
   }
 
   // 모델이 화면 조작으로 판단(어휘에 없던 표현, 예: "요만하게 해줘") → 실행기로.

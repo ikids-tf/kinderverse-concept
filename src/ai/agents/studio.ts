@@ -1,5 +1,6 @@
 import { callGateway } from '../client';
 import { extractJson } from '../json';
+import { requestedCount, imageSubject } from '../intent-lexicon';
 import { PEDAGOGY_FOUNDATION } from '../pedagogy';
 import { validateRegistryPayload, type RegistryPayload, type StudioItem } from '@/ui-registry/contracts';
 import {
@@ -134,35 +135,41 @@ JSON만 출력:
   return { payload: result.value, mocked: first.mocked || !!visual.mocked };
 }
 
-/* 이미지/도안 → StudioGallery. 캡션 생성 후 image 플러그인으로 렌더 가능한 이미지 확보. */
-export async function runStudioImages(
+/* 이미지/도안 생성은 2단계로 분리한다(보드가 카드를 먼저 깔고 차례로 채우는 UX):
+   1) planStudioImages — 캡션/프롬프트 목록(스펙)만 계획. 요청에 개수가 명시되면
+      ("각각 10개") 그 수만큼, 항목마다 서로 다른 대상 + 짧은 이름 캡션(예: 소방차).
+   2) renderStudioImage — 스펙 1건을 이미지 1장으로 렌더. */
+
+export interface StudioImageSpec {
+  caption: string;
+  prompt: string;
+}
+export interface StudioImagePlan {
+  specs: StudioImageSpec[];
+  style: string;
+  /** 갤러리/프레임 제목용 — 수량·어미를 뗀 주제. */
+  title: string;
+}
+
+export async function planStudioImages(
   request: string,
   selected: string[],
   ctx?: string,
   kind: 'image' | '도안' = 'image',
   opts?: { simple?: boolean; count?: number },
-): Promise<StudioResult> {
+): Promise<StudioImagePlan> {
   const style = kind === '도안' ? KV_COLORING_STYLE : KV_ART_STYLE;
+  const subject = imageSubject(request);
+  // 명시 개수: 호출자 지정 > 요청문 파싱("10개/열 장"). 다개수면 simple이라도 멀티로.
+  const reqN = opts?.count ?? requestedCount(request) ?? undefined;
+  const multi = (reqN ?? 1) > 1;
 
-  // Simple mode ("사자 그려줘") — just ONE clean drawing of the subject, with the
-  // subject as the caption. No activity framing, no extra explanation.
-  if (opts?.simple) {
-    const subject =
-      request
-        .replace(/(을|를|좀|한\s*장|하나)?\s*(그려\s*주세요|그려\s*줘|그려|그림\s*그려|그림|그리기|만들어\s*주세요|만들어\s*줘|만들어|해\s*줘)\s*$/u, '')
-        .trim() || request;
-    const img = await callGateway({
-      task: 'image',
-      provider: 'auto',
-      messages: [],
-      meta: { prompt: `${subject} — ${style}`, caption: subject },
-    });
-    return {
-      payload: { type: 'StudioGallery', props: { title: subject, items: [{ caption: subject, kind, url: img.image }] } },
-      mocked: !!img.mocked,
-    };
+  // Simple mode ("사자 그려줘") — ONE clean drawing of the subject, caption = subject.
+  if (opts?.simple && !multi) {
+    return { specs: [{ caption: subject, prompt: subject }], style, title: subject };
   }
 
+  const n = Math.min(Math.max(reqN ?? 3, 1), 12);
   const sel = selected.length ? `참고 활동: ${selected.join(', ')}` : '';
   const capRes = await callGateway({
     task: 'studio',
@@ -173,14 +180,19 @@ export async function runStudioImages(
     messages: [
       {
         role: 'user',
-        content: `요청: "${request}"\n${sel}\n${kind === '도안' ? '색칠 도안' : '개념 일러스트'} 3개의 캡션과 이미지 프롬프트를 제안하라(실제 아동 사진 아님). JSON만:\n{ "items": [ { "caption": string, "prompt": string } ] }`,
+        content: `요청: "${request}"\n${sel}\n${kind === '도안' ? '색칠 도안' : '개념 일러스트'} 정확히 ${n}개의 캡션과 이미지 프롬프트를 제안하라(실제 아동 사진 아님).
+[캡션 규칙]
+- 각 항목은 요청 범주 안의 '서로 다른 대상' 하나씩 (예: "직업 자동차 10개" → 소방차, 경찰차, 구급차, 우편차…).
+- caption은 그 대상의 짧은 이름 1~3단어만 (예: "소방차"). 요청 문장이나 "개념 N" 같은 표현을 캡션에 쓰지 마라.
+- prompt는 그 대상 '하나'를 그릴 구체적 묘사 1문장.
+JSON만:\n{ "items": [ { "caption": string, "prompt": string } ] } — items는 정확히 ${n}개.`,
       },
     ],
-    meta: { kind: 'image_captions', title: request, selected },
-    maxTokens: 600,
+    meta: { kind: 'image_captions', title: request, selected, count: n },
+    maxTokens: 200 + n * 130,
   });
 
-  let specs: Array<{ caption: string; prompt: string }> = [];
+  let specs: StudioImageSpec[] = [];
   if (capRes.ok && capRes.text) {
     try {
       specs = (extractJson(capRes.text) as { items?: Array<{ caption: string; prompt?: string }> }).items?.map(
@@ -191,29 +203,43 @@ export async function runStudioImages(
     }
   }
   if (specs.length === 0) {
-    specs = [
-      { caption: `${request} — 개념 1`, prompt: request },
-      { caption: `${request} — 개념 2`, prompt: request },
-    ];
+    // 캡션 LLM 실패 폴백 — 요청 문장 대신 '주제'의 짧은 이름으로 n개.
+    specs = Array.from({ length: n }, (_, i) => ({
+      caption: n > 1 ? `${subject} ${i + 1}` : subject,
+      prompt: `${subject}${n > 1 ? ` — 서로 다른 모습 ${i + 1}` : ''}`,
+    }));
   }
-  specs = specs.slice(0, 3);
+  return { specs: specs.slice(0, n), style, title: subject };
+}
 
-  // Generate (or placeholder) one image per caption via the image plugin.
-  const items: StudioItem[] = [];
-  let anyMock = false;
-  for (const s of specs) {
-    const img = await callGateway({
-      task: 'image',
-      provider: 'auto',
-      messages: [],
-      meta: { prompt: `${s.prompt} — ${style}`, caption: s.caption },
-    });
-    anyMock = anyMock || !!img.mocked;
-    items.push({ caption: s.caption, kind, url: img.image });
-  }
+/** 스펙 1건 → 이미지 1장(게이트웨이 image 플러그인). */
+export async function renderStudioImage(
+  spec: StudioImageSpec,
+  style: string,
+): Promise<{ url?: string; mocked?: boolean }> {
+  const img = await callGateway({
+    task: 'image',
+    provider: 'auto',
+    messages: [],
+    meta: { prompt: `${spec.prompt} — ${style}`, caption: spec.caption },
+  });
+  return { url: img.image, mocked: !!img.mocked };
+}
 
+/* 이미지/도안 → StudioGallery (일괄 API — 레인/러너/소식지 등 기존 호출부용).
+   보드 컴포저는 planStudioImages+renderStudioImage로 카드를 먼저 깔고 채운다. */
+export async function runStudioImages(
+  request: string,
+  selected: string[],
+  ctx?: string,
+  kind: 'image' | '도안' = 'image',
+  opts?: { simple?: boolean; count?: number },
+): Promise<StudioResult> {
+  const plan = await planStudioImages(request, selected, ctx, kind, opts);
+  const results = await Promise.all(plan.specs.map((s) => renderStudioImage(s, plan.style)));
+  const items: StudioItem[] = results.map((img, i) => ({ caption: plan.specs[i].caption, kind, url: img.url }));
   return {
-    payload: { type: 'StudioGallery', props: { title: request, items } },
-    mocked: anyMock,
+    payload: { type: 'StudioGallery', props: { title: plan.title, items } },
+    mocked: results.some((r) => !!r.mocked),
   };
 }

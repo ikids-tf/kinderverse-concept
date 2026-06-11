@@ -3,6 +3,7 @@ import { loadEnv } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleGatewayRequest, type GatewayConfig } from '../server/gateway/handler';
 import { streamChatResponse, type ChatStreamBody } from '../server/gateway/chat';
+import { searchYoutube } from '../server/gateway/youtube';
 
 /* Dev-only thin gateway: mounts POST /api/ai/run in the Vite dev server so the
    browser never sees provider keys. The same handler moves to a serverless /
@@ -65,6 +66,22 @@ export function devGateway(): Plugin {
         readJsonBody(req)
           .then((body) => handleGatewayRequest(body as never, config))
           .then((result) => sendJson(res, 200, result))
+          .catch((e) =>
+            sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }),
+          );
+      });
+
+      // 유튜브 검색(무키 — 결과 페이지 파싱) — 보드의 유튜브 뷰어 카드용.
+      server.middlewares.use('/api/youtube/search', (req, res) => {
+        const u = new URL(req.url ?? '', 'http://localhost');
+        const q = (u.searchParams.get('q') ?? '').trim();
+        const n = Number(u.searchParams.get('n') ?? 3) || 3;
+        if (!q) {
+          sendJson(res, 200, { ok: false, error: 'missing q' });
+          return;
+        }
+        searchYoutube(q, n)
+          .then((results) => sendJson(res, 200, { ok: true, results }))
           .catch((e) =>
             sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }),
           );

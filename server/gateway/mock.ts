@@ -12,7 +12,7 @@ import type {
 import type { RecordInput } from '../../src/ai/prompt-record';
 import type { RegistryPayload } from '../../src/ui-registry/contracts';
 // 의도 어휘는 단일 출처(intent-lexicon)를 공유 — 실라우터/보드 정규식과 동일 사전(P0-3).
-import { contentIntentFast, boardOp, INTENT_TO_ROUTE } from '../../src/ai/intent-lexicon';
+import { contentIntentFast, boardOp, INTENT_TO_ROUTE, requestedCount, imageSubject } from '../../src/ai/intent-lexicon';
 
 function suggestionsFor(route: RouteTarget): SuggestedNext[] {
   switch (route) {
@@ -161,7 +161,18 @@ export interface LaneStepMeta {
   kind: string;
   title: string;
   selected: string[];
+  /** 명시된 산출물 개수(image_captions 등) — 없으면 title에서 파싱. */
+  count?: number;
 }
+
+/* 오프라인 데모용 테마별 대상 사전 — "직업 자동차 10개" 같은 다개수 요청도
+   API 키 없이 그럴듯한 짧은 이름 캡션(소방차/경찰차…)으로 채운다. */
+const MOCK_SUBJECTS: Array<{ re: RegExp; items: string[] }> = [
+  { re: /(직업|일하는|도와주는).*(자동차|차|탈것)|(자동차|탈것).*(직업|일하)/, items: ['소방차', '경찰차', '구급차', '우편차', '청소차', '버스', '택시', '견인차', '굴착기', '트랙터', '레미콘', '사다리차'] },
+  { re: /동물/, items: ['강아지', '고양이', '토끼', '코끼리', '사자', '기린', '펭귄', '곰', '다람쥐', '돌고래', '판다', '여우'] },
+  { re: /과일/, items: ['사과', '바나나', '딸기', '포도', '수박', '오렌지', '복숭아', '키위', '배', '체리', '레몬', '감'] },
+  { re: /꽃/, items: ['해바라기', '튤립', '장미', '민들레', '코스모스', '카네이션', '벚꽃', '나팔꽃', '수선화', '국화', '무궁화', '제비꽃'] },
+];
 
 export function mockLaneStep(meta: LaneStepMeta): string {
   const { kind, title, selected } = meta;
@@ -242,14 +253,18 @@ export function mockAgentStep(meta: LaneStepMeta): string {
           domains: ['자연탐구', '예술경험'],
         },
       });
-    case 'image_captions':
+    case 'image_captions': {
+      // 개수 존중 + 캡션은 대상의 짧은 이름(요청 문장을 캡션에 쓰지 않는다).
+      const n = Math.min(Math.max(meta.count ?? requestedCount(title) ?? 3, 1), 12);
+      const subj = imageSubject(title);
+      const themed = MOCK_SUBJECTS.find((t) => t.re.test(title))?.items;
       return JSON.stringify({
-        items: [
-          { caption: `${ctx} — 개념 1`, prompt: `${ctx} 유아 활동 개념 일러스트` },
-          { caption: `${ctx} — 개념 2`, prompt: `${ctx} 따뜻한 색감 일러스트` },
-          { caption: `${ctx} — 개념 3`, prompt: `${ctx} 단순한 도안` },
-        ],
+        items: Array.from({ length: n }, (_, i) => {
+          const caption = themed?.[i] ?? (n > 1 ? `${subj} ${i + 1}` : subj);
+          return { caption, prompt: `${caption} — 유아 그림책 개념 일러스트` };
+        }),
       });
+    }
     case 'letter':
     case 'notice':
     case 'text':

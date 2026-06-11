@@ -38,7 +38,8 @@ export type IconName =
   | 'copy'
   | 'download'
   | 'print'
-  | 'layers';
+  | 'layers'
+  | 'video';
 
 const ICON_PATHS: Record<IconName, string> = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
@@ -72,6 +73,7 @@ const ICON_PATHS: Record<IconName, string> = {
   cursor: '<path d="m4 4 7.5 16 2.3-6.7L20.5 11z"/>',
   present: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20M12 16v4"/>',
   frame: '<path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/>',
+  video: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10.3 9.3 4.6 2.7-4.6 2.7z"/>',
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   copy: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
   download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>',

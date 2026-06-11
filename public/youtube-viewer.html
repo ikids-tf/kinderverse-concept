@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>유튜브 뷰어</title>
+<style>
+  /* Milray Park 토큰과 동일 값(독립 HTML이라 변수로 복제) — 임의 색 추가 없음 */
+  :root {
+    --bg: #F8F7F2;
+    --bg-deep: #F1EEE6;
+    --surface: #FFFFFF;
+    --border: #E7E0D4;
+    --fg: #141311;
+    --fg-2: #56524B;
+    --fg-muted: #8C887F;
+    --accent: #F2733E;
+    --accent-hover: #E5602B;
+    --font-sans: 'Pretendard', 'Hanken Grotesk', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex;
+    flex-direction: column;
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--fg);
+  }
+
+  /* ── 상단: 유튜브 링크 입력 ────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  #url {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--fg);
+    font: 400 12px var(--font-sans);
+    outline: none;
+  }
+  #url:focus { border-color: var(--accent); }
+  #url::placeholder { color: var(--fg-muted); }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font: 600 13px var(--font-sans);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--accent-hover); }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-2);
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── 가운데: 영상 ─────────────────────────────────────────────── */
+  .stage { position: relative; flex: 1; display: flex; min-height: 0; background: var(--bg-deep); }
+  #player {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: none;
+    background: #000; /* 영상 레터박스 — 플레이어 고유 배경 */
+  }
+  #empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--fg-muted);
+    font-size: 13px;
+    pointer-events: none;
+  }
+  #empty .tv { font-size: 34px; }
+  #err {
+    display: none;
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    transform: translateX(-50%);
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--fg-2);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  /* ── 연결 제안 — 보드에서 다른 요소와 선이 이어지면 묻는 확인 카드 ── */
+  #ask {
+    display: none;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9;
+    max-width: 86%;
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgba(20, 19, 17, 0.12);
+    text-align: center;
+  }
+  #ask p { margin: 0 0 12px; font-size: 13px; color: var(--fg); }
+  #ask p b { color: var(--accent); }
+  #ask .row { display: flex; gap: 8px; justify-content: center; }
+  .btn.ghost {
+    background: var(--surface);
+    color: var(--fg-2);
+    border: 1px solid var(--border);
+  }
+  .btn.ghost:hover { background: var(--bg-deep); color: var(--fg); }
+
+  /* ── 프레젠테이션(수업) 모드 — 메뉴 숨김 → 보드 위에 영상만 ──────── */
+  #exit { position: absolute; top: 8px; right: 8px; display: none; z-index: 10; opacity: 0.55; }
+  #exit:hover { opacity: 1; }
+  body.present header { display: none; }
+  body.present #exit { display: inline-flex; }
+</style>
+</head>
+<body>
+  <header>
+    <input id="url" type="text" inputmode="url" placeholder="유튜브 링크를 붙여넣으세요 (youtube.com/watch… 또는 youtu.be/…)" />
+    <button id="go" class="btn" type="button">재생</button>
+    <button id="fs" class="icon-btn" type="button" title="전체 화면 (수업용 — 메뉴 숨기고 영상만)">⛶</button>
+  </header>
+
+  <div class="stage">
+    <iframe
+      id="player"
+      title="YouTube"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      allowfullscreen
+      referrerpolicy="strict-origin-when-cross-origin"
+    ></iframe>
+    <div id="empty">
+      <span class="tv">📺</span>
+      <span>유튜브 링크를 붙여넣고 재생을 누르세요</span>
+    </div>
+    <span id="err">링크에서 영상을 찾지 못했어요 — 유튜브 주소인지 확인해 주세요</span>
+    <div id="ask">
+      <p id="askMsg"></p>
+      <div class="row">
+        <button id="askOk" class="btn" type="button">확인</button>
+        <button id="askNo" class="btn ghost" type="button">취소</button>
+      </div>
+    </div>
+    <button id="exit" class="icon-btn" type="button" title="프레젠테이션 종료">✕</button>
+  </div>
+
+  <script>
+    const player = document.getElementById('player');
+    const urlEl = document.getElementById('url');
+    const emptyEl = document.getElementById('empty');
+    const errEl = document.getElementById('err');
+
+    // watch?v= / youtu.be/ / shorts/ / live/ / embed/ — 어떤 형태든 영상 ID를 뽑는다.
+    function videoId(raw) {
+      const s = (raw || '').trim();
+      if (!s) return null;
+      if (/^[\w-]{11}$/.test(s)) return s; // ID만 붙여넣은 경우
+      try {
+        const u = new URL(s.includes('://') ? s : `https://${s}`);
+        if (!/(^|\.)((youtube|youtube-nocookie)\.com|youtu\.be)$/.test(u.hostname)) return null;
+        if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('/')[0] || null;
+        const v = u.searchParams.get('v');
+        if (v) return v;
+        const m = u.pathname.match(/\/(shorts|live|embed)\/([\w-]{11})/);
+        return m ? m[2] : null;
+      } catch { return null; }
+    }
+
+    function play(raw) {
+      const id = videoId(raw);
+      if (!id) { errEl.style.display = 'inline-block'; return; }
+      errEl.style.display = 'none';
+      emptyEl.style.display = 'none';
+      player.style.display = 'block';
+      // nocookie 도메인 — 교실용으로 추적 쿠키 없이 재생.
+      player.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+    }
+
+    document.getElementById('go').addEventListener('click', () => play(urlEl.value));
+    urlEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') play(urlEl.value); });
+    urlEl.addEventListener('paste', () => setTimeout(() => play(urlEl.value), 0)); // 붙여넣기만 해도 바로 재생
+
+    // ── 프레젠테이션(수업) 모드 — 부모(보드 카드)에 postMessage로 알려
+    //    카드 테두리·헤더도 함께 숨긴다 → 보드 위에 영상만 크게.
+    const setPresent = (on) => {
+      document.body.classList.toggle('present', on);
+      try { window.parent && window.parent.postMessage({ type: 'kv-embed-present', on }, '*'); } catch { /* standalone */ }
+    };
+    document.getElementById('fs').addEventListener('click', () => setPresent(true));
+    document.getElementById('exit').addEventListener('click', () => setPresent(false));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setPresent(false); });
+
+    // ── 연결 제안 — 보드에서 다른 요소와 선이 이어지면 그 주제의 영상을 찾아
+    //    연결할지 묻는다(확인 → 서버 검색(/api/youtube/search) → 첫 영상 재생).
+    const ask = document.getElementById('ask');
+    const askMsg = document.getElementById('askMsg');
+    let askTopic = null;
+    window.proposeSearch = (topic) => {
+      askTopic = String(topic || '').trim();
+      if (!askTopic) return;
+      askMsg.innerHTML = '';
+      const b = document.createElement('b');
+      b.textContent = `'${askTopic}'`;
+      askMsg.append('연결된 요소 ', b, ' 에 대한 영상을 찾아 연결할까요?');
+      ask.style.display = 'block';
+    };
+    document.getElementById('askNo').addEventListener('click', () => { ask.style.display = 'none'; });
+    document.getElementById('askOk').addEventListener('click', async () => {
+      const topic = askTopic;
+      ask.style.display = 'none';
+      if (!topic) return;
+      errEl.textContent = `'${topic}' 영상을 찾는 중…`;
+      errEl.style.display = 'inline-block';
+      try {
+        // 교실용이라 '어린이'를 붙여 아이들에게 맞는 결과를 우선한다.
+        const r = await fetch(`/api/youtube/search?q=${encodeURIComponent(`${topic} 어린이`)}&n=1`);
+        const j = await r.json();
+        if (!j.ok || !j.results || !j.results[0]) throw new Error(j.error || '검색 결과 없음');
+        const v = j.results[0];
+        urlEl.value = `https://www.youtube.com/watch?v=${v.id}`;
+        errEl.style.display = 'none';
+        play(v.id);
+      } catch (e) {
+        errEl.textContent = `'${topic}' 영상을 찾지 못했어요 — 다시 시도해 주세요`;
+        errEl.style.display = 'inline-block';
+      }
+    });
+
+    // 외부에서 URL로 바로 재생할 수 있게 — 테스트·딥링크용.
+    window.loadSrc = (u) => { urlEl.value = u; play(u); };
+    window.__videoId = videoId; // 테스트용(링크 파서)
+    const q = new URLSearchParams(location.search).get('src');
+    if (q) window.loadSrc(q);
+  </script>
+</body>
+</html>

@@ -27,7 +27,8 @@ import { runDesignDirector } from '@/ai/agents/design';
 import { pickTemplate, type FrameTemplate, type FrameRegion, type FillAgent } from './templates';
 import { runRouter } from '@/ai/agents/router';
 import { runPlanIdeas, runPlan, runMindMapActivities, type MindActivity } from '@/ai/agents/plan';
-import { runStudioImages, runStudioWorksheet, KV_ART_STYLE } from '@/ai/agents/studio';
+import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImage, KV_ART_STYLE } from '@/ai/agents/studio';
+import { findAsset, saveAsset } from './assets';
 import { runRecord } from '@/ai/agents/record';
 import { runWriting } from '@/ai/agents/writing';
 import { callGateway } from '@/ai/client';
@@ -57,14 +58,16 @@ import {
   WORKSHEET_RE as WORKSHEET_REQ_RE,
   MINDMAP_RE,
 } from '@/ai/intent-lexicon';
-let composing = false; // guard against double-submit racing frame creation
 
 /* ---------------- entry ---------------- */
 
+/** 진행 단계 메시지 — 프롬프트바·보드 상태 필에 라이브로 스트리밍된다. */
+const say = (m: string) => useBoardStore.getState().setGenerating(m);
+
 export async function composeFromPrompt(text: string, forceRoute?: RouteTarget): Promise<void> {
-  if (composing) return;
-  composing = true;
-  useBoardStore.getState().setGenerating('✨ 보드를 만들고 있어요…');
+  // 복수 생성 허용 — 단일 실행 가드 대신 genActive 카운터로 동시 작업을 추적한다.
+  useBoardStore.getState().beginGen();
+  say('🧭 요청을 분석하고 있어요…');
   const created: string[] = [];
   let frameId: string | undefined; // hoisted so `finally` can clear the loading flag
   try {
@@ -115,6 +118,7 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
     const variant = ruleBasedVariant(out.route_to); // Design Director — arrange (rule-based)
     const complexity = estimateComplexity(text, out);
     const recordMode: RecordMode = out.mode ?? 'story';
+    say(`📐 '${frameTitle(text, template)}' 프레임을 준비하고 있어요…`);
 
     // Seed the frame — beside ALL existing content (panning there), else viewport
     // center. The frame appears IMMEDIATELY with a loading state so the teacher sees
@@ -123,15 +127,18 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
     // heights at the end) so the frames sit neatly side by side.
     const refFrame = rightmostComposerFrame();
     const c = composeOrigin();
+    // 병렬 생성(복수 작업) — 동시에 시작한 다른 컴포즈와 같은 원점을 계산해 겹치지
+    // 않도록, 진행 중 작업 수만큼 아래 레인으로 비켜 배치한다.
+    const parallelLane = Math.max(0, useBoardStore.getState().genActive - 1);
     frameId = newId('frame');
     b.addNodeRaw({
       id: frameId,
       type: 'frame',
       x: Math.round(c.x - 360),
-      y: refFrame ? Math.round(refFrame.y) : Math.round(c.y - 200),
+      y: (refFrame ? Math.round(refFrame.y) : Math.round(c.y - 200)) + parallelLane * 640,
       w: 720,
       h: 420,
-      data: { title: frameTitle(text, template), templateId: template.id, composer: true, variant, loading: true, loadingLabel: '✨ AI가 자료를 만들고 있어요…', sourcePrompt: text },
+      data: { title: frameTitle(text, template), templateId: template.id, composer: true, variant, loading: true, working: true, loadingLabel: '✨ AI가 자료를 만들고 있어요…', sourcePrompt: text },
     });
     created.push(frameId);
 
@@ -149,9 +156,15 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
       .filter((r) => complexity === 'complex' || r.tier === 'core')
       .sort((a, z) => a.order - z.order);
     let planId: string | undefined;
+    const ranAgents = new Set<FillAgent>();
     for (const region of regions) {
       try {
         const agent = effectiveAgent(region, template, text);
+        // 같은 에이전트가 같은 프롬프트로 두 번 돌지 않게(스튜디오 core가 그리기
+        // 요청으로 studio.images로 스왑되면 expand images 영역과 중복 → 10개 요청이
+        // 20장 생성되던 버그).
+        if (ranAgents.has(agent)) continue;
+        ranAgents.add(agent);
         const res = await fillRegion(frameId, agent, text, ctx, planId, recordMode);
         created.push(...res.ids);
         if (res.planId) planId = res.planId;
@@ -161,6 +174,7 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
     }
 
     // Next-step chips on the frame.
+    say('🪄 배치를 다듬고 있어요…');
     attachNextSteps(frameId, template, out.suggested_next);
     b.setSelection([frameId]);
 
@@ -179,23 +193,24 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
     designComposedFrame(frameId, spec.variant);
     decorateComposedFrame(frameId, text, spec.stickers);
     clearFrameLoading(frameId); // content is laid out → drop the in-frame loading state
-    if (refFrame) alignFrameToReference(frameId, refFrame.id); // neat side-by-side: top + equal height
+    // 병렬 레인으로 비켜 배치된 프레임은 기준 프레임에 재정렬하지 않는다(다시 겹침 방지).
+    if (refFrame && parallelLane === 0) alignFrameToReference(frameId, refFrame.id); // neat side-by-side: top + equal height
     if (spec.coverRole) void generateCoverFor(frameId, spec.coverRole, text);
     recordSpawnedNodes(created, 'AI 보드 생성');
   } finally {
-    composing = false;
-    useBoardStore.getState().setGenerating(null);
+    useBoardStore.getState().endGen(); // 마지막 작업일 때만 메시지가 사라진다
     if (frameId) clearFrameLoading(frameId); // safety: never leave a frame stuck loading
   }
 }
 
-/** Clear a frame's in-progress loading overlay (data.loading / loadingLabel). */
+/** Clear a frame's in-progress flags (loading 오버레이 + 제목 탭 working 스피너). */
 function clearFrameLoading(frameId: string): void {
   const f = useBoardStore.getState().nodes[frameId];
-  if (f?.data?.loading) {
+  if (f?.data?.loading || f?.data?.working) {
     const data = { ...f.data };
     delete data.loading;
     delete data.loadingLabel;
+    delete data.working;
     useBoardStore.getState().updateNodeRaw(frameId, { data });
   }
 }
@@ -752,6 +767,64 @@ function effectiveAgent(region: FrameRegion, template: FrameTemplate, prompt: st
   return region.agent;
 }
 
+/* ---------------- image row layout + library reuse ---------------- */
+
+/** 이미지 카드를 스폰 직후 '가로 한 줄'(헤더 아래)로 정렬 — placeInFrame의 줄바꿈
+    배치(세로 그리드)로 로딩되다가 완료 후 가로로 점프하던 어색함을 없앤다. */
+function layoutImagesRow(frameId: string, cardIds: string[]): void {
+  const b = useBoardStore.getState();
+  const fr = b.nodes[frameId];
+  if (!fr || cardIds.length === 0) return;
+  const PAD = 28;
+  const GAP = 24;
+  const members = Object.values(b.nodes).filter((n) => n.data?.frameId === frameId);
+  const header = members.find((n) => n.data?.role === 'header');
+  const headerH = header
+    ? (typeof header.data?.renderH === 'number' ? (header.data.renderH as number) : header.h)
+    : 0;
+  const y = header ? header.y + headerH + 20 : fr.y + PAD;
+  let x = fr.x + PAD;
+  for (const id of cardIds) {
+    const n = b.nodes[id];
+    if (!n) continue;
+    b.updateNodeRaw(id, { x: Math.round(x), y: Math.round(y) });
+    x += n.w + GAP;
+  }
+  fitFrameToChildren(frameId);
+}
+
+interface LibNoticeItem {
+  cardId: string;
+  caption: string;
+  prompt: string;
+  style: string;
+  kind: 'image' | '도안';
+}
+
+/** "새로 생성" — 보관함에서 재사용한 카드들을 취소하고 새 이미지로 다시 생성한다.
+    새로 생성된 그림은 다시 보관함에 저장(최신본 갱신). */
+export async function regenerateLibraryCards(frameId: string): Promise<void> {
+  const b = useBoardStore.getState();
+  const fr = b.nodes[frameId];
+  const notice = fr?.data?.libNotice as { items: LibNoticeItem[] } | undefined;
+  if (!fr || !notice?.items?.length) return;
+  b.updateNodeRaw(frameId, { data: { ...fr.data, libNotice: undefined } });
+  notice.items.forEach((it) => {
+    const c = b.nodes[it.cardId];
+    if (c) b.updateNodeRaw(it.cardId, { loading: true, data: { ...(c.data ?? {}), fromLibrary: false } });
+  });
+  await Promise.all(
+    notice.items.map(async (it) => {
+      const img = await renderStudioImage({ caption: it.caption, prompt: it.prompt }, it.style).catch(
+        () => ({ url: undefined as string | undefined, mocked: false }),
+      );
+      const cur = useBoardStore.getState().nodes[it.cardId];
+      if (cur) useBoardStore.getState().updateNodeRaw(it.cardId, { loading: false, ...(img.url ? { src: img.url } : {}) });
+      if (img.url && !img.mocked) void saveAsset(it.caption, it.kind, img.url);
+    }),
+  );
+}
+
 /* ---------------- region fill (reuse Tier1 agents → board cards) ---------------- */
 
 interface FillResult {
@@ -770,11 +843,13 @@ async function fillRegion(
   const ids: string[] = [];
   switch (agent) {
     case 'plan.ideas': {
+      say('💡 놀이 아이디어를 뽑고 있어요…');
       const ideas = await runPlanIdeas(topic, ctx);
       ideas.slice(0, 4).forEach((it) => ids.push(spawnTextCard(frameId, `${it.label}\n${it.desc}`, 'accent-soft', 240, 'idea')));
       return { ids };
     }
     case 'plan.grid': {
+      say('📅 주간 놀이계획을 작성하고 있어요…');
       const res = await runPlan(topic, [], ctx);
       // Full professional plan document, landscape A4 (fits the weekly grid table).
       const cid = spawnDocCard(frameId, planDocMarkdown(res.payload), 'plan', PLAN_DOC_W);
@@ -788,13 +863,52 @@ async function fillRegion(
       // A pure "draw X" request → ONE simple drawing of the subject (no worksheet,
       // no activity captions); expansion lives in the frame's action chips.
       const simple = agent === 'studio.images' && MEDIA_RE.test(topic) && !WORKSHEET_REQ_RE.test(topic);
-      const res = await runStudioImages(topic, [], ctx, agent === 'studio.coloring' ? '도안' : 'image', simple ? { simple: true } : undefined);
-      if (res.payload.type === 'StudioGallery') {
-        res.payload.props.items.forEach((it) => ids.push(spawnImageCard(frameId, it.url, it.caption)));
+      const kindStr: 'image' | '도안' = agent === 'studio.coloring' ? '도안' : 'image';
+      say(kindStr === '도안' ? '🖍️ 도안 구성을 잡고 있어요…' : '🖼️ 그림 구성을 잡고 있어요…');
+      // 1) 캡션 계획 → 보관함(자산 DB) 조회 — 같은 이름이 이미 있으면 생성 없이 재사용.
+      const plan = await planStudioImages(topic, [], ctx, kindStr, simple ? { simple: true } : undefined);
+      const hits = await Promise.all(plan.specs.map((s) => findAsset(s.caption, kindStr).catch(() => undefined)));
+      // 2) 카드 N장을 먼저 전부 배치 — 보관함 히트는 즉시 채움, 나머지는 스피너.
+      const cardIds = plan.specs.map((s, i) => spawnImageCard(frameId, hits[i]?.url, s.caption, !hits[i]));
+      ids.push(...cardIds);
+      const b = useBoardStore.getState();
+      cardIds.forEach((cid, i) => {
+        if (!hits[i]) return;
+        const c = b.nodes[cid];
+        if (c) b.updateNodeRaw(cid, { data: { ...(c.data ?? {}), fromLibrary: true } });
+      });
+      // 처음부터 '가로 한 줄'로 배치(스폰 시 세로 그리드 → 완료 후 가로로 점프하던 문제 제거).
+      layoutImagesRow(frameId, cardIds);
+      // 프레임 전체 로딩 오버레이를 끄고 카드별 스피너로 전환(가려지면 안 보임).
+      const fr = b.nodes[frameId];
+      if (fr?.data?.loading) b.updateNodeRaw(frameId, { data: { ...fr.data, loading: false } });
+      // 보관함 재사용 안내 + "새로 생성" 취소 액션(프레임 데이터에 기록 → NodeView가 렌더).
+      const libItems = plan.specs
+        .map((s, i) => ({ cardId: cardIds[i], caption: s.caption, prompt: s.prompt, style: plan.style, kind: kindStr, hit: !!hits[i] }))
+        .filter((it) => it.hit);
+      if (libItems.length) {
+        const f2 = useBoardStore.getState().nodes[frameId];
+        if (f2) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...f2.data, libNotice: { items: libItems } } });
+      }
+      // 3) 미스만 병렬 생성하되 '맨 앞부터 차례로' 공개. 성공작은 보관함에 자동 저장.
+      const proms = plan.specs.map((s, i) =>
+        hits[i] ? null : renderStudioImage(s, plan.style).catch(() => ({ url: undefined as string | undefined, mocked: false })),
+      );
+      const total = proms.filter(Boolean).length;
+      let done = 0;
+      for (let i = 0; i < proms.length; i++) {
+        const p = proms[i];
+        if (!p) continue;
+        say(`🎨 '${plan.specs[i].caption}' 그리는 중… (${done + 1}/${total})`);
+        const img = await p;
+        done += 1;
+        useBoardStore.getState().updateNodeRaw(cardIds[i], { loading: false, src: img.url });
+        if (img.url && !img.mocked) void saveAsset(plan.specs[i].caption, kindStr, img.url, plan.title);
       }
       return { ids };
     }
     case 'studio.worksheet': {
+      say('✏️ 활동지를 설계하고 있어요…');
       const res = await runStudioWorksheet(topic, ctx, planId);
       const cid = spawnDocCard(frameId, payloadText(res.payload), 'worksheet');
       stashPayload(cid, res.payload);
@@ -802,6 +916,7 @@ async function fillRegion(
       return { ids };
     }
     case 'writing.letter': {
+      say('💌 통신문을 작성하고 있어요…');
       const res = await runWriting(topic, ctx);
       const cid = spawnDocCard(frameId, payloadText(res.payload), 'letter');
       stashPayload(cid, res.payload);
@@ -809,6 +924,7 @@ async function fillRegion(
       return { ids };
     }
     case 'record': {
+      say('📝 기록 초안을 작성하고 있어요…');
       const res = await runRecord({ text: topic, mode: recordMode, grounding: { photos: [], teacher_notes: [topic] } }, ctx);
       const cid = spawnDocCard(frameId, payloadText(res.payload), 'record');
       stashPayload(cid, res.payload);
@@ -816,6 +932,7 @@ async function fillRegion(
       return { ids };
     }
     case 'source.web': {
+      say('🔎 웹에서 참고 자료를 찾고 있어요…');
       const cid = await spawnWebSource(frameId, topic);
       if (cid) ids.push(cid);
       return { ids };

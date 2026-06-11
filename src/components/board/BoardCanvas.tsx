@@ -1,7 +1,9 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { moveNodesCmd, captureNodes, pushRedesign, type NodeSnap } from '@/board/commands';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useBoardStore, type BoardNode, type BoardLink } from '@/store/boardStore';
+import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, type NodeSnap } from '@/board/commands';
+import { linkSequence } from '@/board/links';
 import { mindMapSubtree } from '@/board/composer';
+import { regenImageCard, genTextCard } from '@/board/workflow';
 import { frameMoveSet, rebindFrameMembership, frameOfPoint } from '@/board/frames';
 import { worldBox, renderHeight } from '@/board/geometry';
 import { IMG_PLACEHOLDER_ZOOM } from '@/board/imageLod';
@@ -45,11 +47,14 @@ function lockTextSelection() {
   document.body.style.userSelect = 'none';
   (document.body.style as unknown as { webkitUserSelect: string }).webkitUserSelect = 'none';
   window.getSelection?.()?.removeAllRanges();
+  // 드래그 동안 iframe이 포인터 이벤트를 삼키지 않게(임베드 위에서 pointerup 유실 방지).
+  document.body.classList.add('kv-iframe-shield');
 }
 function unlockTextSelection() {
   if (typeof document === 'undefined') return;
   document.body.style.userSelect = '';
   (document.body.style as unknown as { webkitUserSelect: string }).webkitUserSelect = '';
+  document.body.classList.remove('kv-iframe-shield');
 }
 
 interface Box {
@@ -68,6 +73,63 @@ export function BoardCanvas() {
   const selection = useBoardStore((s) => s.selection);
   const viewport = useBoardStore((s) => s.viewport);
   const generating = useBoardStore((s) => s.generating);
+  const links = useBoardStore((s) => s.links);
+  const classroom = useBoardStore((s) => s.classroom);
+  const show = useBoardStore((s) => s.show);
+
+  // ── 요소 연결선 — 양 끝이 살아있는 링크만, 순번(1, 2, 3…) 포함 ────────────
+  const liveLinks = useMemo(() => links.filter((l) => nodes[l.from] && nodes[l.to]), [links, nodes]);
+  const linkSeq = useMemo(() => linkSequence(liveLinks), [liveLinks]);
+  // 수업 모드 — 연결망에 포함된 요소만 렌더(나머지 숨김).
+  // 슬라이드 쇼 — 현재 슬라이드 한 장만(아이들에게 한 장씩).
+  const soloId = show ? show.ids[show.index] : null;
+  const classSet = useMemo(() => {
+    if (soloId) return new Set([soloId]);
+    return classroom ? new Set(classroom.ids) : null;
+  }, [classroom, soloId]);
+
+  // 노드·면(l/r)별로 붙은 링크 목록(생성 순) — 선과 포트가 같은 슬롯을 공유해
+  // 연결이 여러 개면 각자 다른 점에서 선이 나간다(한 점 두 갈래 방지).
+  const sideMap = useMemo(() => {
+    const m = new Map<string, { l: string[]; r: string[] }>();
+    const put = (id: string, side: 'l' | 'r', linkId: string) => {
+      if (!m.has(id)) m.set(id, { l: [], r: [] });
+      m.get(id)![side].push(linkId);
+    };
+    for (const l of liveLinks) {
+      const ab = worldBox(nodes[l.from]);
+      const zb = worldBox(nodes[l.to]);
+      const l2r = ab.x + ab.w / 2 <= zb.x + zb.w / 2;
+      put(l.from, l2r ? 'r' : 'l', l.id);
+      put(l.to, l2r ? 'l' : 'r', l.id);
+    }
+    return m;
+  }, [liveLinks, nodes]);
+
+  /** 한 면의 포트 슬롯들 — 붙은 링크들(순서대로) + 마지막에 '새 연결' 슬롯.
+      전체가 측변 세로 중앙을 기준으로 나란히 정렬된다. */
+  function portSlots(nodeId: string, side: 'l' | 'r'): Array<{ x: number; y: number; linkId?: string }> {
+    const n = nodes[nodeId];
+    if (!n) return [];
+    const b = worldBox(n);
+    const list = sideMap.get(nodeId)?.[side] ?? [];
+    const total = list.length + 1;
+    const gap = 22 / viewport.zoom;
+    const x = side === 'l' ? b.x : b.x + b.w;
+    const cy = b.y + b.h / 2;
+    return Array.from({ length: total }, (_, i) => ({
+      x,
+      y: cy + (i - (total - 1) / 2) * gap,
+      linkId: list[i],
+    }));
+  }
+
+  /** 링크의 한쪽 끝 좌표 — 그 링크가 차지한 포트 슬롯 위치. */
+  function linkAnchor(nodeId: string, side: 'l' | 'r', linkId: string, off: { dx: number; dy: number }) {
+    const slots = portSlots(nodeId, side);
+    const slot = slots.find((sl) => sl.linkId === linkId) ?? slots[0];
+    return { x: slot.x + off.dx, y: slot.y + off.dy };
+  }
 
   // Mind-map connection edges (frame.data.edges). Recompute only when nodes/order
   // change — NOT on every drag frame (drag is local state, doesn't touch the store).
@@ -234,6 +296,157 @@ export function BoardCanvas() {
     },
     [handlePointerToWorld, onHandleMove, onHandleUp],
   );
+
+  // ── 연결 포트(호버 시 좌/우 원형 버튼) + 포트 드래그로 선 잇기 ──────────────
+  // 텍스트·메모·이미지·영상(임베드)·프레임만 연결 가능(도형·러너 제외).
+  const LINKABLE = useMemo(() => new Set(['text', 'sticky', 'image', 'frame']), []);
+  const [portsId, setPortsId] = useState<string | null>(null);
+  const [linkLine, setLinkLine] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  // 연결 직후 생성 제안 — 빈 메모/이미지 카드를 다른 요소와 이으면
+  // "연결된 요소 'X'에 대한 내용/이미지를 생성할까요?" 확인 카드를 띄운다.
+  const [proposal, setProposal] = useState<{ id: string; topic: string; kind: 'memo' | 'image' } | null>(null);
+  // mode 'new' = 빈 포트에서 새 연결, 'detach' = 연결된 포트를 떼어내 분리/옮기기.
+  // from = 고정된(반대쪽) 끝, keepFrom = 고정 끝이 링크의 from인지.
+  const lk = useRef<{ mode: 'new' | 'detach'; from: string; x1: number; y1: number; linkId?: string; keepFrom?: boolean } | null>(null);
+
+  /** 월드 좌표에서 연결 가능한 최상위 노드(포트 여유 16px 포함). */
+  const linkableAt = useCallback(
+    (wx: number, wy: number): BoardNode | null => {
+      const s = useBoardStore.getState();
+      const pad = 16 / s.viewport.zoom;
+      for (let i = s.order.length - 1; i >= 0; i--) {
+        const n = s.nodes[s.order[i]];
+        if (!n || n.locked || !LINKABLE.has(n.type)) continue;
+        const b = worldBox(n);
+        if (wx >= b.x - pad && wx <= b.x + b.w + pad && wy >= b.y - pad && wy <= b.y + b.h + pad) return n;
+      }
+      return null;
+    },
+    [LINKABLE],
+  );
+
+  /** 캔버스 호버 → 포트를 보여줄 노드 추적(드래그/팬/박스/수업 모드 중엔 끔). */
+  function onCanvasHover(e: React.PointerEvent) {
+    if (lk.current) return; // 연결 드래그 중 — 별도 핸들러가 관리
+    if (it.current.mode !== 'idle' || ht.current.mode || classroom || show) {
+      if (portsId) setPortsId(null);
+      return;
+    }
+    const w = toWorld(e.clientX, e.clientY);
+    const hit = linkableAt(w.x, w.y);
+    const next = hit ? hit.id : null;
+    if (next !== portsId) setPortsId(next);
+  }
+
+  const onLinkMove = useCallback(
+    (e: PointerEvent) => {
+      const st = lk.current;
+      if (!st) return;
+      const w = handlePointerToWorld(e.clientX, e.clientY);
+      setLinkLine({ x1: st.x1, y1: st.y1, x2: w.x, y2: w.y });
+      const t = linkableAt(w.x, w.y);
+      setPortsId(t && t.id !== st.from ? t.id : null); // 드롭 대상 하이라이트
+    },
+    [handlePointerToWorld, linkableAt],
+  );
+
+  const onLinkUp = useCallback(
+    (e: PointerEvent) => {
+      const st = lk.current;
+      lk.current = null;
+      unlockTextSelection();
+      window.removeEventListener('pointermove', onLinkMove);
+      window.removeEventListener('pointerup', onLinkUp);
+      setLinkLine(null);
+      if (!st) return;
+      const w = handlePointerToWorld(e.clientX, e.clientY);
+      const target = linkableAt(w.x, w.y);
+      if (st.mode === 'new') {
+        if (target && target.id !== st.from) {
+          const created = addLinkCmd(st.from, target.id);
+          // 연결 직후 제안 — 상대 요소의 캡션/제목을 주제로:
+          //  · 유튜브 뷰어 ↔ 요소 → 뷰어 안 "영상을 찾아 연결할까요?" (뷰어가 처리)
+          //  · 빈 메모/이미지 ↔ 요소 → 보드 위 "내용/이미지를 생성할까요?" 팝오버
+          if (created) {
+            const ss = useBoardStore.getState();
+            const pair = [ss.nodes[st.from], ss.nodes[target.id]].filter(Boolean) as BoardNode[];
+            const topicOf = (n?: BoardNode) =>
+              n ? ((n.text ?? '') || String(n.data?.title ?? '')).split('\n')[0].trim() : '';
+            const viewer = pair.find((n) => String(n.data?.embed ?? '').includes('youtube-viewer'));
+            if (viewer) {
+              const other = pair.find((n) => n !== viewer);
+              const topic = topicOf(other);
+              if (topic) window.dispatchEvent(new CustomEvent('kv:yt-propose', { detail: { target: viewer.id, topic } }));
+            } else {
+              // 빈 카드만 제안 — 채워진 이미지끼리 잇는 슬라이드 체인을 방해하지 않게.
+              const emptyMemo = (n: BoardNode) =>
+                n.type === 'sticky' && !n.data?.embed && !n.data?.doc && !(n.text ?? '').trim();
+              const emptyImage = (n: BoardNode) => n.type === 'image' && !n.src && !n.loading;
+              const genNode = pair.find((n) => emptyMemo(n) || emptyImage(n));
+              const other = pair.find((n) => n !== genNode);
+              const topic = topicOf(other);
+              if (genNode && topic) {
+                setProposal({ id: genNode.id, topic, kind: emptyImage(genNode) ? 'image' : 'memo' });
+              }
+            }
+          }
+        }
+      } else if (st.linkId) {
+        // 떼어내기: 빈 곳 = 연결 해제, 다른 요소 = 옮겨 연결, 제자리(원래 카드/고정 끝) = 유지
+        const link = useBoardStore.getState().links.find((l) => l.id === st.linkId);
+        if (link) {
+          const detached = st.keepFrom ? link.to : link.from; // 원래 붙어 있던(떼어낸) 쪽
+          if (!target) relinkCmd(link.id, null);
+          else if (target.id !== detached && target.id !== st.from) {
+            relinkCmd(link.id, st.keepFrom ? { from: st.from, to: target.id } : { from: target.id, to: st.from });
+          }
+        }
+      }
+      setPortsId(null);
+    },
+    [handlePointerToWorld, linkableAt, onLinkMove],
+  );
+
+  /** 포트 pointerdown — 노드 드래그를 막고 연결 드래그를 시작한다.
+      detachLink가 있으면 그 연결을 '떼어내는' 드래그(반대쪽 끝은 고정).
+      slot = 잡은 포트의 좌표 — 임시 선이 그 점에서 출발한다. */
+  function onPortDown(
+    e: React.PointerEvent,
+    nodeId: string,
+    side: 'l' | 'r',
+    slot: { x: number; y: number },
+    detachLink?: BoardLink,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    const s = useBoardStore.getState();
+    const n = s.nodes[nodeId];
+    if (!n) return;
+    if (detachLink) {
+      const otherId = detachLink.from === nodeId ? detachLink.to : detachLink.from;
+      const other = s.nodes[otherId];
+      if (!other) return;
+      // 고정(반대쪽) 끝의 슬롯 위치에서 임시 선이 출발한다.
+      const ab = worldBox(s.nodes[detachLink.from]);
+      const zb = worldBox(s.nodes[detachLink.to]);
+      const l2r = ab.x + ab.w / 2 <= zb.x + zb.w / 2;
+      const otherSide: 'l' | 'r' = detachLink.from === otherId ? (l2r ? 'r' : 'l') : (l2r ? 'l' : 'r');
+      const anch = linkAnchor(otherId, otherSide, detachLink.id, { dx: 0, dy: 0 });
+      lk.current = {
+        mode: 'detach',
+        from: otherId,
+        x1: anch.x,
+        y1: anch.y,
+        linkId: detachLink.id,
+        keepFrom: detachLink.from === otherId,
+      };
+    } else {
+      lk.current = { mode: 'new', from: nodeId, x1: slot.x, y1: slot.y };
+    }
+    lockTextSelection();
+    window.addEventListener('pointermove', onLinkMove);
+    window.addEventListener('pointerup', onLinkUp);
+  }
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -420,6 +633,7 @@ export function BoardCanvas() {
       ref={ref}
       data-kv-canvas
       onPointerDown={onBackgroundPointerDown}
+      onPointerMove={onCanvasHover}
       onWheel={onWheel}
       onDoubleClick={onBackgroundDoubleClick}
       className="relative h-full w-full overflow-hidden bg-bg"
@@ -440,11 +654,12 @@ export function BoardCanvas() {
         className="absolute left-0 top-0 origin-top-left"
         style={{ transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})` }}
       >
-        {laneOrder.map((id) => (lanes[id] ? <LaneView key={id} lane={lanes[id]} /> : null))}
+        {!classroom && !show && laneOrder.map((id) => (lanes[id] ? <LaneView key={id} lane={lanes[id]} /> : null))}
 
         {/* frames render behind (back container layer), other cards on top */}
         {order
           .filter((id) => nodes[id]?.type === 'frame')
+          .filter((id) => !classSet || classSet.has(id))
           .filter((id) => keepIds.has(id) || inView(nodes[id]))
           .map((id) => {
             const n = nodes[id];
@@ -469,6 +684,7 @@ export function BoardCanvas() {
             const a = nodes[e.from];
             const z = nodes[e.to];
             if (!a || !z) return null;
+            if (classSet && (!classSet.has(e.from) || !classSet.has(e.to))) return null;
             const oa = drag && dragIds.includes(a.id) ? drag : { dx: 0, dy: 0 };
             const oz = drag && dragIds.includes(z.id) ? drag : { dx: 0, dy: 0 };
             const ah = typeof a.data?.renderH === 'number' ? a.data.renderH : a.h;
@@ -491,6 +707,7 @@ export function BoardCanvas() {
 
         {order
           .filter((id) => nodes[id] && nodes[id].type !== 'frame')
+          .filter((id) => !classSet || classSet.has(id))
           .filter((id) => keepIds.has(id) || inView(nodes[id]))
           .map((id) => {
             const n = nodes[id];
@@ -520,6 +737,188 @@ export function BoardCanvas() {
             style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
           />
         )}
+
+        {/* ── 요소 연결선 — 포트 드래그로 만든 from→to 곡선. 클릭하면 연결 해제. ── */}
+        <svg className="absolute left-0 top-0" width="1" height="1" style={{ overflow: 'visible', pointerEvents: 'none' }}>
+          {liveLinks.map((l) => {
+            if (classSet && (!classSet.has(l.from) || !classSet.has(l.to))) return null;
+            const a = nodes[l.from];
+            const z = nodes[l.to];
+            const oa = drag && dragIds.includes(l.from) ? drag : { dx: 0, dy: 0 };
+            const oz = drag && dragIds.includes(l.to) ? drag : { dx: 0, dy: 0 };
+            const ab = worldBox(a);
+            const zb = worldBox(z);
+            // 면 판정은 sideMap과 동일하게(오프셋 없이) — 슬롯과 선이 항상 같은 점.
+            const l2r = ab.x + ab.w / 2 <= zb.x + zb.w / 2;
+            const p1 = linkAnchor(l.from, l2r ? 'r' : 'l', l.id, oa);
+            const p2 = linkAnchor(l.to, l2r ? 'l' : 'r', l.id, oz);
+            const x1 = p1.x;
+            const y1 = p1.y;
+            const x2 = p2.x;
+            const y2 = p2.y;
+            const k = (l2r ? 1 : -1) * Math.max(28, Math.min(90, Math.abs(x2 - x1) / 2));
+            const d = `M ${x1} ${y1} C ${x1 + k} ${y1}, ${x2 - k} ${y2}, ${x2} ${y2}`;
+            return (
+              <g key={l.id}>
+                <path d={d} fill="none" stroke="var(--accent)" strokeWidth={2 / viewport.zoom} strokeLinecap="round" opacity={0.65} />
+                <circle cx={x2} cy={y2} r={3.5 / viewport.zoom} fill="var(--accent)" opacity={0.85} />
+                {/* 넉넉한 투명 히트 영역 — 클릭으로 연결 해제(undo 가능) */}
+                {!classroom && (
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={12 / viewport.zoom}
+                    style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                    onClick={() => removeLinkCmd(l.id)}
+                  >
+                    <title>클릭하면 연결 해제</title>
+                  </path>
+                )}
+              </g>
+            );
+          })}
+          {/* 연결 드래그 중 임시 선 */}
+          {linkLine && (
+            <path
+              d={`M ${linkLine.x1} ${linkLine.y1} C ${linkLine.x1 + 40} ${linkLine.y1}, ${linkLine.x2 - 40} ${linkLine.y2}, ${linkLine.x2} ${linkLine.y2}`}
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth={2 / viewport.zoom}
+              strokeDasharray={`${6 / viewport.zoom} ${5 / viewport.zoom}`}
+              strokeLinecap="round"
+              opacity={0.8}
+            />
+          )}
+        </svg>
+
+        {/* 연결 포트 — 호버한 카드의 좌/우 세로 중앙 원형 버튼.
+            빈 포트: 드래그해서 새 연결. 이미 연결된 면: 채워진 포트(드래그=떼어내기 —
+            빈 곳에 놓으면 분리, 다른 요소에 놓으면 옮겨 연결) + 그 아래 새 포트가
+            하나 더 생겨 또 다른 요소와 가지(1-1) 연결을 만들 수 있다. */}
+        {!classroom && !show && portsId && nodes[portsId] && !drag && (() => {
+          const pn = nodes[portsId];
+          const sz = 14 / viewport.zoom;
+          const ring = lk.current && lk.current.from !== portsId; // 드롭 대상 하이라이트
+          const dot = (key: string, slot: { x: number; y: number }, side: 'l' | 'r', detach?: BoardLink) => (
+            <div
+              key={key}
+              title={detach ? '드래그해서 떼어내기 — 빈 곳에 놓으면 연결 해제' : '드래그해서 다른 카드와 연결'}
+              onPointerDown={(e) => onPortDown(e, pn.id, side, slot, detach)}
+              className={`absolute z-30 rounded-full border-2 border-accent shadow-sm transition-colors duration-150 ease-soft ${
+                detach || ring ? 'bg-accent' : 'bg-surface hover:bg-accent'
+              }`}
+              style={{
+                left: slot.x,
+                top: slot.y,
+                width: sz,
+                height: sz,
+                transform: 'translate(-50%, -50%)',
+                cursor: detach ? 'grab' : 'crosshair',
+                pointerEvents: 'auto',
+                borderWidth: Math.max(1, 2 / viewport.zoom),
+              }}
+            />
+          );
+          return (
+            <>
+              {(['l', 'r'] as const).map((side) => (
+                <Fragment key={side}>
+                  {portSlots(pn.id, side).map((slot, i) =>
+                    dot(
+                      `${side}-${i}`,
+                      slot,
+                      side,
+                      slot.linkId ? liveLinks.find((l) => l.id === slot.linkId) : undefined,
+                    ),
+                  )}
+                </Fragment>
+              ))}
+            </>
+          );
+        })()}
+
+        {/* 연결 생성 제안 팝오버 — 대상 카드 바로 아래 중앙. 확인 = 메모는 관련
+            내용, 이미지는 그 주제의 이미지 생성(둘 다 기존 생성 경로 재사용). */}
+        {proposal && nodes[proposal.id] && (() => {
+          const pn = nodes[proposal.id];
+          const pb = worldBox(pn);
+          const z = viewport.zoom;
+          const confirm = () => {
+            const { id, topic, kind } = proposal;
+            setProposal(null);
+            if (kind === 'image') {
+              void regenImageCard(id, topic);
+            } else {
+              useBoardStore.getState().updateNodeRaw(id, { text: '✨ 내용을 만들고 있어요…' });
+              void genTextCard(id, `${topic}에 대해 아이들과 나눌 핵심 내용을 짧은 메모로 정리해줘`);
+            }
+          };
+          return (
+            <div
+              className="absolute z-40"
+              style={{ left: pb.x + pb.w / 2, top: pb.y + pb.h + 10 / z, transform: 'translateX(-50%)' }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div
+                className="rounded-lg border border-border bg-surface text-center shadow-lg"
+                style={{ padding: `${10 / z}px ${14 / z}px`, width: 'max-content', maxWidth: 340 / z }}
+              >
+                <p className="text-fg" style={{ fontSize: 13 / z, margin: 0, marginBottom: 9 / z, lineHeight: 1.45 }}>
+                  연결된 요소 <b className="font-semibold text-accent">'{proposal.topic}'</b>
+                  {proposal.kind === 'image' ? '의 이미지를 생성할까요?' : '에 대한 내용을 생성할까요?'}
+                </p>
+                <div className="flex items-center justify-center" style={{ gap: 6 / z }}>
+                  <button
+                    onClick={confirm}
+                    className="rounded-pill bg-accent font-semibold text-on-accent hover:bg-accent-hover"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${16 / z}px` }}
+                  >
+                    확인
+                  </button>
+                  <button
+                    onClick={() => setProposal(null)}
+                    className="rounded-pill border border-border bg-surface text-fg-2 hover:bg-surface-2"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${16 / z}px` }}
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 연결 순번 배지 — 1(시작)부터 연결 순서대로, 카드 좌상단에 작게.
+            슬라이드 쇼 중에는 표시하지 않는다(아이들 화면을 깨끗하게). */}
+        {!show && [...linkSeq.entries()].map(([id, label]) => {
+          const n = nodes[id];
+          if (!n) return null;
+          if (classSet && !classSet.has(id)) return null;
+          const b = worldBox(n);
+          const o = drag && dragIds.includes(id) ? drag : { dx: 0, dy: 0 };
+          const sz = 22 / viewport.zoom;
+          return (
+            <div
+              key={`seq-${id}`}
+              className="pointer-events-none absolute z-30 flex items-center justify-center rounded-pill bg-accent font-semibold text-on-accent shadow-sm"
+              style={{
+                left: b.x + o.dx,
+                top: b.y + o.dy,
+                minWidth: sz,
+                height: sz,
+                paddingLeft: 7 / viewport.zoom,
+                paddingRight: 7 / viewport.zoom,
+                fontSize: 11.5 / viewport.zoom,
+                lineHeight: 1,
+                whiteSpace: 'nowrap',
+                transform: 'translate(-40%, -40%)',
+              }}
+            >
+              {label}
+            </div>
+          );
+        })}
       </div>
 
       {/* generating status pill — screen-fixed, above the world (SKILL §6: 5 states).

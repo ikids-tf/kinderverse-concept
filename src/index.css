@@ -97,9 +97,53 @@
     40% { opacity: 1; }
   }
 
+  /* 보드 드래그 중 iframe 입력 차단 — 포인터가 임베드(iframe) 위를 지나도
+     pointerup을 삼키지 않게(카드가 마우스를 영영 따라다니던 버그). */
+  body.kv-iframe-shield iframe { pointer-events: none !important; }
+
   /* Prompt-bar send button spinner while a prompt is generating. */
   .kv-spin { animation: kv-spin 0.7s linear infinite; }
   @keyframes kv-spin { to { transform: rotate(360deg); } }
+
+  /* 생성 중 게시 버튼 — 트랙 + 아크 + 선두 점이 자연스럽게 도는 스피너. */
+  .kv-spin-smooth {
+    animation: kv-spin 0.9s linear infinite;
+    transform-origin: center;
+  }
+
+  /* 생성 중 프롬프트바 — 외곽선을 '따라 흐르는' 코랄 그라데이션 링.
+     conic-gradient 각도를 회전시키고, 마스크로 테두리 두께(2px)만 남긴다. */
+  @property --kv-pbar-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+  }
+  .kv-pbar-streaming { border-color: transparent !important; }
+  .kv-pbar-streaming::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 2px;
+    background: conic-gradient(
+      from var(--kv-pbar-angle),
+      var(--accent) 0deg,
+      var(--gold) 70deg,
+      var(--coral-soft) 140deg,
+      var(--border) 190deg,
+      var(--border) 330deg,
+      var(--accent) 360deg
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: kv-pbar-sweep 2.4s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes kv-pbar-sweep {
+    to { --kv-pbar-angle: 360deg; }
+  }
 
   /* A4 document cards on My Board — light markdown typography (가정통신문·활동지·계획). */
   .kv-doc-md p { margin: 0 0 0.5rem; }

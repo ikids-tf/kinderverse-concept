@@ -7,6 +7,10 @@ import {
   groupNodesCmd,
   ungroupNodesCmd,
   toggleLockCmd,
+  copyNodesCmd,
+  cutNodesCmd,
+  pasteNodesCmd,
+  hasClipboard,
 } from '@/board/commands';
 
 /* Global keyboard handler (SKILL §6.1), bound to the history module (§6.2).
@@ -73,6 +77,29 @@ export function useKeyboardShortcuts() {
       if (mod(e) && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         duplicateNodesCmd(sel);
+        return;
+      }
+      // Copy / Cut / Paste — 보드 내부 클립보드(모든 선택 가능 요소).
+      // 보드 선택이 없으면 preventDefault 하지 않아 네이티브 텍스트 복사를 보존한다.
+      if (mod(e) && e.key.toLowerCase() === 'c') {
+        if (sel.length) {
+          e.preventDefault();
+          copyNodesCmd(sel);
+        }
+        return;
+      }
+      if (mod(e) && e.key.toLowerCase() === 'x') {
+        if (sel.length) {
+          e.preventDefault();
+          cutNodesCmd(sel);
+        }
+        return;
+      }
+      if (mod(e) && e.key.toLowerCase() === 'v') {
+        if (hasClipboard()) {
+          e.preventDefault();
+          pasteNodesCmd();
+        }
         return;
       }
       // Group / ungroup

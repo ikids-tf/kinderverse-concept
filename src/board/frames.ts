@@ -159,9 +159,10 @@ export function designComposedFrame(frameId: string, variant: LayoutVariant = 'd
   const oy = frame.y + FRAME_PAD;
   let y = oy;
 
-  // 1) Header band (top-left).
+  // 1) Header band (top-left). 폭은 건드리지 않는다 — 텍스트 카드는 내용에 핏(autoW)
+  // 이라 store w에 큰 값을 쓰면 화면(max-content)과 어긋나 선택 핸들이 멀리 떠 버린다.
   if (header) {
-    b.updateNodeRaw(header.id, { x: ox, y, w: Math.max(420, header.w) });
+    b.updateNodeRaw(header.id, { x: ox, y });
     y += layoutH(header) + 20;
   }
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { worldBox, renderHeight } from '@/board/geometry';
+import { linkedComponent } from '@/board/links';
 
 /* My Board state (SKILL §6, PRD §4.2). The BOARD slice (CLAUDE §5).
    Holds free primitives, workflow lanes, selection, and the viewport. Mutations
@@ -69,6 +70,13 @@ export interface Viewport {
   panY: number;
 }
 
+/** 요소 사이의 연결선(포트 드래그) — from→to 방향이 순번 계산의 기준. */
+export interface BoardLink {
+  id: string;
+  from: string;
+  to: string;
+}
+
 /* Serializable content of one board (canvas) — for multi-board save/load. */
 export interface BoardSnapshot {
   nodes: Record<string, BoardNode>;
@@ -76,6 +84,8 @@ export interface BoardSnapshot {
   lanes: Record<string, Lane>;
   laneOrder: string[];
   viewport: Viewport;
+  /** 요소 연결선 — 이전 스냅샷에는 없을 수 있다(로드 시 [] 폴백). */
+  links?: BoardLink[];
 }
 
 interface BoardState {
@@ -85,9 +95,23 @@ interface BoardState {
   laneOrder: string[];
   selection: string[];
   viewport: Viewport;
+  links: BoardLink[];
   classroomMode: boolean;
+  /** 수업 모드 — 연결망만 남기고 숨김 + 가로 정렬. 종료 시 원위치 복원용 저장본. */
+  classroom: {
+    ids: string[];
+    saved: Array<{ id: string; x: number; y: number }>;
+    savedViewport: Viewport;
+  } | null;
+  /** 슬라이드 쇼 — 연결 순서대로 한 장씩 풀스크린처럼(나머지 숨김 + 포커스 줌). */
+  show: { ids: string[]; index: number; savedViewport: Viewport } | null;
+  startShow: (ids: string[]) => void;
+  stepShow: (dir: 1 | -1) => void;
+  endShow: () => void;
   /** Non-null while an AI generation is running → board shows a status pill. */
   generating: string | null;
+  /** 동시 진행 중인 생성 작업 수 — 복수 생성 지원. 모두 끝나야 메시지가 사라진다. */
+  genActive: number;
 
   // ---- raw node ops ----
   addNodeRaw: (node: BoardNode) => void;
@@ -97,6 +121,10 @@ interface BoardState {
   /** Send a node to the back of the z-order (e.g. a frame that wraps others). */
   moveToBackRaw: (id: string) => void;
 
+  // ---- links (요소 연결선) ----
+  addLinkRaw: (link: BoardLink) => void;
+  removeLinkRaw: (id: string) => void;
+
   // ---- selection ----
   setSelection: (ids: string[]) => void;
   toggleSelection: (id: string) => void;
@@ -105,12 +133,15 @@ interface BoardState {
 
   // ---- viewport ----
   setGenerating: (label: string | null) => void;
+  /** 생성 작업 시작/종료 표시 — endGen은 마지막 작업이 끝났을 때만 메시지를 비운다. */
+  beginGen: () => void;
+  endGen: () => void;
   setViewport: (v: Partial<Viewport>) => void;
   zoomBy: (factor: number, cx?: number, cy?: number) => void;
   resetView: () => void;
   fit: () => void;
   /** Center one node in the visible canvas and zoom so it fills the view. */
-  focusNode: (id: string) => void;
+  focusNode: (id: string, maxZoom?: number) => void;
   toggleClassroomMode: () => void;
 
   // ---- multi-board snapshot ----
@@ -135,10 +166,39 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   laneOrder: [],
   selection: [],
   viewport: { zoom: 1, panX: 0, panY: 0 },
+  links: [],
   classroomMode: false,
+  classroom: null,
+  show: null,
   generating: null,
+  genActive: 0,
+
+  startShow: (ids) => {
+    if (!ids.length) return;
+    set((s) => ({ show: { ids, index: 0, savedViewport: { ...s.viewport } }, selection: [] }));
+    get().focusNode(ids[0], 3);
+  },
+  stepShow: (dir) => {
+    const s = get();
+    if (!s.show) return;
+    const i = Math.min(s.show.ids.length - 1, Math.max(0, s.show.index + dir));
+    if (i === s.show.index) return;
+    set({ show: { ...s.show, index: i } });
+    get().focusNode(s.show.ids[i], 3);
+  },
+  endShow: () => {
+    const s = get();
+    if (!s.show) return;
+    set({ viewport: s.show.savedViewport, show: null });
+  },
 
   setGenerating: (label) => set({ generating: label }),
+  beginGen: () => set((s) => ({ genActive: s.genActive + 1 })),
+  endGen: () =>
+    set((s) => {
+      const n = Math.max(0, s.genActive - 1);
+      return { genActive: n, ...(n === 0 ? { generating: null } : {}) };
+    }),
 
   addNodeRaw: (node) =>
     set((s) => ({ nodes: { ...s.nodes, [node.id]: node }, order: [...s.order, node.id] })),
@@ -169,6 +229,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   moveToBackRaw: (id) =>
     set((s) => (s.nodes[id] ? { order: [id, ...s.order.filter((x) => x !== id)] } : {})),
+
+  addLinkRaw: (link) => set((s) => ({ links: [...s.links, link] })),
+  removeLinkRaw: (id) => set((s) => ({ links: s.links.filter((l) => l.id !== id) })),
 
   setSelection: (ids) => set({ selection: ids }),
   toggleSelection: (id) =>
@@ -221,7 +284,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       },
     });
   },
-  focusNode: (id) => {
+  focusNode: (id, maxZoom = 2) => {
     const s = get();
     const n = s.nodes[id];
     if (!n) return;
@@ -247,8 +310,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const bottomY = pr ? pr.top - 16 : cr.top + cr.height - 140;
     const availW = Math.max(240, cr.width - padX * 2);
     const availH = Math.max(240, bottomY - cr.top - padTop);
-    // Fill the view but never zoom past 2× (keeps small cards from over-magnifying).
-    const zoom = clampZoom(Math.min(availW / (w + gap * 2), availH / (h + gap * 2), 2));
+    // Fill the view but never zoom past maxZoom (keeps small cards from over-magnifying;
+    // 슬라이드 쇼는 3×까지 허용 — 교실 화면에서 한 장이 크게 보이도록).
+    const zoom = clampZoom(Math.min(availW / (w + gap * 2), availH / (h + gap * 2), maxZoom));
     // Center is invariant under center-anchored scale — use the geometric center.
     const ncx = n.x + n.w / 2;
     const ncy = n.y + renderHeight(n) / 2;
@@ -263,11 +327,73 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       },
     });
   },
-  toggleClassroomMode: () => set((s) => ({ classroomMode: !s.classroomMode })),
+  /* 수업 모드. 연결된 요소가 선택돼 있으면: 그 연결망만 남기고 전부 숨기고,
+     순번(1→2→3…) 순서대로 가로 한 줄(세로 중앙 정렬)로 배치 + 화면에 맞춘다.
+     종료(다시 누름): 원위치·원래 뷰로 복원. 연결 없는 선택이면 기존처럼 시각 토글만. */
+  toggleClassroomMode: () => {
+    const s = get();
+    // ── 종료: 위치·뷰 복원 ──
+    if (s.classroom) {
+      const nodes = { ...s.nodes };
+      for (const p of s.classroom.saved) {
+        if (nodes[p.id]) nodes[p.id] = { ...nodes[p.id], x: p.x, y: p.y };
+      }
+      set({ nodes, viewport: s.classroom.savedViewport, classroom: null, classroomMode: false });
+      return;
+    }
+    // ── 진입 ──
+    const live = s.links.filter((l) => s.nodes[l.from] && s.nodes[l.to]);
+    const anchor = s.selection.find((id) => live.some((l) => l.from === id || l.to === id));
+    const chain = anchor ? linkedComponent(anchor, live).filter((id) => s.nodes[id]) : [];
+    if (chain.length < 2) {
+      set({ classroomMode: !s.classroomMode }); // 연결망 없음 — 기존 동작 유지
+      return;
+    }
+    const saved = chain.map((id) => ({ id, x: s.nodes[id].x, y: s.nodes[id].y }));
+    // 순번 순서 그대로 가로 정렬 — 첫 요소의 현재 위치를 기준점으로.
+    const GAP = 48;
+    const boxes = chain.map((id) => worldBox(s.nodes[id]));
+    let X = Math.min(...boxes.map((b) => b.x));
+    const yCenter = boxes[0].y + boxes[0].h / 2;
+    const nodes = { ...s.nodes };
+    for (const id of chain) {
+      const n = nodes[id];
+      const sc = n.scale ?? 1;
+      const rh = renderHeight(n);
+      // 월드 좌단을 X에, 월드 세로 중앙을 yCenter에 — 스케일된 카드도 정확히.
+      nodes[id] = {
+        ...n,
+        x: Math.round(X - n.w / 2 + (n.w * sc) / 2),
+        y: Math.round(yCenter - rh / 2),
+      };
+      X += n.w * sc + GAP;
+    }
+    // 정렬된 연결망에 화면 맞춤(fit과 동일 계산, 대상만 한정).
+    const nb = chain.map((id) => worldBox(nodes[id]));
+    const minX = Math.min(...nb.map((b) => b.x));
+    const minY = Math.min(...nb.map((b) => b.y));
+    const maxX = Math.max(...nb.map((b) => b.x + b.w));
+    const maxY = Math.max(...nb.map((b) => b.y + b.h));
+    const pad = 80;
+    const vw = window.innerWidth - 180;
+    const vh = window.innerHeight - 200;
+    const zoom = clampZoom(Math.min(vw / (maxX - minX + pad * 2), vh / (maxY - minY + pad * 2), 1.4));
+    set({
+      nodes,
+      classroom: { ids: chain, saved, savedViewport: { ...s.viewport } },
+      classroomMode: true,
+      selection: [],
+      viewport: {
+        zoom,
+        panX: (vw + 180 - (maxX - minX) * zoom) / 2 - minX * zoom - 90,
+        panY: -minY * zoom + Math.max(pad, (vh + 200 - (maxY - minY) * zoom) / 2 - 100),
+      },
+    });
+  },
 
   snapshot: () => {
-    const { nodes, order, lanes, laneOrder, viewport } = get();
-    return { nodes, order, lanes, laneOrder, viewport };
+    const { nodes, order, lanes, laneOrder, viewport, links } = get();
+    return { nodes, order, lanes, laneOrder, viewport, links };
   },
   loadSnapshot: (snap) =>
     set({
@@ -276,6 +402,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       lanes: snap.lanes,
       laneOrder: snap.laneOrder,
       viewport: snap.viewport,
+      links: snap.links ?? [],
+      classroom: null,
+      classroomMode: false,
+      show: null,
       selection: [],
       generating: null,
     }),

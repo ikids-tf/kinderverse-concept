@@ -8,29 +8,30 @@ import { navByGroup, type NavItem } from '@/lib/nav';
    Responsiveness keys off the shell container (container query) — see AppShell. */
 
 function RailItem({ item }: { item: NavItem }) {
+  // 활성 표시는 아이콘 배경 필만(왼쪽 세로 라인 제거), 아이콘 아래에 이름 라벨.
   return (
     <NavLink
       to={item.path}
       end={item.path === '/'}
       title={item.label}
-      className={({ isActive }) =>
-        [
-          'group relative flex h-12 w-12 items-center justify-center rounded-lg transition-colors duration-150 ease-soft',
-          isActive ? 'bg-surface-3 text-accent' : 'text-fg-2 hover:bg-surface-2 hover:text-fg',
-        ].join(' ')
-      }
+      className="group flex w-14 flex-col items-center gap-0.5 py-t1"
     >
       {({ isActive }) => (
         <>
-          {/* active marker — coral pill on the left edge */}
           <span
-            aria-hidden
-            className={`absolute left-0 h-6 w-[3px] rounded-pill bg-accent transition-opacity duration-150 ${
-              isActive ? 'opacity-100' : 'opacity-0'
+            className={`flex h-9 w-12 items-center justify-center rounded-lg transition-colors duration-150 ease-soft ${
+              isActive ? 'bg-surface-3 text-accent' : 'text-fg-2 group-hover:bg-surface-2 group-hover:text-fg'
             }`}
-          />
-          <Icon name={item.icon} size={22} stroke={isActive ? 2 : 1.8} />
-          <span className="sr-only">{item.label}</span>
+          >
+            <Icon name={item.icon} size={20} stroke={isActive ? 2 : 1.8} />
+          </span>
+          <span
+            className={`max-w-full truncate text-[10px] font-medium leading-tight ${
+              isActive ? 'text-accent' : 'text-fg-muted group-hover:text-fg-2'
+            }`}
+          >
+            {item.label}
+          </span>
         </>
       )}
     </NavLink>
@@ -55,17 +56,15 @@ export function LNB() {
         ))}
       </div>
 
-      <div className="my-t4 h-px w-7 bg-border" />
-
-      {/* mid group */}
-      <div className="flex flex-col items-center gap-t1">
+      {/* mid group(우리반·캘린더·폴더) — 하단으로 내려 프로필 바로 위에 둔다 */}
+      <div className="mt-auto flex flex-col items-center gap-t1">
         {navByGroup('mid').map((item) => (
           <RailItem key={item.id} item={item} />
         ))}
       </div>
 
-      {/* bottom group — profile pinned to the bottom */}
-      <div className="mt-auto flex flex-col items-center gap-t1">
+      {/* bottom group — profile pinned to the bottom (위 그룹과 여유 간격) */}
+      <div className="mt-t6 flex flex-col items-center gap-t1">
         {navByGroup('bottom').map((item) => (
           <RailItem key={item.id} item={item} />
         ))}

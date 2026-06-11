@@ -93,10 +93,38 @@ export function contentIntentFast(text: string): ContentIntent | null {
   return null;
 }
 
+/* ── 산출물 개수·이미지 주제 파서(스튜디오·mock 공유) ─────────────────────── */
+
+const KO_COUNT: Record<string, number> = {
+  한: 1, 두: 2, 세: 3, 네: 4, 다섯: 5, 여섯: 6, 일곱: 7, 여덟: 8, 아홉: 9, 열: 10,
+};
+
+/** 요청에 명시된 산출물 개수("10개/열 장/3가지/각각 5개") — 없으면 null. */
+export function requestedCount(text: string): number | null {
+  const a = text.match(/(\d+)\s*(?:개|장|가지|컷|마리|종류)/);
+  if (a) return Math.max(1, parseInt(a[1], 10));
+  const k = text.match(/(한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*(?:개|장|가지|컷|마리|종류)/);
+  if (k) return KO_COUNT[k[1]] ?? null;
+  return null;
+}
+
+/** 그리기 요청에서 '주제'만 남긴다 — 수량·"각각"·그려줘류 어미 제거.
+    "직업에 따른 자동차를 각각 10개 그려줘" → "직업에 따른 자동차". */
+export function imageSubject(text: string): string {
+  return (
+    text
+      .replace(/(각각|모두|전부|서로\s*다른)\s*/g, ' ')
+      .replace(/(\d+|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*(?:개|장|가지|컷|마리|종류)(?:씩)?\s*/g, ' ')
+      .replace(/(을|를|좀|한\s*장|하나)?\s*(그려\s*주세요|그려\s*줘|그려|그림\s*그려|그림|그리기|만들어\s*주세요|만들어\s*줘|만들어|생성해?\s*줘?|해\s*줘)[.!~ ]*$/u, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim() || text
+  );
+}
+
 /* ── 보드 조작(화면 지시) 의도 ────────────────────────────────────────────── */
 
 export type BoardOpType =
-  | 'resize_up' | 'resize_down'
+  | 'resize_up' | 'resize_down' | 'match_size'
   | 'move'
   | 'group'
   | 'align' | 'arrange'
@@ -112,6 +140,8 @@ export interface BoardOpMatch {
 }
 
 const OP_RE: Array<{ op: BoardOpType; re: RegExp }> = [
+  // resize·duplicate보다 먼저 — "사이즈 똑같이 맞춰/크기 통일"이 그쪽에 잡히지 않게.
+  { op: 'match_size', re: /(크기|사이즈|싸이즈)\s*(를|도|들|가|좀)?\s*(맞|통일|같게|똑같)|같은\s*(크기|사이즈|싸이즈)/ },
   { op: 'resize_up', re: /크게|키워|확대|늘려/ },
   { op: 'resize_down', re: /작게|줄여|축소/ },
   { op: 'delete', re: /지워|삭제|없애|치워/ },

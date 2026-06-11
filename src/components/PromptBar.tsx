@@ -6,6 +6,8 @@ import { useUIStore } from '@/store/uiStore';
 import { useRouterStore } from '@/store/routerStore';
 import { useBoardStore } from '@/store/boardStore';
 import { handleBoardPrompt } from '@/board/prompt';
+import { searchAssets, type ImageAsset } from '@/board/assets';
+import { placeAssetOnBoard } from '@/board/workflow';
 import { FavoriteCardRail } from './FavoriteCardRail';
 
 // Core generation steps (keywords only) streamed into the input on send.
@@ -38,6 +40,19 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const genCancel = useRef(false);
   useEffect(() => () => { genCancel.current = true; }, []);
 
+  // 보드 실생성 상태 — 컴포저/에이전트가 단계마다 갱신하는 진행 메시지를 그대로
+  // 입력창에 스트리밍한다(가짜 키워드 애니메이션이 아니라 실제 프로세스).
+  const boardGenerating = useBoardStore((s) => s.generating);
+  const genActive = useBoardStore((s) => s.genActive);
+  const streaming = generating || !!boardGenerating;
+  // 스트리밍 중 입력창을 클릭하면 진행 표시를 '바 위 스트립'으로 분리하고 입력창은
+  // 플레이스홀더로 복귀 — 입력해 제출하면 생성이 병렬로 추가된다(복수 생성).
+  const [statusDetached, setStatusDetached] = useState(false);
+  useEffect(() => {
+    if (!streaming) setStatusDetached(false); // 모든 생성이 끝나면 원래 모드로
+  }, [streaming]);
+  const statusInline = streaming && !statusDetached;
+
   const collapsed = useUIStore((s) => s.promptBarCollapsed);
   const favoritesOpen = useUIStore((s) => s.favoritesOpen);
   const draft = useUIStore((s) => s.promptDraft);
@@ -54,6 +69,20 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const leftInset = useUIStore((s) => s.promptBarLeftInset);
   const hasText = draft.trim().length > 0;
   const onChatPage = location.pathname === AI_CHAT_PATH;
+
+  // 보관함 추천 — 보드에서 2자 이상 입력하면 태그/주제가 맞는 저장 자료를 바 위에
+  // 카드로 띄운다. 클릭 = 생성 없이 보드의 빈 자리에 바로 배치(겹침 회피).
+  const [assetSugs, setAssetSugs] = useState<ImageAsset[]>([]);
+  useEffect(() => {
+    if (!location.pathname.startsWith('/board') || draft.trim().length < 2) {
+      setAssetSugs([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      void searchAssets(draft.trim()).then(setAssetSugs).catch(() => setAssetSugs([]));
+    }, 160);
+    return () => clearTimeout(t);
+  }, [draft, location.pathname]);
 
   // Keep the favorites rail mounted briefly after closing so it can play the
   // reverse animation (cards descend back behind the bar) before unmounting.
@@ -125,7 +154,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
 
   // Behavior 2/3 — star (empty) vs send (typed).
   function onStarOrSend() {
-    if (generating) return;
+    if (statusInline) return; // 진행 표시가 입력창을 차지한 동안만 잠금(분리 모드는 병렬 제출 허용)
     if (hasText) {
       void runGeneration(draft.trim());
     } else {
@@ -133,11 +162,16 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     }
   }
 
-  // Stream the core generation steps (keywords only) into the input, then dispatch.
+  // Dispatch. 보드는 즉시 실행 — 실제 생성 단계가 boardStore.generating으로 입력창에
+  // 스트리밍된다. 그 외 페이지는 기존 키워드 타이핑 애니메이션 후 라우터로 보낸다.
   async function runGeneration(text: string) {
     genCancel.current = false;
-    setGenerating(true);
     setFavoritesOpen(false);
+    if (location.pathname.startsWith('/board')) {
+      finalizeSend(text);
+      return;
+    }
+    setGenerating(true);
     for (const step of GEN_STEPS) {
       for (let i = 1; i <= step.length; i++) {
         if (genCancel.current) return;
@@ -209,15 +243,70 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   // view-transition-name on the form (kv-pbar-vt).
   return (
     <div className={wrapperClass} style={wrapperStyle}>
-      <div className={`pointer-events-auto ${collapsed ? 'w-auto' : 'w-full max-w-3xl'}`}>
+      <div className={`pointer-events-auto relative ${collapsed ? 'w-auto' : 'w-full max-w-3xl'}`}>
         {favRender && !collapsed && <FavoriteCardRail closing={favClosing} />}
+
+        {/* 보관함 추천 — 입력 텍스트와 태그/주제가 맞는 저장 자료. 클릭 = 즉시 배치. */}
+        {assetSugs.length > 0 && !collapsed && !favRender && (
+          <div
+            className="pointer-events-auto absolute bottom-full left-1/2 z-0 -translate-x-1/2"
+            style={{ marginBottom: streaming && statusDetached ? 52 : 8 }}
+          >
+            <div className="flex max-w-[44rem] items-stretch gap-t2 overflow-x-auto rounded-xl border border-border bg-surface/95 p-t2 shadow-lg backdrop-blur">
+              <span className="flex shrink-0 items-center pl-t1 text-overline text-fg-muted">
+                <Icon name="folder" size={12} />
+                <span className="ml-t1">보관함</span>
+              </span>
+              {assetSugs.map((a) => (
+                <button
+                  key={`${a.tag}-${a.createdAt}`}
+                  type="button"
+                  title={`'${a.tag}' 보드에 추가`}
+                  onClick={() => placeAssetOnBoard(a)}
+                  className="group w-[72px] shrink-0 rounded-lg border border-border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft hover:border-accent"
+                >
+                  <img
+                    src={a.url}
+                    alt={a.tag}
+                    draggable={false}
+                    className="h-14 w-full rounded-md object-cover"
+                  />
+                  <span className="mt-0.5 block truncate text-[10px] font-medium text-fg-2 group-hover:text-accent">
+                    {a.tag}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 분리된 진행 스트립 — 입력창을 클릭해 되찾으면 스트리밍이 바 '바로 위'에서
+            계속된다. 입력창은 플레이스홀더로 복귀, 제출하면 생성이 병렬로 추가. */}
+        {streaming && statusDetached && !collapsed && (
+          <div className="pointer-events-none absolute bottom-full left-1/2 z-0 mb-t2 -translate-x-1/2">
+            <div className="flex items-center gap-t2 rounded-pill border border-border bg-surface/95 py-1.5 pl-t2 pr-t3 shadow-md backdrop-blur">
+              <svg className="kv-spin-smooth shrink-0 text-accent" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                <path d="M20.5 12A8.5 8.5 0 0 0 12 3.5" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+              <span className="max-w-[26rem] truncate font-sans text-sm font-medium text-fg-2">
+                {boardGenerating ?? genText}
+              </span>
+              {genActive > 1 && (
+                <span className="shrink-0 rounded-pill bg-accent-soft px-t2 py-0.5 text-[10px] font-semibold text-accent">
+                  {genActive}개 작업
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         <form
           onSubmit={onSubmit}
           className={`kv-pbar-vt relative z-10 mx-auto flex w-full items-center overflow-hidden rounded-2xl border backdrop-blur transition-all duration-300 ease-soft ${
             collapsed
               ? 'max-w-[3.25rem] gap-0 border-transparent bg-transparent p-0 shadow-none'
-              : 'max-w-3xl gap-t2 border-border bg-surface/95 p-t2 pl-t3 shadow-lg'
+              : `max-w-3xl gap-t2 border-border bg-surface/95 px-t2 py-t4 pl-t3 shadow-lg ${streaming ? 'kv-pbar-streaming' : ''}`
           }`}
         >
           {/* Message icon — collapsed: orange expand pill · expanded: AI 채팅 nav */}
@@ -253,18 +342,30 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             </button>
 
             {/* Selection scope chip — the bar's command targets these elements */}
-            {boardSelectionCount > 0 && !generating && (
+            {boardSelectionCount > 0 && !statusInline && (
               <span className="flex shrink-0 items-center gap-t1 self-center rounded-pill bg-accent-soft px-t2 py-1 text-xs font-semibold text-accent">
                 <Icon name="board" size={12} /> {boardSelectionCount}개 선택
               </span>
             )}
 
-            {/* Input — replaced by streaming keyword steps while generating */}
-            {generating ? (
-              <div className="flex min-h-[40px] flex-1 items-center gap-t2 self-center px-t1 py-t2">
-                <Icon name="sparkle" size={16} className="text-accent" />
-                <span className="font-sans text-body font-medium text-fg">{genText}</span>
-                <span className="ml-0.5 flex items-center gap-0.5">
+            {/* Input — 생성 중에는 실제 진행 단계가 라이브로 스트리밍된다
+                (보드: boardStore.generating · 그 외: 키워드 타이핑).
+                클릭하면 진행 표시가 바 위 스트립으로 분리되고 입력창이 돌아온다. */}
+            {statusInline ? (
+              <div
+                role="button"
+                title="클릭해서 추가로 입력하기 (생성은 계속 진행돼요)"
+                onClick={() => {
+                  setStatusDetached(true);
+                  setTimeout(() => inputRef.current?.focus(), 0);
+                }}
+                className="flex min-h-[40px] flex-1 cursor-text items-center gap-t2 self-center px-t1 py-t2"
+              >
+                {!boardGenerating && <Icon name="sparkle" size={16} className="text-accent" />}
+                <span className="truncate font-sans text-body font-medium text-fg">
+                  {boardGenerating ?? genText}
+                </span>
+                <span className="ml-0.5 flex shrink-0 items-center gap-0.5">
                   <span className="kv-typing-dot h-1 w-1 rounded-full bg-fg-muted" />
                   <span className="kv-typing-dot h-1 w-1 rounded-full bg-fg-muted" style={{ animationDelay: '0.15s' }} />
                   <span className="kv-typing-dot h-1 w-1 rounded-full bg-fg-muted" style={{ animationDelay: '0.3s' }} />
@@ -286,12 +387,12 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             {/* Behavior 2/3 — star (empty, coral) ↔ send (typed) ↔ spinner (generating) */}
             <button
               type="submit"
-              disabled={generating || collapsed}
-              aria-label={generating ? '생성 중' : hasText ? '전송' : '즐겨찾기 작업'}
+              disabled={statusInline || collapsed}
+              aria-label={statusInline ? '생성 중' : hasText ? '전송' : '즐겨찾기 작업'}
               aria-pressed={!hasText && favoritesOpen}
               tabIndex={collapsed ? -1 : 0}
               className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-pill transition-colors duration-150 ease-soft ${
-                generating
+                statusInline
                   ? 'cursor-wait bg-accent text-on-accent'
                   : hasText
                     ? 'bg-accent text-on-accent hover:bg-accent-hover'
@@ -300,8 +401,13 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                       : 'bg-accent text-on-accent hover:bg-accent-hover'
               }`}
             >
-              {generating ? (
-                <span className="kv-spin h-[18px] w-[18px] rounded-full border-2 border-white/40 border-t-white" />
+              {statusInline ? (
+                // 트랙(연한 링) + 아크 + 선두 점 — 부드럽게 도는 생성 스피너.
+                <svg className="kv-spin-smooth" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeOpacity="0.3" strokeWidth="2.5" />
+                  <path d="M20.5 12A8.5 8.5 0 0 0 12 3.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                  <circle cx="12" cy="3.5" r="2" fill="currentColor" />
+                </svg>
               ) : (
                 <Icon name={hasText ? 'send' : 'star'} size={18} fill={!hasText && favoritesOpen ? 'currentColor' : 'none'} />
               )}
