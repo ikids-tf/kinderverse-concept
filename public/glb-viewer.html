@@ -427,8 +427,15 @@
     window.loadSrc = (u) => { mv.src = u; nameEl.textContent = u.split('/').pop(); };
     window.__renderAnims = renderAnims; // 테스트용(목록 렌더 주입)
     window.__thumbs = { idbPut, idbAll, idbDel, renderThumbs }; // 테스트용(보관함 주입)
+    // 기본 모델 — ?src= 가 없으면 소라게 3D를 자동으로 불러온다(파일을 고르기 전 기본값).
+    const DEFAULT_SRC = '/models/hermit-crab.glb';
     const q = new URLSearchParams(location.search).get('src');
-    if (q) window.loadSrc(q);
+    if (q) {
+      window.loadSrc(q);
+    } else {
+      nameEl.textContent = '소라게 (기본 모델)';
+      mv.src = DEFAULT_SRC; // 기본값이라 보관함(IndexedDB)에는 저장하지 않는다
+    }
   </script>
 </body>
 </html>
