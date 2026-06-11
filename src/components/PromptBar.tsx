@@ -5,10 +5,11 @@ import { AI_CHAT_PATH } from '@/lib/nav';
 import { useUIStore } from '@/store/uiStore';
 import { useRouterStore } from '@/store/routerStore';
 import { useBoardStore } from '@/store/boardStore';
-import { handleBoardPrompt } from '@/board/prompt';
-import { searchAssets, type ImageAsset } from '@/board/assets';
-import { placeAssetOnBoard } from '@/board/workflow';
+import type { ImageAsset } from '@/board/assets';
 import { FavoriteCardRail } from './FavoriteCardRail';
+
+/* Board engine modules (prompt/workflow/assets) are heavy and only needed on My
+   Board, so they're loaded on demand (keeps them out of the initial bundle). */
 
 // Core generation steps (keywords only) streamed into the input on send.
 const GEN_STEPS = ['의도 분석', '자료 구성', '초안 생성', '누리과정 연계', '마무리'];
@@ -79,7 +80,10 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
       return;
     }
     const t = setTimeout(() => {
-      void searchAssets(draft.trim()).then(setAssetSugs).catch(() => setAssetSugs([]));
+      void import('@/board/assets')
+        .then((m) => m.searchAssets(draft.trim()))
+        .then(setAssetSugs)
+        .catch(() => setAssetSugs([]));
     }, 160);
     return () => clearTimeout(t);
   }, [draft, location.pathname]);
@@ -194,7 +198,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     // 1) My Board → ALWAYS handle on the board (act on the selected card/frame,
     //    or spawn a new card from the prompt). Never navigate to chat.
     if (path.startsWith('/board')) {
-      handleBoardPrompt(text);
+      void import('@/board/prompt').then((m) => m.handleBoardPrompt(text));
       return;
     }
 
@@ -262,7 +266,9 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                   key={`${a.tag}-${a.createdAt}`}
                   type="button"
                   title={`'${a.tag}' 보드에 추가`}
-                  onClick={() => placeAssetOnBoard(a)}
+                  onClick={() => {
+                    void import('@/board/workflow').then((m) => m.placeAssetOnBoard(a));
+                  }}
                   className="group w-[72px] shrink-0 rounded-lg border border-border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft hover:border-accent"
                 >
                   <img

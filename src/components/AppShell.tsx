@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { LNB, BottomTabs } from './LNB';
 import { PromptBar } from './PromptBar';
@@ -48,7 +48,15 @@ export function AppShell() {
           (clearing the left rail) instead of the whole viewport. */}
       <div className="relative flex min-w-0 flex-1 flex-col">
         <main className="min-h-0 flex-1 overflow-auto">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center">
+                <span className="h-6 w-6 animate-spin rounded-full border-2 border-surface-3 border-t-accent" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </main>
 
         {/* Bottom tabs — shown on narrow via container query */}
