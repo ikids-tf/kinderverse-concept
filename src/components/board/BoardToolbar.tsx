@@ -238,17 +238,6 @@ const PRESET_PANELS: Record<ToolId, { title: string; sections: PresetSection[] }
           { id: 'square', label: '정사각', desc: '520×520 — 게시 카드', patch: { w: 520, h: 520, data: { title: '정사각' } }, swatch: ratioBox(17, 17, true) },
           { id: 'wide', label: '와이드 16:9', desc: '640×360 — 화면·배너', patch: { w: 640, h: 360, data: { title: '와이드' } }, swatch: ratioBox(24, 13.5, true) },
           {
-            id: 'youtube', label: '유튜브', desc: '링크 붙여넣고 영상 재생',
-            nodeType: 'sticky',
-            patch: { w: 640, h: 420, autoH: false, text: '유튜브', data: { embed: '/youtube-viewer.html', title: '유튜브' } },
-            swatch: (
-              <svg viewBox="0 0 24 24" width={19} height={19} className="text-fg-2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <rect x="3" y="5.5" width="18" height="13" rx="3.2" />
-                <path d="M10.4 9.4 14.8 12l-4.4 2.6z" fill="currentColor" stroke="none" />
-              </svg>
-            ),
-          },
-          {
             id: 'glb', label: 'GLB 뷰어', desc: '3D 모델(GLB) 보기·애니메이션 재생',
             nodeType: 'sticky',
             patch: { w: 520, h: 480, autoH: false, text: 'GLB 뷰어', data: { embed: '/glb-viewer.html', title: 'GLB 뷰어' } },
