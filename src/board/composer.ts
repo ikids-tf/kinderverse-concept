@@ -57,6 +57,7 @@ import {
   IMAGE_RE as MEDIA_RE,
   WORKSHEET_RE as WORKSHEET_REQ_RE,
   MINDMAP_RE,
+  coreTopic,
 } from '@/ai/intent-lexicon';
 
 /* ---------------- entry ---------------- */
@@ -749,10 +750,8 @@ function estimateComplexity(text: string, r: RouterOutput): 'simple' | 'complex'
 }
 
 function frameTitle(text: string, t: FrameTemplate): string {
-  const cleaned = text
-    .replace(/(만들어\s*줘|만들어|그려\s*줘|해\s*줘|작성해\s*줘|짜\s*줘|추천해\s*줘|찾아\s*줘)\s*$/g, '')
-    .trim();
-  return (cleaned || t.title).slice(0, 24);
+  // 핵심 주제만 — 명령 어미 이후 꼬리("그려줘 각각")까지 제거(프롬프트 원문 노출 방지).
+  return (coreTopic(text) || t.title).slice(0, 24);
 }
 
 function effectiveAgent(region: FrameRegion, template: FrameTemplate, prompt: string): FillAgent {

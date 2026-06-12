@@ -25,7 +25,7 @@ import {
   mockAgentStep,
   type LaneStepMeta,
 } from './mock';
-import { generateImage, detectImageElements } from './image';
+import { generateImage, detectImageElements, askImage } from './image';
 
 export interface GatewayConfig {
   anthropicKey?: string;
@@ -86,6 +86,17 @@ export async function handleGatewayRequest(
       max: meta.max,
     });
     return { ok: true, regions, mocked, error: mocked ? detail : undefined };
+  }
+
+  // ---- Vision Q&A task: 이미지 한 장에 대한 단답 질문(예: 주인공 방향 분석). ----
+  if (req.task === 'vision') {
+    const meta = (req.meta ?? {}) as { image?: string; question?: string };
+    const { text, mocked, detail } = await askImage({
+      geminiKey: config.geminiKey,
+      image: meta.image ?? '',
+      question: meta.question ?? '',
+    });
+    return { ok: true, text, mocked, error: mocked ? detail : undefined };
   }
 
   // ---- Web search task: Gemini Google Search grounding (real when keyed). ----

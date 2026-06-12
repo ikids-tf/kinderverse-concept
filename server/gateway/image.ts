@@ -182,6 +182,55 @@ export async function detectImageElements(
   }
 }
 
+/* ---------- Vision Q&A (이미지 한 장 + 짧은 질문 → 짧은 답) ---------- */
+
+interface AskImageOpts {
+  geminiKey?: string;
+  model?: string;
+  image: string; // data URI
+  question: string;
+}
+
+/** 이미지에 대한 단답 질문(예: 주인공이 보는 방향). 키 없으면 mocked + 빈 답. */
+export async function askImage(
+  opts: AskImageOpts,
+): Promise<{ text: string; mocked: boolean; detail?: string }> {
+  const parsed = parseDataUri(opts.image);
+  if (!opts.geminiKey || !parsed) {
+    return { text: '', mocked: true, detail: !opts.geminiKey ? 'no GEMINI_API_KEY' : 'image is not a base64 data URI' };
+  }
+  const model = opts.model || DEFAULT_DETECT_MODEL;
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model,
+    )}:generateContent?key=${encodeURIComponent(opts.geminiKey)}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [{ inlineData: { mimeType: parsed.mime, data: parsed.data } }, { text: opts.question }],
+          },
+        ],
+        generationConfig: { temperature: 0, maxOutputTokens: 1500 },
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return { text: '', mocked: true, detail: `gemini ${model} HTTP ${res.status}: ${body.slice(0, 160)}` };
+    }
+    const data = (await res.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+    return { text: text.trim(), mocked: false };
+  } catch (e) {
+    return { text: '', mocked: true, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 function clampBox(b: number[]): [number, number, number, number] | null {
   if (!Array.isArray(b) || b.length !== 4 || b.some((n) => typeof n !== 'number')) return null;
   const [ymin, xmin, ymax, xmax] = b.map((n) => Math.max(0, Math.min(1000, n)));

@@ -2,12 +2,13 @@ import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { buildAgentContext } from '@/ai/context';
 import { callGateway } from '@/ai/client';
 import { runPlanIdeas, runPlan } from '@/ai/agents/plan';
-import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImage } from '@/ai/agents/studio';
+import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImage, KV_ART_STYLE } from '@/ai/agents/studio';
 // 의도 어휘는 단일 출처(intent-lexicon) — 로컬 정규식은 '그려' 등이 빠져 어긋났었다(P0-1).
-import { IMAGE_RE } from '@/ai/intent-lexicon';
+import { IMAGE_RE, coreTopic } from '@/ai/intent-lexicon';
 import { findAsset, saveAsset } from './assets';
 import { recordSpawnedNodes } from './commands';
 import { worldBox } from './geometry';
+import { linkedComponent } from './links';
 import type { RegistryPayload } from '@/ui-registry/contracts';
 
 /* Workflow-to-board (reference board model): a "새 놀이계획" frame holds a runner
@@ -629,12 +630,82 @@ export async function autoTitleFrame(frameId: string): Promise<void> {
   useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(cur.data ?? {}), title } });
 }
 
-/** Regenerate an image card from a prompt. */
+/** 형제 그림 참조 표현 — "옆에 있는/이 프레임/연결된/다른 그림들과 스타일 통일·맞춰" 류.
+    ("옆모습으로" 같은 일반 표현은 잡지 않도록 명사 결합을 요구한다.) */
+const SIBLING_REF_RE =
+  /옆에\s*있는|옆\s*(이미지|그림|카드)|이\s*프레임|프레임\s*(안|속)|연결된|연결돼\s*있는|이어진|다른\s*(이미지|그림|카드)들?|(스타일|화풍|느낌|분위기)[\s\S]{0,12}?(통일|맞춰|맞게|똑같|같게)|통일시/;
+
+/** Regenerate an image card from a prompt.
+    - 실패하면 원본 그림·캡션을 그대로 유지하고 실패 안내만 띄운다(조용한 손상 방지).
+    - 성공하면 이전 표시용 썸네일(data.thumb)을 무효화 — 보드는 thumb||src를 그리므로
+      이걸 지우지 않으면 새 그림이 생성돼도 옛 그림이 계속 보인다.
+    - 캡션은 프롬프트 원문이 아니라 핵심 주제만("거북이를 탄 토끼로 바꿔줘 이미지를"
+      → "거북이를 탄 토끼"). 스타일 수정("더 밝게 해줘")이면 원래 캡션을 유지한다.
+    - "옆에 있는/이 프레임/다른 그림들과 스타일 통일" — 모델은 옆 그림을 볼 수 없으므로
+      같은 프레임 형제 캡션들을 '같은 시리즈' 맥락으로 풀어서 실어준다. */
 export async function regenImageCard(nodeId: string, prompt: string): Promise<void> {
   const b = useBoardStore.getState();
+  const orig = b.nodes[nodeId];
+  if (!orig) return;
+  b.beginGen();
+  b.setGenerating('🎨 이미지를 다시 그리고 있어요…');
   b.updateNodeRaw(nodeId, { loading: true });
-  const res = await callGateway({ task: 'image', provider: 'auto', messages: [], meta: { prompt, caption: prompt } });
-  b.updateNodeRaw(nodeId, { loading: false, src: res.image, text: prompt });
+  try {
+    const origCaption = (orig.text ?? '').trim();
+    const subject = coreTopic(prompt);
+    // 새 주제인가? — 그리기/교체 동사가 있거나, 명령 어미가 없는 맨 주제어("겨울 풍경").
+    const isCommand = /(줘|주세요|줄래|주라|달라|다오)/.test(prompt);
+    const isNewSubject = /그려|그리|바꿔|바꾸|만들|생성/.test(prompt);
+    const caption = (!isCommand || isNewSubject) && subject.length >= 2 ? subject : origCaption || subject;
+    // 스타일/부분 수정(캡션 유지)이면 원래 주제를 프롬프트에 함께 실어 무엇을 그릴지
+    // 알려준다("더 밝게 해줘"만으로는 대상이 없다). 새 주제면 프롬프트가 이미 대상 포함.
+    let genPrompt = caption === origCaption && origCaption ? `${origCaption} — ${prompt}` : prompt;
+    // 형제 그림 참조 → 시리즈 맥락 주입. 참조 소스는 두 가지를 합친다:
+    //  ① 같은 프레임(data.frameId) 안의 이미지들  ② 선(links)으로 연결된 연결망의 이미지들.
+    if (SIBLING_REF_RE.test(prompt)) {
+      const refIds = new Set<string>();
+      const frameId = orig.data?.frameId as string | undefined;
+      if (frameId) {
+        for (const n of Object.values(b.nodes))
+          if (n.id !== nodeId && n.data?.frameId === frameId) refIds.add(n.id);
+      }
+      const live = b.links.filter((l) => b.nodes[l.from] && b.nodes[l.to]);
+      for (const id of linkedComponent(nodeId, live)) if (id !== nodeId) refIds.add(id);
+      const sibs = [...refIds]
+        .map((id) => b.nodes[id])
+        .filter((n) => n?.type === 'image')
+        .map((n) => (n.text ?? '').trim())
+        .filter(Boolean);
+      if (sibs.length) {
+        const frameTopic = frameId
+          ? (((b.nodes[frameId]?.data?.title as string | undefined) ?? '').trim())
+          : '';
+        genPrompt =
+          `${caption}${frameTopic ? ` — '${frameTopic}' 시리즈의 한 장` : ''}. ` +
+          `같은 시리즈의 다른 그림들(${sibs.join(', ')})과 동일한 화풍·색감·구도·배경 톤으로 통일. 지시: ${prompt}`;
+      }
+    }
+    const res = await callGateway({
+      task: 'image',
+      provider: 'auto',
+      messages: [],
+      meta: { prompt: `${genPrompt} — ${KV_ART_STYLE}`, caption },
+    });
+    const fresh = useBoardStore.getState().nodes[nodeId];
+    if (!fresh) return; // 기다리는 동안 카드가 지워짐
+    if (res.ok && res.image) {
+      const data = { ...(fresh.data ?? {}) };
+      delete data.thumb; // 새 src 기준으로 ensureThumb가 다시 만든다
+      delete data.fromLibrary; // 이제 새로 생성된 그림
+      useBoardStore.getState().updateNodeRaw(nodeId, { loading: false, src: res.image, text: caption, data });
+    } else {
+      useBoardStore.getState().updateNodeRaw(nodeId, { loading: false }); // 원본 유지
+      useBoardStore.getState().setGenerating('⚠️ 이미지 수정에 실패했어요 — 원본 그림을 유지해요');
+      await new Promise((r) => setTimeout(r, 2400)); // 안내가 읽힐 시간
+    }
+  } finally {
+    useBoardStore.getState().endGen();
+  }
 }
 
 /** Generate/replace a memo or text card's content from a prompt. */
