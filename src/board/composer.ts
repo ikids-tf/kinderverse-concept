@@ -488,7 +488,11 @@ function layoutMindMap(frameId: string): void {
 
 /** Strip emoji + mind-map/document filler words from a title to get the subject. */
 function docTopic(title: string): string {
-  const noEmoji = title.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}️\u{1F1E6}-\u{1F1FF}]/gu, ' ');
+  // 변형 선택자(U+FE0F)는 문자 클래스에 두면 결합문자로 오인되므로 먼저 떼어낸 뒤
+  // 이모지 범위를 공백으로 치환한다.
+  const noEmoji = title
+    .replace(/️/g, '')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{1F1E6}-\u{1F1FF}]/gu, ' ');
   const s = noEmoji.replace(MINDMAP_RE, ' ').replace(/계획안?|문서|주제/g, ' ');
   return s.replace(/\s+/g, ' ').trim() || mindMapTopic(title);
 }

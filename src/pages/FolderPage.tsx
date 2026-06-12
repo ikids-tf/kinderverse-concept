@@ -45,7 +45,13 @@ export function FolderPage() {
   ]);
   const [sel, setSel] = useState<Set<number>>(() => new Set());
 
-  const toggle = (id: number) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggle = (id: number) =>
+    setSel((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
   const clearSel = () => setSel(new Set());
   const selectAll = () => setSel((s) => (s.size === files.length ? new Set() : new Set(files.map((f) => f.id))));
   const removeSelected = () => { setFiles((fs) => fs.filter((f) => !sel.has(f.id))); clearSel(); };

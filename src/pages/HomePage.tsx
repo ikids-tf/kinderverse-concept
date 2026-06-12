@@ -108,7 +108,6 @@ export function HomePage() {
       window.removeEventListener('resize', updateInd);
       cancelMomentum();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function onDragDown(e: React.MouseEvent<HTMLDivElement>) {
