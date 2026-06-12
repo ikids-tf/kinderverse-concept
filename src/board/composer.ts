@@ -420,13 +420,18 @@ function rightmostComposerFrame(): BoardNode | undefined {
   return frames.reduce((a, f) => (f.x + f.w > a.x + a.w ? f : a));
 }
 
-/** Every node that belongs to a frame (direct children + sub-frame grandchildren). */
-function frameDescendants(frameId: string): string[] {
+/** Every node that belongs to a frame — direct children + nested frames and their
+    descendants, recursively(임의 깊이의 중첩 프레임까지). */
+function frameDescendants(frameId: string, seen = new Set<string>()): string[] {
+  if (seen.has(frameId)) return [];
+  seen.add(frameId);
   const nodes = Object.values(useBoardStore.getState().nodes);
-  const direct = nodes.filter((n) => n.data?.frameId === frameId);
-  const out = direct.map((n) => n.id);
-  const subIds = direct.filter((n) => n.type === 'frame').map((n) => n.id);
-  for (const n of nodes) if (subIds.includes(n.data?.frameId as string)) out.push(n.id);
+  const out: string[] = [];
+  for (const n of nodes) {
+    if (n.data?.frameId !== frameId) continue;
+    out.push(n.id);
+    if (n.type === 'frame') out.push(...frameDescendants(n.id, seen));
+  }
   return out;
 }
 

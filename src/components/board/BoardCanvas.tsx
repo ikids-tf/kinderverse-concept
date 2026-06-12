@@ -703,7 +703,8 @@ export function BoardCanvas() {
     else b.fit();
   }
 
-  // 트랙패드 제스처: 핀치 = 줌, 두 손가락 스크롤 = 팬. ctrl/⌘+휠도 줌.
+  // 마우스 휠 = 확대/축소(커서 기준). 핀치(ctrlKey)·ctrl/⌘+휠도 줌. 트랙패드 가로
+  // 스와이프(좌우 두 손가락)만 좌우 팬으로 남긴다. 캔버스 팬은 스페이스+드래그·휠 클릭 드래그.
   // (맥 트랙패드 핀치는 Chrome류에서 ctrlKey가 켜진 wheel 이벤트로 들어온다.)
   // 브라우저 자체 페이지 줌을 막으려면 preventDefault가 실제로 동작해야 하는데
   // React onWheel은 passive로 붙어 무시되므로 네이티브 리스너를 non-passive로 단다.
@@ -711,23 +712,22 @@ export function BoardCanvas() {
     const el = ref.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      const zooming = e.ctrlKey || e.metaKey; // 핀치(ctrlKey) 또는 ctrl/⌘+휠 강제 줌
-      // Over scrollable content (a doc/frame with its own scroll) that can still move
-      // in this direction → let the browser scroll it natively. ctrl/⌘/핀치 forces zoom.
-      if (!zooming && scrollableUnderCursor(e.target, e.deltaY, el)) return;
+      const pinch = e.ctrlKey || e.metaKey; // 핀치(ctrlKey) 또는 ctrl/⌘+휠
+      // 문서/프레임 등 자체 스크롤 영역 위에서는 그 내용 스크롤을 우선(긴 계획안 등).
+      if (!pinch && scrollableUnderCursor(e.target, e.deltaY, el)) return;
       e.preventDefault();
       const k = e.deltaMode === 1 ? 16 : 1; // line-mode wheel(Firefox) → px 근사
       const b = useBoardStore.getState();
       const rect = el.getBoundingClientRect();
-      if (zooming) {
-        // 핀치는 deltaY가 잘게 연속으로 오므로 지수 매핑이 부드럽다. 휠 클릭(±100)은 클램프.
-        const factor = Math.min(1.25, Math.max(0.8, Math.exp(-e.deltaY * k * 0.01)));
-        b.zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
-      } else {
-        // 두 손가락 스크롤 → 캔버스 팬(내추럴 스크롤: 내용이 손가락을 따라간다).
-        const { panX, panY } = b.viewport;
-        b.setViewport({ panX: panX - e.deltaX * k, panY: panY - e.deltaY * k });
+      // 가로 스와이프(트랙패드, |dx|>|dy|)는 좌우 팬으로만 남긴다.
+      if (!pinch && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        b.setViewport({ panX: b.viewport.panX - e.deltaX * k });
+        return;
       }
+      // 그 외(마우스 휠·핀치·세로 스크롤) → 커서 기준 확대/축소.
+      // 핀치는 deltaY가 잘게 연속으로 와 지수 매핑이 부드럽고, 휠 클릭(±100)은 클램프된다.
+      const factor = Math.min(1.25, Math.max(0.8, Math.exp(-e.deltaY * k * 0.01)));
+      b.zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
     };
     // Safari는 핀치를 ctrl+wheel 대신 gesturestart/gesturechange로 보낸다.
     interface SafariGestureEvent extends Event {

@@ -407,6 +407,11 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       useBoardStore.getState().updateNodeRaw(node.id, { data: { ...node.data, title: v.trim() || '프레임' } });
     const frameBg = `border-2 ${selected ? 'border-accent' : isSub ? 'border-border/70' : 'border-border'} ${isSub ? 'bg-surface-2/50' : 'bg-surface/40'} shadow-md`;
     const loading = !!node.data?.loading;
+    // 좁은 프레임 — 상단의 제목 탭(좌)과 저장 버튼(우)이 겹치지 않게 동적 축소:
+    // 저장 버튼은 아이콘만 남기고, 제목은 남는 폭만큼만 차지하고 말줄임.
+    const narrow = node.w < 380;
+    const saveBtnW = !isSub ? (narrow ? 44 : savedBundleId ? 92 : 116) : 0; // px 근사
+    const titleMaxW = Math.max(64, node.w - 40 /* 좌우 들여쓰기 */ - saveBtnW - 16 /* 간격 */);
     return (
       <div
         className="absolute"
@@ -439,9 +444,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           className={`absolute left-t5 top-0 z-10 inline-flex -translate-y-1/2 items-center gap-t2 rounded-pill border px-t4 py-t2 text-sm font-medium shadow-sm ${
             selected ? 'border-accent bg-accent text-on-accent' : 'border-border bg-surface text-fg-2'
           }`}
-          style={{ pointerEvents: 'auto', cursor: 'grab' }}
+          style={{ pointerEvents: 'auto', cursor: 'grab', maxWidth: titleMaxW }}
         >
-          <Icon name="frame" size={16} />
+          <Icon name="frame" size={16} className="shrink-0" />
           {editing ? (
             <input
               autoFocus
@@ -454,11 +459,11 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               className="w-32 bg-transparent text-sm font-medium focus:outline-none"
             />
           ) : (
-            title
+            <span className="min-w-0 truncate">{title}</span>
           )}
           {/* 생성 작업이 진행 중인 프레임 — 제목 탭에 미니 스피너 */}
           {!!node.data?.working && !editing && (
-            <span className="ml-t1 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent opacity-80" />
+            <span className="ml-t1 inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent opacity-80" />
           )}
         </div>
         )}
@@ -478,16 +483,18 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               showToast(ok ? `'${title}' 폴더에 저장했어요` : '저장에 실패했어요 — 프레임이 비어 있어요', ok ? 'success' : 'error');
             }, 450);
           }}
-          title="이 프레임을 폴더에 저장"
+          title={savedBundleId ? '폴더에 저장됨' : '이 프레임을 폴더에 저장'}
           // 타이틀 라벨과 같은 문법 — 경계선 위 오른쪽에 걸쳐 앉는 액션 버튼.
-          className={`absolute right-t5 top-0 z-10 inline-flex -translate-y-1/2 items-center gap-t2 rounded-pill border px-t4 py-t2 text-sm font-medium shadow-sm ${
+          // 좁은 프레임에서는 라벨을 숨겨 아이콘만(제목 탭과 겹침 방지).
+          className={`absolute right-t5 top-0 z-10 inline-flex -translate-y-1/2 items-center gap-t2 whitespace-nowrap rounded-pill border px-t4 py-t2 text-sm font-medium shadow-sm ${
             savedBundleId
               ? 'border-success/40 bg-success-soft text-success'
               : 'border-border bg-surface text-fg-2 hover:border-accent hover:text-accent'
           }`}
           style={{ pointerEvents: 'auto', cursor: 'pointer' }}
         >
-          <Icon name={savedBundleId ? 'check' : 'folder'} size={16} /> {savedBundleId ? '저장됨' : '폴더에 저장'}
+          <Icon name={savedBundleId ? 'check' : 'folder'} size={16} className="shrink-0" />
+          {!narrow && (savedBundleId ? '저장됨' : '폴더에 저장')}
         </button>
         )}
 

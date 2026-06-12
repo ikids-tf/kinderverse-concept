@@ -37,10 +37,51 @@ export function geometryChildrenOf(frameId: string): string[] {
     .map((n) => n.id);
 }
 
-/** Union of tagged + geometric children — the set that moves with the frame. */
+/** 프레임의 모든 하위 노드 id — 중첩 프레임과 그 안의 카드까지 재귀(tagged 기준).
+    상위 프레임을 움직이거나 수업/프롬프트에 적용할 때 한 묶음으로 다루는 단위. */
+export function frameSubtree(frameId: string, seen = new Set<string>()): string[] {
+  if (seen.has(frameId)) return []; // frameId 사이클 방지
+  seen.add(frameId);
+  const b = useBoardStore.getState();
+  const out: string[] = [];
+  for (const n of Object.values(b.nodes)) {
+    if (n.data?.frameId !== frameId) continue;
+    out.push(n.id);
+    if (n.type === 'frame') out.push(...frameSubtree(n.id, seen));
+  }
+  return out;
+}
+
+/** 이 프레임을 '완전히 감싸는' 가장 작은 다른 프레임(중첩 부모 후보) — 자기 후손은 제외.
+    수동으로 프레임을 다른 프레임 안에 끌어다 놓았을 때 부모를 판정한다. */
+function enclosingFrame(frameId: string): string | undefined {
+  const b = useBoardStore.getState();
+  const f = b.nodes[frameId];
+  if (!f || f.type !== 'frame') return undefined;
+  const fb = worldBox(f);
+  const descendants = new Set(frameSubtree(frameId));
+  let best: string | undefined;
+  let bestArea = Infinity;
+  for (const n of Object.values(b.nodes)) {
+    if (n.id === frameId || n.type !== 'frame' || descendants.has(n.id)) continue;
+    const nb = worldBox(n);
+    const contains = fb.x >= nb.x - 1 && fb.y >= nb.y - 1 && fb.x + fb.w <= nb.x + nb.w + 1 && fb.y + fb.h <= nb.y + nb.h + 1;
+    if (contains) {
+      const area = nb.w * nb.h;
+      if (area < bestArea) {
+        bestArea = area;
+        best = n.id;
+      }
+    }
+  }
+  return best;
+}
+
+/** Union of tagged subtree + geometric children — the set that moves with the frame.
+    중첩 프레임과 그 자식(손주)까지 재귀로 포함해 함께 끌려온다. */
 export function frameMoveSet(frameId: string): string[] {
   const ids = new Set<string>(geometryChildrenOf(frameId));
-  childrenOf(frameId).forEach((n) => ids.add(n.id));
+  for (const id of frameSubtree(frameId)) ids.add(id);
   return [...ids];
 }
 
@@ -62,12 +103,14 @@ export function rebindFrameMembership(movedIds: string[]): void {
   const b = useBoardStore.getState();
   for (const id of movedIds) {
     const n = b.nodes[id];
-    if (!n || n.type === 'frame') continue;
-    const fid = frameOfPoint(n.x + n.w / 2, n.y + n.h / 2);
+    if (!n) continue;
+    // 프레임은 '완전히 감싸는' 부모 프레임에 소속(중첩) — 자기 후손은 부모가 될 수 없다.
+    // 일반 카드는 종전대로 중심점이 들어간 최상위 프레임에 소속.
+    const target = n.type === 'frame' ? enclosingFrame(id) : frameOfPoint(n.x + n.w / 2, n.y + n.h / 2);
     const cur = n.data?.frameId as string | undefined;
-    if (fid === cur) continue;
+    if (target === cur) continue;
     const data = { ...(n.data ?? {}) };
-    if (fid) data.frameId = fid;
+    if (target) data.frameId = target;
     else delete data.frameId;
     b.updateNodeRaw(id, { data });
   }

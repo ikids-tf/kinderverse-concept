@@ -100,11 +100,18 @@ export function presentationVisibleSet(
   const primary = show ? (show.group ? show.ids : [show.ids[show.index]]) : classroom ? classroom.ids : null;
   if (!primary) return null;
   const set = new Set(primary);
-  for (const id of primary) {
-    if (nodes[id]?.type === 'frame') {
-      for (const n of Object.values(nodes)) if (n.data?.frameId === id) set.add(n.id);
+  // 프레임이 보이면 그 하위 노드(중첩 프레임과 손주까지 재귀)도 함께 보인다.
+  const addChildren = (fid: string, seen: Set<string>) => {
+    if (seen.has(fid)) return;
+    seen.add(fid);
+    for (const n of Object.values(nodes)) {
+      if (n.data?.frameId !== fid) continue;
+      set.add(n.id);
+      if (n.type === 'frame') addChildren(n.id, seen);
     }
-  }
+  };
+  const seen = new Set<string>();
+  for (const id of primary) if (nodes[id]?.type === 'frame') addChildren(id, seen);
   return set;
 }
 
@@ -462,13 +469,22 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         });
       chain = [...chain, ...extra];
     }
-    // 프레임은 자식 카드(data.frameId)를 함께 데리고 다닌다 — 레인 항목은 프레임
-    // 자신이고, 자식은 프레임과 같은 변위로 따라 움직여 프레임 안 배치를 유지한다.
-    const childrenOf = (fid: string) =>
-      Object.keys(s.nodes).filter((id) => s.nodes[id].data?.frameId === fid);
+    // 프레임은 모든 하위 노드(중첩 프레임과 그 손주까지 재귀)를 함께 데리고 다닌다 —
+    // 레인 항목은 최상위 프레임이고, 하위는 프레임과 같은 변위로 따라 움직여 배치를 유지한다.
+    const descendantsOf = (fid: string, seen = new Set<string>()): string[] => {
+      if (seen.has(fid)) return [];
+      seen.add(fid);
+      const out: string[] = [];
+      for (const id of Object.keys(s.nodes)) {
+        if (s.nodes[id].data?.frameId !== fid) continue;
+        out.push(id);
+        if (s.nodes[id].type === 'frame') out.push(...descendantsOf(id, seen));
+      }
+      return out;
+    };
     const childSet = new Set<string>();
     for (const id of chain)
-      if (s.nodes[id].type === 'frame') childrenOf(id).forEach((c) => childSet.add(c));
+      if (s.nodes[id].type === 'frame') descendantsOf(id).forEach((c) => childSet.add(c));
     // 레인 항목 = chain에서 '다른 프레임의 자식'은 제외(이중 배치 방지).
     const layout = chain.filter((id) => !childSet.has(id));
 
@@ -525,7 +541,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       if (n.type === 'frame') {
         const dx = nx - n.x;
         const dy = ny - n.y;
-        for (const cid of childrenOf(id)) {
+        for (const cid of descendantsOf(id)) {
           const c = nodes[cid];
           if (c) nodes[cid] = { ...c, x: c.x + dx, y: c.y + dy };
         }
