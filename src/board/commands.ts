@@ -284,6 +284,33 @@ export function removeLinkCmd(id: string) {
 let clipboard: BoardNode[] = [];
 let pasteSeq = 0; // 같은 클립보드 연속 붙여넣기 — 계단식 오프셋
 
+/* 보드 캔버스 위 마지막 마우스 위치(클라이언트 좌표) — 붙여넣기를 커서 자리에
+   놓기 위해 추적한다. 커서가 캔버스 밖(툴바·패널·다른 페이지)이면 null. */
+let cursorClient: { x: number; y: number } | null = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'pointermove',
+    (e) => {
+      const onCanvas = (e.target as HTMLElement | null)?.closest?.('[data-kv-canvas]');
+      cursorClient = onCanvas ? { x: e.clientX, y: e.clientY } : null;
+    },
+    { passive: true },
+  );
+}
+
+/** 커서의 보드(월드) 좌표 — 캔버스 위에 없으면 null. */
+function cursorWorldPoint(): { x: number; y: number } | null {
+  if (!cursorClient || typeof document === 'undefined') return null;
+  const cv = document.querySelector('[data-kv-canvas]');
+  if (!cv) return null;
+  const rect = cv.getBoundingClientRect();
+  const { zoom, panX, panY } = board().viewport;
+  return {
+    x: (cursorClient.x - rect.left - panX) / zoom,
+    y: (cursorClient.y - rect.top - panY) / zoom,
+  };
+}
+
 /** 프레임이 포함되면 그 자식 카드(data.frameId)까지 함께. */
 function expandWithFrameChildren(ids: string[]): string[] {
   const b = board();
@@ -319,9 +346,11 @@ export function hasClipboard(): boolean {
   return clipboard.length > 0;
 }
 
-/** 붙여넣기. 원본 영역이 화면에 보이면 계단식(+24×n) 오프셋으로 옆에, 화면 밖에
-    있으면 현재 뷰 중앙에 놓는다. 프레임 소속(frameId)·그룹·data 속 노드 참조는
-    함께 복사된 대상에 한해 새 id로 재매핑된다. */
+/** 붙여넣기. 마우스 커서가 보드 위에 있으면 그 자리(커서 = 사본 영역 중심)에,
+    아니면 기존 규칙 — 원본 영역이 화면에 보이면 계단식(+24×n) 오프셋으로 옆에,
+    화면 밖이면 현재 뷰 중앙. 같은 자리 연속 붙여넣기는 계단식으로 비껴 쌓인다.
+    프레임 소속(frameId)·그룹·data 속 노드 참조는 함께 복사된 대상에 한해 새 id로
+    재매핑된다. */
 export function pasteNodesCmd(): string[] {
   if (clipboard.length === 0) return [];
   const minX = Math.min(...clipboard.map((n) => n.x));
@@ -329,16 +358,25 @@ export function pasteNodesCmd(): string[] {
   const maxX = Math.max(...clipboard.map((n) => n.x + n.w));
   const maxY = Math.max(...clipboard.map((n) => n.y + n.h));
 
-  // 원본 영역이 현재 화면에 보이는가 — 보이면 옆에(계단식), 아니면 뷰 중앙에.
   const { zoom, panX, panY } = board().viewport;
-  const railW = 64; // left icon rail (viewportCenterBoardPoint와 동일 가정)
-  const cw = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) - railW);
-  const ch = Math.max(320, typeof window !== 'undefined' ? window.innerHeight : 800);
-  const view = { x: -panX / zoom, y: -panY / zoom, w: cw / zoom, h: ch / zoom };
-  const visible = minX < view.x + view.w && maxX > view.x && minY < view.y + view.h && maxY > view.y;
   pasteSeq++;
-  const dx = visible ? 24 * pasteSeq : Math.round(view.x + view.w / 2 - (minX + maxX) / 2);
-  const dy = visible ? 24 * pasteSeq : Math.round(view.y + view.h / 2 - (minY + maxY) / 2);
+  let dx: number;
+  let dy: number;
+  const cursor = cursorWorldPoint();
+  if (cursor) {
+    // 커서 위치에 — 사본 영역의 중심을 커서에 맞추고, 연속 붙여넣기는 +24×n 비껴서.
+    dx = Math.round(cursor.x - (minX + maxX) / 2) + 24 * (pasteSeq - 1);
+    dy = Math.round(cursor.y - (minY + maxY) / 2) + 24 * (pasteSeq - 1);
+  } else {
+    // 원본 영역이 현재 화면에 보이는가 — 보이면 옆에(계단식), 아니면 뷰 중앙에.
+    const railW = 64; // left icon rail (viewportCenterBoardPoint와 동일 가정)
+    const cw = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) - railW);
+    const ch = Math.max(320, typeof window !== 'undefined' ? window.innerHeight : 800);
+    const view = { x: -panX / zoom, y: -panY / zoom, w: cw / zoom, h: ch / zoom };
+    const visible = minX < view.x + view.w && maxX > view.x && minY < view.y + view.h && maxY > view.y;
+    dx = visible ? 24 * pasteSeq : Math.round(view.x + view.w / 2 - (minX + maxX) / 2);
+    dy = visible ? 24 * pasteSeq : Math.round(view.y + view.h / 2 - (minY + maxY) / 2);
+  }
 
   const idMap = new Map<string, string>();
   clipboard.forEach((n) => idMap.set(n.id, newId(n.type)));
