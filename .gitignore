@@ -17,5 +17,8 @@ npm-debug.log*
 # TS build info
 *.tsbuildinfo
 
+# 로컬 서버 데이터(지난 수업 미러 등) — 수업 기록은 커밋하지 않는다
+.kv-data/
+
 # Claude Code local settings (per-machine; not shared)
 .claude/settings.local.json

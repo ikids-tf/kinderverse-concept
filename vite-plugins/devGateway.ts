@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleGatewayRequest, type GatewayConfig } from '../server/gateway/handler';
 import { streamChatResponse, type ChatStreamBody } from '../server/gateway/chat';
 import { searchYoutube } from '../server/gateway/youtube';
+import { dbListLessons, dbSaveLesson, dbRemoveLesson } from '../server/gateway/lessons';
 
 /* Dev-only thin gateway: mounts POST /api/ai/run in the Vite dev server so the
    browser never sees provider keys. The same handler moves to a serverless /
@@ -69,6 +70,30 @@ export function devGateway(): Plugin {
           .catch((e) =>
             sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }),
           );
+      });
+
+      // 지난 수업 저장(서버 미러, 파일 DB) — GET 목록 · POST 저장 · DELETE ?id= 삭제.
+      server.middlewares.use('/api/lessons', (req, res) => {
+        const done = (p: Promise<unknown>) =>
+          p
+            .then((body) => sendJson(res, 200, body))
+            .catch((e) =>
+              sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }),
+            );
+        if (req.method === 'GET') {
+          done(dbListLessons().then((lessons) => ({ ok: true, lessons })));
+        } else if (req.method === 'POST') {
+          done(
+            readJsonBody(req)
+              .then((b) => dbSaveLesson(b as never))
+              .then(() => ({ ok: true })),
+          );
+        } else if (req.method === 'DELETE') {
+          const u = new URL(req.url ?? '', 'http://localhost');
+          done(dbRemoveLesson(u.searchParams.get('id') ?? '').then(() => ({ ok: true })));
+        } else {
+          sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        }
       });
 
       // 유튜브 검색(무키 — 결과 페이지 파싱) — 보드의 유튜브 뷰어 카드용.

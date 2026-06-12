@@ -44,7 +44,7 @@ export function MyBoardPage() {
   const empty = Object.keys(lanes).length === 0 && Object.keys(nodes).length === 0;
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full overflow-hidden">
       {/* Wide: canvas */}
       <div className="hidden h-full w-full md:block">
         <BoardCanvas />
