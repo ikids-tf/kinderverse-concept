@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Icon } from '@/lib/icons';
+import { SHAPE_PATHS } from '@/lib/shapes';
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { editTextCmd, captureNodes, pushRedesign } from '@/board/commands';
 import { runWorkflowStep, type RunnerData, type StepKind } from '@/board/workflow';
@@ -10,7 +11,8 @@ import { saveFrameToFolder, fitFrameToChildren } from '@/board/frames';
 import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
 import type { RouteTarget } from '@/ai/contract';
 import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
-import { WorksheetSheet, downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-sheet';
+import { WorksheetSheet } from '@/ui-registry/worksheet-sheet';
+import { downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-a4';
 import { separateImageLayers } from '@/ai/layers';
 import { ensureThumb } from '@/board/imageLod';
 import { MotionPathNode } from './MotionPathNode';
@@ -1099,13 +1101,6 @@ const COLOR_TEXT: Record<string, string> = {
   'surface-2': 'text-surface-2',
   gold: 'text-gold',
   'success-soft': 'text-success-soft',
-};
-
-/** 별·하트 SVG 패스(24×24 viewBox, preserveAspectRatio=none으로 노드 박스에 맞춤). */
-export const SHAPE_PATHS: Record<string, string> = {
-  star: 'M12 1.8l3.1 6.3 6.9 1-5 4.9 1.2 6.9L12 17.6l-6.2 3.3L7 14 2 9.1l6.9-1z',
-  heart:
-    'M12 21.4l-1.5-1.3C5.4 15.4 2 12.3 2 8.5 2 5.4 4.4 3 7.5 3c1.7 0 3.4.8 4.5 2.1C13.1 3.8 14.8 3 16.5 3 19.6 3 22 5.4 22 8.5c0 3.8-3.4 6.9-8.5 11.6z',
 };
 
 /* ---- text style system (toolbar presets + T menu share data.fontSize/fontPx/fontFam/bold/accent) ---- */

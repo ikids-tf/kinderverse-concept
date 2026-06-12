@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Icon, type IconName } from '@/lib/icons';
 import { useBoardStore, type BoardNode, type NodeType } from '@/store/boardStore';
-import { SHAPE_PATHS } from './NodeView';
+import { SHAPE_PATHS } from '@/lib/shapes';
 import {
   addNodeCmd,
   addFrameCmd,

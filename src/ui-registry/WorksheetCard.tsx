@@ -2,7 +2,8 @@ import { Icon } from '@/lib/icons';
 import type { WorksheetCardProps } from './contracts';
 import type { ComponentState } from './state';
 import { CardFrame } from './parts';
-import { WorksheetSheet, downloadWorksheetA4, printWorksheetA4 } from './worksheet-sheet';
+import { WorksheetSheet } from './worksheet-sheet';
+import { downloadWorksheetA4, printWorksheetA4 } from './worksheet-a4';
 
 /* 활동지/워크시트 (agent.studio) — 인쇄용 A4 한 장. 제목·안내는 또렷한 텍스트
    레이어, 그림은 생성 이미지. 다운로드/인쇄는 정확한 A4(210:297) PNG로 합성. */

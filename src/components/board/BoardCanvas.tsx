@@ -8,7 +8,7 @@ import { frameMoveSet, rebindFrameMembership, frameOfPoint } from '@/board/frame
 import { worldBox, renderHeight } from '@/board/geometry';
 import { IMG_PLACEHOLDER_ZOOM } from '@/board/imageLod';
 import { NodeView } from './NodeView';
-import { normalizeMotionNode } from './MotionPathNode';
+import { normalizeMotionNode } from '@/board/motionGeometry';
 import { LaneView } from './LaneView';
 
 // Memoized node — on pan/zoom the viewport changes but each node's props (node,
