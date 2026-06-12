@@ -53,6 +53,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     if (!streaming) setStatusDetached(false); // 모든 생성이 끝나면 원래 모드로
   }, [streaming]);
   const statusInline = streaming && !statusDetached;
+  // 생성 중 전송 버튼 호버 — 스피너가 정지(■) 버튼으로 바뀐다.
+  const [hoverStop, setHoverStop] = useState(false);
 
   const collapsed = useUIStore((s) => s.promptBarCollapsed);
   const favoritesOpen = useUIStore((s) => s.favoritesOpen);
@@ -72,21 +74,39 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const onChatPage = location.pathname === AI_CHAT_PATH;
 
   // 보관함 추천 — 보드에서 2자 이상 입력하면 태그/주제가 맞는 저장 자료를 바 위에
-  // 카드로 띄운다. 클릭 = 생성 없이 보드의 빈 자리에 바로 배치(겹침 회피).
+  // 카드로 띄운다. 클릭 = 복수 선택 토글 → [배치] 버튼 또는 프롬프트 제출로 적용.
   const [assetSugs, setAssetSugs] = useState<ImageAsset[]>([]);
+  const [assetSel, setAssetSel] = useState<string[]>([]); // 클릭 순서 유지(배치 순서)
+  const assetKey = (a: ImageAsset) => `${a.tag}-${a.createdAt}`;
   useEffect(() => {
     if (!location.pathname.startsWith('/board') || draft.trim().length < 2) {
       setAssetSugs([]);
+      setAssetSel([]);
       return;
     }
     const t = setTimeout(() => {
       void import('@/board/assets')
         .then((m) => m.searchAssets(draft.trim()))
-        .then(setAssetSugs)
+        .then((sugs) => {
+          setAssetSugs(sugs);
+          // 목록이 바뀌면 더 이상 보이지 않는 선택은 비운다.
+          const keys = new Set(sugs.map((a) => `${a.tag}-${a.createdAt}`));
+          setAssetSel((sel) => sel.filter((k) => keys.has(k)));
+        })
         .catch(() => setAssetSugs([]));
     }, 160);
     return () => clearTimeout(t);
   }, [draft, location.pathname]);
+
+  /** 선택한 보관함 자료를 보드의 빈 자리에 그리드로 정렬 배치(겹침 없음). */
+  function applySelectedAssets() {
+    const chosen = assetSel
+      .map((k) => assetSugs.find((a) => assetKey(a) === k))
+      .filter((a): a is ImageAsset => !!a);
+    if (chosen.length === 0) return;
+    setAssetSel([]);
+    void import('@/board/workflow').then((m) => m.placeAssetsOnBoard(chosen));
+  }
 
   // Keep the favorites rail mounted briefly after closing so it can play the
   // reverse animation (cards descend back behind the bar) before unmounting.
@@ -156,9 +176,16 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     if (!onChatPage) navigate(AI_CHAT_PATH, { viewTransition: true });
   }
 
-  // Behavior 2/3 — star (empty) vs send (typed).
+  // Behavior 2/3 — star (empty) vs send (typed). 생성 중에는 정지 버튼이 된다.
   function onStarOrSend() {
-    if (statusInline) return; // 진행 표시가 입력창을 차지한 동안만 잠금(분리 모드는 병렬 제출 허용)
+    if (statusInline) {
+      // 정지 — 진행 중인 모든 생성을 즉시 중단(보드 플로우 + 로컬 타이핑 애니메이션).
+      genCancel.current = true;
+      setGenerating(false);
+      setGenText('');
+      void import('@/board/workflow').then((m) => m.abortGeneration());
+      return;
+    }
     if (hasText) {
       void runGeneration(draft.trim());
     } else {
@@ -197,8 +224,21 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
 
     // 1) My Board → ALWAYS handle on the board (act on the selected card/frame,
     //    or spawn a new card from the prompt). Never navigate to chat.
+    //    보관함 추천에서 자료를 선택한 상태로 제출하면: 먼저 보드에 정렬 배치하고
+    //    (배치가 그 카드들을 선택함) 프롬프트를 그 카드들에 대한 명령으로 실행.
     if (path.startsWith('/board')) {
-      void import('@/board/prompt').then((m) => m.handleBoardPrompt(text));
+      const chosen = assetSel
+        .map((k) => assetSugs.find((a) => assetKey(a) === k))
+        .filter((a): a is ImageAsset => !!a);
+      if (chosen.length > 0) {
+        setAssetSel([]);
+        void import('@/board/workflow')
+          .then((m) => m.placeAssetsOnBoard(chosen))
+          .then(() => import('@/board/prompt'))
+          .then((m) => m.handleBoardPrompt(text));
+      } else {
+        void import('@/board/prompt').then((m) => m.handleBoardPrompt(text));
+      }
       return;
     }
 
@@ -250,38 +290,55 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
       <div className={`pointer-events-auto relative ${collapsed ? 'w-auto' : 'w-full max-w-3xl'}`}>
         {favRender && !collapsed && <FavoriteCardRail closing={favClosing} />}
 
-        {/* 보관함 추천 — 입력 텍스트와 태그/주제가 맞는 저장 자료. 클릭 = 즉시 배치. */}
+        {/* 보관함 추천 — 입력 텍스트와 태그/주제가 맞는 저장 자료. 클릭 = 복수 선택,
+            [배치] 버튼 = 보드 빈 자리에 그리드 정렬, 선택 상태로 프롬프트 제출 =
+            배치 후 그 카드들에 명령. 화면 가로 폭(양옆 패딩 제외)을 꽉 채우고
+            줄바꿈으로 쌓이며, 3줄을 넘으면 세로 스크롤. */}
         {assetSugs.length > 0 && !collapsed && !favRender && (
           <div
-            className="pointer-events-auto absolute bottom-full left-1/2 z-0 -translate-x-1/2"
-            style={{ marginBottom: streaming && statusDetached ? 52 : 8 }}
+            className="pointer-events-auto absolute bottom-full left-1/2 z-0 flex -translate-x-1/2 flex-col items-center"
+            style={{
+              marginBottom: streaming && statusDetached ? 52 : 8,
+              width: `calc(100vw - ${(leftInset || 64) + 48}px)`,
+            }}
           >
-            <div className="flex max-w-[44rem] items-stretch gap-t2 overflow-x-auto rounded-xl border border-border bg-surface/95 p-t2 shadow-lg backdrop-blur">
-              <span className="flex shrink-0 items-center pl-t1 text-overline text-fg-muted">
-                <Icon name="folder" size={12} />
-                <span className="ml-t1">보관함</span>
-              </span>
-              {assetSugs.map((a) => (
-                <button
-                  key={`${a.tag}-${a.createdAt}`}
-                  type="button"
-                  title={`'${a.tag}' 보드에 추가`}
-                  onClick={() => {
-                    void import('@/board/workflow').then((m) => m.placeAssetOnBoard(a));
-                  }}
-                  className="group w-[72px] shrink-0 rounded-lg border border-border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft hover:border-accent"
-                >
-                  <img
-                    src={a.url}
-                    alt={a.tag}
-                    draggable={false}
-                    className="h-14 w-full rounded-md object-cover"
-                  />
-                  <span className="mt-0.5 block truncate text-[10px] font-medium text-fg-2 group-hover:text-accent">
-                    {a.tag}
-                  </span>
-                </button>
-              ))}
+            {assetSel.length > 0 && (
+              <button
+                type="button"
+                onClick={applySelectedAssets}
+                className="mb-t2 rounded-pill bg-accent px-t6 py-t2 text-sm font-semibold text-on-accent shadow-md transition-opacity duration-150 ease-soft hover:opacity-90"
+              >
+                선택한 {assetSel.length}개 보드에 배치
+              </button>
+            )}
+            <div className="flex max-h-[286px] w-full flex-wrap items-start gap-t2 overflow-y-auto rounded-lg border border-border bg-surface/95 p-t2 shadow-lg backdrop-blur">
+              {assetSugs.map((a) => {
+                const selected = assetSel.includes(assetKey(a));
+                return (
+                  <button
+                    key={assetKey(a)}
+                    type="button"
+                    title={selected ? `'${a.tag}' 선택 해제` : `'${a.tag}' 선택`}
+                    onClick={() => {
+                      setAssetSel((sel) =>
+                        sel.includes(assetKey(a)) ? sel.filter((k) => k !== assetKey(a)) : [...sel, assetKey(a)],
+                      );
+                    }}
+                    className={`group w-[72px] shrink-0 rounded-sm border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft ${
+                      selected ? 'border-accent ring-2 ring-accent/40' : 'border-border hover:border-accent'
+                    }`}
+                  >
+                    <img src={a.url} alt={a.tag} draggable={false} className="h-14 w-full rounded-xs object-cover" />
+                    <span
+                      className={`mt-0.5 block truncate text-[10px] font-medium ${
+                        selected ? 'text-accent' : 'text-fg-2 group-hover:text-accent'
+                      }`}
+                    >
+                      {a.tag}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -394,12 +451,17 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             <button
               type="submit"
               disabled={statusInline || collapsed}
-              aria-label={statusInline ? '생성 중' : hasText ? '전송' : '즐겨찾기 작업'}
+              aria-label={statusInline ? (hoverStop ? '생성 중단' : '생성 중') : hasText ? '전송' : '즐겨찾기 작업'}
               aria-pressed={!hasText && favoritesOpen}
               tabIndex={collapsed ? -1 : 0}
+              onMouseEnter={() => setHoverStop(true)}
+              onMouseLeave={() => setHoverStop(false)}
+              title={statusInline ? (hoverStop ? '생성 중단' : '생성 중 — 호버하면 중단') : undefined}
               className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-pill transition-colors duration-150 ease-soft ${
                 statusInline
-                  ? 'cursor-wait bg-accent text-on-accent'
+                  ? hoverStop
+                    ? 'cursor-pointer bg-fg text-on-dark' // 정지 모드 — 잉크색으로 분명하게
+                    : 'cursor-wait bg-accent text-on-accent'
                   : hasText
                     ? 'bg-accent text-on-accent hover:bg-accent-hover'
                     : favoritesOpen
@@ -408,12 +470,19 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
               }`}
             >
               {statusInline ? (
-                // 트랙(연한 링) + 아크 + 선두 점 — 부드럽게 도는 생성 스피너.
-                <svg className="kv-spin-smooth" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeOpacity="0.3" strokeWidth="2.5" />
-                  <path d="M20.5 12A8.5 8.5 0 0 0 12 3.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                  <circle cx="12" cy="3.5" r="2" fill="currentColor" />
-                </svg>
+                hoverStop ? (
+                  // 정지(■) — 클릭하면 진행 중인 생성을 즉시 중단.
+                  <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>
+                    <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" />
+                  </svg>
+                ) : (
+                  // 트랙(연한 링) + 아크 + 선두 점 — 부드럽게 도는 생성 스피너.
+                  <svg className="kv-spin-smooth" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeOpacity="0.3" strokeWidth="2.5" />
+                    <path d="M20.5 12A8.5 8.5 0 0 0 12 3.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                    <circle cx="12" cy="3.5" r="2" fill="currentColor" />
+                  </svg>
+                )
               ) : (
                 <Icon name={hasText ? 'send' : 'star'} size={18} fill={!hasText && favoritesOpen ? 'currentColor' : 'none'} />
               )}

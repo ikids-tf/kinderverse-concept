@@ -6,6 +6,7 @@ import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImag
 // 의도 어휘는 단일 출처(intent-lexicon) — 로컬 정규식은 '그려' 등이 빠져 어긋났었다(P0-1).
 import { IMAGE_RE, coreTopic } from '@/ai/intent-lexicon';
 import { findAsset, saveAsset } from './assets';
+import { fitFrameToChildren } from './frames';
 import { recordSpawnedNodes } from './commands';
 import { worldBox } from './geometry';
 import { linkedComponent } from './links';
@@ -78,9 +79,16 @@ export function placeInFrame(frameId: string, w: number, h: number): { x: number
   const fy = frame ? frame.y : 0;
   let fw = frame ? frame.w : FRAME_W;
   if (w + PAD * 2 > fw) fw = w + PAD * 2; // frame at least as wide as the card
+  // autoH 문서는 node.h가 '최소 높이'일 뿐 — 실제 렌더 높이(data.renderH)로 막아야
+  // 긴 계획안 아래 영역을 빈 곳으로 착각해 카드가 문서 위에 겹치지 않는다.
   const obs = Object.values(b.nodes)
     .filter((n) => n.id !== frameId && n.type !== 'frame')
-    .map((n) => ({ x: n.x, y: n.y, w: n.w, h: Math.max(n.h, 90) }));
+    .map((n) => ({
+      x: n.x,
+      y: n.y,
+      w: n.w,
+      h: Math.max(typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : 0, n.h, 90),
+    }));
   const hit = (x: number, y: number) =>
     obs.find((o) => x < o.x + o.w + GAP && x + w + GAP > o.x && y < o.y + o.h + GAP && y + h + GAP > o.y);
 
@@ -412,14 +420,133 @@ export async function generateIntoFrame(frameId: string, prompt: string): Promis
   }
 }
 
-/** 보관함 추천 클릭 → 보드 위 빈 자리에 카드 배치(기존 자료·프레임과 겹치지 않게).
-    뷰포트 중앙에서 좌우로 번갈아 벌리며, 자리가 없으면 아래 줄로 내려가며 찾는다. */
-export function placeAssetOnBoard(asset: { tag: string; url: string }): string {
+/** 선택에서 대상 프레임을 찾는다 — 프레임 자체가 선택됐거나 선택 카드가 속한 프레임. */
+function selectionFrameId(): string | undefined {
   const b = useBoardStore.getState();
+  for (const id of b.selection) {
+    const n = b.nodes[id];
+    if (!n) continue;
+    if (n.type === 'frame' && !n.data?.sub) return id;
+    const fid = n.data?.frameId as string | undefined;
+    if (fid && b.nodes[fid]?.type === 'frame') return fid;
+  }
+  return undefined;
+}
+
+/** '마지막으로 작업한 프레임'의 프록시 — 보드는 왼→오 시간순으로 자라므로
+    최우측 최상위 프레임이 가장 최근 작업이다. */
+function lastWorkedFrame(): BoardNode | undefined {
+  const frames = Object.values(useBoardStore.getState().nodes).filter(
+    (n) => n.type === 'frame' && !n.data?.sub,
+  );
+  if (frames.length === 0) return undefined;
+  return frames.reduce((a, f) => (f.x + f.w > a.x + a.w ? f : a));
+}
+
+/** 뷰포트 팬을 부드럽게(ease-out cubic) — 순간이동이 아니라 '어디로 이동했는지'가
+    인지되게. 거리에 비례해 200~420ms. prefers-reduced-motion이면 즉시 적용.
+    새 애니메이션/취소가 오면 토큰이 무효화돼, 진행 중이던 RAF 루프가 이후의
+    카메라 연출(예: 계획안 스트리밍 시작 팬)을 덮어쓰지 않는다. */
+let panAnimToken = 0;
+
+/** 진행 중인 팬 애니메이션 중단 — 다른 카메라 연출을 시작하기 전에 호출. */
+export function cancelPanAnimation(): void {
+  panAnimToken++;
+}
+
+export function animatePanBy(dx: number, dy: number): void {
+  const b = useBoardStore.getState();
+  const from = { x: b.viewport.panX, y: b.viewport.panY };
+  const token = ++panAnimToken;
+  if (typeof window === 'undefined' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    b.setViewport({ panX: from.x + dx, panY: from.y + dy });
+    return;
+  }
+  const dist = Math.hypot(dx, dy);
+  const dur = Math.min(420, Math.max(200, dist * 0.25));
+  const t0 = performance.now();
+  const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+  const step = (now: number) => {
+    if (token !== panAnimToken) return; // 취소/대체됨 — 카메라를 더 건드리지 않는다
+    const t = Math.min(1, (now - t0) / dur);
+    const k = ease(t);
+    useBoardStore.getState().setViewport({ panX: from.x + dx * k, panY: from.y + dy * k });
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+/** 배치된 카드 묶음이 화면 밖이면 뷰포트를 '최소한으로' 팬해 보이게 한다(줌 유지).
+    이미 화면 안이면 움직이지 않는다 — 작업 중이던 시선·흐름을 깨지 않기 위해. */
+function ensureBoxVisible(ids: string[]): void {
+  const b = useBoardStore.getState();
+  const ns = ids.map((id) => b.nodes[id]).filter((n): n is BoardNode => !!n);
+  if (ns.length === 0) return;
+  const x1 = Math.min(...ns.map((n) => n.x));
+  const y1 = Math.min(...ns.map((n) => n.y));
+  const x2 = Math.max(...ns.map((n) => n.x + n.w));
+  const y2 = Math.max(...ns.map((n) => n.y + n.h));
+  const { zoom, panX, panY } = b.viewport;
+  const railW = 64;
+  const cw = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) - railW);
+  const ch = Math.max(320, typeof window !== 'undefined' ? window.innerHeight : 800);
+  const M = 40; // 가장자리 여백
+  const BOTTOM = 120; // 하단 프롬프트바가 덮는 영역
+  const sx1 = x1 * zoom + panX;
+  const sy1 = y1 * zoom + panY;
+  const sx2 = x2 * zoom + panX;
+  const sy2 = y2 * zoom + panY;
+  let dx = 0;
+  let dy = 0;
+  if (sx1 < M) dx = M - sx1;
+  else if (sx2 > cw - M) dx = cw - M - sx2;
+  if (sy1 < M) dy = M - sy1;
+  else if (sy2 > ch - BOTTOM) dy = ch - BOTTOM - sy2;
+  if (dx !== 0 || dy !== 0) animatePanBy(dx, dy);
+}
+
+/** 보관함 자료 N개를 '작업 맥락'에 배치한다(겹침 없음, 배치 후 선택 상태).
+    ① 선택된 프레임(또는 선택 카드의 프레임)이 있으면 그 안에 — 흐름에 합류.
+    ② 없으면 마지막 작업 프레임(최우측) 오른쪽에 그리드로 나란히 — 왼→오 시간순 유지.
+    ③ 프레임이 없으면 뷰포트 중앙에서 겹침 회피 탐색(기존 동작).
+    배치가 화면 밖이면 뷰포트를 최소한으로 팬해서 보여준다. */
+export function placeAssetsOnBoard(assets: Array<{ tag: string; url: string }>): string[] {
+  if (assets.length === 0) return [];
   const w = 220;
   const h = 200;
   const GAP = 24;
-  const c = viewportCenterBoardPoint();
+
+  // ① 선택 프레임 안에 — placeInFrame이 빈 칸을 찾고 프레임을 늘린다.
+  const selFid = selectionFrameId();
+  if (selFid) {
+    const ids = assets.map((asset) => {
+      const pos = placeInFrame(selFid, w, h);
+      const id = newId('image');
+      useBoardStore.getState().addNodeRaw({
+        id,
+        type: 'image',
+        x: Math.round(pos.x),
+        y: Math.round(pos.y),
+        w,
+        h,
+        src: asset.url,
+        text: asset.tag,
+        data: { role: 'image', fromLibrary: true, frameId: selFid },
+      });
+      return id;
+    });
+    fitFrameToChildren(selFid);
+    recordSpawnedNodes(ids, '보관함 자료 추가');
+    useBoardStore.getState().setSelection(ids);
+    ensureBoxVisible(ids);
+    return ids;
+  }
+
+  const b = useBoardStore.getState();
+  const cols = Math.min(assets.length, 4);
+  const rows = Math.ceil(assets.length / cols);
+  const bw = cols * w + (cols - 1) * GAP; // 그리드 전체 폭
+  const bh = rows * h + (rows - 1) * GAP; // 그리드 전체 높이
   const obstacles = Object.values(b.nodes).map((n) => ({
     x: n.x,
     y: n.y,
@@ -427,36 +554,288 @@ export function placeAssetOnBoard(asset: { tag: string; url: string }): string {
     h: Math.max(typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : n.h, 90),
   }));
   const hit = (x: number, y: number) =>
-    obstacles.some((o) => x < o.x + o.w + GAP && x + w + GAP > o.x && y < o.y + o.h + GAP && y + h + GAP > o.y);
+    obstacles.some((o) => x < o.x + o.w + GAP && x + bw + GAP > o.x && y < o.y + o.h + GAP && y + bh + GAP > o.y);
   let pos: { x: number; y: number } | null = null;
-  const x0 = c.x - w / 2;
-  const y0 = c.y - h / 2;
-  for (let row = 0; row < 60 && !pos; row++) {
-    for (let i = 0; i < 41; i++) {
-      const x = x0 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (w + GAP);
-      const y = y0 + row * (h + GAP);
-      if (!hit(x, y)) { pos = { x, y }; break; }
+
+  // ② 마지막 작업 프레임 오른쪽, 위 모서리 정렬 — 오른쪽/아래로만 밀며 빈 자리 탐색
+  //    (왼쪽 과거 영역은 침범하지 않는다).
+  const last = lastWorkedFrame();
+  if (last) {
+    const x0 = last.x + last.w + 48;
+    const y0 = last.y;
+    for (let row = 0; row < 60 && !pos; row++) {
+      for (let i = 0; i < 41; i++) {
+        const x = x0 + i * (w + GAP);
+        const y = y0 + row * (h + GAP);
+        if (!hit(x, y)) { pos = { x, y }; break; }
+      }
     }
   }
-  if (!pos) pos = { x: x0, y: y0 };
-  const id = newId('image');
-  b.addNodeRaw({
-    id,
-    type: 'image',
-    x: Math.round(pos.x),
-    y: Math.round(pos.y),
-    w,
-    h,
-    src: asset.url,
-    text: asset.tag,
-    data: { role: 'image', fromLibrary: true },
+
+  // ③ 프레임이 없는 보드 — 뷰포트 중앙에서 좌우로 번갈아 벌리며 탐색.
+  if (!pos) {
+    const c = viewportCenterBoardPoint();
+    const x0 = c.x - bw / 2;
+    const y0 = c.y - bh / 2;
+    for (let row = 0; row < 60 && !pos; row++) {
+      for (let i = 0; i < 41; i++) {
+        const x = x0 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (w + GAP);
+        const y = y0 + row * (h + GAP);
+        if (!hit(x, y)) { pos = { x, y }; break; }
+      }
+    }
+    if (!pos) pos = { x: x0, y: y0 };
+  }
+
+  const ids = assets.map((asset, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const id = newId('image');
+    b.addNodeRaw({
+      id,
+      type: 'image',
+      x: Math.round(pos!.x + col * (w + GAP)),
+      y: Math.round(pos!.y + row * (h + GAP)),
+      w,
+      h,
+      src: asset.url,
+      text: asset.tag,
+      data: { role: 'image', fromLibrary: true },
+    });
+    return id;
   });
-  recordSpawnedNodes([id], '보관함 자료 추가');
-  b.setSelection([id]);
-  return id;
+  recordSpawnedNodes(ids, '보관함 자료 추가');
+  b.setSelection(ids);
+  ensureBoxVisible(ids);
+  return ids;
+}
+
+/** 보관함 추천 클릭 → 보드 위 빈 자리에 카드 한 장 배치(겹침 회피). */
+export function placeAssetOnBoard(asset: { tag: string; url: string }): string {
+  return placeAssetsOnBoard([asset])[0];
 }
 
 /* ---- 유튜브 뷰어 + 프롬프트 = 영상 검색 → 뷰어 아래 썸네일 가로 배열 ---- */
+
+/* ---- 생성 중단(정지 버튼) — 공유 AbortController ----------------------------
+   진행 중인 모든 생성 플로우가 같은 시그널을 본다. abortGeneration()이 호출되면
+   스트리밍 fetch는 즉시 끊기고, 루프형 플로우는 다음 체크포인트에서 멈추며,
+   프롬프트바 상태는 바로 초기화된다. 다음 생성은 새 컨트롤러로 시작한다. */
+let genCtrl: AbortController | null = null;
+
+/** 현재 생성 세대의 AbortSignal — 플로우 시작 시 받아 체크포인트마다 확인한다. */
+export function genSignal(): AbortSignal {
+  if (!genCtrl || genCtrl.signal.aborted) genCtrl = new AbortController();
+  return genCtrl.signal;
+}
+
+/** 정지 버튼 — 진행 중인 생성을 모두 중단하고 상태를 초기화한다. */
+export function abortGeneration(): void {
+  genCtrl?.abort();
+  genCtrl = null;
+  cancelPanAnimation(); // 따라가던 카메라도 멈춘다
+  useBoardStore.getState().resetGen();
+}
+
+/* ---- 유튜브: 링크 연결 → 교사 맞춤 영상 추천 ---- */
+
+/** 연결된 자료의 내용 → 유아교육 현장에 맞는 유튜브 검색어(저가 LLM, 실패 시
+    휴리스틱). 예: "봄 꽃 심기" 계획 카드 → "봄 꽃 심기 유아 활동". */
+async function ytTeacherQuery(content: string): Promise<string> {
+  const base = coreTopic(content.split('\n')[0]) || content.split('\n')[0].slice(0, 24);
+  try {
+    const res = await callGateway({
+      task: 'lane_step',
+      tier: 'low',
+      provider: 'auto',
+      system:
+        '유치원 교사가 수업에 쓸 유튜브 검색어를 만든다. 입력 자료의 핵심 주제를 뽑아 유아교육 맥락(유아·동요·활동·놀이 중 어울리는 1개)을 결합한 한국어 검색어 한 줄만 출력한다. 8단어 이내, 따옴표·설명 금지.',
+      messages: [{ role: 'user', content: content.slice(0, 600) }],
+      meta: { kind: 'memo', title: 'yt-query', selected: [] },
+      maxTokens: 60,
+    });
+    const q = res.ok && res.text ? res.text.trim().split('\n')[0].replace(/["'「」]/g, '').trim() : '';
+    if (q && q.length <= 40) return q;
+  } catch {
+    /* 폴백으로 */
+  }
+  return `${base} 유아 활동`;
+}
+
+/** 계획안의 '놀이 활동' 추출 — payload(WeeklyPlanGrid)의 days가 정답이고,
+    없으면 문서 마크다운 표('놀이 활동' 열)를 파싱한다. */
+function planActivities(node: BoardNode): { day?: string; activity: string }[] {
+  const p = node.data?.payload as
+    | { type?: string; props?: { days?: { day?: string; activity?: string }[] } }
+    | undefined;
+  if (p?.type === 'WeeklyPlanGrid' && Array.isArray(p.props?.days)) {
+    return p.props.days
+      .map((d) => ({ day: d.day, activity: (d.activity ?? '').trim() }))
+      .filter((d) => d.activity);
+  }
+  const out: { day?: string; activity: string }[] = [];
+  let actIdx = -1;
+  for (const ln of (node.text ?? '').split('\n')) {
+    if (!/^\s*\|/.test(ln)) {
+      actIdx = -1; // 표가 끝나면 리셋(다음 표에서 다시 헤더 탐색)
+      continue;
+    }
+    if (/^[\s|:-]+$/.test(ln)) continue; // |---| 구분행
+    const cells = ln.replace(/^\s*\||\|\s*$/g, '').split('|').map((c) => c.trim());
+    if (actIdx < 0) {
+      actIdx = cells.findIndex((c) => c.includes('활동'));
+      continue; // 헤더 행
+    }
+    if (cells[actIdx]) out.push({ day: cells[0], activity: cells[actIdx] });
+  }
+  return out;
+}
+
+/** 활동 문장들 → 활동별 유튜브 검색어(저가 LLM 한 번, 실패 시 핵심어 휴리스틱). */
+async function activityQueries(acts: string[]): Promise<string[]> {
+  const fallback = acts.map((a) => {
+    const ws = a.replace(/[^\d가-힣A-Za-z\s]/g, ' ').split(/\s+/).filter((w) => w.length >= 2);
+    return [...ws.slice(0, 4), '유아'].join(' ');
+  });
+  try {
+    const res = await callGateway({
+      task: 'lane_step',
+      tier: 'low',
+      provider: 'auto',
+      system:
+        '각 줄은 유치원 놀이 활동 설명이다. 줄마다 그 활동 영상을 찾기 좋은 유튜브 검색어 하나로 바꿔라(핵심 활동어 3~5단어 + "유아"). 입력과 같은 줄 수를 유지하고 검색어만 출력한다.',
+      messages: [{ role: 'user', content: acts.join('\n') }],
+      meta: { kind: 'memo', title: 'yt-activity-queries', selected: [] },
+      maxTokens: 400,
+    });
+    if (res.ok && res.text) {
+      const qs = res.text
+        .trim()
+        .split('\n')
+        .map((s) => s.replace(/^\d+[.)]\s*/, '').replace(/["'「」]/g, '').trim())
+        .filter(Boolean);
+      if (qs.length === acts.length) return qs;
+    }
+  } catch {
+    /* 폴백으로 */
+  }
+  return fallback;
+}
+
+/** 계획안 연결 — 요일별 '놀이 활동' 수만큼 활동마다 맞는 영상 1개씩을 찾아
+    같은 행에 나열한다(캡션 앞에 요일 표시). */
+export async function searchVideosForPlan(
+  viewerId: string,
+  items: { day?: string; activity: string }[],
+): Promise<void> {
+  const b = useBoardStore.getState();
+  if (!b.nodes[viewerId] || items.length === 0) return;
+  const signal = genSignal();
+  b.beginGen();
+  b.setGenerating(`🔎 놀이 활동 ${items.length}개에 맞는 영상을 찾고 있어요…`);
+
+  const row = spawnVideoRow(viewerId, items.length);
+  if (!row) {
+    useBoardStore.getState().endGen();
+    return;
+  }
+  const { ids, vb, rowY, wrapFrameId } = row;
+
+  try {
+    const queries = await activityQueries(items.map((it) => it.activity));
+    if (signal.aborted) throw new Error('aborted');
+    const results = await Promise.all(
+      queries.map((q) =>
+        fetch(`/api/youtube/search?q=${encodeURIComponent(q)}&n=1`, { signal })
+          .then((r) => r.json() as Promise<{ ok: boolean; results?: { id: string; title: string }[] }>)
+          .then((j) => (j.ok && j.results?.[0] ? j.results[0] : null))
+          .catch(() => null),
+      ),
+    );
+    const bb = useBoardStore.getState();
+    let filled = 0;
+    ids.forEach((cardId, i) => {
+      if (!bb.nodes[cardId]) return;
+      const v = results[i];
+      if (!v) {
+        bb.removeNodeRaw(cardId); // 이 활동은 결과 없음 — 빈 카드는 거둔다
+        return;
+      }
+      filled += 1;
+      const day = items[i].day ? `(${items[i].day}) ` : '';
+      bb.updateNodeRaw(cardId, {
+        src: `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+        text: `${day}${v.title}`,
+        loading: false,
+        data: { role: 'yt-result', ytTarget: viewerId, ytId: v.id, thumb: '' },
+      });
+    });
+    if (filled === 0) throw new Error('검색 결과 없음');
+    recordSpawnedNodes(
+      [...ids.filter((id) => useBoardStore.getState().nodes[id]), ...(wrapFrameId && useBoardStore.getState().nodes[wrapFrameId] ? [wrapFrameId] : [])],
+      '활동별 영상 검색',
+    );
+  } catch (e) {
+    const bb = useBoardStore.getState();
+    ids.forEach((id) => bb.removeNodeRaw(id));
+    if (!signal.aborted) {
+      const noteId = newId('sticky');
+      bb.addNodeRaw({
+        id: noteId,
+        type: 'sticky',
+        x: Math.round(vb.x),
+        y: rowY,
+        w: 320,
+        h: 80,
+        autoH: true,
+        text: `⚠️ 활동 영상을 찾지 못했어요 — 네트워크를 확인하고 다시 시도해 주세요.\n(${e instanceof Error ? e.message : String(e)})`,
+        data: { color: 'accent-soft' },
+      });
+      recordSpawnedNodes([noteId], '영상 검색 실패 안내');
+    }
+  } finally {
+    useBoardStore.getState().endGen();
+  }
+}
+
+/** 유튜브 뷰어에 자료를 '선으로 연결'하면(BoardCanvas 링크 완료 훅) — 먼저
+    연결된 자료를 '분석'한다:
+    · 계획안(또는 그 계획안을 감싼 프레임, 활동 표를 가진 어떤 문서든) →
+      '놀이 활동'을 추출해 활동 수만큼 활동마다 영상 1개씩 추천
+    · 활동이 없는 일반 자료 → 내용으로 교사 맞춤 검색어를 만들어 추천 3개. */
+export async function recommendVideosForLink(viewerId: string, content: string, sourceId?: string): Promise<void> {
+  const b = useBoardStore.getState();
+  b.beginGen();
+  b.setGenerating('📋 연결한 자료를 분석하고 있어요…');
+  try {
+    const st = useBoardStore.getState();
+    let src = sourceId ? st.nodes[sourceId] : undefined;
+    const isPlanish = (n?: BoardNode) =>
+      !!n && (n.data?.role === 'plan' || (n.data?.payload as { type?: string } | undefined)?.type === 'WeeklyPlanGrid');
+
+    // 프레임에 연결했으면(문서 대신 프레임 모서리에 선이 걸리는 경우가 흔하다) —
+    // 프레임 안에서 계획안/활동 표 문서를 찾아 그걸 분석 대상으로 쓴다.
+    if (src?.type === 'frame') {
+      const kids = Object.values(st.nodes).filter((n) => n.data?.frameId === src!.id);
+      src =
+        kids.find(isPlanish) ??
+        kids.find((n) => planActivities(n).length >= 2) ??
+        src;
+    }
+
+    const acts = src && src.type !== 'frame' ? planActivities(src) : [];
+    // 계획안으로 판별되면 활동 1개부터, 일반 문서는 활동 표가 분명할 때(2개 이상)만.
+    const planMode = src ? (isPlanish(src) ? acts.length >= 1 : acts.length >= 2) : false;
+    if (planMode) {
+      await searchVideosForPlan(viewerId, acts);
+      return;
+    }
+    const q = await ytTeacherQuery(content);
+    await searchVideosForViewer(viewerId, q, 3);
+  } finally {
+    useBoardStore.getState().endGen();
+  }
+}
 
 /** "공룡 영상 검색해줘" → 검색어만 남긴다(영상/검색/지시 어미 제거). */
 function ytQuery(text: string): string {
@@ -471,31 +850,35 @@ function ytQuery(text: string): string {
 /** 유튜브 뷰어 카드를 선택하고 영상을 요청하면: 로딩 썸네일 카드를 뷰어 바로
     아래 가로로 깔고 → 검색 결과(제목+썸네일)로 채운다. 썸네일의 ▶를 누르면
     그 영상이 뷰어에서 바로 재생된다(NodeView의 kv:yt-play 이벤트). */
-export async function searchVideosForViewer(viewerId: string, text: string, count = 3): Promise<void> {
+/* 썸네일 행 공통 상수 — 단일 검색·활동별 검색이 같은 레이아웃을 쓴다. */
+const YT_W = 168;
+const YT_H = 94; // 16:9 썸네일 — 제목 캡션은 카드가 아래로 덧그린다
+const YT_GAPX = 12;
+const YT_GAPY = 20;
+const YT_CAPTION = 34; // 캡션이 카드 아래로 차지하는 대략 높이(겹침 판정용)
+
+/** 뷰어 아래 '가로 중앙'에 로딩 썸네일 행을 깔고, 즉시 뷰어+썸네일을 프레임으로
+    감싼다(이미 프레임 안이면 합류). 단일/활동별 검색이 공유하는 골격. */
+function spawnVideoRow(
+  viewerId: string,
+  count: number,
+): { ids: string[]; vb: { x: number; y: number; w: number; h: number }; rowX: number; rowY: number; wrapFrameId?: string } | null {
   const b = useBoardStore.getState();
   const viewer = b.nodes[viewerId];
-  if (!viewer) return;
-  const q = ytQuery(text);
-  b.beginGen();
-  b.setGenerating(`🔎 유튜브에서 '${q}' 영상을 찾고 있어요…`);
-
-  const W = 168;
-  const H = 94; // 16:9 썸네일 — 제목 캡션은 카드가 아래로 덧그린다
-  const GAPX = 12;
-  const GAPY = 20;
-  const CAPTION = 34; // 캡션이 카드 아래로 차지하는 대략 높이(겹침 판정용)
+  if (!viewer) return null;
   // 뷰어가 리사이즈/스케일된 어떤 크기여도 — 월드 박스 기준으로 그 '아래'에 깐다.
   const vb = worldBox(viewer);
-  const rowW = count * W + (count - 1) * GAPX;
+  const rowW = count * YT_W + (count - 1) * YT_GAPX;
+  const rowX = Math.round(vb.x + (vb.w - rowW) / 2); // 뷰어 기준 '가로 중앙'
   // 이전 검색 결과 등 기존 카드와 겹치면 행 단위로 아래로 비켜 내린다.
   const others = Object.values(b.nodes).filter((n) => n.id !== viewerId);
   const rowHits = (yy: number) =>
     others.some((n) => {
       const o = worldBox(n);
-      return vb.x < o.x + o.w + GAPX && vb.x + rowW + GAPX > o.x && yy < o.y + o.h + GAPY && yy + H + CAPTION + GAPY > o.y;
+      return rowX < o.x + o.w + YT_GAPX && rowX + rowW + YT_GAPX > o.x && yy < o.y + o.h + YT_GAPY && yy + YT_H + YT_CAPTION + YT_GAPY > o.y;
     });
-  let rowY = Math.round(vb.y + vb.h + GAPY);
-  while (rowHits(rowY)) rowY += H + CAPTION + GAPY;
+  let rowY = Math.round(vb.y + vb.h + YT_GAPY);
+  while (rowHits(rowY)) rowY += YT_H + YT_CAPTION + YT_GAPY;
 
   const ids: string[] = [];
   for (let i = 0; i < count; i++) {
@@ -503,18 +886,68 @@ export async function searchVideosForViewer(viewerId: string, text: string, coun
     b.addNodeRaw({
       id,
       type: 'image',
-      x: Math.round(vb.x + i * (W + GAPX)),
+      x: Math.round(rowX + i * (YT_W + YT_GAPX)),
       y: rowY,
-      w: W,
-      h: H,
+      w: YT_W,
+      h: YT_H,
       loading: true,
       data: { role: 'yt-result', ytTarget: viewerId },
     });
     ids.push(id);
   }
 
+  // 썸네일이 깔리는 '즉시' 뷰어+썸네일을 한 프레임으로 감싼다(이미 프레임 안이면 합류).
+  let wrapFrameId = viewer.data?.frameId as string | undefined;
+  if (wrapFrameId && b.nodes[wrapFrameId]?.type === 'frame') {
+    ids.forEach((cid) => {
+      const c = b.nodes[cid];
+      if (c) b.updateNodeRaw(cid, { data: { ...(c.data ?? {}), frameId: wrapFrameId } });
+    });
+    fitFrameToChildren(wrapFrameId);
+  } else {
+    const PAD = 28;
+    wrapFrameId = newId('frame');
+    const x1 = Math.round(Math.min(vb.x, rowX) - PAD);
+    const y1 = Math.round(vb.y - PAD);
+    const x2 = Math.round(Math.max(vb.x + vb.w, rowX + rowW) + PAD);
+    const y2 = Math.round(rowY + YT_H + YT_CAPTION + PAD);
+    b.addNodeRaw({
+      id: wrapFrameId,
+      type: 'frame',
+      x: x1,
+      y: y1,
+      w: x2 - x1,
+      h: y2 - y1,
+      data: { title: '동영상 모음' },
+    });
+    const tag = (nid: string) => {
+      const n = useBoardStore.getState().nodes[nid];
+      if (n) useBoardStore.getState().updateNodeRaw(nid, { data: { ...(n.data ?? {}), frameId: wrapFrameId } });
+    };
+    tag(viewerId);
+    ids.forEach(tag);
+    void autoTitleFrame(wrapFrameId); // 내용 기반 자동 제목(비동기)
+  }
+  return { ids, vb, rowX, rowY, wrapFrameId };
+}
+
+export async function searchVideosForViewer(viewerId: string, text: string, count = 3): Promise<void> {
+  const b = useBoardStore.getState();
+  if (!b.nodes[viewerId]) return;
+  const q = ytQuery(text);
+  const signal = genSignal(); // 정지 버튼 — 검색 fetch가 즉시 끊긴다
+  b.beginGen();
+  b.setGenerating(`🔎 유튜브에서 '${q}' 영상을 찾고 있어요…`);
+
+  const row = spawnVideoRow(viewerId, count);
+  if (!row) {
+    useBoardStore.getState().endGen();
+    return;
+  }
+  const { ids, vb, rowY, wrapFrameId } = row;
+
   try {
-    const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(q)}&n=${count}`);
+    const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(q)}&n=${count}`, { signal });
     const json = (await res.json()) as {
       ok: boolean;
       results?: { id: string; title: string; channel?: string }[];
@@ -538,10 +971,18 @@ export async function searchVideosForViewer(viewerId: string, text: string, coun
         data: { role: 'yt-result', ytTarget: viewerId, ytId: v.id, thumb: '' },
       });
     });
-    recordSpawnedNodes(ids.filter((id) => useBoardStore.getState().nodes[id]), '영상 검색');
+    recordSpawnedNodes(
+      [...ids.filter((id) => useBoardStore.getState().nodes[id]), ...(wrapFrameId && useBoardStore.getState().nodes[wrapFrameId] ? [wrapFrameId] : [])],
+      '영상 검색',
+    );
   } catch (e) {
-    // 실패 — 로딩 카드를 거두고 자리에 안내 메모 하나만 남긴다.
     const bb = useBoardStore.getState();
+    if (signal.aborted) {
+      // 정지 버튼 — 로딩 카드만 조용히 거둔다(안내 메모 없음).
+      ids.forEach((id) => bb.removeNodeRaw(id));
+      return;
+    }
+    // 실패 — 로딩 카드를 거두고 자리에 안내 메모 하나만 남긴다.
     ids.forEach((id) => bb.removeNodeRaw(id));
     const noteId = newId('sticky');
     bb.addNodeRaw({

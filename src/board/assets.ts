@@ -76,7 +76,7 @@ function queryTokens(query: string): string[] {
 export async function searchAssets(
   query: string,
   kind: ImageAsset['kind'] = 'image',
-  limit = 8,
+  limit = Infinity, // 개수 제한 없음 — 추천 스트립이 줄바꿈+스크롤로 모두 보여준다
 ): Promise<ImageAsset[]> {
   const tokens = queryTokens(query);
   if (tokens.length === 0) return [];

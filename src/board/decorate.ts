@@ -19,8 +19,9 @@ export interface StickerDeco {
 const ANCHORS: DecoAnchor[] = ['tr', 'bl', 'tl', 'br'];
 const ROTS = [-12, 11, -8, 14, -15, 9];
 
-/** Document roles that read as "paper" and look good with corner stickers. */
-const DOC_ROLES = new Set(['plan', 'letter', 'record', 'worksheet', 'newsletter']);
+/** Document roles that read as "paper" and look good with corner stickers.
+    계획안(plan)은 공식 문서 — 모서리 스티커를 붙이지 않는다. */
+const DOC_ROLES = new Set(['letter', 'record', 'worksheet', 'newsletter']);
 
 /** Dress a single card with up to `count` stickers at its corners. `emojis` (from
     the Design Director) wins; otherwise theme stickers are picked by keyword. */

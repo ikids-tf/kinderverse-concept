@@ -2,6 +2,7 @@ import { Suspense, useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { LNB, BottomTabs } from './LNB';
 import { PromptBar } from './PromptBar';
+import { KvToast } from './KvToast';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { actionsForPath } from '@/ai/actions';
 import { AI_CHAT_PATH } from '@/lib/nav';
@@ -69,6 +70,9 @@ export function AppShell() {
             the quick-action pills), so the docked bar is suppressed there. */}
         {location.pathname !== '/' && <PromptBar />}
       </div>
+
+      {/* 전역 토스트 — showToast()가 어느 페이지에서든 하단 중앙에 띄운다 */}
+      <KvToast />
     </div>
   );
 }

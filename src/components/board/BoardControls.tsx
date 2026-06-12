@@ -191,6 +191,22 @@ export function BoardControls() {
               : ''
           }`}
         >
+          {/* 호버 확장 순서: [이전 수업 | 수업 모드] — 알약이 화면 우측에 붙어 있어
+              앞에 끼어드는 이전 수업이 '왼쪽으로' 펼쳐지고, 수업 모드는 오른쪽
+              제자리를 지킨다. */}
+          {!classroomMode && (
+            <button
+              title="이전 수업 — 저장된 수업 기록 보기"
+              onClick={() => setHistoryOpen(true)}
+              className={`flex items-center gap-t1 self-stretch overflow-hidden whitespace-nowrap border-r text-sm font-medium transition-all duration-200 ease-soft hover:bg-surface-2 hover:text-accent motion-reduce:transition-none ${
+                lessonHover.hover
+                  ? 'max-w-[120px] border-border px-t3 opacity-100'
+                  : 'max-w-0 border-transparent px-0 opacity-0 group-focus-within/lesson:max-w-[120px] group-focus-within/lesson:border-border group-focus-within/lesson:px-t3 group-focus-within/lesson:opacity-100'
+              }`}
+            >
+              <Icon name="history" size={15} /> 이전 수업
+            </button>
+          )}
           <button
             title={classroomMode ? '수업 종료 — 숨긴 요소와 원래 배치 복원' : '수업 모드 — 선택한 요소만 가로로 크게 (선 연결 안 해도 됨)'}
             onClick={() => {
@@ -206,19 +222,6 @@ export function BoardControls() {
           >
             <Icon name="present" size={16} /> {classroomMode ? '수업 종료' : '수업 모드'}
           </button>
-          {!classroomMode && (
-            <button
-              title="이전 수업 — 저장된 수업 기록 보기"
-              onClick={() => setHistoryOpen(true)}
-              className={`flex items-center gap-t1 self-stretch overflow-hidden whitespace-nowrap border-l text-sm font-medium transition-all duration-200 ease-soft hover:bg-surface-2 hover:text-accent motion-reduce:transition-none ${
-                lessonHover.hover
-                  ? 'max-w-[120px] border-border px-t3 opacity-100'
-                  : 'max-w-0 border-transparent px-0 opacity-0 group-focus-within/lesson:max-w-[120px] group-focus-within/lesson:border-border group-focus-within/lesson:px-t3 group-focus-within/lesson:opacity-100'
-              }`}
-            >
-              <Icon name="history" size={15} /> 이전 수업
-            </button>
-          )}
         </div>
       </div>
 

@@ -137,6 +137,18 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
   const [done, setDone] = useState(false);
   // 구간 효과 — 열린 패널(조절점 클릭 토글)과 재생 중 말풍선(화면 좌표).
   const [wpOpen, setWpOpen] = useState<null | 'm1' | 'm2'>(null);
+  // 구간 효과 패널 — 이 모션 노드 바깥(배경·다른 카드)을 클릭하면 닫는다.
+  // 같은 라인의 조절점 클릭 토글(열기/닫기)과 겹치지 않게 노드 루트 기준으로 판정.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!wpOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (rootRef.current && e.target instanceof Node && rootRef.current.contains(e.target)) return;
+      setWpOpen(null);
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [wpOpen]);
   const [bubble, setBubble] = useState<{ text: string; x: number; y: number } | null>(null);
   const bubbleOn = useRef(false);
   const wpOf = (k: 'm1' | 'm2'): Waypoint => (node.data?.[WP_KEY[k]] ?? {}) as Waypoint;
@@ -764,6 +776,7 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
 
   return (
     <div
+      ref={rootRef}
       className="absolute select-none"
       // zIndex — 원형 버튼·컨트롤이 항상 카드/프레임 위에 있어 언제든 연결·분리 가능.
       style={{ left, top, width: node.w, height: node.h, pointerEvents: 'none', zIndex: 25, ...liveTransform }}
@@ -887,9 +900,10 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
 
       {/* 연결/해제는 원형 버튼 드래그&드롭으로 — 별도 칩 없이 깔끔하게.
           컨트롤 — 가운데 점 아래(라인 기능은 아래, 카드 기능 피커는 카드 위 — 역할 분리).
+          출발 카드가 연결되기 전엔 재생할 대상이 없으므로 컨트롤 자체를 숨긴다.
           구간 효과 패널이 열려 있는 동안은 숨겨 화면을 패널에 집중시킨다.
           수업 재생 화면(presenting)에서는 아래 하단 중앙 고정 바가 대신한다. */}
-      {!wpOpen && !presenting && (
+      {!wpOpen && !presenting && !!startNode && (
       <div
         className="pointer-events-auto absolute flex items-center gap-t3 whitespace-nowrap"
         // width: max-content — absolute 요소도 컨테이너 오른쪽까지 남은 공간으로
@@ -930,9 +944,10 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
         )}
         {!presenting && (
           <>
+            {/* 속도 칩 — 평소엔 "속도 0.70×"로 접혀 있고, 호버하면 슬라이더가 펼쳐진다. */}
             <label
-              title="속도 — 슬라이더로 조절 (오른쪽일수록 빨라요, 재생 중에도 바로 적용)"
-              className={`${chip} cursor-default`}
+              title="속도 — 마우스를 올리면 슬라이더가 펼쳐져요 (오른쪽일수록 빨라요, 재생 중에도 바로 적용)"
+              className={`${chip} group cursor-default`}
               onPointerDown={(e) => e.stopPropagation()}
             >
               속도
@@ -943,7 +958,8 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
                 step={0.05}
                 value={speedX}
                 onChange={(e) => setData({ speedX: Number(e.target.value) })}
-                className="kv-range-lg w-80"
+                // 접힌 상태에선 -ml-t3가 flex gap 하나를 상쇄해 "속도 0.70×"가 자연스럽게 붙는다.
+                className="kv-range-lg w-0 -ml-t3 opacity-0 transition-all duration-200 ease-soft group-hover:w-80 group-hover:ml-0 group-hover:opacity-100"
               />
               <span className="tabular-nums">{speedX < 1 ? speedX.toFixed(2) : speedX.toFixed(1)}×</span>
             </label>

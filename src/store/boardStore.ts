@@ -157,6 +157,8 @@ interface BoardState {
   /** 생성 작업 시작/종료 표시 — endGen은 마지막 작업이 끝났을 때만 메시지를 비운다. */
   beginGen: () => void;
   endGen: () => void;
+  /** 생성 중단(정지 버튼) — 카운터·메시지를 즉시 초기화한다. */
+  resetGen: () => void;
   setViewport: (v: Partial<Viewport>) => void;
   zoomBy: (factor: number, cx?: number, cy?: number) => void;
   resetView: () => void;
@@ -228,6 +230,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const n = Math.max(0, s.genActive - 1);
       return { genActive: n, ...(n === 0 ? { generating: null } : {}) };
     }),
+  resetGen: () => set({ genActive: 0, generating: null }),
 
   addNodeRaw: (node) =>
     set((s) => ({ nodes: { ...s.nodes, [node.id]: node }, order: [...s.order, node.id] })),

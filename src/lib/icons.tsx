@@ -39,7 +39,9 @@ export type IconName =
   | 'download'
   | 'print'
   | 'layers'
-  | 'video';
+  | 'video'
+  | 'history'
+  | 'motion';
 
 const ICON_PATHS: Record<IconName, string> = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',

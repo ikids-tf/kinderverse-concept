@@ -35,9 +35,9 @@ function scrollableUnderCursor(target: EventTarget | null, deltaY: number, root:
   return false;
 }
 
-/* The infinite canvas surface (SKILL §6). Pan (space+drag / wheel), zoom
-   (ctrl/⌘+wheel toward cursor), drag-box selection on empty space, node drag
-   (committed as one undoable move). Renders free primitives + workflow lanes. */
+/* The infinite canvas surface (SKILL §6). Pan (space+drag / two-finger scroll),
+   zoom (pinch / ctrl/⌘+wheel toward cursor), drag-box selection on empty space,
+   node drag (committed as one undoable move). Renders free primitives + lanes. */
 
 /** Suppress the browser's native text selection (blue highlight) while a board
     drag is in flight — a background/box drag must not sweep-select node text.
@@ -225,8 +225,11 @@ export function BoardCanvas() {
   // A corner handle scales the node uniformly (중심 기준); the top handle rotates
   // it. Both write node.scale / node.rot raw during the drag, then commit one
   // undoable step on release. shift while rotating snaps to 15°.
+  // 프레임·텍스트·메모는 정비례 스케일 대신 '프리폼 리사이즈'(resizeBox) — 반대
+  // 모서리를 앵커로 w/h를 직접 바꿔 내용 레이아웃(텍스트 줄바꿈)이 새 폭에 맞춰
+  // 리플로된다. autoH 노드의 h는 min-height로 동작.
   const ht = useRef<{
-    mode: 'resize' | 'rotate' | null;
+    mode: 'resize' | 'resizeBox' | 'rotate' | null;
     id: string;
     cx: number;
     cy: number;
@@ -234,8 +237,15 @@ export function BoardCanvas() {
     startRot: number;
     startDist: number;
     startAng: number;
+    ax: number; // resizeBox: 고정 앵커(반대 모서리, 월드 좌표)
+    ay: number;
+    minW: number;
+    minH: number;
     before: NodeSnap[];
-  }>({ mode: null, id: '', cx: 0, cy: 0, startScale: 1, startRot: 0, startDist: 1, startAng: 0, before: [] });
+  }>({ mode: null, id: '', cx: 0, cy: 0, startScale: 1, startRot: 0, startDist: 1, startAng: 0, ax: 0, ay: 0, minW: 120, minH: 48, before: [] });
+
+  /** 프리폼 리사이즈 대상 — 내용이 박스 크기에 맞춰 리플로되는 타입. */
+  const FREEFORM_RESIZE = useMemo(() => new Set(['frame', 'text', 'sticky']), []);
 
   const handlePointerToWorld = useCallback((clientX: number, clientY: number) => {
     const rect = ref.current?.getBoundingClientRect();
@@ -248,7 +258,23 @@ export function BoardCanvas() {
       const st = ht.current;
       if (!st.mode) return;
       const w = handlePointerToWorld(e.clientX, e.clientY);
-      if (st.mode === 'resize') {
+      if (st.mode === 'resizeBox') {
+        // 반대 모서리(ax, ay) 고정 — 포인터가 만드는 박스로 w/h를 직접 변경(리플로).
+        // 노드에 scale이 걸려 있으면 월드 박스 = w·s이므로 역산해 저장한다(s=1이면 정확히 일치).
+        const s = st.startScale || 1;
+        const bw = Math.max(st.minW * s, Math.abs(w.x - st.ax));
+        const bh = Math.max(st.minH * s, Math.abs(w.y - st.ay));
+        const left = w.x < st.ax ? st.ax - bw : st.ax;
+        const top = w.y < st.ay ? st.ay - bh : st.ay;
+        const w2 = bw / s;
+        const h2 = bh / s;
+        useBoardStore.getState().updateNodeRaw(st.id, {
+          x: Math.round(left - (w2 * (1 - s)) / 2),
+          y: Math.round(top - (h2 * (1 - s)) / 2),
+          w: Math.round(w2),
+          h: Math.round(h2),
+        });
+      } else if (st.mode === 'resize') {
         const d = Math.hypot(w.x - st.cx, w.y - st.cy);
         const scale = Math.min(6, Math.max(0.3, st.startScale * (d / st.startDist)));
         useBoardStore.getState().updateNodeRaw(st.id, { scale: Math.round(scale * 100) / 100 });
@@ -267,12 +293,12 @@ export function BoardCanvas() {
     unlockTextSelection();
     window.removeEventListener('pointermove', onHandleMove);
     window.removeEventListener('pointerup', onHandleUp);
-    if (st.mode && st.before.length) pushRedesign([st.id], st.before, st.mode === 'resize' ? '크기 조절' : '회전');
+    if (st.mode && st.before.length) pushRedesign([st.id], st.before, st.mode === 'rotate' ? '회전' : '크기 조절');
     st.mode = null;
   }, [onHandleMove]);
 
   const onHandleDown = useCallback(
-    (e: React.PointerEvent, id: string, kind: 'resize' | 'rotate') => {
+    (e: React.PointerEvent, id: string, kind: 'resize' | 'rotate', corner?: number) => {
       e.stopPropagation();
       e.preventDefault();
       const n = useBoardStore.getState().nodes[id];
@@ -280,22 +306,35 @@ export function BoardCanvas() {
       const cx = n.x + n.w / 2;
       const cy = n.y + renderHeight(n) / 2;
       const w = handlePointerToWorld(e.clientX, e.clientY);
+      const s = n.scale ?? 1;
+      // 프레임·텍스트·메모 + 모서리 핸들 → 프리폼 리사이즈. 드래그 모서리의
+      // '반대 모서리'(스케일 반영된 월드 박스 기준)를 앵커로 고정한다.
+      // corner: 0=좌상 1=우상 2=우하 3=좌하.
+      // 문서 카드(data.doc — 계획안·통신문 등)는 편집 디자인이 깨지지 않게 프리폼을
+      // 잠그고 정비례 스케일만 허용한다.
+      const freeform = kind === 'resize' && corner !== undefined && FREEFORM_RESIZE.has(n.type) && !n.data?.doc;
+      const hw = (n.w * s) / 2;
+      const hh = (renderHeight(n) * s) / 2;
       ht.current = {
-        mode: kind,
+        mode: freeform ? 'resizeBox' : kind,
         id,
         cx,
         cy,
-        startScale: n.scale ?? 1,
+        startScale: s,
         startRot: n.rot ?? 0,
         startDist: Math.hypot(w.x - cx, w.y - cy) || 1,
         startAng: Math.atan2(w.y - cy, w.x - cx),
+        ax: corner === 0 || corner === 3 ? cx + hw : cx - hw,
+        ay: corner === 0 || corner === 1 ? cy + hh : cy - hh,
+        minW: n.type === 'frame' ? 200 : 120,
+        minH: n.type === 'frame' ? 140 : 48,
         before: captureNodes([id]),
       };
       lockTextSelection();
       window.addEventListener('pointermove', onHandleMove);
       window.addEventListener('pointerup', onHandleUp);
     },
-    [handlePointerToWorld, onHandleMove, onHandleUp],
+    [handlePointerToWorld, onHandleMove, onHandleUp, FREEFORM_RESIZE],
   );
 
   // ── 연결 포트(호버 시 좌/우 원형 버튼) + 포트 드래그로 선 잇기 ──────────────
@@ -325,6 +364,18 @@ export function BoardCanvas() {
     },
     [LINKABLE],
   );
+
+  // 임베드 카드(유튜브 뷰어 등)는 본문이 iframe이라 마우스 이동이 캔버스에 닿지
+  // 않는다 — 카드 진입 시 NodeView가 쏘는 kv:ports-hover로 연결 포트를 띄운다.
+  useEffect(() => {
+    const onPortsHover = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (!id || it.current.mode !== 'idle' || ht.current.mode || classroom || show || lk.current) return;
+      setPortsId(id);
+    };
+    window.addEventListener('kv:ports-hover', onPortsHover);
+    return () => window.removeEventListener('kv:ports-hover', onPortsHover);
+  }, [classroom, show]);
 
   /** 캔버스 호버 → 포트를 보여줄 노드 추적(드래그/팬/박스/수업 모드 중엔 끔). */
   function onCanvasHover(e: React.PointerEvent) {
@@ -375,9 +426,16 @@ export function BoardCanvas() {
               n ? ((n.text ?? '') || String(n.data?.title ?? '')).split('\n')[0].trim() : '';
             const viewer = pair.find((n) => String(n.data?.embed ?? '').includes('youtube-viewer'));
             if (viewer) {
+              // 유튜브 뷰어에 자료를 연결 → 즉시 추천(뷰어 아래 가로 중앙 썸네일,
+              // 클릭 = 재생). 놀이계획안이면 요일별 활동마다 영상 1개씩, 그 외엔
+              // 내용 기반 교사 맞춤 3개.
               const other = pair.find((n) => n !== viewer);
-              const topic = topicOf(other);
-              if (topic) window.dispatchEvent(new CustomEvent('kv:yt-propose', { detail: { target: viewer.id, topic } }));
+              const content = other
+                ? [String(other.data?.title ?? ''), other.text ?? ''].filter(Boolean).join('\n').trim()
+                : '';
+              if (content) {
+                void import('@/board/workflow').then((m) => m.recommendVideosForLink(viewer.id, content, other?.id));
+              }
             } else {
               // 빈 카드만 제안 — 채워진 이미지끼리 잇는 슬라이드 체인을 방해하지 않게.
               const emptyMemo = (n: BoardNode) =>
@@ -645,18 +703,65 @@ export function BoardCanvas() {
     else b.fit();
   }
 
-  function onWheel(e: React.WheelEvent) {
-    if (e.deltaY === 0) return; // horizontal-only wheel/trackpad — ignore
-    const forceZoom = e.ctrlKey || e.metaKey;
-    // Over scrollable content (a doc/frame with its own scroll) that can still move
-    // in this direction → let the browser scroll it natively. ctrl/⌘ forces zoom.
-    if (!forceZoom && scrollableUnderCursor(e.target, e.deltaY, ref.current)) return;
-    // Default: zoom toward the cursor (background or non-scrolling content).
-    e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    const rect = ref.current!.getBoundingClientRect();
-    useBoardStore.getState().zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
-  }
+  // 트랙패드 제스처: 핀치 = 줌, 두 손가락 스크롤 = 팬. ctrl/⌘+휠도 줌.
+  // (맥 트랙패드 핀치는 Chrome류에서 ctrlKey가 켜진 wheel 이벤트로 들어온다.)
+  // 브라우저 자체 페이지 줌을 막으려면 preventDefault가 실제로 동작해야 하는데
+  // React onWheel은 passive로 붙어 무시되므로 네이티브 리스너를 non-passive로 단다.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const zooming = e.ctrlKey || e.metaKey; // 핀치(ctrlKey) 또는 ctrl/⌘+휠 강제 줌
+      // Over scrollable content (a doc/frame with its own scroll) that can still move
+      // in this direction → let the browser scroll it natively. ctrl/⌘/핀치 forces zoom.
+      if (!zooming && scrollableUnderCursor(e.target, e.deltaY, el)) return;
+      e.preventDefault();
+      const k = e.deltaMode === 1 ? 16 : 1; // line-mode wheel(Firefox) → px 근사
+      const b = useBoardStore.getState();
+      const rect = el.getBoundingClientRect();
+      if (zooming) {
+        // 핀치는 deltaY가 잘게 연속으로 오므로 지수 매핑이 부드럽다. 휠 클릭(±100)은 클램프.
+        const factor = Math.min(1.25, Math.max(0.8, Math.exp(-e.deltaY * k * 0.01)));
+        b.zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
+      } else {
+        // 두 손가락 스크롤 → 캔버스 팬(내추럴 스크롤: 내용이 손가락을 따라간다).
+        const { panX, panY } = b.viewport;
+        b.setViewport({ panX: panX - e.deltaX * k, panY: panY - e.deltaY * k });
+      }
+    };
+    // Safari는 핀치를 ctrl+wheel 대신 gesturestart/gesturechange로 보낸다.
+    interface SafariGestureEvent extends Event {
+      scale?: number;
+      clientX?: number;
+      clientY?: number;
+    }
+    let lastScale = 1;
+    const onGestureStart = (e: SafariGestureEvent) => {
+      e.preventDefault();
+      lastScale = e.scale ?? 1;
+    };
+    const onGestureChange = (e: SafariGestureEvent) => {
+      e.preventDefault();
+      const scale = e.scale ?? 1;
+      if (!lastScale) {
+        lastScale = scale;
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      useBoardStore
+        .getState()
+        .zoomBy(scale / lastScale, (e.clientX ?? 0) - rect.left, (e.clientY ?? 0) - rect.top);
+      lastScale = scale;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('gesturestart', onGestureStart as EventListener);
+    el.addEventListener('gesturechange', onGestureChange as EventListener);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', onGestureStart as EventListener);
+      el.removeEventListener('gesturechange', onGestureChange as EventListener);
+    };
+  }, []);
 
   return (
     <div
@@ -664,7 +769,6 @@ export function BoardCanvas() {
       data-kv-canvas
       onPointerDown={onBackgroundPointerDown}
       onPointerMove={onCanvasHover}
-      onWheel={onWheel}
       onDoubleClick={onBackgroundDoubleClick}
       className="relative h-full w-full overflow-hidden bg-bg"
       style={{ cursor: spaceDown ? 'grab' : 'default', touchAction: 'none' }}
@@ -976,7 +1080,7 @@ function SelectionHandles({
 }: {
   node: BoardNode;
   zoom: number;
-  onHandleDown: (e: React.PointerEvent, id: string, kind: 'resize' | 'rotate') => void;
+  onHandleDown: (e: React.PointerEvent, id: string, kind: 'resize' | 'rotate', corner?: number) => void;
 }) {
   const s = node.scale ?? 1;
   const r = ((node.rot ?? 0) * Math.PI) / 180;
@@ -1018,11 +1122,11 @@ function SelectionHandles({
           opacity={0.7}
         />
       </svg>
-      {/* 모서리 스케일 핸들 */}
+      {/* 모서리 핸들 — 프레임·텍스트·메모는 프리폼 리사이즈, 그 외는 정비례 스케일 */}
       {corners.map((c, i) => (
         <div
           key={i}
-          onPointerDown={(e) => onHandleDown(e, node.id, 'resize')}
+          onPointerDown={(e) => onHandleDown(e, node.id, 'resize', i)}
           className="border-accent bg-surface shadow-sm"
           style={{ ...dot(c.x, c.y), cursor: cursors[i], borderStyle: 'solid', borderRadius: 2 }}
           title="크기 조절 (드래그)"

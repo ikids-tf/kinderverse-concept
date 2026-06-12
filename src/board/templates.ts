@@ -54,10 +54,12 @@ export const FRAME_TEMPLATES: Record<ComposerIntent, FrameTemplate> = {
       { id: 'plan', agent: 'plan.grid', tier: 'core', order: 1, role: 'plan' },
       { id: 'images', agent: 'studio.images', tier: 'expand', order: 2, role: 'image' },
     ],
+    // 단일 문서 우선 플로우 — 계획안 하나를 먼저 주고, 칩으로 하나씩 확장한다.
     nextSteps: [
+      { action: 'plan.ideas', label: '아이디어 카드 추가' },
+      { action: 'studio.images', label: '활동 이미지 추가' },
       { action: 'studio.worksheet', label: '활동지 추가' },
       { action: 'writing.letter', label: '가정통신문 작성' },
-      { action: 'source.web', label: '웹에서 자료 찾기' },
     ],
   },
   mindmap: {

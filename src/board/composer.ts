@@ -16,6 +16,9 @@ import {
   DOC_WIDTH,
   viewportCenterBoardPoint,
   composeOrigin,
+  cancelPanAnimation,
+  animatePanBy,
+  genSignal,
   PLAN_DOC_W,
   type SourceLink,
   type SourceThumb,
@@ -32,6 +35,7 @@ import { findAsset, saveAsset } from './assets';
 import { runRecord } from '@/ai/agents/record';
 import { runWriting } from '@/ai/agents/writing';
 import { callGateway } from '@/ai/client';
+import { streamChat } from '@/ai/chat';
 import { buildAgentContext } from '@/ai/context';
 import { PAGE_ACTIONS } from '@/ai/actions';
 import { SUGGESTION_HIDE_BELOW, type RouterOutput, type RecordMode, type RouteTarget } from '@/ai/contract';
@@ -121,6 +125,18 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
     const recordMode: RecordMode = out.mode ?? 'story';
     say(`📐 '${frameTitle(text, template)}' 프레임을 준비하고 있어요…`);
 
+    // ★ 놀이계획 단일 문서 플로우 — A4 세로 시트가 프롬프트바 위 실사이즈로 즉시
+    //   배치되고, 초안이 맨 위부터 스트리밍된 뒤 정식 문서로 정리된다.
+    //   패키지(아이디어·이미지 동반)는 complexity === 'complex'(명시 요청)일 때만.
+    if (template.id === 'play_plan' && complexity === 'simple') {
+      await composePlanDocStream(text, template, created, (id) => {
+        frameId = id; // finally의 clearFrameLoading이 에러 시에도 working 해제
+      });
+      // 빈 상태 중단 시 시트/프레임이 이미 거둬졌을 수 있다 — 살아있는 것만 기록.
+      recordSpawnedNodes(created.filter((id) => useBoardStore.getState().nodes[id]), 'AI 보드 생성');
+      return;
+    }
+
     // Seed the frame — beside ALL existing content (panning there), else viewport
     // center. The frame appears IMMEDIATELY with a loading state so the teacher sees
     // it land and knows generation is running (cleared once the content is laid out).
@@ -158,7 +174,9 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
       .sort((a, z) => a.order - z.order);
     let planId: string | undefined;
     const ranAgents = new Set<FillAgent>();
+    const abortSig = genSignal(); // 정지 버튼 — 다음 영역부터 멈춘다
     for (const region of regions) {
+      if (abortSig.aborted) break;
       try {
         const agent = effectiveAgent(region, template, text);
         // 같은 에이전트가 같은 프롬프트로 두 번 돌지 않게(스튜디오 core가 그리기
@@ -214,6 +232,182 @@ function clearFrameLoading(frameId: string): void {
     delete data.working;
     useBoardStore.getState().updateNodeRaw(frameId, { data });
   }
+}
+
+/* ---------------- 단일 계획안 — A4 세로 + 스트리밍 생성 ---------------- */
+
+/** 초안 스트리밍용 시스템 프롬프트 — 채팅 답변이 아니라 '계획안 문서 초안' 톤.
+    도입·맺음말·메타 발화 없이 본문 마크다운만 위에서부터 흘려보낸다. */
+const PLAN_DRAFT_SYSTEM = `너는 유치원·어린이집 주간 놀이계획 초안을 쓰는 문서 작가다.
+요청 주제로 한국어 마크다운 초안을 즉시 본문부터 작성한다. 인사말·설명·맺음말 금지. 형식:
+# (제목 — 주제가 드러나게)
+**대상** 유아(3–5세) · **교육과정** 누리과정 · **운영 기간** 주 5일
+## 주간 교육 목표
+- (기대하는 경험형 문장 4~5개 — "~을 경험한다 / ~에 관심을 가진다")
+## 요일별 놀이 운영
+| 요일 | 누리과정 영역 | 놀이 활동 | 준비물 |
+|---|---|---|---|
+(월~금 5행 — 활동은 유아가 주어인 놀이 전개 1문장, 준비물 2~4가지)
+## 운영 시 유의점
+- (놀이 흐름에 따른 융통성 1문장 + 안전 유의점 1~2개)`;
+
+/** ★ 놀이계획 단일 문서 생성 — ① A4 세로 시트를 감싼 프레임이 프롬프트바(캔버스)
+    가로 중앙·상단에 실사이즈(zoom 1)로 즉시 배치되고 ② 초안이 문서 맨 위부터
+    스트리밍(채팅 페이지와 동일한 SSE)된 뒤 ③ runPlan이 초안을 유지·다듬어 정식
+    계획안 문서로 정리한다. 확장(아이디어·이미지·활동지…)은 프레임 칩으로 하나씩. */
+async function composePlanDocStream(
+  text: string,
+  template: FrameTemplate,
+  created: string[],
+  onFrame?: (id: string) => void,
+): Promise<string> {
+  const b = useBoardStore.getState();
+  const DOC_W = DOC_WIDTH; // 480 — A4 세로 비율 폭(보드 스케일)
+  const DOC_H = Math.round((DOC_W * 297) / 210); // ≈679 — A4 세로 높이
+  const PAD = 28;
+  const frameW = DOC_W + PAD * 2;
+  const frameH = DOC_H + PAD * 2;
+
+  // 빈 자리 — 기존 콘텐츠의 오른쪽(겹침 방지), 빈 보드면 현재 뷰 중심.
+  const all = Object.values(b.nodes);
+  const GAP = 220;
+  const vc = viewportCenterBoardPoint();
+  const fx = all.length
+    ? Math.round(Math.max(...all.map((n) => n.x + n.w)) + GAP)
+    : Math.round(vc.x - frameW / 2);
+  const fy = all.length ? Math.round(Math.min(...all.map((n) => n.y))) : Math.round(vc.y - frameH / 2);
+
+  const frameId = newId('frame');
+  b.addNodeRaw({
+    id: frameId,
+    type: 'frame',
+    x: fx,
+    y: fy,
+    w: frameW,
+    h: frameH,
+    data: { title: frameTitle(text, template), templateId: template.id, composer: true, working: true, sourcePrompt: text },
+  });
+  created.push(frameId);
+  onFrame?.(frameId);
+
+  // A4 세로 문서가 빈 시트로 즉시 나타난다 — autoH지만 minHeight = A4 높이라
+  // 내용이 짧아도 처음부터 '종이 한 장'으로 보인다.
+  const docId = newId('sticky');
+  b.addNodeRaw({
+    id: docId,
+    type: 'sticky',
+    x: fx + PAD,
+    y: fy + PAD,
+    w: DOC_W,
+    h: DOC_H,
+    autoH: true,
+    text: '',
+    color: 'paper',
+    data: { role: 'plan', frameId, doc: true },
+  });
+  created.push(docId);
+
+  // 실사이즈(zoom 1)로 — 프레임을 캔버스(=프롬프트바) 가로 중앙, 상단에 보이게 팬.
+  // 직전의 부드러운 팬(보관함 배치 등)이 아직 RAF로 돌고 있으면 카메라를 도로
+  // 끌고 가므로 반드시 먼저 중단한다 — 교사는 생성 시작을 화면 상단에서 본다.
+  cancelPanAnimation();
+  const railW = 64;
+  const cw = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) - railW);
+  const TOP = 84; // 문서 상단의 화면 y(상단 툴바 아래)
+  b.setViewport({ zoom: 1, panX: Math.round(cw / 2 - (fx + frameW / 2)), panY: Math.round(TOP - fy) });
+
+  // ① 초안 스트리밍 — 문서 맨 위부터 글이 흘러내린다(80ms 스로틀로 카드 갱신).
+  //    내용이 화면보다 길어지면 카메라가 '쓰는 곳'을 따라 아래로 이동해(채팅
+  //    자동 스크롤처럼) 교사가 실사이즈 글씨로 계속 읽을 수 있다.
+  const signal = genSignal(); // 정지 버튼 — 스트리밍 fetch가 즉시 끊긴다
+  say('📝 계획안 초안을 위에서부터 작성하고 있어요…');
+  let draft = '';
+  let flushTimer: number | undefined;
+  const BOTTOM_GUARD = 150; // 프롬프트바 위 여유 — 쓰는 줄이 이 선 위에 머문다
+  const followStream = () => {
+    const st = useBoardStore.getState();
+    const d = st.nodes[docId];
+    if (!d) return;
+    const rh = Math.max(typeof d.data?.renderH === 'number' ? (d.data.renderH as number) : 0, d.h);
+    const { zoom, panY } = st.viewport;
+    const ch = Math.max(320, typeof window !== 'undefined' ? window.innerHeight : 800);
+    const bottomOnScreen = (d.y + rh) * zoom + panY;
+    const limit = ch - BOTTOM_GUARD;
+    // 아래로만 따라간다(위로 되돌리지 않음 — 흔들림 방지). 80ms마다 한 줄 남짓의
+    // 작은 델타라 직접 세팅으로도 충분히 부드럽다.
+    if (bottomOnScreen > limit) st.setViewport({ panY: panY - (bottomOnScreen - limit) });
+  };
+  const flush = () => {
+    if (useBoardStore.getState().nodes[docId]) {
+      useBoardStore.getState().updateNodeRaw(docId, { text: draft });
+      followStream();
+    }
+  };
+  try {
+    await streamChat([{ role: 'user', content: `주간 놀이계획 초안: ${text}` }], {
+      system: PLAN_DRAFT_SYSTEM,
+      signal,
+      onDelta: (t) => {
+        draft += t;
+        if (flushTimer === undefined) {
+          flushTimer = window.setTimeout(() => {
+            flushTimer = undefined;
+            flush();
+          }, 80);
+        }
+      },
+    });
+  } catch {
+    /* 초안 스트림 실패/중단 — 중단이면 아래에서 바로 끝낸다 */
+  }
+  if (flushTimer !== undefined) {
+    clearTimeout(flushTimer);
+    flushTimer = undefined;
+  }
+  flush();
+
+  // 정지 버튼 — 초안까지만 남기고 즉시 종료(정리 단계·표지 생성 생략).
+  // 아직 한 글자도 못 썼다면 빈 시트를 남기지 않고 통째로 거둔다.
+  if (signal.aborted) {
+    if (!draft.trim()) {
+      const b2 = useBoardStore.getState();
+      b2.removeNodeRaw(docId);
+      b2.removeNodeRaw(frameId);
+    }
+    return frameId;
+  }
+
+  // ② 문서로 정리 — 구조화 에이전트(runPlan)가 초안 내용을 유지하며 정식 계획안으로.
+  say('📐 문서 형태로 정리하고 있어요…');
+  try {
+    const ctx = buildAgentContext('plan');
+    const req = draft.trim() ? `${text}\n\n[방금 작성한 초안 — 내용을 유지하며 구조화할 것]\n${draft.slice(0, 4000)}` : text;
+    const res = await runPlan(req, [], ctx);
+    useBoardStore.getState().updateNodeRaw(docId, { text: planDocMarkdown(res.payload) });
+    stashPayload(docId, res.payload);
+  } catch {
+    // 초안이 살아 있으면 그대로 둔다 — 내용은 이미 읽을 수 있는 상태.
+    if (!draft.trim()) {
+      useBoardStore.getState().updateNodeRaw(docId, { text: '⚠️ 계획안 생성에 실패했어요. 다시 시도해 주세요.' });
+    }
+  }
+
+  if (signal.aborted) return frameId; // 정리 단계 중 정지 — 칩·표지 생략
+
+  // 확장 칩(아이디어 카드·활동 이미지·활동지·가정통신문) — 하나씩 확장 플로우의 입구.
+  attachNextSteps(frameId, template, []);
+  useBoardStore.getState().setSelection([frameId]);
+  await new Promise((r) => setTimeout(r, 300)); // 문서 실제 높이 측정 대기
+  fitFrameToChildren(frameId);
+  // 완성 — 따라가던 카메라를 문서 맨 위로 부드럽게 복귀(완성본을 처음부터 읽도록).
+  const stEnd = useBoardStore.getState();
+  const fEnd = stEnd.nodes[frameId];
+  if (fEnd) {
+    const dyBack = TOP - (fEnd.y * stEnd.viewport.zoom + stEnd.viewport.panY);
+    if (Math.abs(dyBack) > 8) animatePanBy(0, dyBack);
+  }
+  void generateCoverFor(frameId, 'plan', text); // 얇은 와이드 배너 표지(백그라운드)
+  return frameId;
 }
 
 /** The rightmost top-level composer frame (the "parent" a new frame lands beside).
@@ -746,9 +940,15 @@ export async function planFromNode(nodeId: string): Promise<void> {
 
 function estimateComplexity(text: string, r: RouterOutput): 'simple' | 'complex' {
   const t = text.trim();
+  // 놀이계획 — 기본은 '계획안 단일 문서'(simple). 정교한 문서 하나를 먼저 주고
+  // 아이디어·이미지 등은 확장 칩으로 하나씩 붙인다. 패키지(동반 자료)는 명시 요청에만.
+  if (r.route_to === 'plan') {
+    return /패키지|세트|한\s*번에|한꺼번에|전부|모두\s*다?|아이디어|이미지|사진|도안|활동지|통신문/.test(t)
+      ? 'complex'
+      : 'simple';
+  }
   if (t.length > 38) return 'complex';
   if (/그리고|및|랑|[,+]|[0-9]+\s*(개|장|가지)/.test(t)) return 'complex';
-  if (r.route_to === 'plan') return 'complex'; // a weekly plan implies ideas + grid + images
   if (/활동지|도안|이미지|계획|통신문|평가/.test(t) && /와|과|랑|,|그리고/.test(t)) return 'complex';
   return 'simple';
 }
@@ -835,6 +1035,27 @@ interface FillResult {
   planId?: string;
 }
 
+/** 문서 플레이스홀더 — 생성 '전에' 빈 카드(스피너)를 깔아 onSpawn(디자인 디렉터)이
+    최종 자리를 잡게 한다. 내용은 fillPlaceholderDoc이 같은 자리에서 채운다. */
+function spawnPlaceholderDoc(frameId: string, role: string, onSpawn?: (ids: string[]) => void): string {
+  const cid = spawnDocCard(frameId, '', role);
+  const b = useBoardStore.getState();
+  const n = b.nodes[cid];
+  if (n) b.updateNodeRaw(cid, { data: { ...(n.data ?? {}), loadingDoc: true } });
+  onSpawn?.([cid]);
+  return cid;
+}
+
+/** 플레이스홀더에 생성 결과 채우기 — 위치는 그대로, 내용·payload만 갱신. */
+function fillPlaceholderDoc(cid: string, text: string, payload: RegistryPayload): void {
+  const b = useBoardStore.getState();
+  const n = b.nodes[cid];
+  if (!n) return;
+  const data = { ...(n.data ?? {}) };
+  delete data.loadingDoc;
+  b.updateNodeRaw(cid, { text, data: { ...data, payload } });
+}
+
 async function fillRegion(
   frameId: string,
   agent: FillAgent,
@@ -842,6 +1063,10 @@ async function fillRegion(
   ctx: string,
   planId: string | undefined,
   recordMode: RecordMode,
+  /** 칩 확장 등에서 전달 — 플레이스홀더 카드가 깔리는 '즉시' 호출돼 디자인
+      디렉터가 생성 전에 자리를 잡는다(생성 → 완료 후 정렬 점프의 시각 혼선 제거).
+      전달되면 이미지의 임시 가로줄 배치(layoutImagesRow)는 생략된다. */
+  onSpawn?: (ids: string[]) => void,
 ): Promise<FillResult> {
   const ids: string[] = [];
   switch (agent) {
@@ -880,8 +1105,10 @@ async function fillRegion(
         const c = b.nodes[cid];
         if (c) b.updateNodeRaw(cid, { data: { ...(c.data ?? {}), fromLibrary: true } });
       });
-      // 처음부터 '가로 한 줄'로 배치(스폰 시 세로 그리드 → 완료 후 가로로 점프하던 문제 제거).
-      layoutImagesRow(frameId, cardIds);
+      // 자리 먼저 잡기 — 칩 확장(onSpawn)은 디자인 디렉터가 생성 전에 최종 슬롯으로
+      // 정렬하고, 새 프레임 컴포즈는 기존처럼 '가로 한 줄' 임시 배치를 쓴다.
+      if (onSpawn) onSpawn(cardIds);
+      else layoutImagesRow(frameId, cardIds);
       // 프레임 전체 로딩 오버레이를 끄고 카드별 스피너로 전환(가려지면 안 보임).
       const fr = b.nodes[frameId];
       if (fr?.data?.loading) b.updateNodeRaw(frameId, { data: { ...fr.data, loading: false } });
@@ -899,9 +1126,18 @@ async function fillRegion(
       );
       const total = proms.filter(Boolean).length;
       let done = 0;
+      const signal = genSignal(); // 정지 버튼 — 남은 카드 생성을 다음 장부터 멈춘다
       for (let i = 0; i < proms.length; i++) {
         const p = proms[i];
         if (!p) continue;
+        if (signal.aborted) {
+          // 아직 채워지지 않은 로딩 카드는 거둔다(스피너가 영원히 남지 않게).
+          const bb = useBoardStore.getState();
+          for (let j = i; j < proms.length; j++) {
+            if (proms[j] && bb.nodes[cardIds[j]]?.loading) bb.removeNodeRaw(cardIds[j]);
+          }
+          break;
+        }
         say(`🎨 '${plan.specs[i].caption}' 그리는 중… (${done + 1}/${total})`);
         const img = await p;
         done += 1;
@@ -912,26 +1148,43 @@ async function fillRegion(
     }
     case 'studio.worksheet': {
       say('✏️ 활동지를 설계하고 있어요…');
-      const res = await runStudioWorksheet(topic, ctx, planId);
-      const cid = spawnDocCard(frameId, payloadText(res.payload), 'worksheet');
-      stashPayload(cid, res.payload);
+      // 자리 먼저 — 빈 플레이스홀더(생성 중 스피너)를 깔고 onSpawn으로 정렬한 뒤,
+      // 생성이 끝나면 '그 자리에서' 내용만 채운다(완료 후 점프·겹침 제거).
+      const signal = genSignal();
+      const cid = spawnPlaceholderDoc(frameId, 'worksheet', onSpawn);
       ids.push(cid);
+      const res = await runStudioWorksheet(topic, ctx, planId);
+      if (signal.aborted) {
+        useBoardStore.getState().removeNodeRaw(cid);
+        return { ids: [] };
+      }
+      fillPlaceholderDoc(cid, payloadText(res.payload), res.payload);
       return { ids };
     }
     case 'writing.letter': {
       say('💌 통신문을 작성하고 있어요…');
-      const res = await runWriting(topic, ctx);
-      const cid = spawnDocCard(frameId, payloadText(res.payload), 'letter');
-      stashPayload(cid, res.payload);
+      const signal = genSignal();
+      const cid = spawnPlaceholderDoc(frameId, 'letter', onSpawn);
       ids.push(cid);
+      const res = await runWriting(topic, ctx);
+      if (signal.aborted) {
+        useBoardStore.getState().removeNodeRaw(cid);
+        return { ids: [] };
+      }
+      fillPlaceholderDoc(cid, payloadText(res.payload), res.payload);
       return { ids };
     }
     case 'record': {
       say('📝 기록 초안을 작성하고 있어요…');
-      const res = await runRecord({ text: topic, mode: recordMode, grounding: { photos: [], teacher_notes: [topic] } }, ctx);
-      const cid = spawnDocCard(frameId, payloadText(res.payload), 'record');
-      stashPayload(cid, res.payload);
+      const signal = genSignal();
+      const cid = spawnPlaceholderDoc(frameId, 'record', onSpawn);
       ids.push(cid);
+      const res = await runRecord({ text: topic, mode: recordMode, grounding: { photos: [], teacher_notes: [topic] } }, ctx);
+      if (signal.aborted) {
+        useBoardStore.getState().removeNodeRaw(cid);
+        return { ids: [] };
+      }
+      fillPlaceholderDoc(cid, payloadText(res.payload), res.payload);
       return { ids };
     }
     case 'source.web': {
@@ -1111,10 +1364,21 @@ export async function runComposerChip(frameId: string, chipId: string): Promise<
   const chip = (frame?.data?.nextSteps as ComposerChip[] | undefined)?.find((c) => c.id === chipId);
   if (!chip || chip.status === 'running') return;
   setChipStatus(frameId, chipId, 'running');
+  // fillRegion이 진행 메시지(say)를 띄우므로 begin/endGen 짝이 필요 — 없으면
+  // 마지막 메시지("…그리는 중 (3/3)")가 생성이 끝나도 영원히 남는다.
+  b.beginGen();
   try {
     const agent: FillAgent = FILL_AGENTS.has(chip.action) ? (chip.action as FillAgent) : 'memo';
     const topic = chip.prompt?.trim() || topicFor(frameId);
-    const res = await fillRegion(frameId, agent, topic, buildAgentContext('plan'), planIdOf(frameId), 'story');
+    // ★ 자리 먼저, 생성은 그 자리에서 — 플레이스홀더가 깔리는 즉시 디자인 디렉터가
+    //   최종 슬롯으로 정렬한다(기존: 생성 → 문서 위 겹침 → 완료 후 정렬 점프).
+    const arrangeEarly = (spawned: string[]) => {
+      if (!spawned.length) return;
+      const fdata = useBoardStore.getState().nodes[frameId]?.data;
+      designComposedFrame(frameId, asLayoutVariant(fdata?.variant));
+      fitFrameToChildren(frameId);
+    };
+    const res = await fillRegion(frameId, agent, topic, buildAgentContext('plan'), planIdOf(frameId), 'story', arrangeEarly);
     recordSpawnedNodes(res.ids, '확장');
     setChipStatus(frameId, chipId, 'done');
     // Re-arrange into the designed layout so the new card lands in its proper slot
@@ -1127,6 +1391,8 @@ export async function runComposerChip(frameId: string, chipId: string): Promise<
     decorateComposedFrame(frameId, topicFor(frameId), fdata?.stickers as string[] | undefined);
   } catch {
     setChipStatus(frameId, chipId, 'idle');
+  } finally {
+    useBoardStore.getState().endGen(); // 마지막 작업일 때만 메시지가 사라진다
   }
 }
 
@@ -1156,11 +1422,17 @@ async function generateCoverFor(frameId: string, role: string, topic: string): P
   const dp = doc.data?.payload as { type?: string; props?: { image_url?: string } } | undefined;
   if (dp?.type === 'WorksheetCard' && dp.props?.image_url) return;
   try {
+    // 표지는 문서 위 얇은 배너(maxHeight 110)로 깔리므로 가로로 넓은 16:9로 생성 —
+    // object-cover 크롭에서 잘려나가는 면적을 최소화한다.
     const img = await callGateway({
       task: 'image',
       provider: 'auto',
       messages: [],
-      meta: { prompt: `${topic} 표지 일러스트, 글자 없음 — ${KV_ART_STYLE}`, caption: topic },
+      meta: {
+        prompt: `${topic} 표지 일러스트, 가로로 넓은 와이드 배너 구도(위아래 여백 없이 가로 파노라마), 글자 없음 — ${KV_ART_STYLE}`,
+        caption: topic,
+        aspectRatio: '16:9',
+      },
     });
     if (!img.image) return;
     const cur = useBoardStore.getState().nodes[doc.id];

@@ -60,9 +60,14 @@ function itemCaption(id: string): string {
   if (!n) return '';
   const title = (n.data?.title as string | undefined)?.trim();
   const text = (n.text ?? '').split('\n')[0].trim();
-  return (
-    title || text || { image: '이미지', frame: '프레임', sticky: '메모', text: '텍스트', motion: '애니메이션' }[n.type] || n.type
-  ).slice(0, 30);
+  const typeLabels: Partial<Record<typeof n.type, string>> = {
+    image: '이미지',
+    frame: '프레임',
+    sticky: '메모',
+    text: '텍스트',
+    motion: '애니메이션',
+  };
+  return (title || text || typeLabels[n.type] || n.type).slice(0, 30);
 }
 
 /** 현재 수업 모드의 가시 자료로 기록 한 건을 만든다(없으면 null). */

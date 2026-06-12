@@ -1,5 +1,13 @@
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
-import { useFolderStore, bundleFromFrame } from '@/store/folderStore';
+import {
+  useFolderStore,
+  bundleFromFrame,
+  savedEntryId,
+  type SavedFolder,
+  type SavedEntry,
+  type BoardSnap,
+  type BoardSnapNode,
+} from '@/store/folderStore';
 import { worldBox } from './geometry';
 import type { LayoutVariant } from './design-spec';
 
@@ -255,12 +263,112 @@ export function designComposedFrame(frameId: string, variant: LayoutVariant = 'd
   fitFrameToChildren(frameId);
 }
 
+/** 저장 당시 프레임의 '보드 모습' 스냅샷 — 모든 하위 노드(중첩 프레임 포함)를
+    프레임 원점 기준 보드 px로 평탄화해 담는다. 폴더 페이지의 board.board 항목이
+    이 스냅샷을 CSS scale로 그대로 축소 렌더한다(썸네일·풀스크린 공용). */
+export function frameBoardSnap(frameId: string): BoardSnap | null {
+  const b = useBoardStore.getState();
+  const root = b.nodes[frameId];
+  if (!root || root.type !== 'frame') return null;
+  const nodes: BoardSnapNode[] = [];
+  const rh = (n: BoardNode) =>
+    Math.max(typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : 0, n.h);
+  const walk = (fid: string) => {
+    const kids = Object.values(b.nodes)
+      .filter((n) => n.data?.frameId === fid)
+      .sort((a, z) => a.y - z.y || a.x - z.x);
+    for (const n of kids) {
+      if (n.type === 'runner' || n.type === 'motion') continue;
+      const base = { x: Math.round(n.x - root.x), y: Math.round(n.y - root.y), w: n.w, h: Math.round(rh(n)) };
+      if (n.type === 'frame') {
+        nodes.push({ ...base, h: n.h, kind: 'frame', text: (n.data?.title as string) ?? '' });
+        walk(n.id);
+      } else if (n.type === 'image' && n.src) {
+        nodes.push({ ...base, kind: 'image', src: n.src, text: n.text ?? '' });
+      } else if (n.data?.doc) {
+        nodes.push({ ...base, kind: 'doc', text: n.text ?? '', cover: n.data?.coverImage as string | undefined });
+      } else if (n.type === 'sticky' || n.type === 'text') {
+        nodes.push({ ...base, kind: 'memo', text: n.text ?? '', color: n.color });
+      }
+    }
+  };
+  walk(frameId);
+  return { w: root.w, h: root.h, nodes };
+}
+
+/** 프레임 → 폴더 트리(재귀). 프레임 = 폴더, 중첩 프레임 = 중첩 폴더,
+    이미지 = .jpg, 문서(data.doc) = .pdf, 메모/텍스트 = .txt.
+    각 폴더의 맨 앞에는 저장 당시 보드 모습 스냅샷(board.board)이 들어간다.
+    러너(컨트롤)·헤더(폴더명과 중복)·모션 라인은 파일이 아니므로 제외. */
+export function folderFromFrame(frameId: string): SavedFolder | null {
+  const b = useBoardStore.getState();
+  const frame = b.nodes[frameId];
+  if (!frame || frame.type !== 'frame') return null;
+  const safeName = (s: string, fallback: string) =>
+    (
+      s
+        .split('\n')[0]
+        .replace(/^#+\s*/, '') // 문서 첫 줄의 마크다운 헤딩 마커 제거
+        .replace(/\*\*/g, '')
+        .replace(/[\\/:*?"<>|]/g, ' ')
+        .trim() || fallback
+    ).slice(0, 40);
+  const children: SavedEntry[] = [];
+  const kids = Object.values(b.nodes)
+    .filter((n) => n.data?.frameId === frameId)
+    .sort((a, z) => a.y - z.y || a.x - z.x); // 보드의 시각적 순서(위→아래, 왼→오)
+  for (const n of kids) {
+    if (n.type === 'runner' || n.type === 'motion') continue;
+    if (n.data?.role === 'header') continue;
+    if (n.type === 'frame') {
+      const sub = folderFromFrame(n.id);
+      if (sub) children.push(sub);
+      continue;
+    }
+    if (n.type === 'image' && n.src) {
+      children.push({ kind: 'file', id: savedEntryId(), name: `${safeName(n.text ?? '', '이미지')}.jpg`, type: 'image', content: n.src });
+    } else if (n.data?.doc) {
+      children.push({
+        kind: 'file',
+        id: savedEntryId(),
+        name: `${safeName(n.text ?? '', '문서')}.pdf`,
+        type: 'doc',
+        content: n.text ?? '',
+        cover: n.data?.coverImage as string | undefined,
+      });
+    } else if (n.data?.role === 'source' && Array.isArray(n.data?.links)) {
+      const links = n.data.links as Array<{ title: string; url: string }>;
+      const text = [n.data?.summary as string | undefined, ...links.map((l) => `· ${l.title} — ${l.url}`)]
+        .filter(Boolean)
+        .join('\n');
+      children.push({ kind: 'file', id: savedEntryId(), name: '웹 자료.txt', type: 'note', content: text });
+    } else if ((n.type === 'sticky' || n.type === 'text') && (n.text ?? '').trim()) {
+      children.push({ kind: 'file', id: savedEntryId(), name: `${safeName(n.text ?? '', '메모')}.txt`, type: 'note', content: n.text ?? '' });
+    }
+  }
+  // 맨 앞: 저장 당시 보드 모습 그대로 보는 board.board 스냅샷.
+  // frameId를 함께 기억해 뷰어에서 '마이보드에서 보기'로 원본 프레임에 점프한다.
+  const snap = frameBoardSnap(frameId);
+  if (snap && snap.nodes.length) {
+    children.unshift({ kind: 'file', id: savedEntryId(), name: 'board.board', type: 'board', content: JSON.stringify(snap), frameId });
+  }
+  return {
+    kind: 'folder',
+    id: savedEntryId(),
+    name: safeName((frame.data?.title as string) ?? '', '보드 묶음'),
+    children,
+  };
+}
+
 /** Save a frame's child cards as one folder bundle; mark the frame saved.
-    Returns the new bundle id (or null if the frame is empty/invalid). */
+    Returns the new bundle id (or null if the frame is empty/invalid).
+    동시에 폴더 페이지용 '계층 폴더 트리'(folderFromFrame)도 함께 저장한다. */
 export function saveFrameToFolder(frameId: string): string | null {
   const bundle = bundleFromFrame(frameId);
   if (!bundle) return null;
   useFolderStore.getState().addBundle(bundle);
+  const tree = folderFromFrame(frameId);
+  if (tree) useFolderStore.getState().addSavedFolder(tree);
   const b = useBoardStore.getState();
   const frame = b.nodes[frameId];
   if (frame) b.updateNodeRaw(frameId, { data: { ...(frame.data ?? {}), savedBundleId: bundle.id } });

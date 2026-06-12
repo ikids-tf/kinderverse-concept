@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo as reactMemo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Icon } from '@/lib/icons';
+import { showToast } from '@/lib/toast';
 import { SHAPE_PATHS } from '@/lib/shapes';
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { editTextCmd, captureNodes, pushRedesign } from '@/board/commands';
@@ -367,15 +368,18 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     const t = e.target as HTMLElement | null;
     if (t?.closest?.('[data-kv-editable], [contenteditable="true"], input, textarea')) return;
     e.stopPropagation(); // 배경의 "전체 맞춤" 더블클릭이 같이 발동하지 않게
-    // 더블클릭 → 이 카드를 화면 중앙에 풀로(센터 + 줌).
-    useBoardStore.getState().focusNode(node.id);
     // 인라인 편집은 평문 카드(메모/텍스트/이미지 캡션)에서만. 문서 카드(계획안·통신문·
     // 관찰기록·활동지 등 data.doc)는 렌더된 형태를 유지하고 raw 마크다운 textarea를
     // 띄우지 않는다(활동지는 시트 내부의 제목·안내가 인라인 편집됨).
     const isDocCard = !!node.data?.doc;
     if (editable && !node.locked && !isDocCard) {
+      // 제자리 편집 — 보이던 모습 그대로 바로 수정. 센터+줌 점프를 하지 않는다
+      // (시점이 튀면 '갑자기 다른 화면'처럼 느껴진다).
       setDraft(node.text ?? '');
       setEditing(true);
+    } else {
+      // 편집 불가 카드(문서·잠금)만 기존 동작: 카드를 화면 중앙에 풀로(센터 + 줌).
+      useBoardStore.getState().focusNode(node.id);
     }
   };
 
@@ -429,12 +433,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             setDraft(title);
             setEditing(true);
           }}
-          className={`absolute -top-7 left-0 inline-flex items-center gap-t1 rounded-md border px-t3 py-t1 text-overline shadow-sm ${
+          // 프레임 경계선 위에 '걸쳐 앉는' 라벨(fieldset/Figma 섹션 스타일) — 테두리와
+          // 절반 겹쳐 프레임에 부착돼 보인다(허공에 뜬 느낌 제거). 모서리 라운드를
+          // 피해 왼쪽에서 살짝 들여쓴다.
+          className={`absolute left-t5 top-0 z-10 inline-flex -translate-y-1/2 items-center gap-t2 rounded-pill border px-t4 py-t2 text-sm font-medium shadow-sm ${
             selected ? 'border-accent bg-accent text-on-accent' : 'border-border bg-surface text-fg-2'
           }`}
           style={{ pointerEvents: 'auto', cursor: 'grab' }}
         >
-          <Icon name="frame" size={12} />
+          <Icon name="frame" size={16} />
           {editing ? (
             <input
               autoFocus
@@ -444,7 +451,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               onChange={(e) => setDraft(e.target.value)}
               onBlur={() => { renameTitle(draft); setEditing(false); }}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-              className="w-28 bg-transparent text-overline focus:outline-none"
+              className="w-32 bg-transparent text-sm font-medium focus:outline-none"
             />
           ) : (
             title
@@ -460,16 +467,27 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         {!isSub && !presenting && (
         <button
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); if (!savedBundleId) saveFrameToFolder(node.id); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (savedBundleId) return;
+            // 진행 → 완료 토스트. 저장 자체는 동기지만(스냅샷+스토어) 진행 상태가
+            // 인지될 짧은 간격을 두고 완료 메시지로 교체한다.
+            showToast('폴더에 저장하는 중…', 'progress');
+            const ok = saveFrameToFolder(node.id);
+            setTimeout(() => {
+              showToast(ok ? `'${title}' 폴더에 저장했어요` : '저장에 실패했어요 — 프레임이 비어 있어요', ok ? 'success' : 'error');
+            }, 450);
+          }}
           title="이 프레임을 폴더에 저장"
-          className={`absolute -top-7 right-0 inline-flex items-center gap-t1 rounded-md border px-t2 py-t1 text-overline shadow-sm ${
+          // 타이틀 라벨과 같은 문법 — 경계선 위 오른쪽에 걸쳐 앉는 액션 버튼.
+          className={`absolute right-t5 top-0 z-10 inline-flex -translate-y-1/2 items-center gap-t2 rounded-pill border px-t4 py-t2 text-sm font-medium shadow-sm ${
             savedBundleId
               ? 'border-success/40 bg-success-soft text-success'
               : 'border-border bg-surface text-fg-2 hover:border-accent hover:text-accent'
           }`}
           style={{ pointerEvents: 'auto', cursor: 'pointer' }}
         >
-          <Icon name={savedBundleId ? 'check' : 'folder'} size={12} /> {savedBundleId ? '저장됨' : '폴더에 저장'}
+          <Icon name={savedBundleId ? 'check' : 'folder'} size={16} /> {savedBundleId ? '저장됨' : '폴더에 저장'}
         </button>
         )}
 
@@ -677,6 +695,11 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       return (
         <div
           ref={cardRef}
+          // iframe은 마우스 이벤트를 삼켜 캔버스 호버가 닿지 않는다 — 카드 진입을
+          // 직접 감지해 연결 포트를 띄운다(kv:ports-hover → BoardCanvas).
+          onPointerEnter={() => {
+            if (!presenting) window.dispatchEvent(new CustomEvent('kv:ports-hover', { detail: node.id }));
+          }}
           className={`group/card absolute select-none overflow-hidden rounded-xl ${
             embedPresent
               ? 'border border-transparent bg-transparent shadow-none'
@@ -748,7 +771,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     const docImages = Array.isArray(node.data?.docImages) ? (node.data.docImages as string[]) : [];
     const loadingDoc = !!node.data?.loadingDoc;
     // 활동지엔 장식 스티커를 붙이지 않는다(인쇄·오리기에 방해).
-    const decorations = worksheetProps
+    // 계획안(plan)도 공식 문서 톤 유지 — 기존 보드에 저장된 decorations까지 렌더 차단.
+    const decorations = worksheetProps || node.data?.role === 'plan'
       ? []
       : Array.isArray(node.data?.decorations)
         ? (node.data.decorations as StickerDecoData[])
@@ -829,6 +853,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             thumbs={Array.isArray(node.data?.thumbs) ? (node.data.thumbs as SourceThumbData[]) : undefined}
             summary={node.data?.summary as string | undefined}
           />
+        ) : editing && !isNote && !isDoc ? (
+          // 일반 메모 — 보이던 모습(굵은 제목 + 본문) 그대로 제자리에서 수정.
+          <MemoEdit
+            initial={draft}
+            onCommit={(t2) => {
+              setEditing(false);
+              editTextCmd(node.id, node.text ?? '', t2);
+            }}
+          />
         ) : editing ? (
           <textarea
             ref={ref}
@@ -897,7 +930,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 alt=""
                 draggable={false}
                 className={`mb-t4 block w-full rounded-md border border-border ${heroContain ? 'bg-white object-contain' : 'object-cover'}`}
-                style={heroContain ? { maxHeight: 640 } : { maxHeight: 220 }}
+                // 표지 배너 — 문서 본문이 주인공이라 세로를 얇게(와이드 배너로 생성됨).
+                style={heroContain ? { maxHeight: 640 } : { maxHeight: 110 }}
               />
             )}
             <Markdown remarkPlugins={[remarkGfm]}>{node.text || ''}</Markdown>
@@ -1389,6 +1423,47 @@ function LockBadge() {
     </span>
   );
 }
+
+/* 메모 제자리 편집 — MemoText와 똑같은 마크업(굵은 제목 + 본문)을 contentEditable로
+   그대로 수정한다. 내용은 마운트 시 한 번만 그리고(외부 리렌더로 캐럿이 리셋되지
+   않게 메모이즈), blur 시 innerText를 커밋한다. <p> 블록 사이는 innerText에서 빈
+   줄(\n\n)로 직렬화되므로 첫 줄바꿈 묶음만 제목/본문 구분자(\n) 하나로 정규화한다. */
+const MemoEdit = reactMemo(
+  function MemoEdit({ initial, onCommit }: { initial: string; onCommit: (text: string) => void }) {
+    const ref = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.focus();
+      // 캐럿을 내용 끝으로
+      const sel = window.getSelection();
+      if (sel) {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        r.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    }, []);
+    const nl = initial.indexOf('\n');
+    const title = nl >= 0 ? initial.slice(0, nl) : initial;
+    const body = nl >= 0 ? initial.slice(nl + 1).trim() : '';
+    return (
+      <div
+        ref={ref}
+        data-kv-editable="true"
+        contentEditable
+        suppressContentEditableWarning
+        onBlur={() => onCommit((ref.current?.innerText ?? '').replace(/\n+/, '\n').trimEnd())}
+        className="cursor-text focus:outline-none"
+      >
+        <p className="font-semibold leading-snug text-fg" style={{ fontSize: '0.95rem' }}>{title}</p>
+        {body ? <p className="mt-t1 whitespace-pre-wrap text-sm leading-relaxed text-fg-2">{body}</p> : null}
+      </div>
+    );
+  },
+  () => true, // 편집 중엔 절대 되그리지 않는다 — 타이핑 캐럿 보존
+);
 
 /* Memo editorial design — first line is a bold title, the rest is body text. */
 function MemoText({ text }: { text?: string }) {
