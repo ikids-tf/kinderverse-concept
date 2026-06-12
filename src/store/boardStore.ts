@@ -7,7 +7,7 @@ import { linkedComponent } from '@/board/links';
    here are RAW (no history); board/commands.ts wraps them as undoable Commands
    and pushes to historyStore (SKILL §6.2). Kept separate from the history module. */
 
-export type NodeType = 'sticky' | 'text' | 'shape' | 'image' | 'frame' | 'runner';
+export type NodeType = 'sticky' | 'text' | 'shape' | 'image' | 'frame' | 'runner' | 'motion';
 
 export interface BoardNode {
   id: string;
@@ -88,6 +88,26 @@ export interface BoardSnapshot {
   links?: BoardLink[];
 }
 
+/** 수업 모드·슬라이드 쇼에서 '화면에 보이는' 노드 집합(= 렌더·선택 대상). 슬라이드
+    쇼는 현재 한 장, 수업 모드는 연결망/선택 묶음. 프레임이 보이면 그 자식 카드
+    (data.frameId)도 포함. 둘 다 아니면 null(제한 없음 — 일반 편집). 렌더(classSet)·
+    박스 선택·전체 선택이 모두 이 한 정의를 공유해 숨긴 요소는 선택되지 않는다. */
+export function presentationVisibleSet(
+  nodes: Record<string, BoardNode>,
+  classroom: { ids: string[] } | null,
+  show: { ids: string[]; index: number; group?: boolean } | null,
+): Set<string> | null {
+  const primary = show ? (show.group ? show.ids : [show.ids[show.index]]) : classroom ? classroom.ids : null;
+  if (!primary) return null;
+  const set = new Set(primary);
+  for (const id of primary) {
+    if (nodes[id]?.type === 'frame') {
+      for (const n of Object.values(nodes)) if (n.data?.frameId === id) set.add(n.id);
+    }
+  }
+  return set;
+}
+
 interface BoardState {
   nodes: Record<string, BoardNode>;
   order: string[]; // z-order
@@ -103,9 +123,10 @@ interface BoardState {
     saved: Array<{ id: string; x: number; y: number }>;
     savedViewport: Viewport;
   } | null;
-  /** 슬라이드 쇼 — 연결 순서대로 한 장씩 풀스크린처럼(나머지 숨김 + 포커스 줌). */
-  show: { ids: string[]; index: number; savedViewport: Viewport } | null;
-  startShow: (ids: string[]) => void;
+  /** 슬라이드 쇼 — 연결 순서대로 한 장씩 풀스크린처럼(나머지 숨김 + 포커스 줌).
+      group: 이동 애니메이션 묶음 — 한 장씩 대신 연결된 형태 그대로 전체를 풀로. */
+  show: { ids: string[]; index: number; savedViewport: Viewport; group?: boolean } | null;
+  startShow: (ids: string[], group?: boolean) => void;
   stepShow: (dir: 1 | -1) => void;
   endShow: () => void;
   /** Non-null while an AI generation is running → board shows a status pill. */
@@ -142,7 +163,12 @@ interface BoardState {
   fit: () => void;
   /** Center one node in the visible canvas and zoom so it fills the view. */
   focusNode: (id: string, maxZoom?: number) => void;
+  /** 여러 노드의 합집합 박스를 화면에 풀로 맞춘다(모션 묶음 그룹 쇼 등). */
+  focusBounds: (ids: string[], maxZoom?: number) => void;
   toggleClassroomMode: () => void;
+  /** 노드 드래그 진행 중 오프셋(월드 px) — 모션 라인이 연결 카드를 실시간 추적용. */
+  dragging: { ids: string[]; dx: number; dy: number } | null;
+  setDragging: (d: { ids: string[]; dx: number; dy: number } | null) => void;
 
   // ---- multi-board snapshot ----
   snapshot: () => BoardSnapshot;
@@ -172,15 +198,18 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   show: null,
   generating: null,
   genActive: 0,
+  dragging: null,
+  setDragging: (d) => set({ dragging: d }),
 
-  startShow: (ids) => {
+  startShow: (ids, group = false) => {
     if (!ids.length) return;
-    set((s) => ({ show: { ids, index: 0, savedViewport: { ...s.viewport } }, selection: [] }));
-    get().focusNode(ids[0], 3);
+    set((s) => ({ show: { ids, index: 0, savedViewport: { ...s.viewport }, group }, selection: [] }));
+    if (group) get().focusBounds(ids, 2);
+    else get().focusNode(ids[0], 3);
   },
   stepShow: (dir) => {
     const s = get();
-    if (!s.show) return;
+    if (!s.show || s.show.group) return;
     const i = Math.min(s.show.ids.length - 1, Math.max(0, s.show.index + dir));
     if (i === s.show.index) return;
     set({ show: { ...s.show, index: i } });
@@ -241,7 +270,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         : [...s.selection, id],
     })),
   clearSelection: () => set({ selection: [] }),
-  selectAll: () => set((s) => ({ selection: [...s.order] })),
+  selectAll: () =>
+    set((s) => {
+      // 수업 모드·슬라이드 쇼에서는 화면에 보이는 수업자료만(숨긴 요소 제외).
+      const vis = presentationVisibleSet(s.nodes, s.classroom, s.show);
+      return { selection: vis ? s.order.filter((id) => vis.has(id)) : [...s.order] };
+    }),
 
   setViewport: (v) => set((s) => ({ viewport: { ...s.viewport, ...v } })),
   zoomBy: (factor, cx, cy) =>
@@ -327,6 +361,42 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       },
     });
   },
+  focusBounds: (ids, maxZoom = 2) => {
+    const s = get();
+    const boxes = ids
+      .map((id) => s.nodes[id])
+      .filter(Boolean)
+      .map((n) => worldBox(n));
+    if (!boxes.length) return;
+    const minX = Math.min(...boxes.map((b) => b.x));
+    const minY = Math.min(...boxes.map((b) => b.y));
+    const maxX = Math.max(...boxes.map((b) => b.x + b.w));
+    const maxY = Math.max(...boxes.map((b) => b.y + b.h));
+    const w = maxX - minX;
+    const h = maxY - minY;
+    // focusNode와 같은 측정 — 실제 캔버스 박스 + 프롬프트 바 위까지를 가용 영역으로.
+    const doc = typeof document !== 'undefined' ? document : null;
+    const canvas = doc?.querySelector('[data-kv-canvas]') as HTMLElement | null;
+    const cr = canvas
+      ? canvas.getBoundingClientRect()
+      : ({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } as DOMRect);
+    const pbar = doc?.querySelector('.kv-pbar-vt') as HTMLElement | null;
+    const pr = pbar ? pbar.getBoundingClientRect() : undefined;
+    const padX = 48;
+    const padTop = 24;
+    const gap = 40;
+    const bottomY = pr ? pr.top - 16 : cr.top + cr.height - 140;
+    const availW = Math.max(240, cr.width - padX * 2);
+    const availH = Math.max(240, bottomY - cr.top - padTop);
+    const zoom = clampZoom(Math.min(availW / (w + gap * 2), availH / (h + gap * 2), maxZoom));
+    const cx = minX + w / 2;
+    const cy = minY + h / 2;
+    const targetX = pr ? pr.left + pr.width / 2 : cr.left + cr.width / 2;
+    const targetY = cr.top + padTop + availH / 2;
+    set({
+      viewport: { zoom, panX: targetX - cr.left - cx * zoom, panY: targetY - cr.top - cy * zoom },
+    });
+  },
   /* 수업 모드. 연결된 요소가 선택돼 있으면: 그 연결망만 남기고 전부 숨기고,
      순번(1→2→3…) 순서대로 가로 한 줄(세로 중앙 정렬)로 배치 + 화면에 맞춘다.
      종료(다시 누름): 원위치·원래 뷰로 복원. 연결 없는 선택이면 기존처럼 시각 토글만. */
@@ -341,53 +411,132 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       set({ nodes, viewport: s.classroom.savedViewport, classroom: null, classroomMode: false });
       return;
     }
-    // ── 진입 ──
+    // ── 진입 ── 수업 집합(chain) 결정. 선이 연결돼 있지 않아도 선택만으로 진입.
+    //  • 선택 없음 → 기존 시각 토글(되돌리기 가능)
+    //  • 단일 선택 → 연결망에 속하면 그 묶음 전체(워크플로 레인 편의), 아니면 그 하나만
+    //  • 복수 선택 → 선택한 그대로(연결 무관). 화면상 좌→우·위→아래 순으로 정렬
     const live = s.links.filter((l) => s.nodes[l.from] && s.nodes[l.to]);
-    const anchor = s.selection.find((id) => live.some((l) => l.from === id || l.to === id));
-    const chain = anchor ? linkedComponent(anchor, live).filter((id) => s.nodes[id]) : [];
-    if (chain.length < 2) {
-      set({ classroomMode: !s.classroomMode }); // 연결망 없음 — 기존 동작 유지
+    const selected = s.selection.filter((id) => s.nodes[id]);
+    let chain: string[];
+    if (selected.length === 0) {
+      set({ classroomMode: !s.classroomMode });
+      return;
+    } else if (selected.length === 1) {
+      const comp = linkedComponent(selected[0], live).filter((id) => s.nodes[id]);
+      chain = comp.length >= 2 ? comp : selected;
+    } else {
+      chain = [...selected].sort((a, z) => {
+        const ba = worldBox(s.nodes[a]);
+        const bz = worldBox(s.nodes[z]);
+        return ba.x - bz.x || ba.y - bz.y;
+      });
+    }
+    // 이동 애니메이션(모션 라인)은 출발·도착 카드와 한 몸 — 묶음의 어느 하나만
+    // 선택해도 전체(선+연결 카드)를 수업에 데려간다. 카드를 공유하는 라인이
+    // 이어져 있으면 연쇄적으로 확장한다.
+    const cluster = new Set(chain);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const n of Object.values(s.nodes)) {
+        if (n.type !== 'motion') continue;
+        const member = [n.id, n.data?.aStart, n.data?.aEnd].filter(
+          (x): x is string => typeof x === 'string' && !!s.nodes[x],
+        );
+        if (member.some((x) => cluster.has(x)) && !member.every((x) => cluster.has(x))) {
+          member.forEach((x) => cluster.add(x));
+          grew = true;
+        }
+      }
+    }
+    const hasMotion = [...cluster].some((id) => s.nodes[id].type === 'motion');
+    if (cluster.size > chain.length) {
+      const extra = [...cluster]
+        .filter((id) => !chain.includes(id))
+        .sort((a, z) => {
+          const ba = worldBox(s.nodes[a]);
+          const bz = worldBox(s.nodes[z]);
+          return ba.x - bz.x || ba.y - bz.y;
+        });
+      chain = [...chain, ...extra];
+    }
+    // 프레임은 자식 카드(data.frameId)를 함께 데리고 다닌다 — 레인 항목은 프레임
+    // 자신이고, 자식은 프레임과 같은 변위로 따라 움직여 프레임 안 배치를 유지한다.
+    const childrenOf = (fid: string) =>
+      Object.keys(s.nodes).filter((id) => s.nodes[id].data?.frameId === fid);
+    const childSet = new Set<string>();
+    for (const id of chain)
+      if (s.nodes[id].type === 'frame') childrenOf(id).forEach((c) => childSet.add(c));
+    // 레인 항목 = chain에서 '다른 프레임의 자식'은 제외(이중 배치 방지).
+    const layout = chain.filter((id) => !childSet.has(id));
+
+    // 복원용 저장 — 레인 항목 + 모든 프레임 자식까지.
+    const saved = [...new Set([...layout, ...childSet])].map((id) => ({
+      id,
+      x: s.nodes[id].x,
+      y: s.nodes[id].y,
+    }));
+    // 화면 맞춤(fit과 동일 계산, 대상만 한정) — 정렬 후·모션 묶음 공용.
+    const fitTo = (ns: Record<string, BoardNode>) => {
+      const nb = layout.map((id) => worldBox(ns[id]));
+      const minX = Math.min(...nb.map((b) => b.x));
+      const minY = Math.min(...nb.map((b) => b.y));
+      const maxX = Math.max(...nb.map((b) => b.x + b.w));
+      const maxY = Math.max(...nb.map((b) => b.y + b.h));
+      const pad = 80;
+      const vw = window.innerWidth - 180;
+      const vh = window.innerHeight - 200;
+      const zoom = clampZoom(
+        Math.min(vw / (maxX - minX + pad * 2), vh / (maxY - minY + pad * 2), 1.4),
+      );
+      return {
+        zoom,
+        panX: (vw + 180 - (maxX - minX) * zoom) / 2 - minX * zoom - 90,
+        panY: -minY * zoom + Math.max(pad, (vh + 200 - (maxY - minY) * zoom) / 2 - 100),
+      };
+    };
+    // 모션 묶음 — 가로 정렬로 흐트러뜨리지 않고 '연결된 형태 그대로' 보여준다
+    // (선·출발·도착의 상대 배치가 곧 수업 내용이므로 위치는 건드리지 않는다).
+    if (hasMotion) {
+      set({
+        classroom: { ids: layout, saved, savedViewport: { ...s.viewport } },
+        classroomMode: true,
+        selection: [],
+        viewport: fitTo(s.nodes),
+      });
       return;
     }
-    const saved = chain.map((id) => ({ id, x: s.nodes[id].x, y: s.nodes[id].y }));
     // 순번 순서 그대로 가로 정렬 — 첫 요소의 현재 위치를 기준점으로.
     const GAP = 48;
-    const boxes = chain.map((id) => worldBox(s.nodes[id]));
+    const boxes = layout.map((id) => worldBox(s.nodes[id]));
     let X = Math.min(...boxes.map((b) => b.x));
     const yCenter = boxes[0].y + boxes[0].h / 2;
     const nodes = { ...s.nodes };
-    for (const id of chain) {
+    for (const id of layout) {
       const n = nodes[id];
       const sc = n.scale ?? 1;
       const rh = renderHeight(n);
       // 월드 좌단을 X에, 월드 세로 중앙을 yCenter에 — 스케일된 카드도 정확히.
-      nodes[id] = {
-        ...n,
-        x: Math.round(X - n.w / 2 + (n.w * sc) / 2),
-        y: Math.round(yCenter - rh / 2),
-      };
+      const nx = Math.round(X - n.w / 2 + (n.w * sc) / 2);
+      const ny = Math.round(yCenter - rh / 2);
+      // 프레임이면 자식들을 같은 변위(dx, dy)로 함께 이동.
+      if (n.type === 'frame') {
+        const dx = nx - n.x;
+        const dy = ny - n.y;
+        for (const cid of childrenOf(id)) {
+          const c = nodes[cid];
+          if (c) nodes[cid] = { ...c, x: c.x + dx, y: c.y + dy };
+        }
+      }
+      nodes[id] = { ...n, x: nx, y: ny };
       X += n.w * sc + GAP;
     }
-    // 정렬된 연결망에 화면 맞춤(fit과 동일 계산, 대상만 한정).
-    const nb = chain.map((id) => worldBox(nodes[id]));
-    const minX = Math.min(...nb.map((b) => b.x));
-    const minY = Math.min(...nb.map((b) => b.y));
-    const maxX = Math.max(...nb.map((b) => b.x + b.w));
-    const maxY = Math.max(...nb.map((b) => b.y + b.h));
-    const pad = 80;
-    const vw = window.innerWidth - 180;
-    const vh = window.innerHeight - 200;
-    const zoom = clampZoom(Math.min(vw / (maxX - minX + pad * 2), vh / (maxY - minY + pad * 2), 1.4));
+    // 정렬된 레인에 화면 맞춤.
     set({
       nodes,
-      classroom: { ids: chain, saved, savedViewport: { ...s.viewport } },
+      classroom: { ids: layout, saved, savedViewport: { ...s.viewport } },
       classroomMode: true,
       selection: [],
-      viewport: {
-        zoom,
-        panX: (vw + 180 - (maxX - minX) * zoom) / 2 - minX * zoom - 90,
-        panY: -minY * zoom + Math.max(pad, (vh + 200 - (maxY - minY) * zoom) / 2 - 100),
-      },
+      viewport: fitTo(nodes),
     });
   },
 

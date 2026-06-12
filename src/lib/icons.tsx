@@ -79,6 +79,8 @@ const ICON_PATHS: Record<IconName, string> = {
   download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>',
   print: '<path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7" rx="1"/>',
   layers: '<path d="M12 2 2 7l10 5 10-5z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/>',
+  history: '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 4v4h4"/><path d="M12 7.5V12l3.2 1.9"/>',
+  motion: '<circle cx="5" cy="18" r="2.6"/><circle cx="19" cy="6" r="2.6"/><path d="M7.3 16.2C10.5 13.6 13.5 10.4 16.7 7.8"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
 };
 
 export interface IconProps {

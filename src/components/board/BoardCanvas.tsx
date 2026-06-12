@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useBoardStore, type BoardNode, type BoardLink } from '@/store/boardStore';
+import { useBoardStore, presentationVisibleSet, type BoardNode, type BoardLink } from '@/store/boardStore';
 import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, type NodeSnap } from '@/board/commands';
 import { linkSequence } from '@/board/links';
 import { mindMapSubtree } from '@/board/composer';
@@ -8,6 +8,7 @@ import { frameMoveSet, rebindFrameMembership, frameOfPoint } from '@/board/frame
 import { worldBox, renderHeight } from '@/board/geometry';
 import { IMG_PLACEHOLDER_ZOOM } from '@/board/imageLod';
 import { NodeView } from './NodeView';
+import { normalizeMotionNode } from './MotionPathNode';
 import { LaneView } from './LaneView';
 
 // Memoized node — on pan/zoom the viewport changes but each node's props (node,
@@ -82,11 +83,11 @@ export function BoardCanvas() {
   const linkSeq = useMemo(() => linkSequence(liveLinks), [liveLinks]);
   // 수업 모드 — 연결망에 포함된 요소만 렌더(나머지 숨김).
   // 슬라이드 쇼 — 현재 슬라이드 한 장만(아이들에게 한 장씩).
-  const soloId = show ? show.ids[show.index] : null;
-  const classSet = useMemo(() => {
-    if (soloId) return new Set([soloId]);
-    return classroom ? new Set(classroom.ids) : null;
-  }, [classroom, soloId]);
+  // 프레임이 보이면 그 안의 자식 카드(data.frameId)도 함께 보여야 한다(빈 프레임 방지).
+  const classSet = useMemo(
+    () => presentationVisibleSet(nodes, classroom, show),
+    [classroom, show, nodes],
+  );
 
   // 노드·면(l/r)별로 붙은 링크 목록(생성 순) — 선과 포트가 같은 슬롯을 공유해
   // 연결이 여러 개면 각자 다른 점에서 선이 나간다(한 점 두 갈래 방지).
@@ -477,7 +478,11 @@ export function BoardCanvas() {
       useBoardStore.getState().setViewport({ panX: st.startPan.x + dx, panY: st.startPan.y + dy });
     } else if (st.mode === 'drag') {
       const zoom = useBoardStore.getState().viewport.zoom;
-      setDrag({ dx: (e.clientX - st.startX) / zoom, dy: (e.clientY - st.startY) / zoom });
+      const dx = (e.clientX - st.startX) / zoom;
+      const dy = (e.clientY - st.startY) / zoom;
+      setDrag({ dx, dy });
+      // 모션 라인이 연결 카드의 이동을 실시간으로 따라가도록 오프셋을 공유한다.
+      useBoardStore.getState().setDragging({ ids: st.dragIds, dx, dy });
     } else if (st.mode === 'box') {
       const cur = toWorld(e.clientX, e.clientY);
       setBox({
@@ -497,6 +502,19 @@ export function BoardCanvas() {
       const dy = (e.clientY - st.startY) / zoom;
       moveNodesCmd(st.dragIds, dx, dy);
       rebindFrameMembership(st.dragIds); // re-parent cards dragged onto/off a frame
+      // 연결 카드만 끌었으면 모션 라인의 '출발점'도 같은 변위로 따라간다
+      // (도착점은 카드 중심에서 파생되므로 저절로 따라온다).
+      const b2 = useBoardStore.getState();
+      b2.setDragging(null);
+      for (const n of Object.values(b2.nodes)) {
+        if (n.type !== 'motion' || st.dragIds.includes(n.id)) continue;
+        const sId = n.data?.aStart as string | undefined;
+        const p = n.data?.p1 as { x: number; y: number } | undefined;
+        if (sId && p && st.dragIds.includes(sId)) {
+          b2.updateNodeRaw(n.id, { data: { ...n.data, p1: { x: p.x + dx, y: p.y + dy } } });
+          normalizeMotionNode(n.id);
+        }
+      }
       setDrag(null);
       setDragIds([]);
     } else if (st.mode === 'box') {
@@ -506,12 +524,15 @@ export function BoardCanvas() {
       const x1 = Math.max(cur.x, st.boxStartWorld.x);
       const y1 = Math.max(cur.y, st.boxStartWorld.y);
       const b = useBoardStore.getState();
+      // 수업 모드·슬라이드 쇼 — 화면에 보이는 수업자료만 박스 선택 대상(숨긴 요소 제외).
+      const vis = presentationVisibleSet(b.nodes, b.classroom, b.show);
       // Frames are NOT box-selectable — their large box always intersects a box drawn
       // over their interior, which would wrongly pull the frame into the selection and
       // move it when the inner cards are dragged. A frame is selected/moved only via
       // its border strips or title tab. Box-select grabs loose cards/content only.
       const hits = Object.values(b.nodes)
         .filter((n) => n.type !== 'frame' && n.x < x1 && n.x + n.w > x0 && n.y < y1 && n.y + n.h > y0)
+        .filter((n) => !vis || vis.has(n.id))
         .map((n) => n.id);
       if (hits.length || !e.shiftKey) b.setSelection(hits);
       setBox(null);
@@ -599,6 +620,15 @@ export function BoardCanvas() {
       // dragging a frame carries its children (tagged + overlapping) — frame group-move
       moveIds = [id, ...frameMoveSet(id)];
     }
+    // 모션 라인(이동 애니메이션)을 끌면 연결된 출발/도착 카드도 함께 이동한다.
+    const motionExtra = moveIds.flatMap((mid) => {
+      const n = b.nodes[mid];
+      if (n?.type !== 'motion') return [];
+      return [n.data?.aStart, n.data?.aEnd].filter(
+        (x): x is string => typeof x === 'string' && !!b.nodes[x],
+      );
+    });
+    if (motionExtra.length) moveIds = [...new Set([...moveIds, ...motionExtra])];
     it.current = { ...it.current, mode: 'drag', startX: e.clientX, startY: e.clientY, dragIds: moveIds };
     setDragIds(moveIds);
     setDrag({ dx: 0, dy: 0 });

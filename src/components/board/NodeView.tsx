@@ -13,6 +13,7 @@ import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-r
 import { WorksheetSheet, downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-sheet';
 import { separateImageLayers } from '@/ai/layers';
 import { ensureThumb } from '@/board/imageLod';
+import { MotionPathNode } from './MotionPathNode';
 
 /* Renders one board node (reference board model): frame container, runner control,
    image card (real src), and content-sized sticky/text memos. Selection ring +
@@ -48,6 +49,101 @@ const REROUTES: Array<{ route: RouteTarget; tid: string; label: string }> = [
   { route: 'mindmap', tid: 'mindmap', label: '생각그물로' },
 ];
 
+/* 이동 애니메이션의 '기다리는 동작'(data.idle) — 모션 패스에 연결된 카드를 호버하면
+   아래 선택 버튼이 나타난다. 동작 자체는 index.css의 kv-idle-* 키프레임. */
+const IDLE_OPTIONS: Array<{ id: string; label: string; title: string }> = [
+  { id: 'none', label: '없음', title: '기다림 동작 없음' },
+  { id: 'bob', label: '둥실', title: '위아래로 둥실둥실 반복' },
+  { id: 'fidget', label: '두리번', title: '랜덤하게 꼼지락거리며 기다리기' },
+  { id: 'bounce', label: '콩콩', title: '가끔 콩콩 뛰기' },
+];
+
+/** 카드 '위' 화면 좌표에 고정 크기로 렌더(보드 줌/카드 크기와 무관) — 클릭(선택) 시
+    표시. 보드 컨트롤과 같은 한 줄 알약(surface/95 + blur) 미니멀 스타일: 동작 세그먼트
+    + 구분선 + 반경·속도 슬라이더. 값은 카드의 --idle-amp/--idle-speed 변수로 반영. */
+function IdlePicker({ node }: { node: BoardNode }) {
+  const vp = useBoardStore((s) => s.viewport);
+  const cur = (node.data?.idle as string) ?? 'none';
+  const cv = typeof document !== 'undefined' ? document.querySelector('[data-kv-canvas]') : null;
+  if (!cv) return null;
+  // 카드 기능은 카드 위, 라인 기능(▶ 등)은 경로 아래 — 영역을 분리해 겹치지 않는다.
+  // 카드가 화면 위쪽이라 위 공간이 없으면 카드 아래로 자동 플립(뷰포트 밖 방지).
+  const rect = cv.getBoundingClientRect();
+  const sx = rect.left + vp.panX + (node.x + node.w / 2) * vp.zoom;
+  const aboveY = rect.top + vp.panY + node.y * vp.zoom - 12;
+  const flipBelow = aboveY < 84; // 툴바 높이 + 여유가 안 나오는 경우
+  const visualH = typeof node.data?.renderH === 'number' ? (node.data.renderH as number) : node.h;
+  const sy = flipBelow ? rect.top + vp.panY + (node.y + visualH) * vp.zoom + 12 : aboveY;
+  const setData = (patch: Record<string, unknown>) => {
+    const st = useBoardStore.getState();
+    const n = st.nodes[node.id];
+    if (!n) return;
+    const data = { ...(n.data ?? {}), ...patch };
+    for (const k of Object.keys(patch)) if (patch[k] === undefined) delete data[k];
+    st.updateNodeRaw(node.id, { data });
+  };
+  const amp = Number(node.data?.idleAmp ?? 1);
+  const speed = Number(node.data?.idleSpeed ?? 1);
+  return createPortal(
+    <div
+      className="fixed z-50 flex items-center gap-t1 whitespace-nowrap rounded-pill border border-border bg-surface/95 px-t2 py-t1 shadow-md backdrop-blur"
+      // width: max-content — fixed 요소는 화면 오른쪽까지 남은 공간으로 줄어들어
+      // (shrink-to-fit) 카드가 우측에 있으면 글자가 세로로 꺾인다. 콘텐츠 폭으로 고정.
+      style={{ left: sx, top: sy, width: 'max-content', transform: `translate(-50%, ${flipBelow ? '0' : '-100%'})` }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <span className="px-t1 text-overline text-fg-muted">동작</span>
+      {IDLE_OPTIONS.map((o) => (
+        <button
+          key={o.id}
+          title={o.title}
+          onClick={(e) => {
+            e.stopPropagation();
+            setData({ idle: o.id === 'none' ? undefined : o.id });
+          }}
+          className={`rounded-pill px-t3 py-t1 text-sm font-medium transition-colors duration-150 ease-soft ${
+            cur === o.id ? 'bg-accent text-on-accent' : 'text-fg-2 hover:bg-surface-2 hover:text-fg'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+      {cur !== 'none' && (
+        <>
+          <div className="mx-t1 h-5 w-px bg-border" />
+          <label title="움직임 크기" className="flex items-center gap-t1 px-t1 text-overline text-fg-muted">
+            반경
+            <input
+              type="range"
+              min={0.3}
+              max={8}
+              step={0.1}
+              value={amp}
+              onChange={(e) => setData({ idleAmp: Number(e.target.value) })}
+              className="w-24"
+              style={{ accentColor: 'var(--accent)' }}
+            />
+          </label>
+          <label title="움직임 속도" className="flex items-center gap-t1 px-t1 text-overline text-fg-muted">
+            속도
+            <input
+              type="range"
+              min={0.3}
+              max={4}
+              step={0.1}
+              value={speed}
+              onChange={(e) => setData({ idleSpeed: Number(e.target.value) })}
+              className="w-24"
+              style={{ accentColor: 'var(--accent)' }}
+            />
+          </label>
+        </>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
 /** Static drag-strips along a frame's 4 edges (hoisted — never changes). */
 const FRAME_EDGE_STRIPS = [
   { left: 0, right: 0, top: 0, height: 16 },
@@ -67,6 +163,9 @@ interface Props {
 }
 
 export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = false }: Props) {
+  // 슬라이드 쇼(풀스크린) 진행 중 — 콘텐츠만 남기고 모든 보드 크롬(제목 탭·저장
+  // 버튼·추천/정정 행·생성 배지)을 숨긴다. 일반 수업 모드에서는 숨기지 않는다.
+  const presenting = useBoardStore((s) => s.show !== null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(node.text ?? '');
   const [layerBusy, setLayerBusy] = useState(false);
@@ -75,6 +174,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 임베드 카드(GLB 뷰어) 프레젠테이션 모드 — iframe이 postMessage로 켜고 끈다.
   const [embedPresent, setEmbedPresent] = useState(false);
   const embedFrameRef = useRef<HTMLIFrameElement>(null);
+  /** 모션 라인 연결 여부 미러 — 아래 message 리스너가 최신값을 읽는다(아래에서 계산). */
+  const motionLinkedRef = useRef(false);
   useEffect(() => {
     if (typeof node.data?.embed !== 'string') return;
     const onMsg = (e: MessageEvent) => {
@@ -84,16 +185,44 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         setEmbedPresent(!!d.on);
         // 프레젠테이션 진입 → 카드를 화면 중앙에 풀로(센터+줌) + 선택해서 모서리
         // 스케일 핸들로 크기를 더 키울 수 있게 한다.
-        if (d.on) {
+        // 단, 모션 라인에 연결된 뷰어는 화면이 커지면 안 되므로 줌/선택을 생략한다.
+        if (d.on && !motionLinkedRef.current) {
           const b = useBoardStore.getState();
           b.setSelection([node.id]);
           b.focusNode(node.id);
         }
       }
+      // 뷰어 안 모델 클릭 → 이 카드를 선택(요소 클릭 = 동작 툴바·컨트롤 표시).
+      if (d?.type === 'kv-embed-click') {
+        useBoardStore.getState().setSelection([node.id]);
+      }
+    };
+    // kv:embed-mode — 모션 라인 연결/해제가 뷰어의 프레젠테이션을 켜고 끈다.
+    const onMode = (e: Event) => {
+      const d = (e as CustomEvent).detail as { target?: string; present?: boolean } | null;
+      if (!d || d.target !== node.id) return;
+      const w = embedFrameRef.current?.contentWindow as
+        | (Window & { kvSetPresent?: (on: boolean) => void })
+        | null;
+      w?.kvSetPresent?.(!!d.present);
     };
     window.addEventListener('message', onMsg);
-    return () => window.removeEventListener('message', onMsg);
-  }, [node.data?.embed]);
+    window.addEventListener('kv:embed-mode', onMode);
+    return () => {
+      window.removeEventListener('message', onMsg);
+      window.removeEventListener('kv:embed-mode', onMode);
+    };
+  }, [node.id, node.data?.embed]);
+
+  // 카드 선택 ↔ 뷰어 컨트롤(✕·동작보기·애니 바) 동기화 — 호버가 아니라 클릭(선택)
+  // 했을 때만 컨트롤이 보인다. (뷰어 안에서 모델을 직접 클릭해도 토글된다.)
+  useEffect(() => {
+    if (typeof node.data?.embed !== 'string') return;
+    const w = embedFrameRef.current?.contentWindow as
+      | (Window & { kvSetChrome?: (on: boolean) => void })
+      | null;
+    w?.kvSetChrome?.(selected);
+  }, [selected, node.data?.embed]);
   // 유튜브 검색 결과 카드의 ▶ → 이 뷰어(iframe)의 loadSrc로 바로 재생.
   // kv:yt-propose — 다른 요소와 선이 연결되면 뷰어 안에 "영상을 찾아 연결할까요?"
   // 확인 카드를 띄운다(확인 → 뷰어가 직접 검색해 재생).
@@ -111,14 +240,61 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       const w = embedFrameRef.current?.contentWindow as (Window & { proposeSearch?: (t: string) => void }) | null;
       w?.proposeSearch?.(d.topic);
     };
+    // kv:motion-orient — 이동 애니메이션이 보내는 진행 방향(도). 3D 뷰어가
+    // setHeading으로 카메라를 돌려 모델이 가는 쪽을 보게 한다(deg=null → 원복).
+    const onOrient = (e: Event) => {
+      const d = (e as CustomEvent).detail as { target?: string; deg?: number | null } | null;
+      if (!d || d.target !== node.id) return;
+      const w = embedFrameRef.current?.contentWindow as
+        | (Window & { setHeading?: (deg: number) => void; clearHeading?: () => void })
+        | null;
+      if (typeof d.deg === 'number') w?.setHeading?.(d.deg);
+      else w?.clearHeading?.();
+    };
     window.addEventListener('kv:yt-play', onPlay);
     window.addEventListener('kv:yt-propose', onPropose);
+    window.addEventListener('kv:motion-orient', onOrient);
     return () => {
       window.removeEventListener('kv:yt-play', onPlay);
       window.removeEventListener('kv:yt-propose', onPropose);
+      window.removeEventListener('kv:motion-orient', onOrient);
     };
   }, [node.id, node.data?.embed]);
   const editable = node.type === 'sticky' || node.type === 'text' || node.type === 'image';
+
+  // 이동 애니메이션에 연결된 카드인가(출발/도착) — 호버 시 '기다리는 동작' 선택 표시.
+  const motionLinked = useBoardStore((s) =>
+    Object.values(s.nodes).some(
+      (n) => n.type === 'motion' && (n.data?.aStart === node.id || n.data?.aEnd === node.id),
+    ),
+  );
+  motionLinkedRef.current = motionLinked; // 위 message 리스너용 미러
+  // 대기 동작 클래스 — 독립 translate 속성 애니메이션이라 rotate/scale과 안 부딪힌다.
+  // 모션 패스에 연결돼 있는 동안만 동작(라인이 분리되면 즉시 멈춘다).
+  const idleCls = motionLinked && node.data?.idle ? ` kv-idle-${node.data.idle}` : '';
+  // 반경·속도 — 피커 슬라이더 값이 카드 인라인 CSS 변수로 들어가 키프레임에 반영된다.
+  const idleVars = (motionLinked && node.data?.idle
+    ? { '--idle-amp': String(node.data.idleAmp ?? 1), '--idle-speed': String(node.data.idleSpeed ?? 1) }
+    : {}) as React.CSSProperties;
+
+  // 대기 동작 피커 — 카드를 '클릭(선택)'하면 카드 위에 나타나고, 선택을 풀면 닫힌다.
+  const idlePickerVisible = motionLinked && !presenting && selected;
+
+  // 만남 반응 — 이동 요소가 도착 요소에 닿으면 모션 노드가 kv:motion-meet을 쏜다.
+  // 해당 카드는 한 번 통통 튀는 반응(WAAPI scale — transform과 합성, 리마운트 없음).
+  useEffect(() => {
+    const onMeet = (e: Event) => {
+      const d = (e as CustomEvent).detail as { ids?: string[] } | null;
+      if (!d?.ids?.includes(node.id)) return;
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      cardRef.current?.animate(
+        [{ scale: '1' }, { scale: '1.16' }, { scale: '0.94' }, { scale: '1' }],
+        { duration: 520, easing: 'ease-out' },
+      );
+    };
+    window.addEventListener('kv:motion-meet', onMeet);
+    return () => window.removeEventListener('kv:motion-meet', onMeet);
+  }, [node.id]);
 
   useEffect(() => {
     if (editing) ref.current?.focus();
@@ -201,6 +377,20 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     }
   };
 
+  /* ---------- motion: 이동 애니메이션 경로 (출발→도착 곡선 + 재생) ---------- */
+  if (node.type === 'motion') {
+    return (
+      <MotionPathNode
+        node={node}
+        selected={selected}
+        left={left}
+        top={top}
+        presenting={presenting}
+        onPointerDown={onPointerDown}
+      />
+    );
+  }
+
   /* ---------- frame: back container (interior click-through) ---------- */
   if (node.type === 'frame') {
     const title = (node.data?.title as string) ?? '프레임';
@@ -228,7 +418,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             style={{ position: 'absolute', ...pos, pointerEvents: 'auto', cursor: 'grab' }}
           />
         ))}
-        {/* title tab — drag to move, double-click to rename */}
+        {/* title tab — drag to move, double-click to rename (숨김: 슬라이드 쇼) */}
+        {!presenting && (
         <div
           onPointerDown={down}
           onDoubleClick={(e) => {
@@ -261,9 +452,10 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             <span className="ml-t1 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent opacity-80" />
           )}
         </div>
+        )}
 
         {/* save the whole frame to one folder (top composer frame only) */}
-        {!isSub && (
+        {!isSub && !presenting && (
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); if (!savedBundleId) saveFrameToFolder(node.id); }}
@@ -284,6 +476,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             고정 오프셋 가정이라 칩 두 줄이면 행끼리 겹쳤다). 좁은 프레임에서도 한
             줄에 담기도록 최소 폭을 보장한다. */}
         {!isSub &&
+          !presenting &&
           (chips.length > 0 ||
             typeof node.data?.sourcePrompt === 'string' ||
             !!(node.data?.libNotice as { items?: unknown[] } | undefined)?.items?.length) && (
@@ -383,8 +576,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         ref={cardRef}
         onPointerDown={down}
         onDoubleClick={dbl}
-        className={`absolute select-none overflow-hidden rounded-md border border-border bg-surface shadow-sm ${ring}`}
-        style={{ left, top, width: node.w, ...radiusStyle(node), ...rootTransform(node) }}
+        className={`group/card absolute select-none overflow-hidden rounded-md border border-border bg-surface shadow-sm ${ring}${idleCls}`}
+        style={{ left, top, width: node.w, ...radiusStyle(node), ...rootTransform(node), ...idleVars }}
       >
         <div className="relative" style={{ width: '100%', height: node.h }}>
           {node.loading ? (
@@ -398,12 +591,14 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 <span className="truncate text-overline text-fg-muted">{node.text || '이미지'}</span>
               </div>
             ) : (
-              // 보드 표시는 썸네일(data.thumb), 원본(node.src)은 확대/편집/내보내기용
+              // 보드 표시는 썸네일(data.thumb), 원본(node.src)은 확대/편집/내보내기용.
+              // flipX(이동 애니메이션 방향)는 그림에만 — 캡션 글자가 거울로 뒤집히지 않게.
               <img
                 src={(node.data?.thumb as string | undefined) || node.src}
                 alt={node.text ?? ''}
                 draggable={false}
                 className="h-full w-full object-cover"
+                style={node.data?.flipX ? { transform: 'scaleX(-1)' } : undefined}
               />
             )
           ) : (
@@ -411,7 +606,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               <Icon name="studio" size={24} />
             </div>
           )}
-          {node.src && !lod && (
+          {node.src && !lod && !presenting && (
             <span className="absolute left-1 top-1 rounded-pill bg-fg/75 px-t2 py-0.5 text-[10px] text-on-dark">
               {typeof node.data?.ytId === 'string' ? '유튜브' : node.data?.fromLibrary ? '보관함' : 'AI 생성'}
             </span>
@@ -464,6 +659,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           </div>
         )}
         {node.locked && <LockBadge />}
+        {/* 모션 연결 카드 — 클릭(선택)하면 카드 위 고정 크기 툴바(동작 + 반경·속도) */}
+        {idlePickerVisible && <IdlePicker node={node} />}
       </div>
     );
   }
@@ -477,12 +674,13 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       const embedTitle = (node.data?.title as string) ?? '뷰어';
       return (
         <div
-          className={`absolute select-none overflow-hidden rounded-xl ${
+          ref={cardRef}
+          className={`group/card absolute select-none overflow-hidden rounded-xl ${
             embedPresent
               ? 'border border-transparent bg-transparent shadow-none'
               : `border border-border bg-surface shadow-lg ${ring}`
-          }`}
-          style={{ left, top, width: node.w, height: node.h, ...rootTransform(node) }}
+          }${idleCls}`}
+          style={{ left, top, width: node.w, height: node.h, ...rootTransform(node), ...idleVars }}
         >
           {!embedPresent && (
             <div
@@ -502,6 +700,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             style={{ border: 0, height: embedPresent ? '100%' : 'calc(100% - 33px)', background: 'transparent' }}
           />
           {node.locked && <LockBadge />}
+          {/* 모션 연결 카드 — 모델(iframe)을 클릭하면 kv-embed-click으로 카드가
+              선택되고, 선택되면 카드 위 고정 크기 툴바(동작 + 반경·속도)가 열린다. */}
+          {idlePickerVisible && <IdlePicker node={node} />}
         </div>
       );
     }

@@ -26,16 +26,33 @@ function viewCenterWorld() {
   return { x: (cx - panX) / zoom, y: (cy - panY) / zoom };
 }
 
-type ToolId = PrimitiveType | 'frame' | 'video';
+type ToolId = PrimitiveType | 'frame' | 'video' | 'motion';
 
 const TOOLS: Array<{ id: ToolId; icon: IconName; label: string }> = [
+  { id: 'frame', icon: 'frame', label: '프레임' },
   { id: 'text', icon: 'writing', label: '텍스트' },
   { id: 'sticky', icon: 'record', label: '메모' },
   { id: 'image', icon: 'gallery', label: '이미지' },
   { id: 'video', icon: 'video', label: '동영상' },
   { id: 'shape', icon: 'board', label: '도형' },
-  { id: 'frame', icon: 'frame', label: '프레임' },
+  { id: 'motion', icon: 'motion', label: '애니메이션' },
 ];
+
+/** 이동 애니메이션 노드 기본 모양 — 좌하 출발 → 우상 도착, 살짝 휜 곡선. */
+const MOTION_PATCH = (loop: boolean): Partial<BoardNode> => ({
+  w: 440,
+  h: 230,
+  autoH: false,
+  data: {
+    p1: { x: 36, y: 194 },
+    p2: { x: 404, y: 56 },
+    c1: { x: 159, y: 89 },
+    c2: { x: 281, y: 43 },
+    speedX: 1, // 배속(슬라이더 0.3~4×)
+    loop,
+    flip: 'flip', // 이동 방향으로 좌우 플립(기본) — 컨트롤의 [플립] 칩으로 회전/고정 전환
+  },
+});
 
 /** 동영상 플레이어 임베드 카드 — 툴바 동영상 버튼과 플라이아웃이 함께 쓴다. */
 const VIDEO_PLAYER_PATCH: Partial<BoardNode> = {
@@ -81,7 +98,17 @@ const shapeSvg = (kind: 'star' | 'heart', colorCls: string) => (
   </svg>
 );
 
-const PRESET_PANELS: Record<ToolId, { title: string; sections: PresetSection[] }> = {
+/** 이동 애니메이션 스와치 — 두 원 + 곡선 + 가운데 조절점(기능 모양 그대로). */
+const motionSwatch = (
+  <svg viewBox="0 0 24 24" width={20} height={20} className="text-fg-2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
+    <circle cx="5" cy="18" r="2.5" />
+    <circle cx="19" cy="6" r="2.5" />
+    <path d="M7.2 16.2C10.3 13.2 13.7 10.8 16.8 7.8" strokeDasharray="2.6 2.3" />
+    <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections: PresetSection[] }> = {
   text: {
     title: '텍스트',
     sections: [
@@ -252,6 +279,33 @@ const PRESET_PANELS: Record<ToolId, { title: string; sections: PresetSection[] }
       },
     ],
   },
+  motion: {
+    title: '이동 애니메이션',
+    caption:
+      '출발·도착 원에 카드를 연결하고 ▶를 누르면 선을 따라 움직여요. 선 위의 두 점을 각각 드래그하면 S자·파도 등 다채로운 곡선이 돼요 — 수업 자료를 손쉽게 움직이는 콘텐츠로.',
+    sections: [
+      {
+        items: [
+          {
+            id: 'once',
+            label: '한 번 이동',
+            desc: '출발 → 도착 한 번 이동 (↺로 처음으로)',
+            nodeType: 'motion',
+            patch: MOTION_PATCH(false),
+            swatch: motionSwatch,
+          },
+          {
+            id: 'loop',
+            label: '왕복 반복',
+            desc: '갔다가 돌아오기를 반복 (▶/⏸)',
+            nodeType: 'motion',
+            patch: MOTION_PATCH(true),
+            swatch: motionSwatch,
+          },
+        ],
+      },
+    ],
+  },
 };
 
 export function BoardToolbar() {
@@ -277,6 +331,12 @@ export function BoardToolbar() {
     if (type === 'video') {
       const c = viewCenterWorld();
       addPresetNodeCmd('sticky', c.x, c.y, VIDEO_PLAYER_PATCH, '동영상 플레이어 추가');
+      return;
+    }
+    // 애니메이션 버튼 클릭 = 이동 경로(한 번 이동) 바로 생성.
+    if (type === 'motion') {
+      const c = viewCenterWorld();
+      addPresetNodeCmd('motion', c.x, c.y, MOTION_PATCH(false), '이동 애니메이션 추가');
       return;
     }
     const c = viewCenterWorld();
@@ -326,6 +386,9 @@ export function BoardToolbar() {
             <div className="absolute left-full top-0 z-30 pl-t2">
               <div className="w-56 rounded-lg border border-border bg-surface p-t2 shadow-lg">
                 <p className="px-t2 pb-t1 text-overline text-fg-muted">{PRESET_PANELS[t.id].title}</p>
+                {PRESET_PANELS[t.id].caption && (
+                  <p className="px-t2 pb-t2 text-xs leading-snug text-fg-2">{PRESET_PANELS[t.id].caption}</p>
+                )}
                 {PRESET_PANELS[t.id].sections.map((sec, si) => (
                   <div key={si}>
                     {si > 0 && <div className="mx-t2 my-t1 h-px bg-border" />}
