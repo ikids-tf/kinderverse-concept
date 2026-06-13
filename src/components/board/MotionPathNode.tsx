@@ -29,12 +29,20 @@ function speedOf(n: BoardNode): number {
     목표 각도를 점프시키지 않고 이 속도로 따라가 끝에서의 급회전을 없앤다. */
 const TURN_RATE = 160;
 
-/* 구간 효과(웨이포인트) — 곡선 조절점을 '클릭'하면 그 지점의 효과 패널이 열린다.
-   data.wp1/wp2 = { speed?: 배속(0.2~2, 근처에서 점차 적용 후 회복) · jump?: 점프 ·
-   msg?: 도착 시 요소 위 말풍선 }. 위치 기준은 곡선 위 t=⅓(m1)·⅔(m2). */
+/* 구간 효과(웨이포인트) — 곡선 조절점·출발/도착 원을 '클릭'하면 그 지점의 효과
+   패널이 열린다. data.wpStart/wp1/wp2/wpEnd = { speed?: 배속(0.2~2, 근처에서 점차
+   적용 후 회복) · jump?: 점프 · msg?: 지나는 동안 요소 위 말풍선 }.
+   위치 기준은 곡선 위 t=0(출발)·⅓(m1)·⅔(m2)·1(도착). */
 type Waypoint = { speed?: number; jump?: boolean; msg?: string };
-const WP_T: Record<'m1' | 'm2', number> = { m1: 1 / 3, m2: 2 / 3 };
-const WP_KEY: Record<'m1' | 'm2', 'wp1' | 'wp2'> = { m1: 'wp1', m2: 'wp2' };
+type WpKey = 'p1' | 'm1' | 'm2' | 'p2';
+const WP_KEYS: WpKey[] = ['p1', 'm1', 'm2', 'p2'];
+const WP_T: Record<WpKey, number> = { p1: 0, m1: 1 / 3, m2: 2 / 3, p2: 1 };
+const WP_KEY: Record<WpKey, 'wpStart' | 'wp1' | 'wp2' | 'wpEnd'> = {
+  p1: 'wpStart',
+  m1: 'wp1',
+  m2: 'wp2',
+  p2: 'wpEnd',
+};
 const WP_SPEED_RADIUS = 0.18; // 속도 램프가 걸리는 반경(곡선 진행도 기준)
 const WP_JUMP_RADIUS = 0.12;
 const WP_MSG_RADIUS = 0.15;
@@ -135,8 +143,8 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
 
   const [playing, setPlaying] = useState(false);
   const [done, setDone] = useState(false);
-  // 구간 효과 — 열린 패널(조절점 클릭 토글)과 재생 중 말풍선(화면 좌표).
-  const [wpOpen, setWpOpen] = useState<null | 'm1' | 'm2'>(null);
+  // 구간 효과 — 열린 패널(조절점·출발/도착 원 클릭 토글)과 재생 중 말풍선(화면 좌표).
+  const [wpOpen, setWpOpen] = useState<null | WpKey>(null);
   // 구간 효과 패널 — 이 모션 노드 바깥(배경·다른 카드)을 클릭하면 닫는다.
   // 같은 라인의 조절점 클릭 토글(열기/닫기)과 겹치지 않게 노드 루트 기준으로 판정.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -151,8 +159,8 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
   }, [wpOpen]);
   const [bubble, setBubble] = useState<{ text: string; x: number; y: number } | null>(null);
   const bubbleOn = useRef(false);
-  const wpOf = (k: 'm1' | 'm2'): Waypoint => (node.data?.[WP_KEY[k]] ?? {}) as Waypoint;
-  const hasWp = (k: 'm1' | 'm2'): boolean => {
+  const wpOf = (k: WpKey): Waypoint => (node.data?.[WP_KEY[k]] ?? {}) as Waypoint;
+  const hasWp = (k: WpKey): boolean => {
     const w = wpOf(k);
     return (typeof w.speed === 'number' && w.speed !== 1) || !!w.jump || !!(w.msg && w.msg.trim());
   };
@@ -502,9 +510,13 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
       /* 합성 이벤트 등 — 캡처 불가해도 일반 드래그는 동작 */
     }
     let active = !linked0; // 연결 상태면 분리 임계를 넘긴 뒤부터 점이 따라온다
+    let moved = false; // 5px 데드존 — 움직임 없이 떼면 '클릭'(지점 효과 패널 토글)
     const move = (ev: PointerEvent) => {
+      const dist = Math.hypot(ev.clientX - start.x, ev.clientY - start.y);
+      if (!moved && dist < 5) return;
+      moved = true;
       if (!active) {
-        if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 28) return;
+        if (dist < 28) return;
         active = true;
         detachLink(linkKey);
         hint(
@@ -531,6 +543,11 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
       }
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      if (!moved) {
+        // 클릭 — 이 지점(출발/도착)의 효과 패널(구간 속도·점프·말풍선) 토글
+        setWpOpen((prev) => (prev === key ? null : key));
+        return;
+      }
       if (!active) return; // 연결 유지(살짝 움직임)
       // 드롭 지점의 카드에 연결 — 맨 위(z-order) 카드 우선, 어떤 카드든 가능.
       const st = useBoardStore.getState();
@@ -573,10 +590,10 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
     }
     const dur = BASE_DUR / speedOf(cur); // 슬라이더 배속 — 재생 중에도 즉시 반영
     const dt = (now - pr.last) / 1000; // 이번 프레임 경과(초) — 헤딩 회전 속도 제한에도 사용
-    // 구간 속도(웨이포인트) — 조절점 근처에 들어서면 점차 그 배속으로, 지나면 회복.
+    // 구간 속도(웨이포인트) — 지점(출발·조절점·도착) 근처에 들어서면 점차 그 배속으로, 지나면 회복.
     const teNow = ease(clamp01(pr.t));
     let wpFactor = 1;
-    for (const k of ['m1', 'm2'] as const) {
+    for (const k of WP_KEYS) {
       const sp = (cur.data?.[WP_KEY[k]] as Waypoint | undefined)?.speed;
       if (typeof sp === 'number' && sp !== 1) {
         wpFactor *= 1 + (sp - 1) * smooth01(1 - Math.abs(teNow - WP_T[k]) / WP_SPEED_RADIUS);
@@ -615,9 +632,9 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
     const t = ease(clamp01(pr.t));
     const px = bz(t, w.P1.x, w.C1.x, w.C2.x, w.P2.x);
     const py = bz(t, w.P1.y, w.C1.y, w.C2.y, w.P2.y);
-    // 구간 점프 — 조절점 위를 지날 때 포물선 모양으로 폴짝(앞뒤로 부드럽게).
+    // 구간 점프 — 지점(출발·조절점·도착) 위를 지날 때 포물선 모양으로 폴짝.
     let jumpOff = 0;
-    for (const k of ['m1', 'm2'] as const) {
+    for (const k of WP_KEYS) {
       const wj = cur.data?.[WP_KEY[k]] as Waypoint | undefined;
       if (wj?.jump) {
         jumpOff = Math.max(jumpOff, WP_JUMP_HEIGHT * smooth01(1 - Math.abs(t - WP_T[k]) / WP_JUMP_RADIUS));
@@ -629,8 +646,8 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
       x: Math.round(px - m.w / 2),
       y: Math.round(py - jumpOff - renderHeight(m) / 2),
     };
-    // 구간 말풍선 — 조절점 근처를 지나는 동안 요소 바로 위에 입력한 메시지 표시.
-    const msgWp = (['m1', 'm2'] as const)
+    // 구간 말풍선 — 지점 근처를 지나는 동안 요소 바로 위에 입력한 메시지 표시.
+    const msgWp = WP_KEYS
       .map((k) => ({ t0: WP_T[k], w: cur.data?.[WP_KEY[k]] as Waypoint | undefined }))
       .find(({ t0, w: ww }) => typeof ww?.msg === 'string' && ww.msg.trim() && Math.abs(t - t0) < WP_MSG_RADIUS);
     if (msgWp) {
@@ -819,7 +836,20 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
         )}
         {!presenting && (
           <>
-            {/* 출발 원 — 카드 위에 드래그&드롭으로 연결, 연결 상태에서 멀리 끌면 해제 */}
+            {/* 출발 원 — 카드 위에 드래그&드롭으로 연결, 연결 상태에서 멀리 끌면 해제.
+                클릭(이동 없음) = 이 지점 효과 패널 */}
+            {hasWp('p1') && (
+              <circle
+                cx={p1.x}
+                cy={p1.y}
+                r={31}
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth={2.5}
+                strokeDasharray="5 5"
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
             <circle
               cx={p1.x}
               cy={p1.y}
@@ -831,12 +861,44 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
               onPointerDown={dragEndpoint('p1')}
             >
               <title>
-                {startNode
+                {(startNode
                   ? `출발 — '${(startNode.text ?? '카드').split('\n')[0].slice(0, 12)}' 연결됨 (멀리 끌면 해제)`
-                  : '출발 — 카드 위에 놓으면 연결돼요'}
+                  : '출발 — 카드 위에 놓으면 연결돼요') + ' · 클릭 = 지점 효과'}
               </title>
             </circle>
-            {/* 도착 원 — 동일: 드롭=연결 · 멀리 끌면 해제. 연결되면 카드를 따라간다 */}
+            {/* 시작점 라벨 — '출발' (가독성 위해 흰 후광) */}
+            <text
+              x={p1.x}
+              y={p1.y}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={16}
+              fontWeight={800}
+              fill={startNode ? '#fff' : 'var(--accent)'}
+              style={{
+                pointerEvents: 'none',
+                userSelect: 'none',
+                paintOrder: 'stroke',
+                stroke: startNode ? 'var(--accent)' : 'var(--surface)',
+                strokeWidth: 3,
+              }}
+            >
+              출발
+            </text>
+            {/* 도착 원 — 동일: 드롭=연결 · 멀리 끌면 해제. 연결되면 카드를 따라간다.
+                클릭(이동 없음) = 이 지점 효과 패널 */}
+            {hasWp('p2') && (
+              <circle
+                cx={p2.x}
+                cy={p2.y}
+                r={31}
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth={2.5}
+                strokeDasharray="5 5"
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
             <circle
               cx={p2.x}
               cy={p2.y}
@@ -848,11 +910,30 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
               onPointerDown={dragEndpoint('p2')}
             >
               <title>
-                {endNode
+                {(endNode
                   ? `도착 — '${(endNode.text ?? '카드').split('\n')[0].slice(0, 12)}' 연결됨 (멀리 끌면 해제)`
-                  : '도착 — 카드 위에 놓으면 연결돼요'}
+                  : '도착 — 카드 위에 놓으면 연결돼요') + ' · 클릭 = 지점 효과'}
               </title>
             </circle>
+            {/* 끝점 라벨 — '도착' (가독성 위해 흰 후광) */}
+            <text
+              x={p2.x}
+              y={p2.y}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={16}
+              fontWeight={800}
+              fill={endNode ? '#fff' : 'var(--accent)'}
+              style={{
+                pointerEvents: 'none',
+                userSelect: 'none',
+                paintOrder: 'stroke',
+                stroke: endNode ? 'var(--accent)' : 'var(--surface)',
+                strokeWidth: 3,
+              }}
+            >
+              도착
+            </text>
             {/* 곡선 조절 점 둘(선 위 ⅓·⅔ 지점) — 각각 드래그해 S자·파도 등 다채로운
                 곡선을. 크게 + 근처만 가도 잡히는 넓은 히트 영역 */}
             {([
@@ -1144,7 +1225,7 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
       {/* 구간 효과 패널 — 조절점 클릭으로 토글. 그 지점의 속도·점프·말풍선 편집 */}
       {wpOpen && !presenting && (() => {
         const key = wpOpen;
-        const pt = key === 'm1' ? m1 : m2;
+        const pt = ({ p1, m1, m2, p2 } as Record<WpKey, P>)[key];
         const wp = wpOf(key);
         const setWp = (patch: Partial<Waypoint>) => setData({ [WP_KEY[key]]: { ...wp, ...patch } });
         const spv = typeof wp.speed === 'number' ? wp.speed : 1;

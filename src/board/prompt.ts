@@ -38,6 +38,18 @@ function openMismatch(sel: BoardNode[], text: string, intent: ReqIntent, selKind
   usePromptChoiceStore.getState().open({ ids: sel.map((n) => n.id), text, intent, selKind });
 }
 
+/** 프롬프트 안에 든 미디어 링크/주소를 뽑는다(매직 뷰어에 바로 로드용). 없으면 null.
+    http(s) URL · 프로토콜 없는 youtube/youtu.be · 맨 11자 유튜브 영상 ID를 인식. */
+function extractMediaLink(text: string): string | null {
+  const url = text.match(/https?:\/\/\S+/i);
+  if (url) return url[0];
+  const yt = text.match(/(?:youtu\.be\/[\w-]{11}|(?:www\.)?youtube\.com\/\S+)/i);
+  if (yt) return yt[0];
+  const t = text.trim();
+  if (/^[\w-]{11}$/.test(t)) return t; // 영상 ID만 붙여넣은 경우
+  return null;
+}
+
 /* Prompt-in-place on My Board: a board prompt ALWAYS acts on the board (never
    navigates to chat).
    - nothing selected → Frame Composer: classify → seed a frame → fill it
@@ -70,14 +82,22 @@ export function handleBoardPrompt(text: string): boolean {
     return true;
   }
 
-  // 유튜브 뷰어 카드가 선택된 채 프롬프트 → 영상 검색으로 본다(썸네일 3개를
-  // 뷰어 아래 가로로, ▶ 클릭 = 뷰어에서 재생).
-  const ytViewer =
-    sel.length === 1 && sel[0].type === 'sticky' && String(sel[0].data?.embed ?? '').includes('youtube-viewer')
+  // 영상 뷰어(유튜브·매직 뷰어)가 선택된 채 프롬프트:
+  //   · 링크/주소를 입력하면(유튜브·동영상·GLB) 그 뷰어에 바로 로드(매직 뷰어가 인식).
+  //   · 그 외 검색어면 유튜브에서 찾아 썸네일 3개를 뷰어 아래에(▶ = 뷰어에서 재생).
+  const videoViewer =
+    sel.length === 1 &&
+    sel[0].type === 'sticky' &&
+    /youtube-viewer|magic-viewer/.test(String(sel[0].data?.embed ?? ''))
       ? sel[0]
       : null;
-  if (ytViewer) {
-    void searchVideosForViewer(ytViewer.id, text);
+  if (videoViewer) {
+    const link = extractMediaLink(text);
+    if (link) {
+      window.dispatchEvent(new CustomEvent('kv:yt-play', { detail: { videoId: link, target: videoViewer.id } }));
+    } else {
+      void searchVideosForViewer(videoViewer.id, text);
+    }
     return true;
   }
 

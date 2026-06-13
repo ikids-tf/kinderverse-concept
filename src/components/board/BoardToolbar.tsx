@@ -225,9 +225,26 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
     ],
   },
   video: {
-    title: '동영상',
+    title: '뷰어',
     sections: [
       {
+        label: '무엇이든 — 매직 뷰어',
+        items: [
+          {
+            id: 'magic', label: '매직 뷰어', desc: '유튜브·동영상·3D를 하나로 — 링크·파일·프롬프트로 알아서',
+            nodeType: 'sticky',
+            patch: { w: 640, h: 420, autoH: false, text: '매직 뷰어', data: { embed: '/magic-viewer.html', title: '매직 뷰어' } },
+            swatch: (
+              <svg viewBox="0 0 24 24" width={19} height={19} className="text-accent" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M5 19 19 5M14 5h5v5" />
+                <path d="M7.5 7.5 9 9M4 12l1.2 1.2M12 4l1.2 1.2" />
+              </svg>
+            ),
+          },
+        ],
+      },
+      {
+        label: '개별 뷰어',
         items: [
           {
             id: 'player', label: '동영상 플레이어', desc: '내 동영상 파일 재생 (mp4·webm)',

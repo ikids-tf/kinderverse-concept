@@ -6,9 +6,10 @@ import { Icon } from '@/lib/icons';
 import { showToast } from '@/lib/toast';
 import { SHAPE_PATHS } from '@/lib/shapes';
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { editTextCmd, captureNodes, pushRedesign } from '@/board/commands';
+import { editTextCmd, captureNodes, pushRedesign, deleteNodesCmd } from '@/board/commands';
 import { runWorkflowStep, type RunnerData, type StepKind } from '@/board/workflow';
 import { saveFrameToFolder, fitFrameToChildren } from '@/board/frames';
+import { alignFrameCmd } from '@/board/align';
 import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
 import type { RouteTarget } from '@/ai/contract';
 import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
@@ -176,14 +177,63 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const cardRef = useRef<HTMLDivElement>(null);
   // 임베드 카드(GLB 뷰어) 프레젠테이션 모드 — iframe이 postMessage로 켜고 끈다.
   const [embedPresent, setEmbedPresent] = useState(false);
+  // 임베드 카드 호버 — 뷰어 UI(링크 입력·파일 선택 줄)를 호버/선택 시에만 연다.
+  const [embedHover, setEmbedHover] = useState(false);
+  // 조작 모드 — 평소엔 화면 전체가 이동 손잡이(드래그로 옮기기)이고, 조작 모드에서만
+  // 손잡이가 빠져 뷰어 안 버튼·슬라이더·입력을 직접 누른다(유튜브·동영상 뷰어).
+  const [embedInteract, setEmbedInteract] = useState(false);
+  // 3D 뷰어 전용 — 평소엔 메뉴 없이 3D만, 클릭하면 모든 UI를 보여 주고, 커서가
+  // 카드를 벗어나면 2초 뒤 다시 숨긴다(호버하면 이동 핸들만 살짝 나타난다).
+  const [show3dUi, setShow3dUi] = useState(false);
+  // 풀스크린 — body 레벨 포털 오버레이로 화면 전체를 덮는다(캔버스 변형 밖이라
+  // 확실히 꽉 차고, 보드의 다른 요소를 가려 클릭·선택을 차단). Esc·✕로 닫는다.
+  const [fsOpen, setFsOpen] = useState(false);
+  const hide3dTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const embedFrameRef = useRef<HTMLIFrameElement>(null);
+  // 헤더/푸터 빈 곳 드래그(kv-embed-drag)로 카드 이동 — 시작 스냅샷·기준 좌표.
+  const embedDragRef = useRef<{ snap: ReturnType<typeof captureNodes>; sx: number; sy: number; x: number; y: number } | null>(null);
   /** 모션 라인 연결 여부 미러 — 아래 message 리스너가 최신값을 읽는다(아래에서 계산). */
   const motionLinkedRef = useRef(false);
+  // ── 매직 뷰어(magic-viewer.html) — 담는 내용(유튜브·동영상·3D)에 따라 모드가
+  //    바뀐다. 모드에 맞춰 카드 UI를 3D형/일반형으로 전환한다. glb-viewer는 항상 3D. */
+  const embedStr = typeof node.data?.embed === 'string' ? node.data.embed : '';
+  const isMagicViewer = embedStr.includes('magic-viewer');
+  const isGlbViewer = embedStr.includes('glb-viewer');
+  const [viewerMode, setViewerMode] = useState<string>(
+    typeof node.data?.viewerMode === 'string' ? (node.data.viewerMode as string) : 'empty',
+  );
+  const viewerModeRef = useRef(viewerMode);
+  viewerModeRef.current = viewerMode;
+  // 현재 3D처럼 다뤄야 하는가(glb 뷰어 또는 3D 모드의 매직 뷰어).
+  const is3dMode = isGlbViewer || (isMagicViewer && viewerMode === '3d');
+  // iframe src는 첫 렌더에 한 번만 고정 — 내용 변경은 메시지로(src를 바꾸면 reload).
+  // 저장된 내용(viewerSrc, blob: 제외)이 있으면 ?src=로 복원해서 연다.
+  const embedSrcRef = useRef<string | null>(null);
+  if (embedSrcRef.current === null) {
+    const vs = typeof node.data?.viewerSrc === 'string' ? (node.data.viewerSrc as string) : '';
+    embedSrcRef.current = isMagicViewer && vs ? `${embedStr}?src=${encodeURIComponent(vs)}` : embedStr;
+  }
   useEffect(() => {
     if (typeof node.data?.embed !== 'string') return;
     const onMsg = (e: MessageEvent) => {
       if (e.source !== embedFrameRef.current?.contentWindow) return;
-      const d = e.data as { type?: string; on?: boolean } | null;
+      const d = e.data as { type?: string; on?: boolean; phase?: string; sx?: number; sy?: number } | null;
+      // 헤더/푸터 빈 곳 드래그 → 카드 이동(screen 좌표 델타 / 줌). 한 번의 undo로.
+      if (d?.type === 'kv-embed-drag') {
+        const b = useBoardStore.getState();
+        const cur = b.nodes[node.id];
+        if (d.phase === 'start' && cur && typeof d.sx === 'number' && typeof d.sy === 'number') {
+          embedDragRef.current = { snap: captureNodes([node.id]), sx: d.sx, sy: d.sy, x: cur.x, y: cur.y };
+        } else if (d.phase === 'move' && embedDragRef.current && typeof d.sx === 'number' && typeof d.sy === 'number') {
+          const dr = embedDragRef.current;
+          const z = b.viewport.zoom || 1;
+          b.updateNodeRaw(node.id, { x: Math.round(dr.x + (d.sx - dr.sx) / z), y: Math.round(dr.y + (d.sy - dr.sy) / z) });
+        } else if (d.phase === 'end' && embedDragRef.current) {
+          pushRedesign([node.id], embedDragRef.current.snap, '이동');
+          embedDragRef.current = null;
+        }
+        return;
+      }
       if (d?.type === 'kv-embed-present') {
         setEmbedPresent(!!d.on);
         // 프레젠테이션 진입 → 카드를 화면 중앙에 풀로(센터+줌) + 선택해서 모서리
@@ -196,8 +246,32 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         }
       }
       // 뷰어 안 모델 클릭 → 이 카드를 선택(요소 클릭 = 동작 툴바·컨트롤 표시).
+      // 3D 뷰어는 클릭하면 모든 UI를 펼친다(매 클릭마다 — 2초 자동 숨김 후 재클릭 포함).
       if (d?.type === 'kv-embed-click') {
         useBoardStore.getState().setSelection([node.id]);
+        if (isGlbViewer || (isMagicViewer && viewerModeRef.current === '3d')) setShow3dUi(true);
+      }
+      // 매직 뷰어 모드 변경(빈/유튜브/동영상/3D) → 카드 UI를 그 모드에 맞춰 전환 + 영속화.
+      const dm = e.data as { type?: string; mode?: string; src?: string } | null;
+      if (dm?.type === 'kv-viewer-mode' && typeof dm.mode === 'string') {
+        setViewerMode(dm.mode);
+        const b = useBoardStore.getState();
+        const cur = b.nodes[node.id];
+        if (cur && cur.data?.viewerMode !== dm.mode) {
+          b.updateNodeRaw(node.id, { data: { ...(cur.data ?? {}), viewerMode: dm.mode } });
+        }
+      }
+      // 매직 뷰어 현재 내용 → 새로고침 복원용으로 영속화(휘발성 blob:은 제외).
+      if (dm?.type === 'kv-viewer-content') {
+        const b = useBoardStore.getState();
+        const cur = b.nodes[node.id];
+        const src = typeof dm.src === 'string' && !dm.src.startsWith('blob:') ? dm.src : undefined;
+        if (cur && cur.data?.viewerSrc !== src) {
+          const data = { ...(cur.data ?? {}) };
+          if (src) data.viewerSrc = src;
+          else delete data.viewerSrc;
+          b.updateNodeRaw(node.id, { data });
+        }
       }
     };
     // kv:embed-mode — 모션 라인 연결/해제가 뷰어의 프레젠테이션을 켜고 끈다.
@@ -215,17 +289,79 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       window.removeEventListener('message', onMsg);
       window.removeEventListener('kv:embed-mode', onMode);
     };
-  }, [node.id, node.data?.embed]);
+  }, [node.id, node.data?.embed, isGlbViewer, isMagicViewer]);
 
-  // 카드 선택 ↔ 뷰어 컨트롤(✕·동작보기·애니 바) 동기화 — 호버가 아니라 클릭(선택)
-  // 했을 때만 컨트롤이 보인다. (뷰어 안에서 모델을 직접 클릭해도 토글된다.)
+  // 카드 선택/호버 ↔ 뷰어 UI 동기화 — 3D 뷰어 컨트롤(✕·동작보기·애니 바)은 클릭
+  // (선택)했을 때만, 일반 뷰어(유튜브·동영상)의 입력 줄은 호버만 해도 열린다.
   useEffect(() => {
     if (typeof node.data?.embed !== 'string') return;
     const w = embedFrameRef.current?.contentWindow as
       | (Window & { kvSetChrome?: (on: boolean) => void })
       | null;
-    w?.kvSetChrome?.(selected);
+    // 3D 모드: 클릭으로 켜진 show3dUi가 모든 메뉴를 보여 준다(2초 자동 숨김).
+    // 일반 모드(빈·유튜브·동영상): 입력 줄은 호버·선택·조작 중에 열린다.
+    w?.kvSetChrome?.(is3dMode ? show3dUi : selected || embedHover || embedInteract);
+  }, [selected, embedHover, embedInteract, show3dUi, is3dMode, node.data?.embed]);
+
+  // 3D UI — 모든 메뉴는 '모델 클릭'(kv-embed-click)으로만 펼친다. 단순 선택
+  // (박스 선택·이동 바 드래그로 선택됨)으로는 펼치지 않아, 끌어 옮길 때 배경이
+  // 투명하게 유지된다. 선택이 풀리거나 3D 모드가 아니게 되면 닫는다.
+  useEffect(() => {
+    if (is3dMode && selected) return;
+    setShow3dUi(false);
+    if (hide3dTimer.current) clearTimeout(hide3dTimer.current);
+  }, [selected, is3dMode]);
+  useEffect(() => () => { if (hide3dTimer.current) clearTimeout(hide3dTimer.current); }, []);
+
+  // 풀스크린 오버레이 — Esc 또는 오버레이 안 ✕(kv-fs-exit)로 닫는다.
+  useEffect(() => {
+    if (!fsOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFsOpen(false); };
+    const onMsg = (e: MessageEvent) => {
+      if ((e.data as { type?: string } | null)?.type === 'kv-fs-exit') setFsOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('message', onMsg);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('message', onMsg);
+    };
+  }, [fsOpen]);
+
+  // 뷰어 안(iframe)에서 누른 Delete/Backspace를 보드로 전달 — 모델을 클릭하면
+  // iframe(model-viewer)이 키보드 포커스를 가져가, 그냥 두면 보드의 단축키가 키를
+  // 못 받아 '선택했는데 삭제가 안 되는' 문제가 생긴다. 선택 중인 임베드 카드에서만
+  // 같은-출처 iframe 문서에 리스너를 달아 보드 선택을 삭제한다.
+  useEffect(() => {
+    if (typeof node.data?.embed !== 'string' || !selected) return;
+    const doc = embedFrameRef.current?.contentDocument;
+    if (!doc) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const b = useBoardStore.getState();
+      if (b.selection.length) {
+        e.preventDefault();
+        deleteNodesCmd(b.selection);
+      }
+    };
+    doc.addEventListener('keydown', onKey);
+    return () => doc.removeEventListener('keydown', onKey);
   }, [selected, node.data?.embed]);
+
+  // 조작 모드 해제 — 카드 선택이 풀리면(빈 곳 클릭 등) 다시 이동 모드로,
+  // Esc로도 빠져나온다. 이동 모드로 돌아오면 화면 전체가 다시 드래그 손잡이가 된다.
+  useEffect(() => {
+    if (!embedInteract) return;
+    if (!selected) {
+      setEmbedInteract(false);
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEmbedInteract(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [embedInteract, selected]);
   // 유튜브 검색 결과 카드의 ▶ → 이 뷰어(iframe)의 loadSrc로 바로 재생.
   // kv:yt-propose — 다른 요소와 선이 연결되면 뷰어 안에 "영상을 찾아 연결할까요?"
   // 확인 카드를 띄운다(확인 → 뷰어가 직접 검색해 재생).
@@ -407,11 +543,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       useBoardStore.getState().updateNodeRaw(node.id, { data: { ...node.data, title: v.trim() || '프레임' } });
     const frameBg = `border-2 ${selected ? 'border-accent' : isSub ? 'border-border/70' : 'border-border'} ${isSub ? 'bg-surface-2/50' : 'bg-surface/40'} shadow-md`;
     const loading = !!node.data?.loading;
-    // 좁은 프레임 — 상단의 제목 탭(좌)과 저장 버튼(우)이 겹치지 않게 동적 축소:
-    // 저장 버튼은 아이콘만 남기고, 제목은 남는 폭만큼만 차지하고 말줄임.
+    // 정렬 버튼 — 최상위 프레임(다른 프레임 소속이 아닌)에만. 클릭하면 안의
+    // 서브 프레임까지 재귀로 의도 보존 정렬(마인드맵 프레임은 방사형 유지라 제외).
+    const isTopFrame = !isSub && !node.data?.frameId && !node.data?.mindmap;
+    // 좁은 프레임 — 상단의 제목 탭(좌)과 정렬·저장 버튼(우)이 겹치지 않게 동적
+    // 축소: 버튼은 아이콘만 남기고, 제목은 남는 폭만큼만 차지하고 말줄임.
     const narrow = node.w < 380;
     const saveBtnW = !isSub ? (narrow ? 44 : savedBundleId ? 92 : 116) : 0; // px 근사
-    const titleMaxW = Math.max(64, node.w - 40 /* 좌우 들여쓰기 */ - saveBtnW - 16 /* 간격 */);
+    const alignBtnW = isTopFrame ? (narrow ? 44 : 72) + 8 /* 버튼 간격 */ : 0;
+    const titleMaxW = Math.max(64, node.w - 40 /* 좌우 들여쓰기 */ - saveBtnW - alignBtnW - 16 /* 간격 */);
     return (
       <div
         className="absolute"
@@ -468,9 +608,28 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         </div>
         )}
 
-        {/* save the whole frame to one folder (top composer frame only) */}
+        {/* frame actions on the top border, right side: [정렬] [폴더에 저장].
+            한 flex 행에 담아 서로 절대 겹치지 않는다(타이틀 탭과 같은 문법 —
+            경계선 위에 걸쳐 앉는 액션). 좁은 프레임에서는 라벨을 숨겨 아이콘만. */}
         {!isSub && !presenting && (
-        <button
+        <div className="absolute right-t5 top-0 z-10 inline-flex -translate-y-1/2 items-center gap-t2">
+          {isTopFrame && (
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              const ok = alignFrameCmd(node.id);
+              showToast(ok ? `'${title}' 프레임을 깔끔히 정렬했어요` : '정렬할 요소가 없어요', ok ? 'success' : 'error');
+            }}
+            title="프레임 안 요소·서브 프레임을 의도에 맞게 정렬"
+            className="inline-flex items-center gap-t2 whitespace-nowrap rounded-pill border border-border bg-surface px-t4 py-t2 text-sm font-medium text-fg-2 shadow-sm hover:border-accent hover:text-accent"
+            style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+          >
+            <Icon name="board" size={16} className="shrink-0" />
+            {!narrow && '정렬'}
+          </button>
+          )}
+          <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
@@ -484,18 +643,17 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             }, 450);
           }}
           title={savedBundleId ? '폴더에 저장됨' : '이 프레임을 폴더에 저장'}
-          // 타이틀 라벨과 같은 문법 — 경계선 위 오른쪽에 걸쳐 앉는 액션 버튼.
-          // 좁은 프레임에서는 라벨을 숨겨 아이콘만(제목 탭과 겹침 방지).
-          className={`absolute right-t5 top-0 z-10 inline-flex -translate-y-1/2 items-center gap-t2 whitespace-nowrap rounded-pill border px-t4 py-t2 text-sm font-medium shadow-sm ${
+          className={`inline-flex items-center gap-t2 whitespace-nowrap rounded-pill border px-t4 py-t2 text-sm font-medium shadow-sm ${
             savedBundleId
               ? 'border-success/40 bg-success-soft text-success'
               : 'border-border bg-surface text-fg-2 hover:border-accent hover:text-accent'
           }`}
           style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-        >
+          >
           <Icon name={savedBundleId ? 'check' : 'folder'} size={16} className="shrink-0" />
           {!narrow && (savedBundleId ? '저장됨' : '폴더에 저장')}
-        </button>
+          </button>
+        </div>
         )}
 
         {/* 프레임 하단 안내 행들(추천 칩 · 정정 칩 · 보관함 안내) — 하나의 세로 flex
@@ -694,48 +852,141 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
 
   /* ---------- sticky / memo · A4 document (data.doc) ---------- */
   if (node.type === 'sticky') {
-    // 임베드 카드(GLB 뷰어 등) — 상단 헤더로만 드래그, 본문은 iframe이 입력을 받는다.
-    // 프레젠테이션 모드(뷰어의 전체 화면 버튼): 카드 테두리·헤더·배경을 모두 숨겨
-    // 3D 모델이 보드 위에 바로 떠 있는 것처럼 보인다.
+    // 임베드 카드(뷰어) — 프레젠테이션 모드(뷰어의 전체 화면 버튼)에서는 카드
+    // 테두리·헤더·배경을 모두 숨겨 화면이 보드 위에 바로 떠 있는 것처럼 보인다.
+    //   · 3D 뷰어: 본문(iframe)이 카메라 입력을 받으므로 상단 헤더로만 드래그.
+    //   · 일반 뷰어(유튜브·동영상): 평소엔 UI 없이 화면만 — 선택 전에는 화면
+    //     전체가 드래그 손잡이(클릭 한 번 = 선택+드래그)이고, 선택하면 손잡이가
+    //     사라져 뷰어 안 UI(링크 입력·재생·전체 화면)를 그대로 조작한다.
+    //     뷰어 안 입력 줄은 호버/선택 시 kvSetChrome으로 열린다.
     if (typeof node.data?.embed === 'string') {
       const embedTitle = (node.data?.title as string) ?? '뷰어';
+      // 3D처럼 다루는지는 런타임 모드 기준(매직 뷰어는 담은 내용에 따라 바뀜).
+      const is3d = is3dMode;
+      // 3D 뷰어는 '맨몸'(테두리·배경 없이 모델만)이 기본 — UI를 펼친(클릭) 동안만
+      // 카드 크롬이 나타난다. 호버해도 배경은 투명한 채로 두고 '이동 바'만 뜬다.
+      // 선택돼 있어도 메뉴가 닫혀 있으면 맨몸으로 두되 선택 링은 남겨, 모델만
+      // 보이면서도 선택·삭제가 가능하게 한다.
+      const bare3d = is3d && !embedPresent && !show3dUi;
       return (
+       <>
         <div
           ref={cardRef}
           // iframe은 마우스 이벤트를 삼켜 캔버스 호버가 닿지 않는다 — 카드 진입을
           // 직접 감지해 연결 포트를 띄운다(kv:ports-hover → BoardCanvas).
           onPointerEnter={() => {
+            setEmbedHover(true);
+            if (hide3dTimer.current) { clearTimeout(hide3dTimer.current); hide3dTimer.current = null; }
             if (!presenting) window.dispatchEvent(new CustomEvent('kv:ports-hover', { detail: node.id }));
           }}
+          onPointerLeave={() => {
+            setEmbedHover(false);
+            // 3D 뷰어: 커서가 카드를 벗어나면 2초 뒤 메뉴(UI)를 닫아 '맨몸'(모델만)
+            // 으로 되돌린다. 선택 자체는 유지 — 그래야 곧바로 Delete로 지울 수 있다.
+            if (is3d && show3dUi) {
+              if (hide3dTimer.current) clearTimeout(hide3dTimer.current);
+              hide3dTimer.current = setTimeout(() => setShow3dUi(false), 2000);
+            }
+          }}
           className={`group/card absolute select-none overflow-hidden rounded-xl ${
-            embedPresent
-              ? 'border border-transparent bg-transparent shadow-none'
+            embedPresent || bare3d
+              ? `border border-transparent bg-transparent shadow-none${is3d && selected ? ' ' + ring : ''}`
               : `border border-border bg-surface shadow-lg ${ring}`
           }${idleCls}`}
           style={{ left, top, width: node.w, height: node.h, ...rootTransform(node), ...idleVars }}
         >
-          {!embedPresent && (
-            <div
-              onPointerDown={down}
-              className="flex items-center gap-t2 border-b border-border bg-bg-deep/60 px-t3 py-t2"
-              style={{ cursor: 'grab' }}
-            >
-              <Icon name="frame" size={14} className="text-accent" />
-              <span className="text-overline text-fg-2">{embedTitle}</span>
-            </div>
-          )}
           <iframe
             ref={embedFrameRef}
-            src={node.data.embed as string}
+            src={embedSrcRef.current ?? (node.data.embed as string)}
             title={embedTitle}
             className="block w-full"
-            style={{ border: 0, height: embedPresent ? '100%' : 'calc(100% - 33px)', background: 'transparent' }}
+            style={{ border: 0, height: '100%', background: 'transparent' }}
           />
+          {/* 3D 뷰어 이동 핸들 — 호버 시(UI를 펼치기 전) 뷰어 '아래쪽'에 가로형
+              둥근 바가 나타난다. 본문(model-viewer)은 클릭·드래그가 카메라 회전이라,
+              이동은 이 바에서만 한다(이 영역은 회전하지 않는다). UI를 펼치면(클릭)
+              하단 애니메이션 버튼과 겹치므로 바는 숨긴다. */}
+          {is3d && !presenting && !fsOpen && embedHover && !show3dUi && (
+            <div
+              onPointerDown={(e) => { setShow3dUi(false); down(e); }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              title="여기를 끌어 3D 뷰어를 옮기세요 (이 영역은 회전하지 않아요)"
+              className="absolute bottom-t4 left-1/2 z-20 inline-flex -translate-x-1/2 items-center justify-center gap-t3 rounded-pill border border-border bg-surface/95 px-t8 py-t3 text-sm font-semibold text-fg-2 shadow-lg backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
+              style={{ cursor: 'grab', pointerEvents: 'auto', minWidth: Math.min(360, Math.max(200, node.w * 0.72)) }}
+            >
+              <span aria-hidden className="text-lg leading-none tracking-[0.25em] text-fg-muted">⠿⠿⠿</span>
+              {embedTitle} 이동
+            </div>
+          )}
+          {/* 풀스크린 버튼 — 호버 시 오른쪽 상단. 클릭하면 화면 전체를 덮는 오버레이로
+              크게 보여 준다(보드의 다른 요소는 가려져 클릭·선택 불가). 3D 뷰어와 내용이
+              담긴 매직 뷰어(유튜브·동영상·3D)에 표시. embedPresent여도 편집 중이면 보인다. */}
+          {(is3d || (isMagicViewer && viewerMode !== 'empty')) && !presenting && (embedHover || show3dUi) && (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setFsOpen(true); }}
+              title="전체 화면으로 보기"
+              className="absolute right-t2 top-t2 z-20 inline-flex h-9 w-9 items-center justify-center rounded-pill border border-border bg-surface/95 text-fg-2 shadow-md backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
+              style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+            >
+              <span aria-hidden className="text-base leading-none">⛶</span>
+            </button>
+          )}
+          {/* 일반 뷰어 — '이동 모드'에서는 화면 전체가 드래그 손잡이(투명 레이어).
+              선택돼 있어도 손잡이가 남아 언제든 끌어 옮길 수 있다. 더블클릭하면
+              '조작 모드'로 바뀌어 손잡이가 빠지고 뷰어 안 UI(버튼·슬라이더·입력·
+              전체 화면)를 그대로 쓴다. 우하단 토글로도 전환, Esc·선택 해제로 복귀. */}
+          {!is3d && !embedPresent && !embedInteract && (
+            <div
+              onPointerDown={down}
+              onDoubleClick={(e) => { e.stopPropagation(); setEmbedInteract(true); }}
+              title="드래그로 이동 · 더블클릭(또는 ‘조작’)하면 뷰어 조작"
+              className="absolute inset-0"
+              style={{ cursor: 'grab' }}
+            />
+          )}
+          {/* 이동 ↔ 조작 토글 — 호버/선택/조작 중에 우하단에 표시(이동 손잡이 위). */}
+          {!is3d && !embedPresent && (selected || embedHover || embedInteract) && (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setEmbedInteract((v) => !v); }}
+              title={embedInteract ? '이동 모드 — 화면을 끌어 옮기기' : '조작 모드 — 뷰어 안 버튼·슬라이더 사용'}
+              className="absolute bottom-t2 left-t2 z-20 inline-flex items-center gap-t1 rounded-pill border border-border bg-surface/95 px-t3 py-t1 text-overline text-fg-2 shadow-sm hover:border-accent hover:text-accent"
+              style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+            >
+              <Icon name={embedInteract ? 'cursor' : 'frame'} size={12} className="shrink-0" />
+              {embedInteract ? '이동' : '조작'}
+            </button>
+          )}
           {node.locked && <LockBadge />}
           {/* 모션 연결 카드 — 모델(iframe)을 클릭하면 kv-embed-click으로 카드가
               선택되고, 선택되면 카드 위 고정 크기 툴바(동작 + 반경·속도)가 열린다. */}
           {idlePickerVisible && <IdlePicker node={node} />}
         </div>
+        {/* 풀스크린 오버레이 — body 레벨 포털이라 캔버스 변형을 벗어나 화면 전체를
+            덮는다. 보드의 다른 요소는 가려져(오버레이가 이벤트를 가로채) 클릭·선택이
+            불가하다. 같은 src로 새 iframe을 띄우고 컨트롤(애니메이션)을 켜 둔다. */}
+        {fsOpen &&
+          createPortal(
+            <div className="fixed inset-0 bg-bg" style={{ zIndex: 9999, pointerEvents: 'auto' }}>
+              {/* 풀스크린 모드(?fs)의 뷰어가 UI·1.5초 idle 페이드·종료(✕)를 직접
+                  처리하고, ✕는 kv-fs-exit 메시지로 닫기를 알린다. 매직 뷰어는 현재
+                  내용(viewerSrc)을 &src=로 넘겨 같은 화면을 이어서 보여 준다(blob 제외). */}
+              <iframe
+                src={(() => {
+                  let u = `${embedStr}${embedStr.includes('?') ? '&' : '?'}fs=1`;
+                  const vs = typeof node.data?.viewerSrc === 'string' ? node.data.viewerSrc : '';
+                  if (isMagicViewer && vs) u += `&src=${encodeURIComponent(vs)}`;
+                  return u;
+                })()}
+                title={`${embedTitle} (전체 화면)`}
+                className="h-full w-full"
+                style={{ border: 0, background: 'transparent' }}
+              />
+            </div>,
+            document.body,
+          )}
+       </>
       );
     }
     // Mind-map center — the topic, a prominent coral node.

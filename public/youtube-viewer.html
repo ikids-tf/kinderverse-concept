@@ -28,15 +28,17 @@
     color: var(--fg);
   }
 
-  /* ── 상단: 유튜브 링크 입력 ────────────────────────────────────── */
+  /* ── 상단: 유튜브 링크 입력 — 평소엔 숨김(보드에선 화면만 보인다).
+        보드 카드가 호버/선택 시 kvSetChrome으로 연다. ── */
   header {
-    display: flex;
+    display: none;
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
   }
+  body.chrome:not(.present) header { display: flex; }
   #url {
     flex: 1;
     min-width: 0;
@@ -168,7 +170,7 @@
     ></iframe>
     <div id="empty">
       <span class="tv">📺</span>
-      <span>유튜브 링크를 붙여넣고 재생을 누르세요</span>
+      <span>마우스를 올리면 링크 입력 줄이 열려요</span>
     </div>
     <span id="err">링크에서 영상을 찾지 못했어요 — 유튜브 주소인지 확인해 주세요</span>
     <div id="ask">
@@ -262,6 +264,11 @@
         errEl.style.display = 'inline-block';
       }
     });
+
+    // 보드 카드가 호버/선택에 맞춰 입력 줄(UI)을 열고 닫는다.
+    window.kvSetChrome = (on) => document.body.classList.toggle('chrome', !!on);
+    // 보드 카드의 전체 화면 버튼/모션 연결이 프레젠테이션을 켜고 끈다.
+    window.kvSetPresent = setPresent;
 
     // 외부에서 URL로 바로 재생할 수 있게 — 테스트·딥링크용.
     window.loadSrc = (u) => { urlEl.value = u; play(u); };

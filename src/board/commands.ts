@@ -311,15 +311,21 @@ function cursorWorldPoint(): { x: number; y: number } | null {
   };
 }
 
-/** 프레임이 포함되면 그 자식 카드(data.frameId)까지 함께. */
+/** 프레임이 포함되면 그 하위 전체(data.frameId)까지 함께 — 서브 프레임과 그 안의
+    카드(손주)까지 재귀로. 이전엔 한 단계만 펼쳐 중첩 프레임 속 자료가 복사에서
+    빠졌다(붙여넣으면 빈 서브 프레임). */
 function expandWithFrameChildren(ids: string[]): string[] {
   const b = board();
   const set = new Set(ids);
-  for (const id of ids) {
-    if (b.nodes[id]?.type === 'frame') {
-      Object.values(b.nodes).forEach((n) => {
-        if (n.data?.frameId === id) set.add(n.id);
-      });
+  const queue = [...ids];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (b.nodes[id]?.type !== 'frame') continue;
+    for (const n of Object.values(b.nodes)) {
+      if (n.data?.frameId === id && !set.has(n.id)) {
+        set.add(n.id);
+        queue.push(n.id);
+      }
     }
   }
   return [...set];

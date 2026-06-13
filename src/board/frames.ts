@@ -22,19 +22,14 @@ export function childrenOf(frameId: string): BoardNode[] {
   return Object.values(b.nodes).filter((n) => n.data?.frameId === frameId);
 }
 
-/** Cards geometrically inside the frame box (fallback / rebinder). */
-export function geometryChildrenOf(frameId: string): string[] {
-  const b = useBoardStore.getState();
-  const f = b.nodes[frameId];
-  if (!f || f.type !== 'frame') return [];
-  const fb = worldBox(f);
-  return Object.values(b.nodes)
-    .filter((n) => {
-      if (n.id === frameId || n.type === 'frame') return false;
-      const nb = worldBox(n);
-      return nb.x < fb.x + fb.w && nb.x + nb.w > fb.x && nb.y < fb.y + fb.h && nb.y + Math.max(nb.h, 60) > fb.y;
-    })
-    .map((n) => n.id);
+/** 박스 b가 박스 a 안에 '완전히' 들어가 있는가(1px 관용). */
+function boxContains(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean {
+  return b.x >= a.x - 1 && b.y >= a.y - 1 && b.x + b.w <= a.x + a.w + 1 && b.y + b.h <= a.y + a.h + 1;
+}
+
+/** 두 박스가 조금이라도 겹치는가. */
+function boxOverlaps(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean {
+  return b.x < a.x + a.w && b.x + b.w > a.x && b.y < a.y + a.h && b.y + b.h > a.y;
 }
 
 /** 프레임의 모든 하위 노드 id — 중첩 프레임과 그 안의 카드까지 재귀(tagged 기준).
@@ -77,11 +72,48 @@ function enclosingFrame(frameId: string): string | undefined {
   return best;
 }
 
-/** Union of tagged subtree + geometric children — the set that moves with the frame.
-    중첩 프레임과 그 자식(손주)까지 재귀로 포함해 함께 끌려온다. */
+/** The set that moves with the frame. 동반 이동 규칙:
+    1) 이 프레임 소속(tagged) 하위 전체 — 중첩 프레임·손주까지 재귀로 항상 따라온다.
+    2) 다른 프레임 소속 요소 — 이 프레임이 그 '소유 프레임 안에 완전히 들어가 있는'
+       중첩 상황이고, 요소도 이 프레임 안에 완전히 들어와 있을 때만 따라온다.
+       소유 프레임과 밖에서 살짝 겹친 프레임은 (요소를 완전히 덮었더라도) 남의
+       요소를 뺏어 가지 않는다.
+    3) 어느 프레임에도 속하지 않은 보드 단독 요소 — 살짝만 겹쳐도 따라온다.
+    4) 프레임은 단독/소속과 무관하게 '완전히' 들어와 있을 때만 따라온다(+그 하위 전체).
+       살짝 겹친 프레임은 절대 따라오지 않는다. */
 export function frameMoveSet(frameId: string): string[] {
-  const ids = new Set<string>(geometryChildrenOf(frameId));
-  for (const id of frameSubtree(frameId)) ids.add(id);
+  const b = useBoardStore.getState();
+  const f = b.nodes[frameId];
+  if (!f || f.type !== 'frame') return [];
+  const fb = worldBox(f);
+  // 1) 소속 하위는 항상 — 단, 모션 라인(이동 애니메이션)은 제외. 모션은 연결된
+  //    카드를 따라 엔드포인트가 알아서 따라가므로, 프레임과 함께 통째로 옮기면
+  //    이중으로 움직이거나 자유 끝점이 끌려간다. (프레임에 태깅돼 있어도 제외.)
+  const ids = new Set<string>(frameSubtree(frameId).filter((id) => b.nodes[id]?.type !== 'motion'));
+  for (const n of Object.values(b.nodes)) {
+    if (n.id === frameId || ids.has(n.id)) continue;
+    // 모션 라인은 프레임과 박스가 겹쳐도 따라오지 않는다(연결 카드만 따라간다).
+    if (n.type === 'motion') continue;
+    const nb = worldBox(n);
+    if (n.type === 'frame') {
+      // 4) 프레임 — 완전 포함일 때만. 이 프레임의 조상이면(사이클) 제외.
+      if (boxContains(fb, nb) && !frameSubtree(n.id).includes(frameId)) {
+        ids.add(n.id);
+        frameSubtree(n.id).forEach((d) => ids.add(d));
+      }
+      continue;
+    }
+    const ownerId = n.data?.frameId as string | undefined;
+    const owner = ownerId && ownerId !== frameId && !ids.has(ownerId) ? b.nodes[ownerId] : undefined;
+    if (owner) {
+      // 2) 다른 프레임 소속 — 이 프레임이 소유 프레임 '안'(완전 포함)에 있고
+      //    요소도 완전 포함일 때만(프레임 안에 만든 새 중첩 프레임의 경우).
+      if (boxContains(worldBox(owner), fb) && boxContains(fb, nb)) ids.add(n.id);
+    } else if (boxOverlaps(fb, nb)) {
+      // 3) 보드 단독 요소 — 살짝 겹쳐도 함께.
+      ids.add(n.id);
+    }
+  }
   return [...ids];
 }
 
@@ -144,13 +176,23 @@ export function fitFrameToChildren(frameId: string, seen?: Set<string>): void {
   const minY = Math.min(...boxes.map((bx) => bx.y));
   const maxX = Math.max(...boxes.map((bx) => bx.x + bx.w));
   const maxY = Math.max(...boxes.map((bx) => bx.y + bx.h));
-  const x = minX - FRAME_PAD;
-  const y = minY - FRAME_PAD;
-  const w = maxX - minX + FRAME_PAD * 2;
   // Respect a pinned aligned height (set when this frame was aligned beside another)
   // so a content re-fit never shrinks it below its neat side-by-side height.
   const alignedH = typeof f.data?.alignedH === 'number' ? f.data.alignedH : 0;
-  const h = Math.max(maxY - minY + FRAME_PAD * 2, alignedH);
+  const alignedW = typeof f.data?.alignedW === 'number' ? f.data.alignedW : 0;
+  let x = minX - FRAME_PAD;
+  let y = minY - FRAME_PAD;
+  let w = maxX - minX + FRAME_PAD * 2;
+  let h = Math.max(maxY - minY + FRAME_PAD * 2, alignedH);
+  if (alignedW) {
+    // 정렬로 '페이지'가 된 프레임(align.ts) — 내용이 박스 안에 있는 한 위치·크기를
+    // 그대로 유지하고(재포장이 페이지를 줄이거나 끌고 다니지 않게), 내용이 밖으로
+    // 나가면 그쪽으로만 최소 확장한다.
+    x = Math.min(f.x, minX - FRAME_PAD);
+    y = Math.min(f.y, minY - FRAME_PAD);
+    w = Math.max(alignedW, maxX + FRAME_PAD - x);
+    h = Math.max(alignedH, maxY + FRAME_PAD - y);
+  }
   if (f.x !== x || f.y !== y || f.w !== w || f.h !== h) {
     b.updateNodeRaw(frameId, { x, y, w, h });
   }

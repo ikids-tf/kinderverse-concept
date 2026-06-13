@@ -28,15 +28,17 @@
     color: var(--fg);
   }
 
-  /* ── 상단: 파일 선택 ───────────────────────────────────────────── */
+  /* ── 상단: 파일 선택 — 평소엔 숨김(보드에선 화면만 보인다).
+        보드 카드가 호버/선택 시 kvSetChrome으로 연다. ── */
   header {
-    display: flex;
+    display: none;
     align-items: center;
     gap: 10px;
     padding: 10px 12px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
   }
+  body.chrome:not(.present) header { display: flex; }
   .btn {
     display: inline-flex;
     align-items: center;
@@ -211,7 +213,7 @@
     <video id="v" playsinline></video>
     <div id="empty">
       <span class="clap">🎬</span>
-      <span>파일 선택 — 또는 동영상을 여기로 끌어다 놓으세요</span>
+      <span>마우스를 올리면 파일 선택 줄이 열려요</span>
     </div>
     <button id="bigPlay" type="button" title="재생">▶</button>
     <div id="controls">
@@ -306,6 +308,11 @@
     };
     document.getElementById('fs').addEventListener('click', () => setPresent(true));
     document.getElementById('exit').addEventListener('click', () => setPresent(false));
+
+    // 보드 카드가 호버/선택에 맞춰 파일 선택 줄(UI)을 열고 닫는다.
+    window.kvSetChrome = (on) => document.body.classList.toggle('chrome', !!on);
+    // 보드 카드의 전체 화면 버튼/모션 연결이 프레젠테이션을 켜고 끈다.
+    window.kvSetPresent = setPresent;
 
     // 외부에서 URL로 바로 재생 — 테스트·딥링크용.
     window.loadSrc = (u) => {

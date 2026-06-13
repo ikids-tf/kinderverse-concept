@@ -27,9 +27,15 @@
     display: flex;
     flex-direction: column;
     font-family: var(--font-sans);
-    background: var(--bg);
+    background: transparent; /* 보드 임베드 — 평소엔 메뉴 없이 3D만 떠 보인다 */
     color: var(--fg);
   }
+
+  /* 보드 임베드 기본 — '클릭'(.chrome) 전에는 메뉴(파일선택·애니메이션·보관함)를
+     숨겨 3D만 보인다. 호버 시 이동 핸들은 보드(부모 카드)가 그려 준다. */
+  body:not(.present):not(.chrome) header,
+  body:not(.present):not(.chrome) footer,
+  body:not(.present):not(.chrome) #thumbs { display: none; }
 
   /* ── 상단: 파일 선택 ───────────────────────────────────────────── */
   header {
@@ -69,7 +75,7 @@
     width: 100%;
     height: 100%; /* 웹컴포넌트 기본(:host 300×150) 높이 고정 해제 — 영역을 꽉 채운다 */
     min-height: 0;
-    background: var(--bg-deep);
+    background: transparent; /* 보드 위에 3D만 떠 보이게(메뉴 숨김 기본값과 어울림) */
   }
   #empty {
     position: absolute;
@@ -250,6 +256,36 @@
   }
   body.present.chrome #animToggle { opacity: 0.55; pointer-events: auto; }
   body.present.chrome #animToggle:hover { opacity: 1; }
+
+  /* ── 풀스크린(보드 오버레이) 모드 — 헤더·푸터를 보여 주고, 마우스가 1.5초
+     멈추면 상단(헤더)·하단(푸터)·종료 버튼이 페이드아웃, 움직이면 페이드인. ── */
+  body.fs header,
+  body.fs footer { transition: opacity 300ms ease; }
+  body.fs #thumbs { display: none; } /* 풀스크린에선 보관함 스트립 숨김 */
+  body.fs.fs-idle header,
+  body.fs.fs-idle footer,
+  body.fs.fs-idle #fsExit { opacity: 0; pointer-events: none; }
+  #fsExit {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 20;
+    display: none;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-2);
+    font-size: 16px;
+    cursor: pointer;
+    opacity: 1;
+    transition: opacity 300ms ease;
+  }
+  body.fs #fsExit { display: inline-flex; }
+  #fsExit:hover { border-color: var(--accent); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -259,7 +295,7 @@
       <input id="file" type="file" accept=".glb,.gltf,model/gltf-binary" hidden />
     </label>
     <span id="name">GLB 파일을 선택하세요</span>
-    <button id="fs" class="icon-btn" type="button" title="전체 화면 (수업용 — 메뉴 숨기고 보드 위에 3D만)">⛶</button>
+    <!-- 전체 화면은 보드(부모 카드)의 호버 ⛶ 버튼이 처리한다(뷰어 자체 버튼 없음). -->
   </header>
 
   <div class="stage">
@@ -282,6 +318,8 @@
 
   <div id="thumbs"></div>
   <footer id="anims"><span class="hint">모델을 불러오면 애니메이션 목록이 표시돼요</span></footer>
+  <!-- 풀스크린(보드 오버레이) 종료 — 부모(보드)에 알려 오버레이를 닫는다. -->
+  <button id="fsExit" type="button" title="전체 화면 종료 (Esc)">✕</button>
 
   <script type="module">
     const mv = document.getElementById('mv');
@@ -431,7 +469,6 @@
       document.body.classList.toggle('present', on);
       try { window.parent?.postMessage({ type: 'kv-embed-present', on }, '*'); } catch { /* standalone */ }
     };
-    document.getElementById('fs').addEventListener('click', () => setPresent(true));
     document.getElementById('exit').addEventListener('click', () => setPresent(false));
     // 보드(부모)가 모션 라인 연결 시 호출 — 연결되면 자동으로 프레젠테이션 모드.
     window.kvSetPresent = setPresent;
@@ -480,6 +517,54 @@
         }
       } catch { /* 무시 */ }
     };
+
+    // ── 풀스크린(보드 오버레이) 모드 (?fs) — 헤더·푸터를 켜 두고(chrome), 종료(✕)
+    //    버튼을 띄운다. 마우스가 1.5초 멈추면 상·하단 UI가 페이드아웃, 움직이면
+    //    페이드인. 종료는 부모(보드)에 알려 오버레이를 닫는다.
+    if (new URLSearchParams(location.search).has('fs')) {
+      document.body.classList.add('fs', 'chrome');
+      let idleT = null;
+      const bump = () => {
+        document.body.classList.remove('fs-idle');
+        clearTimeout(idleT);
+        idleT = setTimeout(() => document.body.classList.add('fs-idle'), 1500);
+      };
+      document.addEventListener('pointermove', bump, { passive: true });
+      document.addEventListener('pointerdown', bump, { passive: true });
+      document.getElementById('fsExit').addEventListener('click', () => {
+        try { window.parent?.postMessage({ type: 'kv-fs-exit' }, '*'); } catch { /* standalone */ }
+      });
+      bump(); // 진입 직후 타이머 가동(1.5초 무동작이면 바로 페이드아웃)
+    }
+
+    // ── 카드 이동 — 헤더(상단)·푸터(하단)의 '빈 곳'(버튼·입력·파일선택이 아닌
+    //    영역)을 끌면 부모(보드)의 카드가 움직인다. 본문(model-viewer)은 카메라
+    //    회전이라 거기로는 이동하지 않으므로, UI를 펼친 상태에서 이 바들이 이동
+    //    손잡이가 된다. 프레임 간 일관된 screen 좌표로 전달한다.
+    (function initCardDrag() {
+      let dragging = false;
+      const isHandle = (t) => {
+        const onBar = t && (t.closest('header') || t.closest('footer'));
+        if (!onBar) return false;
+        return !t.closest('button') && !t.closest('input') && !t.closest('label');
+      };
+      const post = (phase, e) => {
+        try { window.parent?.postMessage({ type: 'kv-embed-drag', phase, sx: e?.screenX, sy: e?.screenY }, '*'); } catch { /* standalone */ }
+      };
+      document.addEventListener('pointerdown', (e) => {
+        if (!isHandle(e.target)) return;
+        dragging = true;
+        post('start', e);
+        e.preventDefault();
+        // 실제 요소에 포인터 캡처 — 끌다가 커서가 바 밖/모델 위로 가도 move·up 수신
+        // (pointerup에서 자동 해제). 캡처해도 document로 버블링돼 move 리스너가 받는다.
+        try { e.target.setPointerCapture?.(e.pointerId); } catch { /* 무시 */ }
+      });
+      document.addEventListener('pointermove', (e) => { if (dragging) post('move', e); }, { passive: true });
+      const end = () => { if (dragging) { dragging = false; post('end'); } };
+      document.addEventListener('pointerup', end);
+      document.addEventListener('pointercancel', end);
+    })();
 
     // 외부(보드 카드 등)에서 URL로 바로 로드할 수 있게 — 테스트·딥링크용.
     window.loadSrc = (u) => { mv.src = u; nameEl.textContent = u.split('/').pop(); };

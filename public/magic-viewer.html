@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>매직 뷰어</title>
+<style>
+  /* Milray Park 토큰과 동일 값(독립 HTML이라 변수로 복제) — 임의 색 추가 없음 */
+  :root {
+    --bg: #F8F7F2;
+    --bg-deep: #F1EEE6;
+    --surface: #FFFFFF;
+    --border: #E7E0D4;
+    --fg: #141311;
+    --fg-2: #56524B;
+    --fg-muted: #8C887F;
+    --accent: #F2733E;
+    --accent-hover: #E5602B;
+    --accent-soft: #FBE6D9;
+    --font-sans: 'Pretendard', 'Hanken Grotesk', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex;
+    flex-direction: column;
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--fg);
+  }
+  /* 3D 모드는 모델만 떠 보이게 — 보드의 '맨몸' 카드와 어울리는 투명 배경 */
+  body.mode-3d { background: transparent; }
+
+  /* ── 상단: 링크 입력 + 파일 선택 — 평소엔 숨김(보드에선 화면만).
+        보드 카드가 호버/선택 시 kvSetChrome으로 연다. ── */
+  header {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  body.chrome:not(.present) header { display: flex; }
+  #url {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--fg);
+    font: 400 12px var(--font-sans);
+    outline: none;
+  }
+  #url:focus { border-color: var(--accent); }
+  #url::placeholder { color: var(--fg-muted); }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font: 600 13px var(--font-sans);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--accent-hover); }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-2);
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── 가운데: 콘텐츠 무대 — 모드에 맞는 엔진 하나만 보인다 ── */
+  .stage { position: relative; flex: 1; display: flex; min-height: 0; background: var(--bg-deep); }
+  body.mode-3d .stage, body.present .stage { background: transparent; }
+  #yt {
+    flex: 1; width: 100%; height: 100%; border: 0; display: none;
+    background: #000; /* 영상 레터박스 — 플레이어 고유 배경 */
+  }
+  body.mode-yt #yt { display: block; }
+  video {
+    flex: 1; width: 100%; height: 100%; min-height: 0;
+    object-fit: contain; background: transparent; display: none;
+  }
+  body.mode-video video { display: block; }
+  #mvHost { display: none; flex: 1; min-height: 0; }
+  body.mode-3d #mvHost { display: flex; }
+  #mvHost model-viewer { flex: 1; width: 100%; height: 100%; min-height: 0; background: transparent; }
+
+  /* 빈 상태 — 무엇이든 담는 안내 */
+  #empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--fg-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 0 18px;
+    pointer-events: none;
+  }
+  body:not(.mode-empty) #empty { display: none; }
+  #empty .wand { font-size: 36px; }
+  #empty .title { font-weight: 700; font-size: 14px; color: var(--fg-2); }
+  #empty .kinds { color: var(--fg-muted); }
+  .stage.dropping::after {
+    content: '여기에 놓으면 바로 열려요';
+    position: absolute;
+    inset: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed var(--accent);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.6);
+    color: var(--accent);
+    font: 600 13px var(--font-sans);
+    pointer-events: none;
+  }
+  #err {
+    display: none;
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    transform: translateX(-50%);
+    z-index: 8;
+    max-width: 92%;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--fg-2);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── 동영상 컨트롤(video 모드) ── */
+  #bigPlay {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 58px;
+    height: 58px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(20, 19, 17, 0.55);
+    color: #fff;
+    font-size: 22px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+    transition: background 150ms ease, transform 150ms ease;
+  }
+  #bigPlay:hover { background: var(--accent); transform: translate(-50%, -50%) scale(1.06); }
+  body.mode-video.paused #bigPlay { display: inline-flex; }
+  #controls {
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    transform: translateX(-50%);
+    display: none;
+    align-items: center;
+    gap: 8px;
+    width: min(calc(100% - 24px), 560px);
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 14px rgba(20, 19, 17, 0.10);
+  }
+  body.mode-video #controls { display: flex; }
+  #controls button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--fg-2);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #controls button:hover { background: var(--bg-deep); color: var(--accent); }
+  #controls button.on { color: var(--accent); }
+  #seek { flex: 1; min-width: 0; height: 4px; accent-color: var(--accent); cursor: pointer; }
+  #time { flex: 0 0 auto; font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--fg-muted); white-space: nowrap; }
+
+  /* ── 하단: 3D 애니메이션 목록(3d 모드) ── */
+  footer {
+    display: none;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  body.mode-3d.chrome:not(.present) footer { display: flex; }
+  footer .label { font-size: 11px; font-weight: 600; color: var(--fg-muted); margin-right: 2px; }
+  footer .hint { font-size: 12px; color: var(--fg-muted); }
+  footer button {
+    max-width: 150px;
+    overflow: hidden;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-2);
+    font: 500 12px var(--font-sans);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  footer button:hover { border-color: var(--accent); color: var(--accent); }
+  footer button.on { border-color: var(--accent); background: var(--accent); color: #fff; }
+
+  /* ── 연결 제안 — 보드에서 다른 요소와 선이 이어지면 묻는 확인 카드 ── */
+  #ask {
+    display: none;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9;
+    max-width: 86%;
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgba(20, 19, 17, 0.12);
+    text-align: center;
+  }
+  #ask p { margin: 0 0 12px; font-size: 13px; color: var(--fg); }
+  #ask p b { color: var(--accent); }
+  #ask .row { display: flex; gap: 8px; justify-content: center; }
+  .btn.ghost { background: var(--surface); color: var(--fg-2); border: 1px solid var(--border); }
+  .btn.ghost:hover { background: var(--bg-deep); color: var(--fg); }
+
+  /* ── 프레젠테이션(수업·모션 연결) — 메뉴 숨김 + 배경 투명 → 보드 위에 화면만 ── */
+  #exit { position: absolute; top: 8px; right: 8px; display: none; z-index: 10; opacity: 0.55; }
+  #exit:hover { opacity: 1; }
+  body.present { background: transparent; }
+  body.present header, body.present footer { display: none; }
+  body.present #exit { display: inline-flex; }
+  body.present #controls, body.present #bigPlay { display: none; }
+
+  /* ── 풀스크린(보드 오버레이, ?fs) — 마우스가 1.5초 멈추면 상·하단 UI 페이드 ── */
+  body.fs header, body.fs footer, body.fs #controls { transition: opacity 300ms ease; }
+  body.fs.fs-idle header,
+  body.fs.fs-idle footer,
+  body.fs.fs-idle #controls,
+  body.fs.fs-idle #fsExit { opacity: 0; pointer-events: none; }
+  #fsExit {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 20;
+    display: none;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-2);
+    font-size: 16px;
+    cursor: pointer;
+    opacity: 1;
+    transition: opacity 300ms ease;
+  }
+  body.fs #fsExit { display: inline-flex; }
+  #fsExit:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body class="mode-empty paused">
+  <header>
+    <label class="btn">
+      파일 선택
+      <input id="file" type="file" accept="video/*,.glb,.gltf,model/gltf-binary" hidden />
+    </label>
+    <input id="url" type="text" inputmode="url" placeholder="유튜브 링크 · 동영상 링크 · GLB 링크를 붙여넣으세요" />
+    <button id="go" class="btn" type="button">열기</button>
+  </header>
+
+  <div class="stage" id="stage">
+    <iframe
+      id="yt"
+      title="YouTube"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      allowfullscreen
+      referrerpolicy="strict-origin-when-cross-origin"
+    ></iframe>
+    <video id="v" playsinline></video>
+    <div id="mvHost"></div>
+
+    <div id="empty">
+      <span class="wand">🪄</span>
+      <span class="title">매직 뷰어 — 무엇이든 담아 보세요</span>
+      <span class="kinds">유튜브 링크 · 동영상 파일/링크(mp4·webm) · 3D 모델(GLB)</span>
+      <span>마우스를 올리면 입력 줄이 열려요 — 파일을 끌어다 놓아도 돼요</span>
+      <span>뷰어를 선택하고 프롬프트로 "○○ 영상 찾아줘"라고 해도 돼요</span>
+    </div>
+
+    <button id="bigPlay" type="button" title="재생">▶</button>
+    <div id="controls">
+      <button id="play" type="button" title="재생/일시정지">▶</button>
+      <input id="seek" type="range" min="0" max="1000" value="0" />
+      <span id="time">0:00 / 0:00</span>
+      <button id="mute" type="button" title="음소거">🔊</button>
+      <button id="loop" type="button" title="반복 재생">🔁</button>
+    </div>
+
+    <span id="err"></span>
+    <div id="ask">
+      <p id="askMsg"></p>
+      <div class="row">
+        <button id="askOk" class="btn" type="button">확인</button>
+        <button id="askNo" class="btn ghost" type="button">취소</button>
+      </div>
+    </div>
+    <button id="exit" class="icon-btn" type="button" title="프레젠테이션 종료">✕</button>
+  </div>
+
+  <footer id="anims"><span class="hint">3D 모델을 불러오면 애니메이션 목록이 표시돼요</span></footer>
+  <button id="fsExit" type="button" title="전체 화면 종료 (Esc)">✕</button>
+
+  <script>
+    /* 매직 뷰어 — 담는 내용(유튜브 링크 · 동영상 파일/링크 · GLB)을 인식해 그에
+       맞는 엔진과 UI로 변신하는 단일 뷰어. 보드 카드와의 계약(kvSetChrome ·
+       kvSetPresent · loadSrc · proposeSearch · setHeading · kv-embed-click ·
+       kv-embed-drag · ?fs)은 기존 세 뷰어와 동일 — 카드 쪽 코드가 그대로 동작한다. */
+    const stage = document.getElementById('stage');
+    const urlEl = document.getElementById('url');
+    const errEl = document.getElementById('err');
+    const yt = document.getElementById('yt');
+    const v = document.getElementById('v');
+    const mvHost = document.getElementById('mvHost');
+    const animsEl = document.getElementById('anims');
+    let mode = 'empty';
+    let mv = null; // model-viewer 인스턴스(3D 첫 사용 때 lazy 로드)
+    let objectUrl = null;
+    let currentSrc = null; // 풀스크린 핸드오프용(영상/모델의 현재 소스)
+
+    const err = (msg) => {
+      errEl.textContent = msg;
+      errEl.style.display = msg ? 'inline-block' : 'none';
+    };
+
+    /** 모드 전환 + 부모(보드 카드)에 알림 — 카드가 상호작용 방식을 모드에 맞춘다. */
+    function setMode(next) {
+      mode = next;
+      document.body.classList.remove('mode-empty', 'mode-yt', 'mode-video', 'mode-3d');
+      document.body.classList.add('mode-' + next);
+      try { window.parent?.postMessage({ type: 'kv-viewer-mode', mode: next }, '*'); } catch { /* standalone */ }
+    }
+    function reportContent(src) {
+      currentSrc = src;
+      try { window.parent?.postMessage({ type: 'kv-viewer-content', mode, src }, '*'); } catch { /* standalone */ }
+    }
+
+    /* ── 내용 인식 ───────────────────────────────────────────────── */
+    function ytId(raw) {
+      const s = (raw || '').trim();
+      if (!s) return null;
+      if (/^[\w-]{11}$/.test(s)) return s;
+      try {
+        const u = new URL(s.includes('://') ? s : `https://${s}`);
+        if (!/(^|\.)((youtube|youtube-nocookie)\.com|youtu\.be)$/.test(u.hostname)) return null;
+        if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('/')[0] || null;
+        const vv = u.searchParams.get('v');
+        if (vv) return vv;
+        const m = u.pathname.match(/\/(shorts|live|embed)\/([\w-]{11})/);
+        return m ? m[2] : null;
+      } catch { return null; }
+    }
+    const isGlbUrl = (s) => /\.(glb|gltf)(\?|#|$)/i.test(s);
+    const isVideoUrl = (s) => /\.(mp4|webm|ogv|mov|m4v)(\?|#|$)/i.test(s) || s.startsWith('blob:');
+
+    /* ── 엔진들 ─────────────────────────────────────────────────── */
+    function playYt(id) {
+      setMode('yt');
+      yt.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`; // nocookie — 교실용
+      reportContent(id);
+      err('');
+    }
+    function playVideo(src, name) {
+      setMode('video');
+      v.src = src;
+      document.body.classList.add('paused');
+      v.play().catch(() => { /* 자동재생 차단 — 중앙 ▶로 시작 */ });
+      reportContent(src);
+      if (name) urlEl.placeholder = name;
+      err('');
+    }
+    async function show3d(src, name) {
+      setMode('3d');
+      err('');
+      if (!mv) {
+        // model-viewer는 무거워(three.js) 3D를 처음 담을 때만 불러온다.
+        await import('https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js');
+        mv = document.createElement('model-viewer');
+        mv.setAttribute('camera-controls', '');
+        mv.setAttribute('autoplay', '');
+        mv.setAttribute('interaction-prompt', 'none');
+        mv.setAttribute('shadow-intensity', '0.6');
+        mv.setAttribute('exposure', '1');
+        mv.setAttribute('interpolation-decay', '260');
+        mvHost.append(mv);
+        mv.addEventListener('load', () => renderAnims(mv.availableAnimations || []));
+        mv.addEventListener('error', () => err('모델을 불러오지 못했어요 — GLB/glTF 파일인지 확인해 주세요'));
+        // 모델 클릭 → 보드 카드 선택(3D UX: 클릭 = 모든 UI 표시)
+        mv.addEventListener('click', () => {
+          try { window.parent?.postMessage({ type: 'kv-embed-click' }, '*'); } catch { /* standalone */ }
+        });
+      }
+      mv.src = src;
+      reportContent(src);
+      if (name) urlEl.placeholder = name;
+    }
+
+    /** 3D 애니메이션 목록 → 하단 칩(공통 접두사는 떼고 짧게). */
+    function renderAnims(list) {
+      animsEl.innerHTML = '';
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = '애니메이션';
+      animsEl.append(label);
+      if (!list.length) {
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = '이 모델에는 애니메이션이 없어요';
+        animsEl.append(hint);
+        return;
+      }
+      let prefix = '';
+      if (list.length > 1) {
+        prefix = list[0];
+        for (const n of list) { while (prefix && !n.startsWith(prefix)) prefix = prefix.slice(0, -1); }
+        if (prefix.length < 4) prefix = '';
+      }
+      list.forEach((n, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = prefix ? (n.slice(prefix.length).replace(/^[_\-. ]+/, '') || n) : n;
+        b.title = n;
+        b.addEventListener('click', () => {
+          mv.animationName = n;
+          mv.play({ repetitions: Infinity });
+          [...animsEl.querySelectorAll('button')].forEach((c) => c.classList.toggle('on', c === b));
+        });
+        animsEl.append(b);
+        if (i === 0) b.click();
+      });
+    }
+
+    /* ── 열기(링크/파일) — 내용에 맞는 엔진으로 ─────────────────── */
+    function open(raw) {
+      const s = (raw || '').trim();
+      if (!s) return;
+      const id = ytId(s);
+      if (id) { playYt(id); return; }
+      if (isGlbUrl(s)) { void show3d(s); return; }
+      if (isVideoUrl(s)) { playVideo(s); return; }
+      err('유튜브 링크 · 동영상(mp4·webm) · GLB 링크만 열 수 있어요');
+    }
+    function openFile(f) {
+      if (!f) return;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(f);
+      const name = f.name || '';
+      if (/\.(glb|gltf)$/i.test(name) || f.type === 'model/gltf-binary') { void show3d(objectUrl, name); return; }
+      if (f.type.startsWith('video/')) { playVideo(objectUrl, name); return; }
+      URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+      err('동영상 파일(mp4·webm)이나 3D 모델(GLB)을 선택해 주세요');
+    }
+
+    document.getElementById('go').addEventListener('click', () => open(urlEl.value));
+    urlEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(urlEl.value); });
+    urlEl.addEventListener('paste', () => setTimeout(() => open(urlEl.value), 0)); // 붙여넣기만 해도 열림
+    document.getElementById('file').addEventListener('change', (e) => openFile(e.target.files && e.target.files[0]));
+
+    // 드래그&드롭 — 파일을 끌어다 놓으면 바로 열림.
+    ['dragenter', 'dragover'].forEach((t) =>
+      stage.addEventListener(t, (e) => { e.preventDefault(); stage.classList.add('dropping'); }));
+    ['dragleave', 'drop'].forEach((t) =>
+      stage.addEventListener(t, (e) => { e.preventDefault(); stage.classList.remove('dropping'); }));
+    stage.addEventListener('drop', (e) => openFile(e.dataTransfer && e.dataTransfer.files[0]));
+
+    /* ── 동영상 컨트롤 ── */
+    const playBtn = document.getElementById('play');
+    const bigPlay = document.getElementById('bigPlay');
+    const seek = document.getElementById('seek');
+    const timeEl = document.getElementById('time');
+    let seeking = false;
+    const toggle = () => { if (v.paused) v.play(); else v.pause(); };
+    playBtn.addEventListener('click', toggle);
+    bigPlay.addEventListener('click', toggle);
+    v.addEventListener('click', toggle);
+    v.addEventListener('play', () => { document.body.classList.remove('paused'); playBtn.textContent = '⏸'; });
+    v.addEventListener('pause', () => { document.body.classList.add('paused'); playBtn.textContent = '▶'; });
+    const fmt = (s) => {
+      if (!isFinite(s)) return '0:00';
+      const m = Math.floor(s / 60);
+      return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+    };
+    const renderTime = () => { timeEl.textContent = `${fmt(v.currentTime)} / ${fmt(v.duration)}`; };
+    v.addEventListener('timeupdate', () => {
+      if (!seeking && v.duration) seek.value = String(Math.round((v.currentTime / v.duration) * 1000));
+      renderTime();
+    });
+    v.addEventListener('loadedmetadata', renderTime);
+    seek.addEventListener('input', () => { seeking = true; if (v.duration) v.currentTime = (Number(seek.value) / 1000) * v.duration; });
+    seek.addEventListener('change', () => { seeking = false; });
+    document.getElementById('mute').addEventListener('click', (e) => {
+      v.muted = !v.muted;
+      e.currentTarget.textContent = v.muted ? '🔇' : '🔊';
+      e.currentTarget.classList.toggle('on', v.muted);
+    });
+    document.getElementById('loop').addEventListener('click', (e) => {
+      v.loop = !v.loop;
+      e.currentTarget.classList.toggle('on', v.loop);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === ' ' && mode === 'video') { e.preventDefault(); toggle(); }
+      if (e.key === 'Escape') setPresent(false);
+    });
+
+    /* ── 보드 카드 계약 ─────────────────────────────────────────── */
+    // 프레젠테이션(수업·모션 연결) — 메뉴 숨김 + 배경 투명.
+    const setPresent = (on) => {
+      document.body.classList.toggle('present', on);
+      try { window.parent?.postMessage({ type: 'kv-embed-present', on }, '*'); } catch { /* standalone */ }
+    };
+    document.getElementById('exit').addEventListener('click', () => setPresent(false));
+    window.kvSetPresent = setPresent;
+    // 보드 카드가 호버/선택에 맞춰 입력 줄(UI)을 열고 닫는다.
+    window.kvSetChrome = (on) => document.body.classList.toggle('chrome', !!on);
+    // 외부에서 바로 열기 — 유튜브 검색 결과 ▶(kv:yt-play)·저장된 내용 복원·테스트.
+    window.loadSrc = (u) => { urlEl.value = String(u); open(String(u)); };
+    // 모션 라인 진행 방향 — 3D 모드에서 카메라를 이동 방향으로(다른 모드는 무시).
+    let headingBase = null;
+    const orbitStr = (thetaDeg, phiRad) => `${thetaDeg.toFixed(1)}deg ${((phiRad * 180) / Math.PI).toFixed(1)}deg 110%`;
+    window.setHeading = (deg) => {
+      if (mode !== '3d' || !mv) return;
+      try {
+        if (headingBase === null) headingBase = mv.getCameraOrbit();
+        mv.cameraOrbit = orbitStr((headingBase.theta * 180) / Math.PI - deg, headingBase.phi);
+      } catch { /* 모델 로드 전 — 무시 */ }
+    };
+    window.clearHeading = () => {
+      if (!mv) return;
+      try {
+        if (headingBase !== null) {
+          mv.cameraOrbit = orbitStr((headingBase.theta * 180) / Math.PI, headingBase.phi);
+          headingBase = null;
+        }
+      } catch { /* 무시 */ }
+    };
+
+    // ── 연결 제안 — 보드에서 다른 요소와 선이 이어지면 그 주제의 영상을 찾아
+    //    연결할지 묻는다(확인 → /api/youtube/search → 첫 영상 재생).
+    const ask = document.getElementById('ask');
+    const askMsg = document.getElementById('askMsg');
+    let askTopic = null;
+    window.proposeSearch = (topic) => {
+      askTopic = String(topic || '').trim();
+      if (!askTopic) return;
+      askMsg.innerHTML = '';
+      const b = document.createElement('b');
+      b.textContent = `'${askTopic}'`;
+      askMsg.append('연결된 요소 ', b, ' 에 대한 영상을 찾아 연결할까요?');
+      ask.style.display = 'block';
+    };
+    document.getElementById('askNo').addEventListener('click', () => { ask.style.display = 'none'; });
+    document.getElementById('askOk').addEventListener('click', async () => {
+      const topic = askTopic;
+      ask.style.display = 'none';
+      if (!topic) return;
+      err(`'${topic}' 영상을 찾는 중…`);
+      try {
+        const r = await fetch(`/api/youtube/search?q=${encodeURIComponent(`${topic} 어린이`)}&n=1`);
+        const j = await r.json();
+        if (!j.ok || !j.results || !j.results[0]) throw new Error(j.error || '검색 결과 없음');
+        playYt(j.results[0].id);
+      } catch {
+        err(`'${topic}' 영상을 찾지 못했어요 — 다시 시도해 주세요`);
+      }
+    });
+
+    // ── 카드 이동 — 헤더(상단)·푸터(하단)의 '빈 곳'을 끌면 부모 카드가 움직인다.
+    (function initCardDrag() {
+      let dragging = false;
+      const isHandle = (t) => {
+        const onBar = t && (t.closest('header') || t.closest('footer'));
+        if (!onBar) return false;
+        return !t.closest('button') && !t.closest('input') && !t.closest('label');
+      };
+      const post = (phase, e) => {
+        try { window.parent?.postMessage({ type: 'kv-embed-drag', phase, sx: e?.screenX, sy: e?.screenY }, '*'); } catch { /* standalone */ }
+      };
+      document.addEventListener('pointerdown', (e) => {
+        if (!isHandle(e.target)) return;
+        dragging = true;
+        post('start', e);
+        e.preventDefault();
+        try { e.target.setPointerCapture?.(e.pointerId); } catch { /* 무시 */ }
+      });
+      document.addEventListener('pointermove', (e) => { if (dragging) post('move', e); }, { passive: true });
+      const end = () => { if (dragging) { dragging = false; post('end'); } };
+      document.addEventListener('pointerup', end);
+      document.addEventListener('pointercancel', end);
+    })();
+
+    // ── 풀스크린(보드 오버레이, ?fs) — UI 켜고, 1.5초 무동작이면 페이드아웃.
+    const params = new URLSearchParams(location.search);
+    if (params.has('fs')) {
+      document.body.classList.add('fs', 'chrome');
+      let idleT = null;
+      const bump = () => {
+        document.body.classList.remove('fs-idle');
+        clearTimeout(idleT);
+        idleT = setTimeout(() => document.body.classList.add('fs-idle'), 1500);
+      };
+      document.addEventListener('pointermove', bump, { passive: true });
+      document.addEventListener('pointerdown', bump, { passive: true });
+      document.getElementById('fsExit').addEventListener('click', () => {
+        try { window.parent?.postMessage({ type: 'kv-fs-exit' }, '*'); } catch { /* standalone */ }
+      });
+      bump();
+    }
+    // 초기 내용 — ?src=(링크/blob) 로 바로 연다(풀스크린 핸드오프·딥링크).
+    const q = params.get('src');
+    if (q) window.loadSrc(q);
+    window.__magic = { ytId, open, get mode() { return mode; }, get src() { return currentSrc; } }; // 테스트용
+  </script>
+</body>
+</html>
