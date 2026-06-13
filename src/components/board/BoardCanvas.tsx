@@ -896,7 +896,8 @@ export function BoardCanvas() {
       {/* world */}
       <div
         className="absolute left-0 top-0 origin-top-left"
-        style={{ transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})` }}
+        // --zoom: 자식이 줌을 거꾸로 상쇄해 '화면 기준' 크기를 만들 때 쓴다(동영상 중앙 버튼 등).
+        style={{ transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`, ['--zoom' as never]: viewport.zoom }}
       >
         {!classroom && !show && laneOrder.map((id) => (lanes[id] ? <LaneView key={id} lane={lanes[id]} /> : null))}
 

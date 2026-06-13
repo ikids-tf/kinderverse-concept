@@ -208,10 +208,11 @@ export async function generateVideoForViewer(
     const cur = useBoardStore.getState().nodes[viewerId];
     if (cur) {
       useBoardStore.getState().updateNodeRaw(viewerId, {
-        data: { ...(cur.data ?? {}), videoAssetId: assetId },
+        // 헤더 제목 = 핵심주제(tag). 새로고침 복원·갤러리·?title에 모두 쓰인다.
+        data: { ...(cur.data ?? {}), videoAssetId: assetId, ...(tag ? { title: tag } : {}) },
       });
     }
-    window.dispatchEvent(new CustomEvent('kv:video-load', { detail: { viewerId, src: video } }));
+    window.dispatchEvent(new CustomEvent('kv:video-load', { detail: { viewerId, src: video, title: tag || undefined } }));
     showToast('🎬 영상을 만들었어요', 'success');
   } catch (e) {
     if (!signal.aborted) {

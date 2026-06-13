@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { Icon } from '@/lib/icons';
 import { showToast } from '@/lib/toast';
 import { SHAPE_PATHS } from '@/lib/shapes';
-import { useBoardStore, type BoardNode } from '@/store/boardStore';
+import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { editTextCmd, captureNodes, pushRedesign, deleteNodesCmd } from '@/board/commands';
 import { runWorkflowStep, type RunnerData, type StepKind } from '@/board/workflow';
 import { saveFrameToFolder, fitFrameToChildren } from '@/board/frames';
@@ -17,7 +17,8 @@ import { WorksheetSheet } from '@/ui-registry/worksheet-sheet';
 import { downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-a4';
 import { separateImageLayers } from '@/ai/layers';
 import { ensureThumb } from '@/board/imageLod';
-import { getVideoAsset } from '@/board/videoAssets';
+import { getVideoAsset, saveVideoAsset } from '@/board/videoAssets';
+import { saveAsset } from '@/board/assets';
 import { MotionPathNode } from './MotionPathNode';
 
 /* Renders one board node (reference board model): frame container, runner control,
@@ -183,6 +184,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 조작 모드 — 평소엔 화면 전체가 이동 손잡이(드래그로 옮기기)이고, 조작 모드에서만
   // 손잡이가 빠져 뷰어 안 버튼·슬라이더·입력을 직접 누른다(유튜브·동영상 뷰어).
   const [embedInteract, setEmbedInteract] = useState(false);
+  // 뷰어 안 팝업(볼륨 슬라이더·다운로드 메뉴)이 열려 있는 동안 — 이동 손잡이(드래그
+  // 레이어)가 팝업 위를 덮어 클릭/호버를 가로채므로, 열려 있으면 손잡이를 통과시킨다.
+  const [embedControlsOpen, setEmbedControlsOpen] = useState(false);
   // 3D 뷰어 전용 — 평소엔 메뉴 없이 3D만, 클릭하면 모든 UI를 보여 주고, 커서가
   // 카드를 벗어나면 2초 뒤 다시 숨긴다(호버하면 이동 핸들만 살짝 나타난다).
   const [show3dUi, setShow3dUi] = useState(false);
@@ -191,6 +195,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const [fsOpen, setFsOpen] = useState(false);
   const hide3dTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const embedFrameRef = useRef<HTMLIFrameElement>(null);
+  const fsFrameRef = useRef<HTMLIFrameElement>(null); // 풀스크린 오버레이 iframe(영상 로드용)
+  const fsVideoSrcRef = useRef<string | null>(null); // 동영상 풀스크린 시 넘겨받은 현재 src(파일 재생용)
   // 헤더/푸터 빈 곳 드래그(kv-embed-drag)로 카드 이동 — 시작 스냅샷·기준 좌표.
   const embedDragRef = useRef<{ snap: ReturnType<typeof captureNodes>; sx: number; sy: number; x: number; y: number } | null>(null);
   /** 모션 라인 연결 여부 미러 — 아래 message 리스너가 최신값을 읽는다(아래에서 계산). */
@@ -253,8 +259,11 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         }
         return;
       }
-      // 뷰어 안 ⛶ → 풀스크린 오버레이 열기(3D 뷰어와 동일 경로).
+      // 뷰어 안 ⛶ → 풀스크린 오버레이 열기(3D 뷰어와 동일 경로). 동영상은 현재 src를
+      // 함께 받아(파일 재생 등 videoAssetId가 없는 경우) 오버레이에 로드한다.
       if (d?.type === 'kv-embed-fullscreen') {
+        const fd = e.data as { type?: string; src?: string } | null;
+        fsVideoSrcRef.current = typeof fd?.src === 'string' ? fd.src : null;
         setFsOpen(true);
         return;
       }
@@ -324,6 +333,32 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           if (h > MAXH) { h = MAXH; w = Math.round(h * aspect); }
           b.updateNodeRaw(node.id, { w, h, data: { ...(cur.data ?? {}), videoFitted: true } });
         }
+      }
+      // 동영상 제목 편집(iframe 헤더 더블클릭) → 카드 제목(node.data.title) 영속화.
+      // embedSrcRef가 ?title=로 새로고침 시 헤더에 복원한다.
+      const dt = e.data as { type?: string; title?: string } | null;
+      if (dt?.type === 'kv-video-title' && typeof dt.title === 'string') {
+        const b = useBoardStore.getState();
+        const cur = b.nodes[node.id];
+        const title = dt.title.trim();
+        if (cur && title && cur.data?.title !== title) {
+          b.updateNodeRaw(node.id, { data: { ...(cur.data ?? {}), title } });
+        }
+      }
+      // 동영상 '보관함에 저장' → 갤러리 라이브러리에 영상(videoAssets) + 포스터·제목(assets) 등록.
+      // 보드와 별개 키라 갤러리 '동영상' 필터/프롬프트 검색에서 다시 불러올 수 있다.
+      const ds = e.data as { type?: string; dataUri?: string; poster?: string; title?: string } | null;
+      if (ds?.type === 'kv-video-save-library' && typeof ds.dataUri === 'string' && ds.dataUri.startsWith('data:')) {
+        const id = newId('vid');
+        const tag = (ds.title || '동영상').trim() || '동영상';
+        const poster = typeof ds.poster === 'string' && ds.poster.startsWith('data:') ? ds.poster : ds.dataUri;
+        void saveVideoAsset(id, ds.dataUri).then(() => saveAsset(tag, 'video', poster, undefined, id));
+        showToast('🎬 보관함에 저장했어요', 'success');
+      }
+      // 뷰어 안 팝업(볼륨·다운로드 메뉴) 열림/닫힘 → 이동 손잡이를 통과시킬지 토글.
+      const dc = e.data as { type?: string; open?: boolean } | null;
+      if (dc?.type === 'kv-embed-controls') {
+        setEmbedControlsOpen(!!dc.open);
       }
     };
     // kv:embed-mode — 모션 라인 연결/해제가 뷰어의 프레젠테이션을 켜고 끈다.
@@ -444,12 +479,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     };
     // kv:video-load — Veo로 생성한 영상(data URI)을 이 동영상 뷰어에서 바로 재생.
     const onVideoLoad = (e: Event) => {
-      const d = (e as CustomEvent).detail as { viewerId?: string; src?: string } | null;
+      const d = (e as CustomEvent).detail as { viewerId?: string; src?: string; title?: string } | null;
       if (!d?.src || d.viewerId !== node.id) return;
       const w = embedFrameRef.current?.contentWindow as
         | (Window & { loadSrc?: (u: string, name?: string) => void })
         | null;
-      w?.loadSrc?.(d.src, '생성한 영상');
+      w?.loadSrc?.(d.src, (typeof d.title === 'string' && d.title.trim()) || '생성한 영상');
     };
     window.addEventListener('kv:yt-play', onPlay);
     window.addEventListener('kv:yt-propose', onPropose);
@@ -478,7 +513,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         const w = embedFrameRef.current?.contentWindow as
           | (Window & { loadSrc?: (u: string, name?: string) => void })
           | null;
-        if (w?.loadSrc) w.loadSrc(src, '생성한 영상');
+        if (w?.loadSrc) w.loadSrc(src, (typeof node.data?.title === 'string' && (node.data.title as string).trim()) || '생성한 영상');
         else if (tries++ < 20) setTimeout(tryLoad, 150);
       };
       tryLoad();
@@ -990,6 +1025,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             ref={embedFrameRef}
             src={embedSrcRef.current ?? (node.data.embed as string)}
             title={embedTitle}
+            allow="fullscreen"
+            allowFullScreen
             className="block w-full"
             style={{ border: 0, height: '100%', background: 'transparent' }}
           />
@@ -1039,8 +1076,13 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               // 슬라이더·음소거·반복을 바로 쓰게 한다(나머지 영역은 그대로 드래그).
               style={{
                 cursor: 'grab',
-                top: selected || embedHover ? 52 : 0,
+                // 동영상 플레이어는 상단 액션(저장·전체화면, ~58px)을 통째로 비워 클릭이
+                // 드래그 레이어에 가리지 않게 한다(유튜브 헤더는 ~52px).
+                top: selected || embedHover ? (isVideoPlayer ? 64 : 52) : 0,
                 bottom: isVideoPlayer && (selected || embedHover) ? 100 : 0,
+                // 뷰어 팝업(볼륨·다운로드 메뉴)이 열려 있으면 손잡이를 통과시켜(none) 팝업이
+                // 클릭/호버를 받게 한다 — 팝업이 클리어런스 밖(중앙 띠)까지 뻗어도 닿는다.
+                pointerEvents: embedControlsOpen ? 'none' : 'auto',
               }}
             />
           )}
@@ -1056,16 +1098,28 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 w?.kvTogglePlay?.();
               }}
               title={videoPlaying ? '일시정지' : '재생'}
-              className="absolute left-1/2 top-1/2 z-30 inline-flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-pill border border-accent bg-accent text-on-accent shadow-lg backdrop-blur-sm transition-colors duration-150 ease-soft hover:border-accent-hover hover:bg-accent-hover"
-              style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+              className="absolute left-1/2 top-1/2 z-30 inline-flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-pill border border-accent bg-accent text-on-accent shadow-lg backdrop-blur-sm transition-colors duration-150 ease-soft hover:border-accent-hover hover:bg-accent-hover"
+              // 화면 기준 지름을 3단계로만 — eff(=보드 줌 × 카드 scale, 실제 화면 배율)에 따라
+              // eff<0.5→52, 0.5≤eff<1→66, eff≥1→80px. 월드 크기 = 목표/eff → 카드·보드 변환이
+              // 다시 eff만큼 키워 화면에선 항상 목표px로 보인다(카드 크기·줌이 달라도 동일).
+              style={{
+                pointerEvents: 'auto',
+                cursor: 'pointer',
+                ['--eff' as never]: `calc(var(--zoom, 1) * ${node.scale ?? 1})`,
+                ['--s1' as never]: 'clamp(0, (var(--eff) - 0.5) * 1000, 1)',
+                ['--s2' as never]: 'clamp(0, (var(--eff) - 1) * 1000, 1)',
+                ['--pbd' as never]: 'calc(52px + 14px * var(--s1) + 14px * var(--s2))',
+                width: 'calc(var(--pbd) / var(--eff))',
+                height: 'calc(var(--pbd) / var(--eff))',
+              }}
             >
               {videoPlaying ? (
-                <svg viewBox="0 0 24 24" width={26} height={26} fill="currentColor" aria-hidden>
+                <svg viewBox="0 0 24 24" width="46%" height="46%" fill="currentColor" aria-hidden>
                   <rect x="6.6" y="5.5" width="3.7" height="13" rx="1.1" />
                   <rect x="13.7" y="5.5" width="3.7" height="13" rx="1.1" />
                 </svg>
               ) : (
-                <svg viewBox="0 0 24 24" width={26} height={26} fill="currentColor" aria-hidden className="ml-0.5">
+                <svg viewBox="0 0 24 24" width="46%" height="46%" fill="currentColor" aria-hidden className="ml-0.5">
                   <path d="M8 5.5v13l11-6.5z" />
                 </svg>
               )}
@@ -1101,24 +1155,46 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                   처리하고, ✕는 kv-fs-exit 메시지로 닫기를 알린다. 매직·영상 뷰어는 현재
                   내용(viewerSrc)을 &src=로 넘겨 같은 화면을 이어서 보여 준다(blob 제외). */}
               <iframe
+                ref={fsFrameRef}
                 src={(() => {
                   let u = `${embedStr}${embedStr.includes('?') ? '&' : '?'}fs=1`;
                   const vs = typeof node.data?.viewerSrc === 'string' ? node.data.viewerSrc : '';
                   if ((isMagicViewer || isVideoViewer) && vs) u += `&src=${encodeURIComponent(vs)}`;
+                  const t = typeof node.data?.title === 'string' ? (node.data.title as string) : '';
+                  if (isVideoPlayer && t) u += `&title=${encodeURIComponent(t)}`;
                   return u;
                 })()}
                 title={`${embedTitle} (전체 화면)`}
                 className="h-full w-full"
                 style={{ border: 0, background: 'transparent' }}
+                // 동영상 플레이어 — 생성 영상(data URI)은 viewerSrc에 없으므로(스냅샷 제외)
+                // IDB(videoAssetId)에서 받아 오버레이 뷰어에 직접 로드한다. 컨트롤도 켠다.
+                onLoad={() => {
+                  if (!isVideoPlayer) return;
+                  const w = fsFrameRef.current?.contentWindow as
+                    | (Window & { loadSrc?: (u: string, name?: string) => void; kvSetChrome?: (on: boolean) => void })
+                    | null;
+                  if (!w) return;
+                  w.kvSetChrome?.(true);
+                  const title = (typeof node.data?.title === 'string' && (node.data.title as string).trim()) || '동영상';
+                  const assetId = typeof node.data?.videoAssetId === 'string' ? (node.data.videoAssetId as string) : '';
+                  const passed = fsVideoSrcRef.current;
+                  if (assetId) void getVideoAsset(assetId).then((src) => { if (src) w.loadSrc?.(src, title); else if (passed) w.loadSrc?.(passed, title); });
+                  else if (passed) w.loadSrc?.(passed, title);
+                }}
               />
-              {/* 닫기 — Esc로도 닫히지만, 영상 뷰어처럼 자체 ✕가 없는 경우를 위해 항상 둔다. */}
-              <button
-                onClick={() => setFsOpen(false)}
-                title="전체 화면 닫기 (Esc)"
-                className="absolute right-t5 top-t5 z-10 inline-flex h-11 w-11 items-center justify-center rounded-pill border border-border bg-surface/90 text-fg-2 shadow-lg backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
-              >
-                <Icon name="x" size={20} />
-              </button>
+              {/* 닫기 — Esc로도 닫힌다. 동영상 플레이어는 뷰어 우상단 버튼(#fs)을 ✕로 바꿔
+                  스스로 닫으므로(kv-fs-exit) 여기 ✕는 두지 않는다(이중 표시 방지). 자체 ✕가
+                  없는 다른 뷰어를 위해서만 둔다. */}
+              {!isVideoPlayer && (
+                <button
+                  onClick={() => setFsOpen(false)}
+                  title="전체 화면 닫기 (Esc)"
+                  className="absolute right-t5 top-t5 z-10 inline-flex h-11 w-11 items-center justify-center rounded-pill border border-border bg-surface/90 text-fg-2 shadow-lg backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
+                >
+                  <Icon name="x" size={20} />
+                </button>
+              )}
             </div>,
             document.body,
           )}

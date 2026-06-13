@@ -145,6 +145,17 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 240px;
+    padding: 2px 4px;
+    border-radius: 7px;
+    cursor: text;
+  }
+  #titlebar .t:hover { background: var(--bg-deep); } /* 더블클릭으로 제목 편집 가능 힌트 */
+  #titlebar .t[contenteditable='true'] {
+    outline: 2px solid var(--accent);
+    background: #fff;
+    overflow: visible;
+    text-overflow: clip;
   }
   #topbar {
     position: absolute;
@@ -174,6 +185,41 @@
   .ic:hover { color: var(--accent); }
   .ic svg { width: 26px; height: 26px; }
 
+  /* ── 다운로드 — 클릭하면 '내 컴퓨터 / 보관함' 선택 메뉴 ───────────── */
+  #dlwrap { position: relative; display: inline-flex; }
+  #dlmenu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 8px;
+    display: none;
+    flex-direction: column;
+    min-width: 188px;
+    padding: 6px;
+    border-radius: var(--r-md);
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(8px);
+  }
+  #dlmenu.open { display: flex; }
+  #dlmenu button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--fg);
+    font: 600 14px var(--font-sans);
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  #dlmenu button:hover { background: var(--bg-deep); color: var(--accent); }
+  #dlmenu svg { width: 20px; height: 20px; flex: 0 0 auto; }
+
   /* ── 중앙 큰 재생 버튼 — 코랄 원 + 흰 삼각형(일시정지 상태에서만) ── */
   #bigPlay {
     position: absolute;
@@ -196,6 +242,9 @@
   #bigPlay svg { width: 34px; height: 34px; margin-left: 4px; } /* 삼각형 — 크게 + 광학 보정 */
   #bigPlay:hover { background: var(--accent-hover); transform: translate(-50%, -50%) scale(1.06); }
   body.loaded.paused #bigPlay { display: inline-flex; }
+  /* 보드 임베드에선 카드 위(드래그 레이어 위) 중앙 버튼이 줌에 맞춰 크기 조절하므로,
+     iframe 내부 #bigPlay는 숨겨 이중 표시·고배율에서 뒤로 삐져나오는 링을 막는다. */
+  body.no-bigplay #bigPlay { display: none !important; }
 
   /* ── 하단 컨트롤 바 — 프로스티드 필 ───────────────────────────── */
   #controls {
@@ -253,21 +302,21 @@
   }
   #seek::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 20px;
-    height: 20px;
+    width: 40px;               /* 이동(시크) 핸들 — 2배(20→40) */
+    height: 40px;
     border-radius: 50%;
     background: var(--accent);
-    border: 3px solid #fff;
-    box-shadow: 0 1px 3px rgba(20, 19, 17, 0.3);
+    border: 4px solid #fff;
+    box-shadow: 0 2px 5px rgba(20, 19, 17, 0.3);
     cursor: pointer;
   }
   #seek::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
-    border: 3px solid #fff;
+    width: 40px;
+    height: 40px;
+    border: 4px solid #fff;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 1px 3px rgba(20, 19, 17, 0.3);
+    box-shadow: 0 2px 5px rgba(20, 19, 17, 0.3);
     cursor: pointer;
   }
   #time {
@@ -276,6 +325,63 @@
     font-variant-numeric: tabular-nums;
     color: var(--fg-2);
     white-space: nowrap;
+  }
+
+  /* ── 볼륨 — 음소거 버튼 위에 호버 시 세로 슬라이더 팝업 ───────────── */
+  #volwrap { position: relative; display: inline-flex; flex: 0 0 auto; }
+  #volpop {
+    position: absolute;
+    bottom: 100%;            /* 버튼과 맞붙여 호버가 끊기지 않게(갭 없음) */
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    padding: 16px 12px 12px;
+    border-radius: var(--r-lg);
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(8px);
+  }
+  #volpop.open { display: block; } /* 표시는 JS가 지연 제어(호버 이탈 시 즉시 안 사라짐) */
+  #vol {
+    -webkit-appearance: none;
+    appearance: none;
+    writing-mode: vertical-lr; /* 세로 슬라이더(위=크게) — 모던 표준 */
+    direction: rtl;
+    width: 9px;                /* 트랙 두께(가로) — 시크바와 동일, 큰 핸들은 넘쳐서 가운데 정렬 */
+    height: 120px;             /* 트랙 길이(세로) */
+    cursor: pointer;
+    border-radius: var(--r-pill);
+    background:
+      linear-gradient(var(--accent), var(--accent)) bottom / 100% var(--vol, 100%) no-repeat,
+      var(--border);
+  }
+  #vol::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 40px;               /* 볼륨 핸들 — 이동 핸들과 동일하게 2배(작던 기본→40) */
+    height: 40px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 4px solid #fff;
+    box-shadow: 0 2px 5px rgba(20, 19, 17, 0.3);
+    cursor: pointer;
+  }
+  #vol::-moz-range-thumb {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #fff;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 2px 5px rgba(20, 19, 17, 0.3);
+    cursor: pointer;
+  }
+
+  /* ── 네이티브 전체 화면 — 영상 전체를 화면에 contain·검정 배경, 컨트롤 유지 ── */
+  #stage:fullscreen { background: #000; }
+  #stage:fullscreen video {
+    object-fit: contain !important;
+    aspect-ratio: auto !important;
+    object-position: center !important;
+    border-radius: 0;
   }
 
   /* ── 프레젠테이션(수업) 모드 — 메뉴 숨김 → 보드 위에 영상만 ──────── */
@@ -296,18 +402,30 @@
       <label class="btn-pick" for="file">파일 선택</label>
     </div>
 
-    <!-- 상단 헤더(제목) -->
+    <!-- 상단 헤더(제목) — 더블클릭하면 인라인 편집 -->
     <div id="titlebar">
       <span class="dot" aria-hidden="true"></span>
-      <span class="t" id="vtitle">동영상</span>
+      <span class="t" id="vtitle" title="더블클릭하면 제목을 바꿔요">동영상</span>
     </div>
 
     <!-- 상단 액션 -->
     <div id="topbar">
-      <label class="ic" for="file" title="다른 영상 파일 선택">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" /></svg>
-      </label>
-      <button id="fs" class="ic" type="button" title="전체 화면 (수업용 — 메뉴 숨기고 영상만)">
+      <div id="dlwrap">
+        <button id="dl" class="ic" type="button" title="동영상 저장" aria-haspopup="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11" /><path d="m7.5 11 4.5 4.5 4.5-4.5" /><path d="M5 20h14" /></svg>
+        </button>
+        <div id="dlmenu" role="menu">
+          <button id="dlDisk" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>
+            내 컴퓨터에 저장
+          </button>
+          <button id="dlLib" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+            보관함에 저장
+          </button>
+        </div>
+      </div>
+      <button id="fs" class="ic" type="button" title="전체 화면으로 보기">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
       </button>
     </div>
@@ -325,10 +443,13 @@
       </button>
       <input id="seek" type="range" min="0" max="1000" value="0" title="탐색" />
       <span id="time">0:00 / 0:00</span>
-      <button id="mute" type="button" title="음소거">
-        <span class="i-vol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3l5 4V5.5l-5 4H4z" fill="currentColor" stroke="none" /><path d="M16 9a4 4 0 0 1 0 6" /><path d="M18.5 7a7 7 0 0 1 0 10" /></svg></span>
-        <span class="i-muted" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3l5 4V5.5l-5 4H4z" fill="currentColor" stroke="none" /><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" /></svg></span>
-      </button>
+      <div id="volwrap">
+        <div id="volpop"><input id="vol" type="range" min="0" max="100" value="100" title="볼륨 조절" /></div>
+        <button id="mute" type="button" title="음소거">
+          <span class="i-vol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3l5 4V5.5l-5 4H4z" fill="currentColor" stroke="none" /><path d="M16 9a4 4 0 0 1 0 6" /><path d="M18.5 7a7 7 0 0 1 0 10" /></svg></span>
+          <span class="i-muted" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3l5 4V5.5l-5 4H4z" fill="currentColor" stroke="none" /><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" /></svg></span>
+        </button>
+      </div>
       <button id="loop" type="button" title="반복 재생">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" /><path d="m7 22-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /></svg>
       </button>
@@ -349,6 +470,14 @@
     const timeEl = document.getElementById('time');
     const muteBtn = document.getElementById('mute');
     const loopBtn = document.getElementById('loop');
+    const vol = document.getElementById('vol');
+    const volwrap = document.getElementById('volwrap');
+    const volpop = document.getElementById('volpop');
+    const dlBtn = document.getElementById('dl');
+    const dlMenu = document.getElementById('dlmenu');
+    const dlDisk = document.getElementById('dlDisk');
+    const dlLib = document.getElementById('dlLib');
+    const titleEl = document.getElementById('vtitle');
     // 짧은 개념 영상은 기본 '반복'(seamless loop) — 생성 프롬프트가 첫=끝 프레임을 맞추므로
     // 끊김 없이 계속 재생된다. 버튼으로 끌 수 있다(<video loop> 기본 on 반영).
     loopBtn.classList.toggle('on', v.loop);
@@ -362,6 +491,7 @@
       resetCrop();
       v.src = objectUrl;
       document.body.classList.add('loaded');
+      window.kvSetTitle((f.name || '').replace(/\.[^.]+$/, '')); // 헤더 제목 = 파일명(확장자 제외)
       v.play().catch(() => { /* 자동재생 차단 시 — 중앙 ▶로 시작 */ });
     }
     file.addEventListener('change', (e) => loadFile(e.target.files && e.target.files[0]));
@@ -480,6 +610,34 @@
       v.muted = !v.muted;
       muteBtn.classList.toggle('on', v.muted);
     });
+    // 볼륨 슬라이더(세로) — 음소거 버튼 호버 시 나타난다. 0이면 음소거 상태로 표시.
+    // 채움(아래=0)은 --vol(%)로 그린다(커스텀 트랙이라 accent-color 대신 직접).
+    const renderVolFill = () => vol.style.setProperty('--vol', `${Number(vol.value)}%`);
+    vol.value = String(Math.round((v.volume ?? 1) * 100));
+    renderVolFill();
+    vol.addEventListener('input', () => {
+      const val = Number(vol.value) / 100;
+      v.volume = val;
+      v.muted = val === 0;
+      muteBtn.classList.toggle('on', v.muted);
+      renderVolFill();
+    });
+    // 뷰어 안 팝업(볼륨·다운로드 메뉴)이 열렸음을 부모(보드)에 알린다 — 부모가 이동
+    // 손잡이(드래그 레이어)를 통과시켜 팝업이 클리어런스 밖까지 뻗어도 클릭·호버가 닿게 한다.
+    function notifyControls() {
+      const open = volpop.classList.contains('open') || dlMenu.classList.contains('open');
+      try { window.parent && window.parent.postMessage({ type: 'kv-embed-controls', open }, '*'); } catch { /* standalone */ }
+    }
+
+    // 팝업 표시는 JS가 지연 제어 — CSS :hover만 쓰면 버튼→슬라이더로 커서를 옮기는 찰나
+    // hover가 끊겨 팝업이 사라진다. 진입 시 즉시 열고, 이탈 시 280ms 뒤 닫아 그 틈을 메운다.
+    let volTimer = null;
+    const openVol = () => { if (volTimer) { clearTimeout(volTimer); volTimer = null; } volpop.classList.add('open'); notifyControls(); };
+    const closeVolSoon = () => { if (volTimer) clearTimeout(volTimer); volTimer = setTimeout(() => { volpop.classList.remove('open'); notifyControls(); }, 280); };
+    volwrap.addEventListener('mouseenter', openVol);
+    volwrap.addEventListener('mouseleave', closeVolSoon);
+    volpop.addEventListener('mouseenter', openVol);
+    volpop.addEventListener('mouseleave', closeVolSoon);
     loopBtn.addEventListener('click', () => {
       v.loop = !v.loop;
       loopBtn.classList.toggle('on', v.loop);
@@ -497,7 +655,114 @@
       document.body.classList.toggle('present', on);
       try { window.parent && window.parent.postMessage({ type: 'kv-embed-present', on }, '*'); } catch { /* standalone */ }
     };
-    document.getElementById('fs').addEventListener('click', () => setPresent(true));
+    // ── 전체 화면 — 다른 뷰어 카드와 동일하게 '앱의 풀스크린 오버레이 뷰어'로 연다.
+    //    (네이티브 iframe 전체화면은 브라우저·권한 차이로 불안정해 오버레이로 통일.)
+    //    부모가 같은 영상을 오버레이 뷰어에 로드한다. 현재 src도 함께 넘겨 파일 재생도 지원.
+    function openParentFullscreen() {
+      try {
+        window.parent && window.parent.postMessage(
+          { type: 'kv-embed-fullscreen', src: (v.currentSrc || v.src) || undefined },
+          '*',
+        );
+      } catch { /* standalone */ }
+    }
+    // 풀스크린 오버레이(?fs=1) 안에서는 같은 버튼이 '닫기(✕)' 역할 — 부모에 kv-fs-exit를
+    // 보내 오버레이를 닫는다. 그 외(보드 카드)에서는 풀스크린 오버레이를 연다.
+    document.getElementById('fs').addEventListener('click', () => {
+      if (new URLSearchParams(location.search).get('fs') === '1') {
+        try { window.parent && window.parent.postMessage({ type: 'kv-fs-exit' }, '*'); } catch { /* standalone */ }
+      } else {
+        openParentFullscreen();
+      }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      const on = document.fullscreenElement === stage;
+      document.body.classList.toggle('fs', on);
+      if (on) document.body.classList.add('chrome'); // 풀스크린에선 헤더·컨트롤 항상 표시
+    });
+
+    // ── 다운로드 — 현재 영상을 내 컴퓨터에 저장. 지원 시 저장 위치(폴더) 선택(File System
+    //    Access), 아니면 일반 다운로드. data:/blob: 모두 fetch로 Blob화해 저장한다.
+    function safeName() {
+      const t = ((titleEl && titleEl.textContent) || '동영상').trim() || '동영상';
+      return t.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60);
+    }
+    async function downloadVideo() {
+      const src = v.currentSrc || v.src;
+      if (!src) return;
+      let blob;
+      try { blob = await (await fetch(src)).blob(); } catch { return; }
+      const name = safeName() + '.mp4';
+      if (window.showSaveFilePicker) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: name,
+            types: [{ description: '동영상 (mp4)', accept: { 'video/mp4': ['.mp4'] } }],
+          });
+          const w = await handle.createWritable();
+          await w.write(blob);
+          await w.close();
+          return;
+        } catch (e) {
+          if (e && e.name === 'AbortError') return; // 사용자가 취소
+          /* iframe 권한 차단 등 → 아래 일반 다운로드로 폴백 */
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
+    // 현재 프레임을 작은 JPEG 포스터로 — 보관함 썸네일용.
+    function capturePoster() {
+      try {
+        const VW = v.videoWidth, VH = v.videoHeight;
+        if (!VW || !VH) return undefined;
+        const W = 160, H = Math.max(1, Math.round((W * VH) / VW));
+        const cv = document.createElement('canvas');
+        cv.width = W; cv.height = H;
+        const ctx = cv.getContext('2d');
+        if (!ctx) return undefined;
+        ctx.drawImage(v, 0, 0, W, H);
+        return cv.toDataURL('image/jpeg', 0.7);
+      } catch { return undefined; }
+    }
+    // 보관함(이 서비스의 '폴더') 저장 — 부모(보드)가 갤러리 라이브러리에 넣게 영상+포스터+제목 전달.
+    async function saveToLibrary() {
+      const src = v.currentSrc || v.src;
+      if (!src) return;
+      let dataUri = src;
+      if (!src.startsWith('data:')) {
+        try {
+          const blob = await (await fetch(src)).blob();
+          dataUri = await new Promise((res, rej) => {
+            const fr = new FileReader();
+            fr.onload = () => res(fr.result);
+            fr.onerror = rej;
+            fr.readAsDataURL(blob);
+          });
+        } catch { return; }
+      }
+      const title = ((titleEl && titleEl.textContent) || '동영상').trim() || '동영상';
+      try {
+        window.parent && window.parent.postMessage(
+          { type: 'kv-video-save-library', dataUri, poster: capturePoster(), title },
+          '*',
+        );
+      } catch { /* standalone */ }
+    }
+
+    // 다운로드 버튼 = '내 컴퓨터 / 보관함' 선택 메뉴 토글. 메뉴 밖 클릭 시 닫는다.
+    const closeDlMenu = () => { dlMenu.classList.remove('open'); notifyControls(); };
+    dlBtn.addEventListener('click', (e) => { e.stopPropagation(); dlMenu.classList.toggle('open'); notifyControls(); });
+    document.addEventListener('click', (e) => { if (!dlBtn.contains(e.target) && !dlMenu.contains(e.target)) closeDlMenu(); });
+    dlDisk.addEventListener('click', () => { closeDlMenu(); downloadVideo(); });
+    dlLib.addEventListener('click', () => { closeDlMenu(); saveToLibrary(); });
+
     document.getElementById('exit').addEventListener('click', () => setPresent(false));
 
     // 보드 카드가 호버/선택에 맞춰 컨트롤을 열고 닫는다. 호버 시 현재 상태도 다시 알려,
@@ -507,20 +772,65 @@
     window.kvSetPresent = setPresent;
 
     // 외부에서 URL로 바로 재생 — 테스트·딥링크 + 생성 영상(data URI) 로드용.
-    window.loadSrc = (u) => {
+    // name이 오면 헤더 제목으로(생성 영상=핵심주제, 복원 시 카드 제목).
+    window.loadSrc = (u, name) => {
       resetCrop();
       v.src = u;
       document.body.classList.add('loaded');
+      if (name) window.kvSetTitle(name);
       postState();
       v.play().catch(() => {});
     };
 
     // ── 상단 헤더 제목 — ?title= 쿼리로 주입(부모가 카드 제목을 넘긴다). 외부에서
     //    kvSetTitle로도 바꿀 수 있다. 비면 기본 '동영상'.
-    const titleEl = document.getElementById('vtitle');
-    window.kvSetTitle = (t) => { if (titleEl && typeof t === 'string' && t.trim()) titleEl.textContent = t.trim(); };
+    window.kvSetTitle = (t) => {
+      if (titleEl && typeof t === 'string' && t.trim() && titleEl.getAttribute('contenteditable') !== 'true') {
+        titleEl.textContent = t.trim();
+      }
+    };
     const qs = new URLSearchParams(location.search);
     window.kvSetTitle(qs.get('title'));
+    // 전체 화면 오버레이(?fs=1) — 컨트롤 항상 표시. 우상단의 전체화면 버튼(#fs)을 '닫기(✕)'
+    // 버튼으로 바꿔(아이콘·툴팁) 오버레이를 닫게 하고, 다운로드 버튼은 숨겨 우상단에 ✕ 하나만 둔다.
+    const fsMode = qs.get('fs') === '1';
+    if (fsMode) {
+      document.body.classList.add('chrome');
+      const fsb = document.getElementById('fs');
+      if (fsb) {
+        fsb.title = '닫기 (Esc)';
+        fsb.innerHTML =
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+      }
+      const dw = document.getElementById('dlwrap');
+      if (dw) dw.style.display = 'none';
+    }
+    // 보드 카드 임베드(iframe, 비-전체화면) — 카드 위 중앙 버튼이 줌에 맞춰 크기를 조절하므로
+    // iframe 내부 #bigPlay는 숨긴다(전체화면/단독 실행에선 그대로 #bigPlay 사용).
+    if (window.parent !== window && !fsMode) document.body.classList.add('no-bigplay');
+
+    // ── 제목 인라인 편집 — 더블클릭하면 편집, Enter 또는 포커스 해제로 확정. 확정 시
+    //    부모(보드)에 알려 카드 제목(node.data.title)으로 영속화한다(새로고침에도 유지).
+    function commitTitle() {
+      titleEl.removeAttribute('contenteditable');
+      const t = (titleEl.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60) || '동영상';
+      titleEl.textContent = t;
+      try { window.parent && window.parent.postMessage({ type: 'kv-video-title', title: t }, '*'); } catch { /* standalone */ }
+    }
+    titleEl.addEventListener('dblclick', () => {
+      titleEl.setAttribute('contenteditable', 'true');
+      titleEl.focus();
+      const r = document.createRange();
+      r.selectNodeContents(titleEl);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    });
+    titleEl.addEventListener('keydown', (e) => {
+      e.stopPropagation(); // 스페이스(재생토글)·Esc(프레젠테이션 종료)로 새지 않게
+      if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); titleEl.blur(); }
+    });
+    titleEl.addEventListener('blur', commitTitle);
 
     const q = qs.get('src');
     if (q) window.loadSrc(q);
