@@ -32,14 +32,29 @@ export const KV_COLORING_STYLE =
 export const KV_VIDEO_STYLE =
   'warm gentle preschool picture-book animation style, soft pastel colors, rounded simple shapes, calm slow camera, cozy storybook atmosphere, child-friendly, nothing scary, absolutely no text, letters, numbers, captions or watermark anywhere on screen';
 export const KV_VIDEO_NEGATIVE =
-  'text, words, letters, numbers, captions, subtitles, watermark, logo, scary, violent, photorealistic real children, human faces, distorted anatomy, fast flashing, jump cuts';
+  'text, words, letters, numbers, captions, subtitles, watermark, logo, scary, violent, photorealistic real children, human faces, distorted anatomy, fast flashing, jump cuts, abrupt ending, sudden jump or flash at the loop point, discontinuity between last and first frame';
+
+/* 완벽한 반복(seamless loop) 지시 — 끝이 처음으로 자연스럽게 이어져 <video loop>로
+   무한 재생해도 화면이 튀지 않게 한다. 텍스트→비디오는 동작 자체를 순환형으로 설계하게,
+   이미지→비디오는 '제공된 첫 프레임'으로 정확히 되돌아오게(첫=끝 프레임) 강조한다. */
+export const KV_VIDEO_LOOP =
+  'Critical: make the motion a perfect seamless loop. The animation must be cyclical and return exactly to its starting state, so the very last frame is identical to the first frame and the clip can repeat continuously with no visible jump, flash, snap or cut at the loop point.';
+export const KV_VIDEO_IMG_LOOP =
+  'Critical: make the animation a perfect seamless loop that ends exactly where it began. By the final frame every moving element must return to the same position, pose and shape as in the provided starting image, so the first and last frames are identical and the clip loops endlessly with no visible jump, flash or cut at the loop point.';
+
+/* 이미지→비디오 전용 접미사 — 화풍은 '제공된 이미지'가 정의하므로 KV_VIDEO_STYLE(새 화풍 지정)을
+   쓰지 않는다. 원본 보존 + 안전(무자막·사람 배제)만 강조해 배경이 바뀌는 것을 막는다. */
+export const KV_VIDEO_IMG_SAFETY =
+  'Preserve the original art style, colors, lighting, composition and framing of the provided image. ' +
+  'No text, letters, numbers, captions, subtitles, logo or watermark anywhere on screen. ' +
+  'Nothing scary, no people, no human faces or children.';
 
 /** 교사의 한국어 요청(또는 계획에서 뽑은 활동 내용)을 Veo용 영문 프롬프트로 변환.
     공식 5요소(subject·action·scene·camera·composition·ambiance) 구조 + 유아 스타일.
     저티어 LLM 1콜. 실패 시 휴리스틱 폴백(coreTopic + 스타일 접미사). */
 export async function buildVeoPrompt(request: string, ctx?: string): Promise<string> {
   const topic = coreTopic(request) || request.trim();
-  const fallback = `A gentle short animated scene about "${topic}" for preschool children, no people on screen. ${KV_VIDEO_STYLE}`;
+  const fallback = `A gentle short animated scene about "${topic}" for preschool children, no people on screen. ${KV_VIDEO_STYLE} ${KV_VIDEO_LOOP}`;
   const res = await callGateway({
     task: 'studio',
     tier: 'low',
@@ -56,7 +71,8 @@ export async function buildVeoPrompt(request: string, ctx?: string): Promise<str
 - 사람(특히 아동) 등장 금지 — 동물·사물·자연·그림책 캐릭터로 표현.
 - 화면에 글자·숫자·자막 넣지 마라.
 - 4초 내외의 짧고 잔잔한 장면.
-JSON만: { "prompt": "<English Veo prompt>" }`,
+- ★ 동작을 '순환형'으로 설계하라 — 끝이 처음 상태로 정확히 되돌아와 마지막 프레임이 첫 프레임과 같아지는 완벽한 반복(seamless loop). 끊김 없이 무한 재생되게(왕복/흔들림/숨쉬기처럼 제자리로 돌아오는 움직임).
+JSON만: { "prompt": "<English Veo prompt, describing a seamless looping motion>" }`,
       },
     ],
     meta: { kind: 'veo_prompt', title: topic },
@@ -65,7 +81,77 @@ JSON만: { "prompt": "<English Veo prompt>" }`,
   if (res.ok && res.text) {
     try {
       const p = (extractJson(res.text) as { prompt?: string }).prompt;
-      if (p && p.trim().length > 8) return `${p.trim()} ${KV_VIDEO_STYLE}`;
+      if (p && p.trim().length > 8) return `${p.trim()} ${KV_VIDEO_STYLE} ${KV_VIDEO_LOOP}`;
+    } catch {
+      /* fall through to heuristic */
+    }
+  }
+  return fallback;
+}
+
+/** 이미지→비디오용 Veo 프롬프트(첫 프레임 이미지가 이미 정해져 있을 때).
+    텍스트→비디오와 달리 '새 장면'을 짓지 않고 **제공된 이미지를 그대로 살린다**.
+    - userPrompt 비었으면: LLM 없이 — 원본 보존 + '움직임만' 추가하는 고정 프롬프트.
+    - userPrompt 있으면: 그 요청만 반영하되 배경/구도/화풍은 이미지 유지(저티어 LLM 1콜,
+      실패 시 휴리스틱 폴백). 배경에 새 요소를 더하지 않는 게 핵심. */
+export async function buildVeoImagePrompt(userPrompt?: string, ctx?: string): Promise<string> {
+  const req = (userPrompt ?? '').trim();
+
+  // (A) 프롬프트 없음 — 이미지 그대로, 자연스러운 미세 움직임만(배경/요소 추가 금지).
+  //     움직임은 '제자리로 돌아오는' 순환형으로 — 첫 프레임(=원본 이미지)과 끝 프레임을
+  //     일치시켜 무한 반복해도 튀지 않게 한다.
+  if (!req) {
+    return (
+      'Animate the provided still image into a short, gentle moving clip. ' +
+      'Keep the picture exactly as it is — the same single subject, the same background, the same colors, ' +
+      'lighting, art style, composition and framing. ' +
+      'Add only subtle, natural, life-like motion to what is already in the image ' +
+      '(for example a soft sway, gentle breathing, a slow blink, or a light shimmer) that gently returns to rest. ' +
+      'Do NOT add, remove, replace or invent any object, character, scenery or background element. ' +
+      'Keep the camera essentially still. ' +
+      KV_VIDEO_IMG_LOOP + ' ' +
+      KV_VIDEO_IMG_SAFETY
+    );
+  }
+
+  // (B) 프롬프트 있음 — 요청 내용만 반영, 그 외 배경/구도/화풍은 이미지 그대로.
+  const topic = coreTopic(req) || req;
+  const fallback =
+    'Animate the provided still image into a short, gentle moving clip while keeping its subject, background, ' +
+    `colors, art style and composition as in the picture. Apply only this change requested by the teacher: "${req}". ` +
+    'Add just the requested motion or element and do not introduce any other new background, scenery or object. ' +
+    'Keep the camera mostly still. ' +
+    KV_VIDEO_IMG_LOOP + ' ' +
+    KV_VIDEO_IMG_SAFETY;
+
+  const res = await callGateway({
+    task: 'studio',
+    tier: 'low',
+    provider: 'auto',
+    responseFormat: 'json',
+    system: system(ctx),
+    messages: [
+      {
+        role: 'user',
+        content: `교사가 '이미지→비디오'로 짧은 영상을 만든다. 첫 프레임이 될 이미지는 이미 정해져 있다.
+아래 한국어 요청을 그 이미지에 적용할 Veo용 영문 프롬프트 "한 단락"으로 바꿔라.
+요청: "${req}"
+[규칙]
+- 제공된 이미지를 기준으로 한다 — 주체·배경·색감·구도·화풍을 이미지 그대로 유지한다고 명시하라.
+- 요청에 담긴 '움직임/변화'만 반영하라. 요청에 없는 새 배경·사물·등장요소를 임의로 추가하지 마라.
+- 사람(특히 아동) 등장 금지, 화면에 글자·숫자·자막 금지.
+- 4초 내외의 짧고 잔잔한 장면, 카메라는 거의 고정.
+- ★ 동작이 '제공된 첫 프레임 이미지'로 정확히 되돌아오는 완벽한 반복(seamless loop)이 되게 하라 — 마지막 프레임이 첫 프레임과 같아져 끊김 없이 무한 재생되게.
+JSON만: { "prompt": "<English image-to-video prompt describing a seamless looping motion that returns to the starting image>" }`,
+      },
+    ],
+    meta: { kind: 'veo_img_prompt', title: topic },
+    maxTokens: 500,
+  });
+  if (res.ok && res.text) {
+    try {
+      const p = (extractJson(res.text) as { prompt?: string }).prompt;
+      if (p && p.trim().length > 8) return `${p.trim()} ${KV_VIDEO_IMG_LOOP} ${KV_VIDEO_IMG_SAFETY}`;
     } catch {
       /* fall through to heuristic */
     }

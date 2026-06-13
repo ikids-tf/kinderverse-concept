@@ -50,6 +50,50 @@ export interface StartVideoResult {
 
 const dataUriRe = /^data:([^;]+);base64,(.*)$/s;
 
+/* ── 레이트리밋(429)·일시 과부하(503) 자동 재시도 ─────────────────────────────
+   Veo는 분당·일일 할당량이 작아 429(RESOURCE_EXHAUSTED)가 잦다. 구글 오류 본문의
+   RetryInfo.retryDelay("21s")를 존중해 그만큼 기다렸다 다시 시도하고, 권고 지연이
+   너무 길면(=일일 할당량 소진) 즉시 포기해 사용자에게 빨리 안내한다. */
+const RETRY_STATUS = new Set([429, 503]);
+const MAX_RETRIES = 3;
+const MAX_WAIT_MS = 30_000;
+
+/** 구글 오류 JSON의 RetryInfo.retryDelay(예: "21s")를 ms로. 없으면 null. */
+function parseRetryDelayMs(body: string): number | null {
+  try {
+    const j = JSON.parse(body) as { error?: { details?: Array<{ retryDelay?: string }> } };
+    for (const d of j?.error?.details ?? []) {
+      const m = typeof d?.retryDelay === 'string' ? /^([\d.]+)s$/.exec(d.retryDelay.trim()) : null;
+      if (m) return Math.round(parseFloat(m[1]) * 1000);
+    }
+  } catch {
+    /* 본문이 JSON이 아니면 무시 */
+  }
+  return null;
+}
+
+/** fetch + 429/503 백오프 재시도. 성공/비재시도 상태/재시도 소진 시 응답을 그대로 반환
+    (본문 미소비 — 호출부가 읽는다). 재시도 시에는 clone만 읽어 원본을 보존한다. */
+async function fetchVeo(url: string, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    if (!RETRY_STATUS.has(res.status) || attempt >= MAX_RETRIES) return res;
+    const body = await res.clone().text().catch(() => '');
+    const hinted = parseRetryDelayMs(body);
+    if (hinted != null && hinted > MAX_WAIT_MS) return res; // 너무 길게 기다려야 하면 포기
+    const wait = Math.min(hinted ?? 3000 * 2 ** attempt, MAX_WAIT_MS);
+    await new Promise((r) => setTimeout(r, wait));
+  }
+}
+
+/** 429를 교사용 안내 메시지로(나머지는 진단용 원문). */
+function formatVeoHttpError(status: number, model: string, body: string): string {
+  if (status === 429) {
+    return 'Veo 사용량 한도(429)에 걸렸어요 — 1~2분 뒤 다시 시도해 주세요. 계속 실패하면 Google AI Studio에서 Veo 할당량·결제를 확인하거나 KV_GEMINI_VIDEO_MODEL을 veo-3.0-fast-generate-001로 바꿔 보세요.';
+  }
+  return `veo ${model} HTTP ${status}: ${body.slice(0, 240)}`;
+}
+
 /** data URI에서 { mime, base64 } 분리. http URL이면 서버가 받아 변환. */
 async function toBytes(src: string): Promise<{ mime: string; b64: string } | null> {
   const m = dataUriRe.exec(src);
@@ -91,14 +135,14 @@ export async function startVideo(opts: StartVideoOpts): Promise<StartVideoResult
     const url = `${API_BASE}/models/${encodeURIComponent(model)}:predictLongRunning?key=${encodeURIComponent(
       opts.geminiKey,
     )}`;
-    const res = await fetch(url, {
+    const res = await fetchVeo(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ instances: [instance], parameters }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      return { real: false, error: `veo ${model} HTTP ${res.status}: ${body.slice(0, 240)}` };
+      return { real: false, error: formatVeoHttpError(res.status, model, body) };
     }
     const data = (await res.json()) as { name?: string };
     if (!data.name) return { real: false, error: `${model}: no operation name in response` };
@@ -114,6 +158,8 @@ export interface PollVideoResult {
   video?: string;
   mocked?: boolean;
   error?: string;
+  /** 완료됐지만 영상 샘플이 없음(대개 안전 필터) — 재시도하면 성공할 수 있음. */
+  filtered?: boolean;
 }
 
 /** 오퍼레이션 이름은 클라이언트→서버로 매 폴링마다 전달된다. 키는 안 받으므로
@@ -128,23 +174,45 @@ function safeOpName(op: string): string | null {
 /** 결과에서 mp4 URI를 꺼낸다 — 응답 형태가 버전마다 달라 방어적으로 탐색. */
 function extractVideoUri(response: unknown): string | undefined {
   const r = response as {
-    generateVideoResponse?: { generatedSamples?: Array<{ video?: { uri?: string } }> };
+    generateVideoResponse?: { generatedSamples?: Array<{ video?: { uri?: string } }>; videos?: Array<{ uri?: string; video?: { uri?: string } }> };
     generatedSamples?: Array<{ video?: { uri?: string } }>;
     videos?: Array<{ uri?: string; video?: { uri?: string } }>;
   };
   return (
     r?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ??
+    r?.generateVideoResponse?.videos?.[0]?.uri ??
+    r?.generateVideoResponse?.videos?.[0]?.video?.uri ??
     r?.generatedSamples?.[0]?.video?.uri ??
     r?.videos?.[0]?.uri ??
     r?.videos?.[0]?.video?.uri
   );
 }
 
+/** Veo가 완료했지만 영상 샘플이 없을 때 사유를 읽는다 — 대개 콘텐츠 안전 필터
+    (raiMediaFilteredCount/Reasons). 사유가 있으면 교사용 안내 메시지를, 없으면
+    진단용으로 응답 최상위 키 목록을 돌려준다. */
+function noVideoReason(response: unknown): string {
+  const r = (response ?? {}) as {
+    generateVideoResponse?: { raiMediaFilteredCount?: number; raiMediaFilteredReasons?: string[] };
+    raiMediaFilteredCount?: number;
+    raiMediaFilteredReasons?: string[];
+  };
+  const gv = r.generateVideoResponse ?? {};
+  const count = gv.raiMediaFilteredCount ?? r.raiMediaFilteredCount ?? 0;
+  const reasons = gv.raiMediaFilteredReasons ?? r.raiMediaFilteredReasons ?? [];
+  if (count > 0 || reasons.length) {
+    const why = reasons.length ? ` (${reasons.join('; ').slice(0, 200)})` : '';
+    return `안전 필터로 영상이 생성되지 않았어요${why} — 사람·아동이 등장하지 않는 묘사로 바꿔 다시 시도해 주세요.`;
+  }
+  const keys = Object.keys((response as Record<string, unknown>) ?? {}).join(',');
+  return `veo: 완료됐지만 영상 샘플이 없어요 (응답 키: ${keys || '없음'})`;
+}
+
 /** Veo URI(키 필요)를 서버가 받아 data URI로 변환. */
 async function downloadVideo(uri: string, geminiKey: string): Promise<string | null> {
   try {
     // URI에 key 쿼리가 없으면 헤더로 인증(둘 다 허용됨).
-    const r = await fetch(uri, { headers: { 'x-goog-api-key': geminiKey } });
+    const r = await fetchVeo(uri, { headers: { 'x-goog-api-key': geminiKey } });
     if (!r.ok) return null;
     const mime = (r.headers.get('content-type') || 'video/mp4').split(';')[0];
     const buf = Buffer.from(await r.arrayBuffer());
@@ -161,10 +229,10 @@ export async function pollVideo(op: string, geminiKey?: string): Promise<PollVid
   if (!name) return { done: true, error: 'invalid operation name' };
   try {
     const url = `${API_BASE}/${name}?key=${encodeURIComponent(geminiKey)}`;
-    const res = await fetch(url, { headers: { 'x-goog-api-key': geminiKey } });
+    const res = await fetchVeo(url, { headers: { 'x-goog-api-key': geminiKey } });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      return { done: true, error: `veo poll HTTP ${res.status}: ${body.slice(0, 240)}` };
+      return { done: true, error: res.status === 429 ? formatVeoHttpError(429, name, body) : `veo poll HTTP ${res.status}: ${body.slice(0, 240)}` };
     }
     const data = (await res.json()) as {
       done?: boolean;
@@ -174,7 +242,7 @@ export async function pollVideo(op: string, geminiKey?: string): Promise<PollVid
     if (!data.done) return { done: false };
     if (data.error) return { done: true, error: data.error.message || 'veo operation failed' };
     const uri = extractVideoUri(data.response);
-    if (!uri) return { done: true, error: 'veo: no video uri in completed operation' };
+    if (!uri) return { done: true, error: noVideoReason(data.response), filtered: true };
     const video = await downloadVideo(uri, geminiKey);
     if (!video) return { done: true, error: 'veo: failed to download generated video' };
     return { done: true, video };

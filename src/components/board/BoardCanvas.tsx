@@ -314,7 +314,12 @@ export function BoardCanvas() {
       // corner: 0=좌상 1=우상 2=우하 3=좌하.
       // 문서 카드(data.doc — 계획안·통신문 등)는 편집 디자인이 깨지지 않게 프리폼을
       // 잠그고 정비례 스케일만 허용한다.
-      const freeform = kind === 'resize' && corner !== undefined && FREEFORM_RESIZE.has(n.type) && !n.data?.doc;
+      // 동영상 뷰어 카드는 항상 정비례(스케일)로만 리사이즈 — 카드=영상 프레임이라
+      // 자유 리사이즈로 비율이 틀어지면 바운드박스와 영상 사이에 갭이 생긴다.
+      const isVideoCard =
+        n.type === 'sticky' && typeof n.data?.embed === 'string' && (n.data.embed as string).includes('video-player');
+      const freeform =
+        kind === 'resize' && corner !== undefined && FREEFORM_RESIZE.has(n.type) && !n.data?.doc && !isVideoCard;
       const hw = (n.w * s) / 2;
       const hh = (renderHeight(n) * s) / 2;
       ht.current = {

@@ -220,7 +220,17 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const embedSrcRef = useRef<string | null>(null);
   if (embedSrcRef.current === null) {
     const vs = typeof node.data?.viewerSrc === 'string' ? (node.data.viewerSrc as string) : '';
-    embedSrcRef.current = isMagicViewer && vs ? `${embedStr}?src=${encodeURIComponent(vs)}` : embedStr;
+    if (isMagicViewer && vs) {
+      embedSrcRef.current = `${embedStr}?src=${encodeURIComponent(vs)}`;
+    } else if (isVideoPlayer) {
+      // 동영상 뷰어 — 카드 제목을 ?title=로 넘겨 상단 헤더에 띄운다.
+      const t = typeof node.data?.title === 'string' ? (node.data.title as string) : '';
+      embedSrcRef.current = t
+        ? `${embedStr}${embedStr.includes('?') ? '&' : '?'}title=${encodeURIComponent(t)}`
+        : embedStr;
+    } else {
+      embedSrcRef.current = embedStr;
+    }
   }
   useEffect(() => {
     if (typeof node.data?.embed !== 'string') return;
@@ -296,6 +306,24 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       if (dp?.type === 'kv-video-playing') {
         setVideoPlaying(!!dp.playing);
         if (dp.ready) setVideoReady(true);
+      }
+      // 동영상 비율 수신 → 카드를 영상 프레임에 맞춰 1회 리사이즈(좌우/상하 여백 제거,
+      // 카드=프레임). videoFitted로 한 번만 적용해 사용자가 이후 바꾼 크기는 보존한다.
+      const da = e.data as { type?: string; aspect?: number } | null;
+      if (da?.type === 'kv-video-aspect' && typeof da.aspect === 'number' && da.aspect > 0) {
+        const b = useBoardStore.getState();
+        const cur = b.nodes[node.id];
+        const aspect = da.aspect;
+        // 카드 비율을 영상 비율에 정확히 맞춰 바운드박스와 영상 사이 갭을 없앤다. 최초
+        // 1회뿐 아니라 비율이 어긋나면(>0.5%) 다시 맞춘다 — 정비례 스케일과 짝을 이뤄
+        // 카드는 항상 영상 프레임에 핏하게 유지된다. 너비는 보존하고 높이만 조정한다.
+        if (cur && (!cur.data?.videoFitted || Math.abs(cur.w / cur.h - aspect) / aspect > 0.005)) {
+          let w = cur.w;
+          let h = Math.round(w / aspect);
+          const MAXH = 720;
+          if (h > MAXH) { h = MAXH; w = Math.round(h * aspect); }
+          b.updateNodeRaw(node.id, { w, h, data: { ...(cur.data ?? {}), videoFitted: true } });
+        }
       }
     };
     // kv:embed-mode — 모션 라인 연결/해제가 뷰어의 프레젠테이션을 켜고 끈다.
@@ -928,6 +956,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       // 선택돼 있어도 메뉴가 닫혀 있으면 맨몸으로 두되 선택 링은 남겨, 모델만
       // 보이면서도 선택·삭제가 가능하게 한다.
       const bare3d = is3d && !embedPresent && !show3dUi;
+      // 동영상이 로드되면 카드를 '맨몸'(투명·테두리·그림자 없음)으로 — 보드 위에 영상
+      // 화면만 보이고 비율 차이로 생기던 빈 공간은 보드가 그대로 비친다(레터박스 검정 제거와 짝).
+      const bareVideo = isVideoPlayer && videoReady && !embedPresent;
       return (
        <>
         <div
@@ -949,8 +980,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             }
           }}
           className={`group/card absolute select-none overflow-hidden rounded-xl ${
-            embedPresent || bare3d
-              ? `border border-transparent bg-transparent shadow-none${is3d && selected ? ' ' + ring : ''}`
+            embedPresent || bare3d || bareVideo
+              ? `border border-transparent bg-transparent ${bareVideo ? 'shadow-lg' : 'shadow-none'}${(is3d || bareVideo) && selected ? ' ' + ring : ''}`
               : `border border-border bg-surface shadow-lg ${ring}`
           }${idleCls}`}
           style={{ left, top, width: node.w, height: node.h, ...rootTransform(node), ...idleVars }}
@@ -1009,7 +1040,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               style={{
                 cursor: 'grab',
                 top: selected || embedHover ? 52 : 0,
-                bottom: isVideoPlayer && (selected || embedHover) ? 56 : 0,
+                bottom: isVideoPlayer && (selected || embedHover) ? 100 : 0,
               }}
             />
           )}
@@ -1025,14 +1056,25 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 w?.kvTogglePlay?.();
               }}
               title={videoPlaying ? '일시정지' : '재생'}
-              className="absolute left-1/2 top-1/2 z-30 inline-flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-pill border border-border bg-surface/95 text-fg-2 shadow-lg backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
+              className="absolute left-1/2 top-1/2 z-30 inline-flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-pill border border-accent bg-accent text-on-accent shadow-lg backdrop-blur-sm transition-colors duration-150 ease-soft hover:border-accent-hover hover:bg-accent-hover"
               style={{ pointerEvents: 'auto', cursor: 'pointer' }}
             >
-              <span aria-hidden className="text-xl leading-none">{videoPlaying ? '⏸' : '▶'}</span>
+              {videoPlaying ? (
+                <svg viewBox="0 0 24 24" width={26} height={26} fill="currentColor" aria-hidden>
+                  <rect x="6.6" y="5.5" width="3.7" height="13" rx="1.1" />
+                  <rect x="13.7" y="5.5" width="3.7" height="13" rx="1.1" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width={26} height={26} fill="currentColor" aria-hidden className="ml-0.5">
+                  <path d="M8 5.5v13l11-6.5z" />
+                </svg>
+              )}
             </button>
           )}
-          {/* 이동 ↔ 조작 토글 — 호버/선택/조작 중에 우하단에 표시(이동 손잡이 위). */}
-          {!is3d && !embedPresent && (selected || embedHover || embedInteract) && (
+          {/* 이동 ↔ 조작 토글 — 호버/선택/조작 중에 좌하단에 표시(이동 손잡이 위).
+              동영상 뷰어는 컨트롤 바·재생 버튼이 이동 모드에서도 바로 동작하므로
+              혼란을 줄이려 토글을 숨긴다(더블클릭/Esc로 조작 모드 진입·해제). */}
+          {!is3d && !isVideoPlayer && !embedPresent && (selected || embedHover || embedInteract) && (
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); setEmbedInteract((v) => !v); }}

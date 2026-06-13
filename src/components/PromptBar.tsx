@@ -141,7 +141,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     }
     const t = setTimeout(() => {
       void import('@/board/assets')
-        .then((m) => m.searchAssets(draft.trim()))
+        .then((m) => m.searchAssets(draft.trim(), ['image', 'video']))
         .then((sugs) => {
           setAssetSugs(sugs);
           // 목록이 바뀌면 더 이상 보이지 않는 선택은 비운다.
@@ -342,15 +342,18 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     }
   }
 
-  /** 동영상 작성 모드 제출 — 입력 프롬프트(없으면 추천 placeholder) + 연결 이미지로
-      generateVideoForViewer 호출. 이미지 있으면 이미지→비디오, 없으면 텍스트→비디오. */
+  /** 동영상 작성 모드 제출 — 교사가 입력한 프롬프트(userPrompt)와 추천 주제(placeholder)를
+      구분해 넘긴다. 이미지→비디오는 입력이 없으면 이미지 그대로+움직임만, 있으면 그 내용만
+      반영. 텍스트→비디오는 입력(없으면 추천 주제)으로 장면 생성. */
   function runVideoCompose() {
     const vc = useUIStore.getState().videoCompose;
     if (!vc) return;
-    const text = draft.trim() || vc.placeholder;
+    const typed = draft.trim();
     setVideoCompose(null);
     setDraft('');
-    void import('@/board/video').then((m) => m.generateVideoForViewer(vc.viewerId, text, vc.imageSrc));
+    void import('@/board/video').then((m) =>
+      m.generateVideoForViewer(vc.viewerId, vc.placeholder, vc.imageSrc, { userPrompt: typed }),
+    );
   }
 
   // Dispatch. 보드는 즉시 실행 — 실제 생성 단계가 boardStore.generating으로 입력창에
@@ -495,7 +498,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                     onClick={applySelectedAssets}
                     className="rounded-pill bg-accent px-t6 py-t2 text-sm font-semibold text-on-accent shadow-md transition-opacity duration-150 ease-soft hover:opacity-90"
                   >
-                    선택한 이미지 {assetSel.length}개 배치
+                    선택한 자료 {assetSel.length}개 배치
                   </button>
                 )}
                 {webSel.length > 0 && (
@@ -534,7 +537,18 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                             selected ? 'border-accent ring-2 ring-accent/40' : 'border-border hover:border-accent'
                           }`}
                         >
-                          <img src={a.url} alt={a.tag} draggable={false} className="h-14 w-full rounded-xs object-cover" />
+                          <span className="relative block">
+                            <img src={a.url} alt={a.tag} draggable={false} className="h-14 w-full rounded-xs object-cover" />
+                            {a.kind === 'video' && (
+                              <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                                <span className="flex h-7 w-7 items-center justify-center rounded-pill bg-accent text-white shadow-md ring-2 ring-white/70">
+                                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden className="ml-0.5">
+                                    <path d="M8 5.5v13l11-6.5z" />
+                                  </svg>
+                                </span>
+                              </span>
+                            )}
+                          </span>
                           <span
                             className={`mt-0.5 block truncate text-[10px] font-medium ${
                               selected ? 'text-accent' : 'text-fg-2 group-hover:text-accent'

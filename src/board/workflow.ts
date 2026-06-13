@@ -513,30 +513,60 @@ function ensureBoxVisible(ids: string[]): void {
     ② 없으면 마지막 작업 프레임(최우측) 오른쪽에 그리드로 나란히 — 왼→오 시간순 유지.
     ③ 프레임이 없으면 뷰포트 중앙에서 겹침 회피 탐색(기존 동작).
     배치가 화면 밖이면 뷰포트를 최소한으로 팬해서 보여준다. */
-export function placeAssetsOnBoard(assets: Array<{ tag: string; url: string }>): string[] {
+export function placeAssetsOnBoard(
+  assets: Array<{ tag: string; url: string; kind?: string; videoAssetId?: string }>,
+): string[] {
   if (assets.length === 0) return [];
   const w = 220;
   const h = 200;
   const GAP = 24;
+
+  // 보관함 자료 → 보드 노드. 영상(kind==='video')은 동영상 뷰어 카드로(데이터는 videoAssetId로
+  // IDB에서 자동 로드 — NodeView 복원 로직), 그 외는 이미지 카드로 만든다.
+  const makeNode = (asset: (typeof assets)[number], x: number, y: number, frameId?: string): string => {
+    const b = useBoardStore.getState();
+    if (asset.kind === 'video' && asset.videoAssetId) {
+      const id = newId('sticky');
+      b.addNodeRaw({
+        id,
+        type: 'sticky',
+        x: Math.round(x),
+        y: Math.round(y),
+        w,
+        h,
+        autoH: false,
+        text: asset.tag,
+        data: {
+          embed: '/video-player.html',
+          title: asset.tag,
+          videoAssetId: asset.videoAssetId,
+          fromLibrary: true,
+          ...(frameId ? { frameId } : {}),
+        },
+      });
+      return id;
+    }
+    const id = newId('image');
+    b.addNodeRaw({
+      id,
+      type: 'image',
+      x: Math.round(x),
+      y: Math.round(y),
+      w,
+      h,
+      src: asset.url,
+      text: asset.tag,
+      data: { role: 'image', fromLibrary: true, ...(frameId ? { frameId } : {}) },
+    });
+    return id;
+  };
 
   // ① 선택 프레임 안에 — placeInFrame이 빈 칸을 찾고 프레임을 늘린다.
   const selFid = selectionFrameId();
   if (selFid) {
     const ids = assets.map((asset) => {
       const pos = placeInFrame(selFid, w, h);
-      const id = newId('image');
-      useBoardStore.getState().addNodeRaw({
-        id,
-        type: 'image',
-        x: Math.round(pos.x),
-        y: Math.round(pos.y),
-        w,
-        h,
-        src: asset.url,
-        text: asset.tag,
-        data: { role: 'image', fromLibrary: true, frameId: selFid },
-      });
-      return id;
+      return makeNode(asset, pos.x, pos.y, selFid);
     });
     fitFrameToChildren(selFid);
     recordSpawnedNodes(ids, '보관함 자료 추가');
@@ -593,19 +623,7 @@ export function placeAssetsOnBoard(assets: Array<{ tag: string; url: string }>):
   const ids = assets.map((asset, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    const id = newId('image');
-    b.addNodeRaw({
-      id,
-      type: 'image',
-      x: Math.round(pos!.x + col * (w + GAP)),
-      y: Math.round(pos!.y + row * (h + GAP)),
-      w,
-      h,
-      src: asset.url,
-      text: asset.tag,
-      data: { role: 'image', fromLibrary: true },
-    });
-    return id;
+    return makeNode(asset, pos!.x + col * (w + GAP), pos!.y + row * (h + GAP));
   });
   recordSpawnedNodes(ids, '보관함 자료 추가');
   b.setSelection(ids);

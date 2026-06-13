@@ -55,6 +55,21 @@ export async function saveWebLinks(
   await idbSet(KEY, lib);
 }
 
+/** 저장된 모든 웹 링크를 최신순으로(URL 중복 제거). 갤러리 자동 표시용. */
+export async function listWebLinks(): Promise<WebLink[]> {
+  const lib = await load();
+  const out: WebLink[] = [];
+  const seen = new Set<string>();
+  for (const arr of Object.values(lib)) {
+    for (const it of arr) {
+      if (!it.url || seen.has(it.url)) continue;
+      seen.add(it.url);
+      out.push(it);
+    }
+  }
+  return out.sort((a, z) => z.createdAt - a.createdAt);
+}
+
 /** 질의 → 검색 토큰들. assets.ts와 동일 규칙(공백·구분자 분해 + 끝 조사 제거). */
 function queryTokens(query: string): string[] {
   const raw = query

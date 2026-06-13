@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PageHero } from '@/components/PageHero';
 import {
   NotebookPen, Palette, Shapes, BookOpen, Image as ImageIcon, Tag, Sparkles,
   Cake, FileStack, FileText, Search, LayoutGrid, List, Maximize2, Wand2,
-  Share2, Bookmark, Download, X, Check, type LucideIcon,
+  Share2, Bookmark, Download, X, Check, Video, Play, Link as LinkIcon, type LucideIcon,
 } from 'lucide-react';
+import { listAssets, type ImageAsset } from '@/board/assets';
+import { listWebLinks, type WebLink } from '@/board/webLinks';
 
 /* ---------------- Gallery (자료 갤러리) ----------------
    Browse teacher resources (worksheets, coloring, storybooks, posters, name
@@ -27,7 +29,14 @@ const C = {
   shadow2: '0 18px 48px rgba(40,33,24,.08)',
 };
 
-type GalleryItem = { id: string; t: string; cat: string; sub: string; icon: LucideIcon; ratio: string };
+type GalleryItem = {
+  id: string; t: string; cat: string; sub: string; icon: LucideIcon; ratio: string;
+  /** 실제 보관함 자산 — 썸네일(이미지·포스터·웹 대표이미지) + 종류·링크. 없으면 mock(아이콘 카드). */
+  thumb?: string;
+  assetKind?: 'image' | 'video' | 'web';
+  href?: string;
+  videoAssetId?: string;
+};
 
 const GALLERY_ITEMS: GalleryItem[] = [
   { id: 'g1', t: '가을 숫자 세기 활동지', cat: '활동지', sub: '수·연산 · 만 4–5세', icon: NotebookPen, ratio: '3 / 4' },
@@ -54,7 +63,51 @@ const GALLERY_ITEMS: GalleryItem[] = [
   { id: 'g22', t: '현장학습 동의서', cat: '템플릿', sub: '안내·회신', icon: FileText, ratio: '3 / 4' },
 ];
 
-const GALLERY_CATS = ['전체', '활동지', '도안', '스토리북', '포스터', '명찰', '환경꾸미기', '놀이기록', '템플릿'];
+const GALLERY_CATS = ['전체', '도안', '동영상', '웹링크', '활동지', '스토리북', '포스터', '명찰', '환경꾸미기', '놀이기록', '템플릿'];
+
+/** 웹 링크의 파비콘 URL(대표 이미지가 없을 때 폴백). */
+function faviconOf(href?: string): string {
+  if (!href) return '';
+  try {
+    return `https://www.google.com/s2/favicons?domain=${new URL(href).hostname}&sz=64`;
+  } catch {
+    return '';
+  }
+}
+
+/** 보관함 자산(이미지·도안·동영상) + 웹 링크 → 갤러리 아이템.
+    PRD/요청: 일반 이미지·도안 → '도안', 동영상 → '동영상', 웹 링크 → '웹링크'. */
+function buildArchiveItems(assets: ImageAsset[], links: WebLink[]): GalleryItem[] {
+  const out: GalleryItem[] = [];
+  for (const x of assets) {
+    const isVideo = x.kind === 'video';
+    out.push({
+      id: `asset-${x.kind}-${x.videoAssetId ?? x.tag}-${x.createdAt}`,
+      t: x.tag,
+      cat: isVideo ? '동영상' : '도안',
+      sub: isVideo ? '생성한 동영상' : x.kind === '도안' ? '생성한 도안' : '생성한 이미지',
+      icon: isVideo ? Video : x.kind === '도안' ? Palette : ImageIcon,
+      ratio: '1 / 1',
+      thumb: x.url,
+      assetKind: isVideo ? 'video' : 'image',
+      ...(x.videoAssetId ? { videoAssetId: x.videoAssetId } : {}),
+    });
+  }
+  for (const l of links) {
+    out.push({
+      id: `web-${l.url}`,
+      t: l.title,
+      cat: '웹링크',
+      sub: l.domain || '웹 링크',
+      icon: LinkIcon,
+      ratio: '4 / 3',
+      ...(l.thumb ? { thumb: l.thumb } : {}),
+      assetKind: 'web',
+      href: l.url,
+    });
+  }
+  return out;
+}
 
 // offline keyword match — prompt-bar driven "AI gather" (no backend dependency)
 const GAL_STOP = new Set(['자료', '찾아줘', '찾아', '수업', '수업할', '할만한', '사용', '사용할', '좀', '해당', '추천', '해줘', '만들어줘', '보여줘', '해', '줘', '만한', '것', '거', '관련', '위한', '필요한', '있는', '좋은', '모아줘', '모아', '골라줘']);
@@ -75,8 +128,21 @@ function GalleryCard({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
       onClick={onOpen}
       style={{ breakInside: 'avoid', marginBottom: 16, width: '100%', display: 'block', textAlign: 'left', padding: 0, border: `1px solid ${C.line}`, borderRadius: 16, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', overflow: 'hidden', boxShadow: C.shadow1, transition: 'transform .15s, border-color .15s, box-shadow .15s' }}
     >
-      <div style={{ position: 'relative', aspectRatio: it.ratio, background: C.thumb, display: 'grid', placeItems: 'center' }}>
-        <Icon size={40} color={a} strokeWidth={1.7} />
+      <div style={{ position: 'relative', aspectRatio: it.ratio, background: C.thumb, display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+        {it.thumb ? (
+          <img src={it.thumb} alt={it.t} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : it.assetKind === 'web' && faviconOf(it.href) ? (
+          <img src={faviconOf(it.href)} alt="" width={44} height={44} style={{ borderRadius: 10 }} />
+        ) : (
+          <Icon size={40} color={a} strokeWidth={1.7} />
+        )}
+        {it.assetKind === 'video' && (
+          <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
+            <span style={{ width: 46, height: 46, borderRadius: 999, background: a, display: 'grid', placeItems: 'center', boxShadow: '0 6px 16px rgba(20,19,17,.3)', border: '2px solid rgba(255,255,255,.85)' }}>
+              <Play size={20} color="#fff" fill="#fff" style={{ marginLeft: 2 }} />
+            </span>
+          </span>
+        )}
         <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: a, background: '#fff', borderRadius: 999, padding: '3px 9px', boxShadow: C.shadow1 }}>{it.cat}</span>
         <span className="kv-galmax" style={{ position: 'absolute', top: 10, right: 10, width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,.92)', display: 'grid', placeItems: 'center', color: C.ink }}><Maximize2 size={14} /></span>
       </div>
@@ -97,7 +163,22 @@ function GalleryRow({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
       onClick={onOpen}
       style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', textAlign: 'left', padding: 10, border: `1px solid ${C.line}`, borderRadius: 14, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', boxShadow: C.shadow1, transition: 'transform .15s, border-color .15s, box-shadow .15s' }}
     >
-      <div style={{ width: 58, height: 58, borderRadius: 12, background: C.thumb, display: 'grid', placeItems: 'center', flexShrink: 0 }}><Icon size={24} color={a} strokeWidth={1.8} /></div>
+      <div style={{ position: 'relative', width: 58, height: 58, borderRadius: 12, background: C.thumb, display: 'grid', placeItems: 'center', flexShrink: 0, overflow: 'hidden' }}>
+        {it.thumb ? (
+          <img src={it.thumb} alt={it.t} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : it.assetKind === 'web' && faviconOf(it.href) ? (
+          <img src={faviconOf(it.href)} alt="" width={24} height={24} style={{ borderRadius: 6 }} />
+        ) : (
+          <Icon size={24} color={a} strokeWidth={1.8} />
+        )}
+        {it.assetKind === 'video' && (
+          <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
+            <span style={{ width: 24, height: 24, borderRadius: 999, background: a, display: 'grid', placeItems: 'center', border: '1.5px solid rgba(255,255,255,.85)' }}>
+              <Play size={11} color="#fff" fill="#fff" style={{ marginLeft: 1 }} />
+            </span>
+          </span>
+        )}
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.t}</div>
         <div style={{ fontSize: 12.5, color: C.muted, marginTop: 3 }}>{it.cat} · {it.sub}</div>
@@ -124,15 +205,28 @@ function GalleryViewer({ item, onClose, onAction }: { item: GalleryItem; onClose
   return createPortal(
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(20,19,17,.6)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative', background: C.bg, borderRadius: 20, width: 'min(1040px, 100%)', height: 'min(86vh, 760px)', display: 'flex', flexDirection: 'row', overflow: 'hidden', boxShadow: C.shadow2 }}>
-        {/* large paper preview */}
+        {/* large preview — 실제 자산은 썸네일/포스터, mock은 종이 카드 */}
         <div style={{ flex: 1, minHeight: 0, background: C.thumb, display: 'grid', placeItems: 'center', padding: 30, overflow: 'hidden' }}>
-          <div style={{ background: '#fff', borderRadius: 10, boxShadow: C.shadow2, aspectRatio: item.ratio, maxHeight: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '26px 30px', boxSizing: 'border-box' }}>
-            <div style={{ width: 70, height: 70, borderRadius: 18, background: a, display: 'grid', placeItems: 'center', flexShrink: 0 }}><Icon size={32} color="#fff" strokeWidth={1.8} /></div>
-            <div style={{ fontWeight: 700, fontSize: 17, textAlign: 'center', color: C.ink, lineHeight: 1.35 }}>{item.t}</div>
-            <div style={{ width: '76%', display: 'flex', flexDirection: 'column', gap: 7, marginTop: 2 }}>
-              {[100, 86, 94, 72, 90].map((w, i) => <div key={i} style={{ height: 6, borderRadius: 4, background: C.line, width: `${w}%` }} />)}
+          {item.thumb ? (
+            <div style={{ position: 'relative', maxHeight: '100%', maxWidth: '100%', display: 'grid', placeItems: 'center' }}>
+              <img src={item.thumb} alt={item.t} style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', borderRadius: 12, boxShadow: C.shadow2 }} />
+              {item.assetKind === 'video' && (
+                <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
+                  <span style={{ width: 64, height: 64, borderRadius: 999, background: a, display: 'grid', placeItems: 'center', boxShadow: '0 8px 22px rgba(20,19,17,.35)', border: '3px solid rgba(255,255,255,.85)' }}>
+                    <Play size={28} color="#fff" fill="#fff" style={{ marginLeft: 3 }} />
+                  </span>
+                </span>
+              )}
             </div>
-          </div>
+          ) : (
+            <div style={{ background: '#fff', borderRadius: 10, boxShadow: C.shadow2, aspectRatio: item.ratio, maxHeight: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '26px 30px', boxSizing: 'border-box' }}>
+              <div style={{ width: 70, height: 70, borderRadius: 18, background: a, display: 'grid', placeItems: 'center', flexShrink: 0 }}><Icon size={32} color="#fff" strokeWidth={1.8} /></div>
+              <div style={{ fontWeight: 700, fontSize: 17, textAlign: 'center', color: C.ink, lineHeight: 1.35 }}>{item.t}</div>
+              <div style={{ width: '76%', display: 'flex', flexDirection: 'column', gap: 7, marginTop: 2 }}>
+                {[100, 86, 94, 72, 90].map((w, i) => <div key={i} style={{ height: 6, borderRadius: 4, background: C.line, width: `${w}%` }} />)}
+              </div>
+            </div>
+          )}
         </div>
         {/* info + actions */}
         <div style={{ width: 320, flexShrink: 0, borderLeft: `1px solid ${C.line}`, padding: 26, display: 'flex', flexDirection: 'column', gap: 14, background: '#fff' }}>
@@ -172,8 +266,18 @@ export function GalleryPage() {
   const [sel, setSel] = useState<GalleryItem | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [ai, setAi] = useState<{ label: string; ids: string[] } | null>(null);
+  const [dynItems, setDynItems] = useState<GalleryItem[]>([]);
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2200); return () => clearTimeout(t); }, [toast]);
+
+  // 보관함(이미지·도안·동영상 + 웹 링크) 자동 로드 → 갤러리에 자산 카드로 표시.
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([listAssets(), listWebLinks()])
+      .then(([assets, links]) => { if (alive) setDynItems(buildArchiveItems(assets, links)); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // prompt bar drives the gallery: a prompt → gather matching resources into an "AI" filter
   useEffect(() => {
@@ -185,10 +289,13 @@ export function GalleryPage() {
     return () => window.removeEventListener('kv:prompt', h);
   }, []);
 
+  // 실제 보관함 자산을 앞에, mock 데모 자료를 뒤에 둔다.
+  const allItems = useMemo(() => [...dynItems, ...GALLERY_ITEMS], [dynItems]);
+
   const exitAi = () => setAi(null);
   const items = ai
-    ? GALLERY_ITEMS.filter((i) => ai.ids.includes(i.id))
-    : GALLERY_ITEMS.filter((i) => (cat === '전체' || i.cat === cat) && (!q.trim() || i.t.includes(q.trim()) || i.sub.includes(q.trim()) || i.cat.includes(q.trim())));
+    ? allItems.filter((i) => ai.ids.includes(i.id))
+    : allItems.filter((i) => (cat === '전체' || i.cat === cat) && (!q.trim() || i.t.includes(q.trim()) || i.sub.includes(q.trim()) || i.cat.includes(q.trim())));
 
   const chip = (on: boolean): React.CSSProperties => ({ padding: '8px 15px', borderRadius: 999, border: `1px solid ${on ? a : C.line}`, background: on ? a : '#fff', color: on ? '#fff' : C.ink, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0 });
   const vbtn = (on: boolean): React.CSSProperties => ({ width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: 10, border: `1px solid ${on ? a : C.line}`, background: on ? `${a}14` : '#fff', color: on ? a : C.muted, cursor: 'pointer', flexShrink: 0 });

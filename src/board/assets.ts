@@ -8,12 +8,18 @@ import { idbGet, idbSet } from './idb';
 export interface ImageAsset {
   /** 원본 캡션(표시용). 키는 정규화된 태그. */
   tag: string;
-  kind: 'image' | '도안';
-  url: string; // data URI
+  kind: 'image' | '도안' | 'video';
+  /** data URI. video는 큰 mp4 대신 '포스터(첫 프레임) 썸네일'을 담아 표시용으로 쓰고,
+      실제 영상은 videoAssets(IDB)에 videoAssetId로 따로 보관한다. */
+  url: string;
   createdAt: number;
   /** 생성 당시 상위 주제(예: "여러 물고기") — '물고기'처럼 묶음 검색을 가능하게. */
   group?: string;
+  /** kind==='video'일 때 — videoAssets 스토어의 영상 id(배치 시 이걸로 로드). */
+  videoAssetId?: string;
 }
+
+export type AssetKind = ImageAsset['kind'];
 
 const KEY = 'image-assets:v1';
 const MAX_PER_TAG = 3; // 태그당 최근 3장만 보관(용량 관리)
@@ -27,6 +33,20 @@ async function load(): Promise<Record<string, ImageAsset[]>> {
   return cache;
 }
 
+/** 보관함의 모든 자산을 최신순으로(태그·종류 무관). 갤러리 자동 표시용. */
+export async function listAssets(kinds?: ImageAsset['kind'][]): Promise<ImageAsset[]> {
+  const lib = await load();
+  const out: ImageAsset[] = [];
+  for (const arr of Object.values(lib)) {
+    for (const it of arr) {
+      if (!it.url) continue;
+      if (kinds && !kinds.includes(it.kind)) continue;
+      out.push(it);
+    }
+  }
+  return out.sort((a, z) => z.createdAt - a.createdAt);
+}
+
 /** 캡션과 같은 태그의 최신 자산(종류 일치)을 찾는다 — 없으면 undefined. */
 export async function findAsset(caption: string, kind: ImageAsset['kind']): Promise<ImageAsset | undefined> {
   const lib = await load();
@@ -36,18 +56,27 @@ export async function findAsset(caption: string, kind: ImageAsset['kind']): Prom
   return undefined;
 }
 
-/** 생성 성공한 이미지를 태그로 저장(태그당 최근 N장 유지). mock/플레이스홀더는 저장하지 않는다. */
+/** 생성 성공한 자산을 태그로 저장(태그당 최근 N장 유지). mock/플레이스홀더는 저장하지 않는다.
+    video는 url=포스터 썸네일 + videoAssetId(실제 영상은 videoAssets에 별도 보관). */
 export async function saveAsset(
   caption: string,
   kind: ImageAsset['kind'],
   url: string,
   group?: string,
+  videoAssetId?: string,
 ): Promise<void> {
   if (!url || !caption.trim()) return;
   const lib = await load();
   const k = norm(caption);
   const arr = lib[k] ?? (lib[k] = []);
-  arr.push({ tag: caption.trim(), kind, url, createdAt: Date.now(), ...(group?.trim() ? { group: group.trim() } : {}) });
+  arr.push({
+    tag: caption.trim(),
+    kind,
+    url,
+    createdAt: Date.now(),
+    ...(group?.trim() ? { group: group.trim() } : {}),
+    ...(videoAssetId ? { videoAssetId } : {}),
+  });
   if (arr.length > MAX_PER_TAG) arr.splice(0, arr.length - MAX_PER_TAG);
   await idbSet(KEY, lib);
 }
@@ -75,24 +104,29 @@ function queryTokens(query: string): string[] {
     "물고기"는 '여러 물고기'(주제)로, "브라키오와 문어"는 단어별로 각각 매칭된다. */
 export async function searchAssets(
   query: string,
-  kind: ImageAsset['kind'] = 'image',
+  kind: ImageAsset['kind'] | ImageAsset['kind'][] = 'image',
   limit = Infinity, // 개수 제한 없음 — 추천 스트립이 줄바꿈+스크롤로 모두 보여준다
 ): Promise<ImageAsset[]> {
+  const kinds = Array.isArray(kind) ? kind : [kind];
   const tokens = queryTokens(query);
   if (tokens.length === 0) return [];
   const lib = await load();
   const out: ImageAsset[] = [];
   for (const arr of Object.values(lib)) {
+    // 태그당 '종류별 최신 1장' — 같은 캡션에 이미지·영상이 함께 있어도 둘 다 노출되게
+    // (한 종류만 보던 기존 동작이 영상을 가리지 않도록).
+    const seenKinds = new Set<string>();
     for (let i = arr.length - 1; i >= 0; i--) {
       const it = arr[i];
-      if (it.kind !== kind || !it.url) continue;
+      if (!kinds.includes(it.kind) || !it.url || seenKinds.has(it.kind)) continue;
+      seenKinds.add(it.kind);
       const t = norm(it.tag);
       const g = norm(it.group ?? '');
       const matched = tokens.some(
         (tok) => t.includes(tok) || tok.includes(t) || (g.length > 0 && (g.includes(tok) || tok.includes(g))),
       );
       if (matched) out.push(it);
-      break; // 태그당 최신 1장만
+      if (seenKinds.size >= kinds.length) break; // 요청한 종류를 모두 1장씩 봤으면 종료
     }
   }
   return out.sort((a, z) => z.createdAt - a.createdAt).slice(0, limit);

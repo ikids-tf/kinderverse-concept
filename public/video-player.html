@@ -16,6 +16,11 @@
     --fg-muted: #8C887F;
     --accent: #F2733E;
     --accent-hover: #E5602B;
+    --r-md: 14px;
+    --r-lg: 20px;
+    --r-xl: 26px;
+    --r-pill: 999px;
+    --shadow-soft: 0 6px 20px rgba(20, 19, 17, 0.14);
     --font-sans: 'Pretendard', 'Hanken Grotesk', -apple-system, 'Segoe UI', sans-serif;
   }
   * { box-sizing: border-box; }
@@ -24,78 +29,39 @@
     display: flex;
     flex-direction: column;
     font-family: var(--font-sans);
-    background: var(--bg);
+    background: transparent;
     color: var(--fg);
+    -webkit-font-smoothing: antialiased;
   }
 
-  /* ── 상단: 파일 선택 — 평소엔 숨김(보드에선 화면만 보인다).
-        보드 카드가 호버/선택 시 kvSetChrome으로 연다.
-        position:absolute 오버레이라 나타나도 영상(.stage)을 밀어내지 않는다
-        (호버 시 영상이 위아래로 튀던 문제 해결 — 영상 화면은 항상 고정). ── */
-  header {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 6;
-    display: none;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-  body.chrome:not(.present) header { display: flex; }
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 7px 14px;
-    border: 0;
-    border-radius: 999px;
-    background: var(--accent);
-    color: #fff;
-    font: 600 13px var(--font-sans);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .btn:hover { background: var(--accent-hover); }
-  #name {
+  /* ── 무대(영상 프레임) ───────────────────────────────────────────
+     로드 전엔 카드(surface)처럼, 로드되면 '영상 화면만' 남기고 투명 — 부모 카드가
+     영상 비율로 맞춰지므로(카드=프레임) 크롬이 영상 가장자리에 정확히 붙는다. */
+  .stage {
+    position: relative;
     flex: 1;
-    overflow: hidden;
-    font-size: 12px;
-    color: var(--fg-muted);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .icon-btn {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 auto;
-    width: 30px;
-    height: 30px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface);
-    color: var(--fg-2);
-    font-size: 14px;
-    cursor: pointer;
+    min-height: 0;
+    background: var(--bg-deep);
+    overflow: hidden;
   }
-  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-  /* ── 가운데: 영상 ─────────────────────────────────────────────── */
-  .stage { position: relative; flex: 1; display: flex; min-height: 0; background: var(--bg-deep); }
+  body.loaded .stage { background: transparent; }
   video {
-    flex: 1;
+    /* 카드=영상 프레임 — 카드 박스를 꽉 채워 바운드박스와 영상 사이 갭을 없앤다.
+       카드 비율은 부모가 영상 비율(kv-video-aspect)에 맞추므로 cover로 크롭되는 양은
+       거의 없고, 레터박스(박힌 검정 띠)만 잘려 나간다. */
     width: 100%;
     height: 100%;
-    min-height: 0;
-    object-fit: contain;
+    object-fit: cover;
     background: transparent;
     display: none;
+    border-radius: var(--r-xl);
   }
   body.loaded video { display: block; }
+
+  /* ── 빈 상태 — 안내 + 파일 선택 ──────────────────────────────── */
   #empty {
     position: absolute;
     inset: 0;
@@ -103,13 +69,37 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 12px;
+    padding: 16px;
+    text-align: center;
     color: var(--fg-muted);
     font-size: 13px;
-    pointer-events: none;
   }
-  #empty .clap { font-size: 34px; }
+  #empty .clap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    box-shadow: var(--shadow-soft);
+    font-size: 28px;
+  }
   body.loaded #empty { display: none; }
+  .btn-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 18px;
+    border: 0;
+    border-radius: var(--r-pill);
+    background: var(--accent);
+    color: #fff;
+    font: 600 13px var(--font-sans);
+    cursor: pointer;
+  }
+  .btn-pick:hover { background: var(--accent-hover); }
   .stage.dropping::after {
     content: '여기에 놓으면 재생돼요';
     position: absolute;
@@ -118,126 +108,240 @@
     align-items: center;
     justify-content: center;
     border: 2px dashed var(--accent);
-    border-radius: 14px;
+    border-radius: var(--r-lg);
     background: rgba(255, 255, 255, 0.6);
     color: var(--accent);
     font: 600 13px var(--font-sans);
     pointer-events: none;
   }
 
-  /* 중앙 큰 재생 버튼 — 일시정지 상태에서만 */
+  /* ── 상단 헤더 — 제목(좌) + 액션(다른 파일·전체 화면, 우) · 호버/선택 시에만 ── */
+  #titlebar {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 6;
+    display: none;
+    align-items: center;
+    gap: 9px;
+    max-width: calc(100% - 150px);
+    padding: 9px 18px;
+    border-radius: var(--r-pill);
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(6px);
+  }
+  body.chrome:not(.present) #titlebar { display: inline-flex; }
+  #titlebar .dot {
+    flex: 0 0 auto;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  #titlebar .t {
+    font: 600 16px var(--font-sans);
+    color: var(--fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #topbar {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 6;
+    display: none;
+    align-items: center;
+    gap: 9px;
+  }
+  body.chrome:not(.present) #topbar { display: flex; }
+  .ic {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 46px;
+    border: 0;
+    border-radius: var(--r-pill);
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--fg-2);
+    cursor: pointer;
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(6px);
+    transition: color 150ms ease, background 150ms ease;
+  }
+  .ic:hover { color: var(--accent); }
+  .ic svg { width: 26px; height: 26px; }
+
+  /* ── 중앙 큰 재생 버튼 — 코랄 원 + 흰 삼각형(일시정지 상태에서만) ── */
   #bigPlay {
     position: absolute;
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: 58px;
-    height: 58px;
+    width: 66px;
+    height: 66px;
     border: 0;
-    border-radius: 999px;
-    background: rgba(20, 19, 17, 0.55);
+    border-radius: var(--r-pill);
+    background: var(--accent);
     color: #fff;
-    font-size: 22px;
     cursor: pointer;
     display: none;
     align-items: center;
     justify-content: center;
-    backdrop-filter: blur(2px);
+    box-shadow: 0 8px 22px rgba(20, 19, 17, 0.28);
     transition: background 150ms ease, transform 150ms ease;
   }
-  #bigPlay:hover { background: var(--accent); transform: translate(-50%, -50%) scale(1.06); }
+  #bigPlay svg { width: 34px; height: 34px; margin-left: 4px; } /* 삼각형 — 크게 + 광학 보정 */
+  #bigPlay:hover { background: var(--accent-hover); transform: translate(-50%, -50%) scale(1.06); }
   body.loaded.paused #bigPlay { display: inline-flex; }
 
-  /* ── 하단 컨트롤 바 — 심플한 필 ──────────────────────────────── */
+  /* ── 하단 컨트롤 바 — 프로스티드 필 ───────────────────────────── */
   #controls {
     position: absolute;
     left: 50%;
-    bottom: 10px;
+    bottom: 16px;
     transform: translateX(-50%);
     display: none;
     align-items: center;
-    gap: 8px;
-    width: min(calc(100% - 24px), 560px);
-    padding: 6px 12px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(6px);
-    box-shadow: 0 4px 14px rgba(20, 19, 17, 0.10);
+    gap: 14px;
+    width: min(calc(100% - 16px), 820px);
+    padding: 10px 20px;
+    border-radius: var(--r-pill);
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(8px);
+    box-shadow: var(--shadow-soft);
   }
-  /* 하단 컨트롤 바 — 평소엔 숨김, 호버/선택(chrome) 시에만 나타난다(헤더와 동일). */
-  body.loaded.chrome #controls { display: flex; }
+  body.loaded.chrome:not(.present) #controls { display: flex; }
   #controls button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 58px;
+    height: 58px;
     flex: 0 0 auto;
     border: 0;
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     background: transparent;
     color: var(--fg-2);
-    font-size: 13px;
     cursor: pointer;
+    transition: color 150ms ease, background 150ms ease;
   }
   #controls button:hover { background: var(--bg-deep); color: var(--accent); }
   #controls button.on { color: var(--accent); }
+  #controls svg { width: 46px; height: 46px; }
+  /* play/pause·mute 아이콘은 body.paused / .on 상태로 CSS가 전환(텍스트 글리프 안 씀) */
+  #play .i-pause { display: none; }
+  body:not(.paused) #play .i-play { display: none; }
+  body:not(.paused) #play .i-pause { display: inline-flex; }
+  #mute .i-muted { display: none; }
+  #mute.on .i-vol { display: none; }
+  #mute.on .i-muted { display: inline-flex; }
+
   #seek {
+    -webkit-appearance: none;
+    appearance: none;
     flex: 1;
     min-width: 0;
-    height: 4px;
-    accent-color: var(--accent);
+    height: 9px;
+    border-radius: var(--r-pill);
+    cursor: pointer;
+    background:
+      linear-gradient(var(--accent), var(--accent)) 0 / var(--seek, 0%) 100% no-repeat,
+      var(--border);
+  }
+  #seek::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid #fff;
+    box-shadow: 0 1px 3px rgba(20, 19, 17, 0.3);
+    cursor: pointer;
+  }
+  #seek::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 1px 3px rgba(20, 19, 17, 0.3);
     cursor: pointer;
   }
   #time {
     flex: 0 0 auto;
-    font-size: 10.5px;
+    font-size: 15px;
     font-variant-numeric: tabular-nums;
-    color: var(--fg-muted);
+    color: var(--fg-2);
     white-space: nowrap;
   }
 
   /* ── 프레젠테이션(수업) 모드 — 메뉴 숨김 → 보드 위에 영상만 ──────── */
-  #exit { position: absolute; top: 8px; right: 8px; display: none; z-index: 10; opacity: 0.55; }
-  #exit:hover { opacity: 1; }
-  body.present { background: transparent; }
-  body.present header { display: none; }
+  #exit { position: absolute; top: 10px; right: 10px; display: none; z-index: 10; }
   body.present .stage { background: transparent; }
   body.present #exit { display: inline-flex; }
 </style>
 </head>
 <body class="paused">
-  <header>
-    <label class="btn">
-      파일 선택
-      <input id="file" type="file" accept="video/*" hidden />
-    </label>
-    <span id="name">동영상 파일을 선택하세요 (mp4 · webm 등)</span>
-    <button id="fs" class="icon-btn" type="button" title="전체 화면 (수업용 — 메뉴 숨기고 영상만)">⛶</button>
-  </header>
+  <input id="file" type="file" accept="video/*" hidden />
 
   <div class="stage" id="stage">
-    <video id="v" playsinline></video>
+    <video id="v" playsinline loop></video>
+
     <div id="empty">
       <span class="clap">🎬</span>
-      <span>마우스를 올리면 파일 선택 줄이 열려요</span>
+      <span>영상을 만들거나 파일을 선택해 재생해요</span>
+      <label class="btn-pick" for="file">파일 선택</label>
     </div>
-    <button id="bigPlay" type="button" title="재생">▶</button>
+
+    <!-- 상단 헤더(제목) -->
+    <div id="titlebar">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="t" id="vtitle">동영상</span>
+    </div>
+
+    <!-- 상단 액션 -->
+    <div id="topbar">
+      <label class="ic" for="file" title="다른 영상 파일 선택">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" /></svg>
+      </label>
+      <button id="fs" class="ic" type="button" title="전체 화면 (수업용 — 메뉴 숨기고 영상만)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+      </button>
+    </div>
+
+    <!-- 중앙 재생 -->
+    <button id="bigPlay" type="button" title="재생">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
+    </button>
+
+    <!-- 하단 컨트롤 -->
     <div id="controls">
-      <button id="play" type="button" title="재생/일시정지">▶</button>
-      <input id="seek" type="range" min="0" max="1000" value="0" />
+      <button id="play" type="button" title="재생/일시정지">
+        <span class="i-play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z" /></svg></span>
+        <span class="i-pause" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5.5" width="3.6" height="13" rx="1.1" /><rect x="13.9" y="5.5" width="3.6" height="13" rx="1.1" /></svg></span>
+      </button>
+      <input id="seek" type="range" min="0" max="1000" value="0" title="탐색" />
       <span id="time">0:00 / 0:00</span>
-      <button id="mute" type="button" title="음소거">🔊</button>
-      <button id="loop" type="button" title="반복 재생">🔁</button>
+      <button id="mute" type="button" title="음소거">
+        <span class="i-vol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3l5 4V5.5l-5 4H4z" fill="currentColor" stroke="none" /><path d="M16 9a4 4 0 0 1 0 6" /><path d="M18.5 7a7 7 0 0 1 0 10" /></svg></span>
+        <span class="i-muted" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3l5 4V5.5l-5 4H4z" fill="currentColor" stroke="none" /><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" /></svg></span>
+      </button>
+      <button id="loop" type="button" title="반복 재생">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" /><path d="m7 22-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /></svg>
+      </button>
     </div>
-    <button id="exit" class="icon-btn" type="button" title="프레젠테이션 종료">✕</button>
+
+    <button id="exit" class="ic" type="button" title="프레젠테이션 종료">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+    </button>
   </div>
 
   <script>
     const v = document.getElementById('v');
     const file = document.getElementById('file');
-    const nameEl = document.getElementById('name');
     const stage = document.getElementById('stage');
     const playBtn = document.getElementById('play');
     const bigPlay = document.getElementById('bigPlay');
@@ -245,6 +349,9 @@
     const timeEl = document.getElementById('time');
     const muteBtn = document.getElementById('mute');
     const loopBtn = document.getElementById('loop');
+    // 짧은 개념 영상은 기본 '반복'(seamless loop) — 생성 프롬프트가 첫=끝 프레임을 맞추므로
+    // 끊김 없이 계속 재생된다. 버튼으로 끌 수 있다(<video loop> 기본 on 반영).
+    loopBtn.classList.toggle('on', v.loop);
     let objectUrl = null;
     let seeking = false;
 
@@ -252,7 +359,7 @@
       if (!f || !f.type.startsWith('video/')) return;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       objectUrl = URL.createObjectURL(f);
-      nameEl.textContent = f.name;
+      resetCrop();
       v.src = objectUrl;
       document.body.classList.add('loaded');
       v.play().catch(() => { /* 자동재생 차단 시 — 중앙 ▶로 시작 */ });
@@ -281,10 +388,72 @@
         );
       } catch { /* standalone */ }
     };
-    v.addEventListener('play', () => { document.body.classList.remove('paused'); playBtn.textContent = '⏸'; postState(); });
-    v.addEventListener('pause', () => { document.body.classList.add('paused'); playBtn.textContent = '▶'; postState(); });
+    // 아이콘(▶/⏸)은 body.paused 클래스로 CSS가 전환한다 — 여기선 상태 클래스만 토글.
+    v.addEventListener('play', () => { document.body.classList.remove('paused'); postState(); });
+    v.addEventListener('pause', () => { document.body.classList.add('paused'); postState(); });
     // 외부(보드 카드)에서 재생/일시정지 토글 — 카드 위 버튼이 호출한다.
     window.kvTogglePlay = toggle;
+
+    /* ── 영상 비율을 부모(보드 카드)에 알려 카드=프레임으로 맞춘다 ──────────
+       카드가 영상 비율과 맞으면 좌우/상하 여백이 사라져 크롬이 영상 가장자리에 정확히
+       붙고, 라운드 코너·그림자가 곧 영상 프레임이 된다. 크롭이 적용되면 '콘텐츠 비율',
+       아니면 원본 비율을 보낸다. 부모는 최초 1회만 반영(videoFitted). */
+    function postAspect(a) {
+      if (!a || !isFinite(a) || a <= 0) return;
+      try { window.parent && window.parent.postMessage({ type: 'kv-video-aspect', aspect: a }, '*'); } catch { /* standalone */ }
+    }
+
+    /* ── 레터박스(박힌 검정 띠) 자동 크롭 ──────────────────────────────────
+       이미지→비디오는 정사각형 이미지를 16:9로 만들며 좌우(또는 위아래)를 검정으로
+       패딩해 mp4에 굽는다. CSS로는 못 지우므로, 첫 프레임을 캔버스로 분석해 검정 띠를
+       찾아내고 '콘텐츠 비율'로 object-fit:cover 크롭 → 화면(프레임)만 남긴다.
+       검정 띠가 없는 영상은 그대로 둔다(오검출·외부 URL 타이팅 시에도 안전하게 생략). */
+    function resetCrop() {
+      v.style.aspectRatio = '';
+      v.style.objectFit = 'cover'; // 카드 비율을 원본에 맞추므로(아래 postAspect) cover여도 크롭 없음
+      v.style.objectPosition = '';
+    }
+    function cropLetterbox() {
+      const VW = v.videoWidth, VH = v.videoHeight;
+      if (!VW || !VH) return;
+      try {
+        const W = 160, H = Math.max(1, Math.round((W * VH) / VW));
+        const cv = document.createElement('canvas');
+        cv.width = W; cv.height = H;
+        const ctx = cv.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(v, 0, 0, W, H);
+        const data = ctx.getImageData(0, 0, W, H).data;
+        const TH = 18; // 이 값 이하 RGB면 '검정'으로 본다
+        const lit = (x, y) => { const i = (y * W + x) * 4; return data[i] > TH || data[i + 1] > TH || data[i + 2] > TH; };
+        const colHas = (x) => { for (let y = 0; y < H; y++) if (lit(x, y)) return true; return false; };
+        const rowHas = (y) => { for (let x = 0; x < W; x++) if (lit(x, y)) return true; return false; };
+        let l = 0; while (l < W && !colHas(l)) l++;
+        let r = W - 1; while (r > l && !colHas(r)) r--;
+        let t = 0; while (t < H && !rowHas(t)) t++;
+        let b = H - 1; while (b > t && !rowHas(b)) b--;
+        const cw0 = r - l + 1, ch0 = b - t + 1;
+        if (cw0 < W * 0.3 || ch0 < H * 0.3) { resetCrop(); postAspect(VW / VH); return; } // 콘텐츠가 비정상적으로 작으면 무시
+        const sideBars = (l + (W - 1 - r)) / W;
+        const tbBars = (t + (H - 1 - b)) / H;
+        if (sideBars < 0.03 && tbBars < 0.03) { resetCrop(); postAspect(VW / VH); return; } // 띠가 거의 없으면 그대로
+        // 잔여 검정 가장자리(경계 1~2px) 제거 — 감지한 콘텐츠 경계를 안쪽으로 ~2%씩
+        // 좁혀 cover가 그 띠를 덮게 한다(왼쪽 세로 검정 라인 방지). 손실은 미미하다.
+        const insX = Math.max(1, Math.round(W * 0.02));
+        const insY = Math.max(1, Math.round(H * 0.02));
+        if (r - l > insX * 2) { l += insX; r -= insX; }
+        if (b - t > insY * 2) { t += insY; b -= insY; }
+        const cw = r - l + 1, ch = b - t + 1;
+        const contentAspect = ((cw / W) * VW) / ((ch / H) * VH);
+        const cx = (((l + r) / 2) / W) * 100;
+        const cy = (((t + b) / 2) / H) * 100;
+        v.style.aspectRatio = contentAspect.toFixed(4);
+        v.style.objectFit = 'cover';
+        v.style.objectPosition = `${cx.toFixed(1)}% ${cy.toFixed(1)}%`;
+        postAspect(contentAspect);
+      } catch { resetCrop(); postAspect(v.videoWidth / v.videoHeight); /* 외부 URL 캔버스 타이팅 등 — 크롭 생략 */ }
+    }
+    v.addEventListener('loadeddata', cropLetterbox);
+    v.addEventListener('seeked', cropLetterbox);
 
     const fmt = (s) => {
       if (!isFinite(s)) return '0:00';
@@ -293,20 +462,22 @@
       return `${m}:${String(ss).padStart(2, '0')}`;
     };
     const renderTime = () => { timeEl.textContent = `${fmt(v.currentTime)} / ${fmt(v.duration)}`; };
+    const renderSeekFill = () => { seek.style.setProperty('--seek', `${(Number(seek.value) / 1000) * 100}%`); };
     v.addEventListener('timeupdate', () => {
       if (!seeking && v.duration) seek.value = String(Math.round((v.currentTime / v.duration) * 1000));
+      renderSeekFill();
       renderTime();
     });
     v.addEventListener('loadedmetadata', () => { renderTime(); postState(); });
     seek.addEventListener('input', () => {
       seeking = true;
+      renderSeekFill();
       if (v.duration) v.currentTime = (Number(seek.value) / 1000) * v.duration;
     });
     seek.addEventListener('change', () => { seeking = false; });
 
     muteBtn.addEventListener('click', () => {
       v.muted = !v.muted;
-      muteBtn.textContent = v.muted ? '🔇' : '🔊';
       muteBtn.classList.toggle('on', v.muted);
     });
     loopBtn.addEventListener('click', () => {
@@ -329,23 +500,29 @@
     document.getElementById('fs').addEventListener('click', () => setPresent(true));
     document.getElementById('exit').addEventListener('click', () => setPresent(false));
 
-    // 보드 카드가 호버/선택에 맞춰 파일 선택 줄(UI)을 열고 닫는다.
-    // 호버 시 현재 상태도 다시 알려, 이미 로드된(이벤트가 지난) 영상도 카드 위
-    // 재생 버튼이 곧바로 올바른 아이콘으로 뜨게 한다.
+    // 보드 카드가 호버/선택에 맞춰 컨트롤을 열고 닫는다. 호버 시 현재 상태도 다시 알려,
+    // 이미 로드된(이벤트가 지난) 영상도 카드 위 재생 버튼이 곧바로 올바른 아이콘으로 뜨게 한다.
     window.kvSetChrome = (on) => { document.body.classList.toggle('chrome', !!on); postState(); };
     // 보드 카드의 전체 화면 버튼/모션 연결이 프레젠테이션을 켜고 끈다.
     window.kvSetPresent = setPresent;
 
     // 외부에서 URL로 바로 재생 — 테스트·딥링크 + 생성 영상(data URI) 로드용.
-    // data:/blob: URI는 split('/').pop()이 거대한 base64가 되므로 name 인자를 우선 사용.
-    window.loadSrc = (u, name) => {
+    window.loadSrc = (u) => {
+      resetCrop();
       v.src = u;
-      nameEl.textContent = name || (/^(data|blob):/.test(u) ? '영상' : u.split('/').pop());
       document.body.classList.add('loaded');
       postState();
       v.play().catch(() => {});
     };
-    const q = new URLSearchParams(location.search).get('src');
+
+    // ── 상단 헤더 제목 — ?title= 쿼리로 주입(부모가 카드 제목을 넘긴다). 외부에서
+    //    kvSetTitle로도 바꿀 수 있다. 비면 기본 '동영상'.
+    const titleEl = document.getElementById('vtitle');
+    window.kvSetTitle = (t) => { if (titleEl && typeof t === 'string' && t.trim()) titleEl.textContent = t.trim(); };
+    const qs = new URLSearchParams(location.search);
+    window.kvSetTitle(qs.get('title'));
+
+    const q = qs.get('src');
     if (q) window.loadSrc(q);
   </script>
 </body>
