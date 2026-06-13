@@ -157,7 +157,7 @@
   <header>
     <input id="url" type="text" inputmode="url" placeholder="유튜브 링크를 붙여넣으세요 (youtube.com/watch… 또는 youtu.be/…)" />
     <button id="go" class="btn" type="button">재생</button>
-    <button id="fs" class="icon-btn" type="button" title="전체 화면 (수업용 — 메뉴 숨기고 영상만)">⛶</button>
+    <button id="fs" class="icon-btn" type="button" title="전체 화면으로 보기">⛶</button>
   </header>
 
   <div class="stage">
@@ -213,6 +213,8 @@
       player.style.display = 'block';
       // nocookie 도메인 — 교실용으로 추적 쿠키 없이 재생.
       player.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+      // 현재 영상을 부모(보드 카드)에 보고 — 풀스크린/새로고침 복원에 쓰인다.
+      try { window.parent && window.parent.postMessage({ type: 'kv-viewer-content', src: `https://www.youtube.com/watch?v=${id}` }, '*'); } catch { /* standalone */ }
     }
 
     document.getElementById('go').addEventListener('click', () => play(urlEl.value));
@@ -225,7 +227,14 @@
       document.body.classList.toggle('present', on);
       try { window.parent && window.parent.postMessage({ type: 'kv-embed-present', on }, '*'); } catch { /* standalone */ }
     };
-    document.getElementById('fs').addEventListener('click', () => setPresent(true));
+    // 전체 화면 — 부모 보드 카드에 풀스크린 오버레이를 요청한다(3D 뷰어와 동일 경로).
+    // 단독 실행(?fs)이면 부모가 없으니 프레젠테이션으로 대체.
+    document.getElementById('fs').addEventListener('click', () => {
+      try {
+        if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'kv-embed-fullscreen' }, '*');
+        else setPresent(true);
+      } catch { setPresent(true); }
+    });
     document.getElementById('exit').addEventListener('click', () => setPresent(false));
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setPresent(false); });
 

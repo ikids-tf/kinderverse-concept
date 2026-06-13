@@ -24,6 +24,8 @@ import {
   type SourceThumb,
 } from './workflow';
 import { designComposedFrame, fitFrameToChildren } from './frames';
+import { worldBox } from './geometry';
+import { saveWebLinks } from './webLinks';
 import { decorateComposedFrame, decorateDocStickers, decorateMindMapStickers } from './decorate';
 import { ruleBasedVariant, asLayoutVariant, ruleBasedSpec } from './design-spec';
 import { runDesignDirector } from '@/ai/agents/design';
@@ -1234,18 +1236,155 @@ async function buildWebSource(topic: string): Promise<{ summary: string; links: 
       : clean
     : `‘${topic}’ 관련 무료 자료와 검색 링크입니다.`;
 
-  // Real topic thumbnails from free image sites (Openverse — CC images, no key).
-  const thumbs = await fetchFreeImages(imgQuery || topic);
+  const hostOf = (u: string) => {
+    try {
+      return new URL(u).hostname.replace(/^www\./, '');
+    } catch {
+      return '';
+    }
+  };
+
+  // Real grounded result pages from Gemini Google Search (when keyed). Each is a
+  // vertexaisearch redirect that hides the real page — so we unfurl it server-side
+  // (follow redirect → parse og:image/title) to get the actual URL, title and a
+  // real preview thumbnail, exactly like the YouTube viewer pulls i.ytimg.com.
+  const rawSources = (res.sources ?? []).filter((s) => s.url).slice(0, 5);
+  const unfurled = await Promise.all(rawSources.map((s) => unfurlLink(s.url)));
+  const realLinks: SourceLink[] = rawSources.map((s, i) => {
+    const u = unfurled[i];
+    const finalUrl = u?.url || s.url;
+    const host = hostOf(finalUrl);
+    const isRedirect = /vertexaisearch|grounding-api-redirect/.test(host);
+    const title = (u?.title || s.title || host || '웹 자료').slice(0, 80);
+    return {
+      title,
+      url: finalUrl,
+      domain: isRedirect ? (s.title || '').slice(0, 40) : host,
+      ...(u?.thumb ? { thumb: u.thumb } : {}),
+    };
+  });
+
+  // Topic thumbnails: prefer the real page previews (og:image); fall back to free
+  // image sites (Openverse) only when no link yielded a usable preview.
+  const linkThumbs: SourceThumb[] = realLinks
+    .filter((l) => l.thumb)
+    .map((l) => ({ thumb: l.thumb as string, url: l.url, title: l.title, source: l.domain }));
+  const thumbs = linkThumbs.length ? linkThumbs : await fetchFreeImages(imgQuery || topic);
 
   // Curated search shortcuts — always relevant, open the topic search directly.
   const q = encodeURIComponent(topic);
-  const links: SourceLink[] = [
+  const curated: SourceLink[] = [
     { title: '유튜브에서 영상 검색', url: `https://www.youtube.com/results?search_query=${q}`, domain: 'youtube.com' },
     { title: '구글 이미지 검색', url: `https://www.google.com/search?tbm=isch&q=${q}`, domain: 'google.com' },
     { title: 'Pinterest 활동 아이디어', url: `https://www.pinterest.com/search/pins/?q=${q}`, domain: 'pinterest.com' },
     { title: 'Pixabay 무료 이미지', url: `https://pixabay.com/images/search/${q}/`, domain: 'pixabay.com' },
   ];
+  const links: SourceLink[] = [...realLinks, ...curated];
+
+  // 찾은 링크를 키워드 보관함(web-links DB)에 저장 — 프롬프트바에서 같은 키워드를
+  // 입력하면 이미지처럼 다시 추천된다. 실제 검색 결과 우선, 없으면 큐레이션 링크.
+  // 그라운딩 링크는 리다이렉트 URL이라 페이지별 이미지를 가져올 수 없어, 함께 받은
+  // 주제 이미지(Openverse)를 각 링크의 대표 썸네일로 붙여 저장한다(없으면 파비콘 폴백).
+  const toSave = (realLinks.length ? realLinks : curated).map((l, i) => ({
+    ...l,
+    thumb: l.thumb || (thumbs.length ? thumbs[i % thumbs.length].thumb : undefined),
+  }));
+  void saveWebLinks(topic, toSave);
+
   return { summary, links, thumbs };
+}
+
+/** 유튜브 뷰어에 연결한 자료로 '웹 검색' — 뷰어 바로 아래에 웹 자료 카드를 깔고
+    (이미 프레임 안이면 합류, 아니면 뷰어와 한 프레임으로 묶는다), 찾은 링크는
+    web-links 보관함에 저장된다(buildWebSource 내부). */
+export async function searchWebForLink(viewerId: string, content: string, _sourceId?: string): Promise<void> {
+  const b = useBoardStore.getState();
+  if (!b.nodes[viewerId]) return;
+  b.beginGen();
+  b.setGenerating('🔎 연결한 자료로 웹에서 자료를 찾고 있어요…');
+  try {
+    const topic = (content.split('\n')[0] || content).trim().slice(0, 60) || content.trim();
+    const { summary, links, thumbs } = await buildWebSource(topic);
+    spawnSourceUnderViewer(viewerId, summary, links, thumbs);
+  } finally {
+    useBoardStore.getState().endGen();
+  }
+}
+
+/** 뷰어 바로 아래에 웹 자료(role:'source') 카드를 깔고 뷰어와 한 프레임으로 묶는다. */
+function spawnSourceUnderViewer(viewerId: string, summary: string, links: SourceLink[], thumbs: SourceThumb[]): string | null {
+  const b = useBoardStore.getState();
+  const viewer = b.nodes[viewerId];
+  if (!viewer) return null;
+  const vb = worldBox(viewer);
+  const W = 360;
+  const H = 240;
+  const x = Math.round(vb.x + (vb.w - W) / 2);
+  const y = Math.round(vb.y + vb.h + 12);
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id, type: 'sticky', x, y, w: W, h: H, autoH: true, color: 'surface-2',
+    data: { role: 'source', links, thumbs, summary },
+  });
+  let frameId = viewer.data?.frameId as string | undefined;
+  if (frameId && b.nodes[frameId]?.type === 'frame') {
+    b.updateNodeRaw(id, { data: { ...(b.nodes[id]?.data ?? {}), frameId } });
+    fitFrameToChildren(frameId);
+  } else {
+    const PAD = 28;
+    frameId = newId('frame');
+    const x1 = Math.round(Math.min(vb.x, x) - PAD);
+    const y1 = Math.round(vb.y - PAD);
+    const x2 = Math.round(Math.max(vb.x + vb.w, x + W) + PAD);
+    const y2 = Math.round(y + H + PAD);
+    b.addNodeRaw({ id: frameId, type: 'frame', x: x1, y: y1, w: x2 - x1, h: y2 - y1, data: { title: '웹 자료' } });
+    const tag = (nid: string) => {
+      const n = useBoardStore.getState().nodes[nid];
+      if (n) useBoardStore.getState().updateNodeRaw(nid, { data: { ...(n.data ?? {}), frameId } });
+    };
+    tag(viewerId);
+    tag(id);
+  }
+  recordSpawnedNodes([id], '웹 자료 추가');
+  return id;
+}
+
+/** 프롬프트바 웹링크 추천 → 선택한 링크들을 한 장의 웹 자료 카드로 뷰포트 중앙에 배치. */
+export function placeWebLinksOnBoard(
+  links: Array<{ title: string; url: string; domain: string; thumb?: string }>,
+): string | null {
+  if (links.length === 0) return null;
+  const b = useBoardStore.getState();
+  const c = viewportCenterBoardPoint();
+  const W = 360;
+  const id = newId('sticky');
+  const thumbs: SourceThumb[] = links
+    .filter((l) => l.thumb)
+    .map((l) => ({ thumb: l.thumb as string, url: l.url, title: l.title, source: l.domain }));
+  b.addNodeRaw({
+    id, type: 'sticky', x: Math.round(c.x - W / 2), y: Math.round(c.y - 120), w: W, h: 240, autoH: true, color: 'surface-2',
+    data: {
+      role: 'source',
+      links: links.map((l) => ({ title: l.title, url: l.url, domain: l.domain, ...(l.thumb ? { thumb: l.thumb } : {}) })),
+      ...(thumbs.length ? { thumbs } : {}),
+      summary: '보관함에서 가져온 웹 자료입니다.',
+    },
+  });
+  recordSpawnedNodes([id], '웹 자료 배치');
+  b.setSelection([id]);
+  return id;
+}
+
+/** 링크 미리보기 — 서버 언퍼를 엔드포인트(/api/unfurl)로 리다이렉트를 따라가
+    실제 URL·제목·og:image를 받아온다. 실패하면 null(파비콘 폴백). */
+async function unfurlLink(url: string): Promise<{ url: string; thumb?: string; title?: string } | null> {
+  try {
+    const r = await fetch(`/api/unfurl?url=${encodeURIComponent(url)}`);
+    const j = (await r.json()) as { ok?: boolean; url?: string; thumb?: string; title?: string };
+    return j?.ok ? { url: j.url || url, thumb: j.thumb, title: j.title } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Web 자료 card placed inside a frame via placeInFrame (composer source region). */

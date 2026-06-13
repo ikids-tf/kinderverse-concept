@@ -345,6 +345,8 @@ export function BoardCanvas() {
   // 연결 직후 생성 제안 — 빈 메모/이미지 카드를 다른 요소와 이으면
   // "연결된 요소 'X'에 대한 내용/이미지를 생성할까요?" 확인 카드를 띄운다.
   const [proposal, setProposal] = useState<{ id: string; topic: string; kind: 'memo' | 'image' } | null>(null);
+  // 유튜브 뷰어에 자료를 연결했을 때 뜨는 선택 팝오버: 영상 추천 vs 웹 검색.
+  const [viewerLink, setViewerLink] = useState<{ viewerId: string; content: string; topic: string; sourceId?: string } | null>(null);
   // mode 'new' = 빈 포트에서 새 연결, 'detach' = 연결된 포트를 떼어내 분리/옮기기.
   // from = 고정된(반대쪽) 끝, keepFrom = 고정 끝이 링크의 from인지.
   const lk = useRef<{ mode: 'new' | 'detach'; from: string; x1: number; y1: number; linkId?: string; keepFrom?: boolean } | null>(null);
@@ -354,13 +356,24 @@ export function BoardCanvas() {
     (wx: number, wy: number): BoardNode | null => {
       const s = useBoardStore.getState();
       const pad = 16 / s.viewport.zoom;
+      // 프레임은 '담는 그릇'이라 내부 카드보다 우선순위를 낮춘다 — 프레임이 자식보다
+      // 나중에 생성돼 order가 위일 때(예: 유튜브 뷰어를 감싼 '동영상 모음' 프레임),
+      // 자식 위를 호버해도 프레임이 잡혀 카드의 연결 포트가 사라지던 문제를 막는다.
+      // 비-프레임(카드)을 먼저 찾고, 없을 때만(프레임 빈 영역) 프레임을 돌려준다.
+      let frameHit: BoardNode | null = null;
       for (let i = s.order.length - 1; i >= 0; i--) {
         const n = s.nodes[s.order[i]];
         if (!n || n.locked || !LINKABLE.has(n.type)) continue;
         const b = worldBox(n);
-        if (wx >= b.x - pad && wx <= b.x + b.w + pad && wy >= b.y - pad && wy <= b.y + b.h + pad) return n;
+        if (wx >= b.x - pad && wx <= b.x + b.w + pad && wy >= b.y - pad && wy <= b.y + b.h + pad) {
+          if (n.type === 'frame') {
+            if (!frameHit) frameHit = n; // 보류 — 내부 카드가 있으면 그쪽 우선
+            continue;
+          }
+          return n; // 가장 위 카드(비-프레임) 우선
+        }
       }
-      return null;
+      return frameHit;
     },
     [LINKABLE],
   );
@@ -434,7 +447,8 @@ export function BoardCanvas() {
                 ? [String(other.data?.title ?? ''), other.text ?? ''].filter(Boolean).join('\n').trim()
                 : '';
               if (content) {
-                void import('@/board/workflow').then((m) => m.recommendVideosForLink(viewer.id, content, other?.id));
+                // 자동 실행하지 않고 — 뷰어 옆에 "영상 추천 / 웹 검색"을 물어보는 팝오버를 띄운다.
+                setViewerLink({ viewerId: viewer.id, content, topic: topicOf(other), sourceId: other?.id });
               }
             } else {
               // 빈 카드만 제안 — 채워진 이미지끼리 잇는 슬라이드 체인을 방해하지 않게.
@@ -703,14 +717,19 @@ export function BoardCanvas() {
     else b.fit();
   }
 
-  // 마우스 휠 = 확대/축소(커서 기준). 핀치(ctrlKey)·ctrl/⌘+휠도 줌. 트랙패드 가로
-  // 스와이프(좌우 두 손가락)만 좌우 팬으로 남긴다. 캔버스 팬은 스페이스+드래그·휠 클릭 드래그.
-  // (맥 트랙패드 핀치는 Chrome류에서 ctrlKey가 켜진 wheel 이벤트로 들어온다.)
+  // 입력 장치별로 휠 동작을 나눈다 (둘 다 같은 wheel 이벤트로 들어오므로 구분 필요):
+  //   · 맥북 트랙패드 두 손가락 스크롤 → 캔버스 팬(가로·세로, 내추럴 스크롤)
+  //   · PC 마우스 휠 → 커서 기준 확대/축소 (PC 팬은 휠 클릭 드래그)
+  //   · 핀치(ctrlKey) / ctrl·⌘+휠 → 항상 줌
+  // 맥 트랙패드 핀치는 Chrome류에서 ctrlKey가 켜진 wheel 이벤트로 들어온다.
   // 브라우저 자체 페이지 줌을 막으려면 preventDefault가 실제로 동작해야 하는데
   // React onWheel은 passive로 붙어 무시되므로 네이티브 리스너를 non-passive로 단다.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const isMacLike = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+    // 한 번 정체가 잡히면 모호한 이벤트(관성 스크롤 등)에서도 같은 장치로 유지한다.
+    let device: 'mouse' | 'trackpad' | null = null;
     const onWheel = (e: WheelEvent) => {
       const pinch = e.ctrlKey || e.metaKey; // 핀치(ctrlKey) 또는 ctrl/⌘+휠
       // 문서/프레임 등 자체 스크롤 영역 위에서는 그 내용 스크롤을 우선(긴 계획안 등).
@@ -719,12 +738,25 @@ export function BoardCanvas() {
       const k = e.deltaMode === 1 ? 16 : 1; // line-mode wheel(Firefox) → px 근사
       const b = useBoardStore.getState();
       const rect = el.getBoundingClientRect();
-      // 가로 스와이프(트랙패드, |dx|>|dy|)는 좌우 팬으로만 남긴다.
-      if (!pinch && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        b.setViewport({ panX: b.viewport.panX - e.deltaX * k });
+      // ── 장치 판별 ──
+      // 마우스 휠 특징: line 모드(Firefox 마우스), 또는 Chromium에서 wheelDelta가 120 배수(노치).
+      const wd = (e as WheelEvent & { wheelDeltaY?: number }).wheelDeltaY;
+      const looksMouse = e.deltaMode === 1 || (typeof wd === 'number' && wd !== 0 && wd % 120 === 0);
+      // 트랙패드 특징: 가로 성분이 있거나, 소수 delta, 또는 픽셀 모드의 잘은 delta.
+      const looksTrackpad =
+        e.deltaX !== 0 ||
+        !Number.isInteger(e.deltaY) ||
+        (e.deltaMode === 0 && Math.abs(e.deltaY) > 0 && Math.abs(e.deltaY) < 40);
+      if (looksTrackpad && !looksMouse) device = 'trackpad';
+      else if (looksMouse && !looksTrackpad) device = 'mouse';
+      const usingTrackpad = pinch ? false : (device ?? (isMacLike ? 'trackpad' : 'mouse')) === 'trackpad';
+      // ── 동작 ──
+      if (usingTrackpad) {
+        // 두 손가락 스크롤 → 캔버스 팬 (내용이 손가락을 따라가는 내추럴 스크롤).
+        b.setViewport({ panX: b.viewport.panX - e.deltaX * k, panY: b.viewport.panY - e.deltaY * k });
         return;
       }
-      // 그 외(마우스 휠·핀치·세로 스크롤) → 커서 기준 확대/축소.
+      // 마우스 휠·핀치 → 커서 기준 확대/축소.
       // 핀치는 deltaY가 잘게 연속으로 와 지수 매핑이 부드럽고, 휠 클릭(±100)은 클램프된다.
       const factor = Math.min(1.25, Math.max(0.8, Math.exp(-e.deltaY * k * 0.01)));
       b.zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
@@ -1014,6 +1046,72 @@ export function BoardCanvas() {
                     onClick={() => setProposal(null)}
                     className="rounded-pill border border-border bg-surface text-fg-2 hover:bg-surface-2"
                     style={{ fontSize: 12 / z, padding: `${5 / z}px ${16 / z}px` }}
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 유튜브 뷰어 연결 팝오버 — 연결한 자료로 '영상 추천'(일회성, 선 제거)할지
+            '연결'(웹 자료 검색·부착, 선 유지)할지 묻는다. */}
+        {viewerLink && nodes[viewerLink.viewerId] && (() => {
+          const vn = nodes[viewerLink.viewerId];
+          const vb = worldBox(vn);
+          const z = viewport.zoom;
+          const run = (mode: 'videos' | 'web') => {
+            const { viewerId, content, sourceId } = viewerLink;
+            setViewerLink(null);
+            if (mode === 'videos') {
+              // '영상 추천'은 일회성 — 트리거로 쓰인 자료↔뷰어 연결선을 지운다(잡동사니 방지).
+              if (sourceId) {
+                const trig = useBoardStore
+                  .getState()
+                  .links.find(
+                    (l) => (l.from === sourceId && l.to === viewerId) || (l.from === viewerId && l.to === sourceId),
+                  );
+                if (trig) removeLinkCmd(trig.id);
+              }
+              void import('@/board/workflow').then((m) => m.recommendVideosForLink(viewerId, content, sourceId));
+            } else {
+              // '연결'은 자료↔뷰어 연결선을 유지한다(관계 표시).
+              void import('@/board/composer').then((m) => m.searchWebForLink(viewerId, content, sourceId));
+            }
+          };
+          return (
+            <div
+              className="absolute z-40"
+              style={{ left: vb.x + vb.w / 2, top: vb.y + vb.h + 10 / z, transform: 'translateX(-50%)' }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div
+                className="rounded-lg border border-border bg-surface text-center shadow-lg"
+                style={{ padding: `${10 / z}px ${14 / z}px`, width: 'max-content', maxWidth: 360 / z }}
+              >
+                <p className="text-fg" style={{ fontSize: 13 / z, margin: 0, marginBottom: 9 / z, lineHeight: 1.45 }}>
+                  연결한 자료 <b className="font-semibold text-accent">'{viewerLink.topic || '자료'}'</b>로 무엇을 할까요?
+                </p>
+                <div className="flex items-center justify-center" style={{ gap: 6 / z }}>
+                  <button
+                    onClick={() => run('videos')}
+                    className="rounded-pill bg-accent font-semibold text-on-accent hover:bg-accent-hover"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${14 / z}px` }}
+                  >
+                    영상 추천
+                  </button>
+                  <button
+                    onClick={() => run('web')}
+                    className="rounded-pill border border-accent bg-surface font-semibold text-accent hover:bg-accent-soft"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${14 / z}px` }}
+                  >
+                    연결
+                  </button>
+                  <button
+                    onClick={() => setViewerLink(null)}
+                    className="rounded-pill border border-border bg-surface text-fg-2 hover:bg-surface-2"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${12 / z}px` }}
                   >
                     취소
                   </button>

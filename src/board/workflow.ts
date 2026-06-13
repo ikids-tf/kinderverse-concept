@@ -6,6 +6,7 @@ import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImag
 // 의도 어휘는 단일 출처(intent-lexicon) — 로컬 정규식은 '그려' 등이 빠져 어긋났었다(P0-1).
 import { IMAGE_RE, coreTopic } from '@/ai/intent-lexicon';
 import { findAsset, saveAsset } from './assets';
+import { saveWebLinks } from './webLinks';
 import { fitFrameToChildren } from './frames';
 import { recordSpawnedNodes } from './commands';
 import { worldBox } from './geometry';
@@ -179,6 +180,8 @@ export interface SourceLink {
   title: string;
   url: string;
   domain: string;
+  /** 페이지 대표 이미지(og:image). 있으면 파비콘 대신 썸네일로 보여준다. */
+  thumb?: string;
 }
 export interface SourceThumb {
   thumb: string; // image URL (free image site)
@@ -754,6 +757,8 @@ export async function searchVideosForPlan(
     );
     const bb = useBoardStore.getState();
     let filled = 0;
+    // 활동(태그)별 영상 링크 모음 — 아래에서 web-links 보관함에 저장한다.
+    const byActivity = new Map<string, Array<{ title: string; url: string; domain: string; thumb: string }>>();
     ids.forEach((cardId, i) => {
       if (!bb.nodes[cardId]) return;
       const v = results[i];
@@ -763,14 +768,30 @@ export async function searchVideosForPlan(
       }
       filled += 1;
       const day = items[i].day ? `(${items[i].day}) ` : '';
+      const prev = bb.nodes[cardId];
       bb.updateNodeRaw(cardId, {
         src: `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
         text: `${day}${v.title}`,
         loading: false,
-        data: { role: 'yt-result', ytTarget: viewerId, ytId: v.id, thumb: '' },
+        // 기존 data 보존 — frameId를 떨어뜨리면 프레임이 카드를 더는 감싸지 않는다.
+        data: { ...(prev?.data ?? {}), role: 'yt-result', ytTarget: viewerId, ytId: v.id, thumb: '' },
       });
+      const act = items[i].activity.trim();
+      if (act) {
+        const link = {
+          title: v.title,
+          url: `https://www.youtube.com/watch?v=${v.id}`,
+          domain: 'youtube.com',
+          thumb: `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+        };
+        (byActivity.get(act) ?? byActivity.set(act, []).get(act)!).push(link);
+      }
     });
     if (filled === 0) throw new Error('검색 결과 없음');
+    // 활동별로 영상을 web-links 보관함에 저장 — 프롬프트바에서 활동/영상 제목 키워드로 추천.
+    byActivity.forEach((links, act) => void saveWebLinks(act, links));
+    // 결과까지 채운 뒤 프레임을 다시 핏 — 두 번째 묶음도 확실히 감싼다.
+    if (wrapFrameId && useBoardStore.getState().nodes[wrapFrameId]) fitFrameToChildren(wrapFrameId);
     recordSpawnedNodes(
       [...ids.filter((id) => useBoardStore.getState().nodes[id]), ...(wrapFrameId && useBoardStore.getState().nodes[wrapFrameId] ? [wrapFrameId] : [])],
       '활동별 영상 검색',
@@ -831,7 +852,7 @@ export async function recommendVideosForLink(viewerId: string, content: string, 
       return;
     }
     const q = await ytTeacherQuery(content);
-    await searchVideosForViewer(viewerId, q, 3);
+    await searchVideosForViewer(viewerId, q, 5); // 적합한 자료 최대 5개(결과가 적으면 그만큼)
   } finally {
     useBoardStore.getState().endGen();
   }
@@ -854,7 +875,8 @@ function ytQuery(text: string): string {
 const YT_W = 168;
 const YT_H = 94; // 16:9 썸네일 — 제목 캡션은 카드가 아래로 덧그린다
 const YT_GAPX = 12;
-const YT_GAPY = 20;
+const YT_GAPY = 12; // 썸네일 행끼리(2번째 묶음 등)의 세로 간격·겹침 여백
+const YT_TOP_GAP = 72; // 뷰어 ↔ 첫 썸네일 행 간격 — 시각적 분리를 위해 넉넉히
 const YT_CAPTION = 34; // 캡션이 카드 아래로 차지하는 대략 높이(겹침 판정용)
 
 /** 뷰어 아래 '가로 중앙'에 로딩 썸네일 행을 깔고, 즉시 뷰어+썸네일을 프레임으로
@@ -871,13 +893,15 @@ function spawnVideoRow(
   const rowW = count * YT_W + (count - 1) * YT_GAPX;
   const rowX = Math.round(vb.x + (vb.w - rowW) / 2); // 뷰어 기준 '가로 중앙'
   // 이전 검색 결과 등 기존 카드와 겹치면 행 단위로 아래로 비켜 내린다.
-  const others = Object.values(b.nodes).filter((n) => n.id !== viewerId);
+  // 단, 프레임은 '담는 그릇'이라 장애물에서 제외한다 — 뷰어가 이미 프레임 안에 있을 때
+  // 프레임의 큰 박스에 걸려 썸네일 행이 프레임 바닥까지 밀려나던 버그를 막는다.
+  const others = Object.values(b.nodes).filter((n) => n.id !== viewerId && n.type !== 'frame');
   const rowHits = (yy: number) =>
     others.some((n) => {
       const o = worldBox(n);
       return rowX < o.x + o.w + YT_GAPX && rowX + rowW + YT_GAPX > o.x && yy < o.y + o.h + YT_GAPY && yy + YT_H + YT_CAPTION + YT_GAPY > o.y;
     });
-  let rowY = Math.round(vb.y + vb.h + YT_GAPY);
+  let rowY = Math.round(vb.y + vb.h + YT_TOP_GAP);
   while (rowHits(rowY)) rowY += YT_H + YT_CAPTION + YT_GAPY;
 
   const ids: string[] = [];
@@ -896,14 +920,20 @@ function spawnVideoRow(
     ids.push(id);
   }
 
+  // 프레임 멤버십 태깅 — 반드시 '지금'의 스토어에서 읽는다. 위에서 addNodeRaw로 카드를
+  // 막 만들었으므로, 함수 시작 시 캡처한 b.nodes(과거 스냅샷)에는 새 카드가 없어
+  // 태깅이 조용히 누락된다(= 두 번째 묶음이 프레임에 안 들어가던 원인).
+  const tag = (nid: string, frameId: string) => {
+    const n = useBoardStore.getState().nodes[nid];
+    if (n) useBoardStore.getState().updateNodeRaw(nid, { data: { ...(n.data ?? {}), frameId } });
+  };
+
   // 썸네일이 깔리는 '즉시' 뷰어+썸네일을 한 프레임으로 감싼다(이미 프레임 안이면 합류).
   let wrapFrameId = viewer.data?.frameId as string | undefined;
-  if (wrapFrameId && b.nodes[wrapFrameId]?.type === 'frame') {
-    ids.forEach((cid) => {
-      const c = b.nodes[cid];
-      if (c) b.updateNodeRaw(cid, { data: { ...(c.data ?? {}), frameId: wrapFrameId } });
-    });
-    fitFrameToChildren(wrapFrameId);
+  if (wrapFrameId && useBoardStore.getState().nodes[wrapFrameId]?.type === 'frame') {
+    const fid = wrapFrameId;
+    ids.forEach((cid) => tag(cid, fid));
+    fitFrameToChildren(fid);
   } else {
     const PAD = 28;
     wrapFrameId = newId('frame');
@@ -920,18 +950,49 @@ function spawnVideoRow(
       h: y2 - y1,
       data: { title: '동영상 모음' },
     });
-    const tag = (nid: string) => {
-      const n = useBoardStore.getState().nodes[nid];
-      if (n) useBoardStore.getState().updateNodeRaw(nid, { data: { ...(n.data ?? {}), frameId: wrapFrameId } });
-    };
-    tag(viewerId);
-    ids.forEach(tag);
+    tag(viewerId, wrapFrameId);
+    ids.forEach((cid) => tag(cid, wrapFrameId!));
     void autoTitleFrame(wrapFrameId); // 내용 기반 자동 제목(비동기)
   }
   return { ids, vb, rowX, rowY, wrapFrameId };
 }
 
-export async function searchVideosForViewer(viewerId: string, text: string, count = 3): Promise<void> {
+/** 동영상 모음 프레임의 고유 규칙을 복원한다 — 유튜브 뷰어는 상단에, 썸네일은
+    뷰어 아래 가로 중앙 행으로(읽기 순서 보존). 뷰어가 살짝 밀렸거나 썸네일이
+    섞여 있어도 '뷰어 위·썸네일 아래' 구조로 되돌린다. 정렬 버튼이 이 프레임에서
+    호출한다(범용 행/열 정돈 대신). 동영상 프레임이 아니면 false. */
+export function relayoutVideoFrame(frameId: string): boolean {
+  const b = useBoardStore.getState();
+  const frame = b.nodes[frameId];
+  if (!frame || frame.type !== 'frame') return false;
+  const kids = Object.values(b.nodes).filter((n) => n.data?.frameId === frameId && n.id !== frameId);
+  const viewer = kids.find((n) => String(n.data?.embed ?? '').includes('youtube-viewer'));
+  const thumbs = kids.filter((n) => n.data?.role === 'yt-result');
+  if (!viewer || thumbs.length === 0) return false;
+  const vb = worldBox(viewer);
+  // 썸네일을 현재 읽기 순서(y→x)대로 정렬해 순서를 보존한다.
+  thumbs.sort((a, z) => a.y - z.y || a.x - z.x);
+  // 한 줄 개수 — 뷰어 폭의 약 1.4배까지 허용(원래 한 줄에 넉넉히 들어가던 모습 유지).
+  const perRow = Math.max(1, Math.floor((vb.w * 1.4 + YT_GAPX) / (YT_W + YT_GAPX)));
+  const rows = Math.ceil(thumbs.length / perRow);
+  const vcx = vb.x + vb.w / 2; // 뷰어 가로 중앙 — 행을 이 아래 가운데로 깐다
+  let y = Math.round(vb.y + vb.h + YT_TOP_GAP);
+  for (let r = 0; r < rows; r++) {
+    const rowItems = thumbs.slice(r * perRow, (r + 1) * perRow);
+    const rowW = rowItems.length * YT_W + (rowItems.length - 1) * YT_GAPX;
+    let x = Math.round(vcx - rowW / 2);
+    for (const t of rowItems) {
+      // yt-result는 고정 크기 — 위치만 격자로 되돌리고 스케일/회전은 초기화.
+      b.updateNodeRaw(t.id, { x, y, scale: 1, rot: 0 });
+      x += YT_W + YT_GAPX;
+    }
+    y += YT_H + YT_CAPTION + YT_GAPY;
+  }
+  fitFrameToChildren(frameId);
+  return true;
+}
+
+export async function searchVideosForViewer(viewerId: string, text: string, count = 5): Promise<void> {
   const b = useBoardStore.getState();
   if (!b.nodes[viewerId]) return;
   const q = ytQuery(text);
@@ -963,14 +1024,29 @@ export async function searchVideosForViewer(viewerId: string, text: string, coun
         bb.removeNodeRaw(cardId); // 결과가 모자라면 빈 카드는 거둔다
         return;
       }
+      const prev = bb.nodes[cardId];
       bb.updateNodeRaw(cardId, {
         src: `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
         text: v.title,
         loading: false,
-        // thumb: '' — 교차 출처라 캔버스 축소 불가, 원본(이미 480px)을 그대로 표시
-        data: { role: 'yt-result', ytTarget: viewerId, ytId: v.id, thumb: '' },
+        // thumb: '' — 교차 출처라 캔버스 축소 불가, 원본(이미 480px)을 그대로 표시.
+        // 기존 data 보존 — frameId를 떨어뜨리면 프레임이 카드를 더는 감싸지 않는다.
+        data: { ...(prev?.data ?? {}), role: 'yt-result', ytTarget: viewerId, ytId: v.id, thumb: '' },
       });
     });
+    // 결과까지 채운 뒤 프레임을 다시 핏 — 두 번째 묶음도 확실히 감싼다.
+    if (wrapFrameId && useBoardStore.getState().nodes[wrapFrameId]) fitFrameToChildren(wrapFrameId);
+    // 찾은 영상을 web-links 보관함에 저장(검색어 태그 + 영상 제목) — 프롬프트바에서
+    // 같은/제목 키워드를 치면 이미지처럼 썸네일과 함께 다시 추천된다.
+    void saveWebLinks(
+      q,
+      results.map((v) => ({
+        title: v.title,
+        url: `https://www.youtube.com/watch?v=${v.id}`,
+        domain: 'youtube.com',
+        thumb: `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+      })),
+    );
     recordSpawnedNodes(
       [...ids.filter((id) => useBoardStore.getState().nodes[id]), ...(wrapFrameId && useBoardStore.getState().nodes[wrapFrameId] ? [wrapFrameId] : [])],
       '영상 검색',

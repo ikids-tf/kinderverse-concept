@@ -6,6 +6,7 @@ import { useUIStore } from '@/store/uiStore';
 import { useRouterStore } from '@/store/routerStore';
 import { useBoardStore } from '@/store/boardStore';
 import type { ImageAsset } from '@/board/assets';
+import type { WebLink } from '@/board/webLinks';
 import { FavoriteCardRail } from './FavoriteCardRail';
 
 /* Board engine modules (prompt/workflow/assets) are heavy and only needed on My
@@ -106,6 +107,38 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     if (chosen.length === 0) return;
     setAssetSel([]);
     void import('@/board/workflow').then((m) => m.placeAssetsOnBoard(chosen));
+  }
+
+  // 웹링크 보관함 추천 — 웹 검색으로 저장된 링크를 키워드로 찾아 이미지처럼 리스트한다.
+  const [webSugs, setWebSugs] = useState<WebLink[]>([]);
+  const [webSel, setWebSel] = useState<string[]>([]); // url 기준 복수 선택
+  useEffect(() => {
+    if (!location.pathname.startsWith('/board') || draft.trim().length < 2) {
+      setWebSugs([]);
+      setWebSel([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      void import('@/board/webLinks')
+        .then((m) => m.searchWebLinks(draft.trim()))
+        .then((sugs) => {
+          setWebSugs(sugs);
+          const urls = new Set(sugs.map((s) => s.url));
+          setWebSel((sel) => sel.filter((u) => urls.has(u)));
+        })
+        .catch(() => setWebSugs([]));
+    }, 160);
+    return () => clearTimeout(t);
+  }, [draft, location.pathname]);
+
+  /** 선택한 웹링크를 한 장의 웹 자료 카드로 보드(뷰포트 중앙)에 배치. */
+  function applySelectedWebLinks() {
+    const chosen = webSel
+      .map((u) => webSugs.find((s) => s.url === u))
+      .filter((s): s is WebLink => !!s);
+    if (chosen.length === 0) return;
+    setWebSel([]);
+    void import('@/board/composer').then((m) => m.placeWebLinksOnBoard(chosen));
   }
 
   // Keep the favorites rail mounted briefly after closing so it can play the
@@ -294,52 +327,118 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             [배치] 버튼 = 보드 빈 자리에 그리드 정렬, 선택 상태로 프롬프트 제출 =
             배치 후 그 카드들에 명령. 화면 가로 폭(양옆 패딩 제외)을 꽉 채우고
             줄바꿈으로 쌓이며, 3줄을 넘으면 세로 스크롤. */}
-        {assetSugs.length > 0 && !collapsed && !favRender && (
+        {(assetSugs.length > 0 || webSugs.length > 0) && !collapsed && !favRender && (
           <div
-            className="pointer-events-auto absolute bottom-full left-1/2 z-0 flex -translate-x-1/2 flex-col items-center"
+            className="pointer-events-auto absolute bottom-full left-1/2 z-0 flex -translate-x-1/2 flex-col items-center gap-t2"
             style={{
               marginBottom: streaming && statusDetached ? 52 : 8,
               width: `calc(100vw - ${(leftInset || 64) + 48}px)`,
             }}
           >
-            {assetSel.length > 0 && (
-              <button
-                type="button"
-                onClick={applySelectedAssets}
-                className="mb-t2 rounded-pill bg-accent px-t6 py-t2 text-sm font-semibold text-on-accent shadow-md transition-opacity duration-150 ease-soft hover:opacity-90"
-              >
-                선택한 {assetSel.length}개 보드에 배치
-              </button>
-            )}
-            <div className="flex max-h-[286px] w-full flex-wrap items-start gap-t2 overflow-y-auto rounded-lg border border-border bg-surface/95 p-t2 shadow-lg backdrop-blur">
-              {assetSugs.map((a) => {
-                const selected = assetSel.includes(assetKey(a));
-                return (
+            {(assetSel.length > 0 || webSel.length > 0) && (
+              <div className="flex items-center gap-t2">
+                {assetSel.length > 0 && (
                   <button
-                    key={assetKey(a)}
                     type="button"
-                    title={selected ? `'${a.tag}' 선택 해제` : `'${a.tag}' 선택`}
-                    onClick={() => {
-                      setAssetSel((sel) =>
-                        sel.includes(assetKey(a)) ? sel.filter((k) => k !== assetKey(a)) : [...sel, assetKey(a)],
-                      );
-                    }}
-                    className={`group w-[72px] shrink-0 rounded-sm border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft ${
-                      selected ? 'border-accent ring-2 ring-accent/40' : 'border-border hover:border-accent'
-                    }`}
+                    onClick={applySelectedAssets}
+                    className="rounded-pill bg-accent px-t6 py-t2 text-sm font-semibold text-on-accent shadow-md transition-opacity duration-150 ease-soft hover:opacity-90"
                   >
-                    <img src={a.url} alt={a.tag} draggable={false} className="h-14 w-full rounded-xs object-cover" />
-                    <span
-                      className={`mt-0.5 block truncate text-[10px] font-medium ${
-                        selected ? 'text-accent' : 'text-fg-2 group-hover:text-accent'
+                    선택한 이미지 {assetSel.length}개 배치
+                  </button>
+                )}
+                {webSel.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={applySelectedWebLinks}
+                    className="rounded-pill bg-accent px-t6 py-t2 text-sm font-semibold text-on-accent shadow-md transition-opacity duration-150 ease-soft hover:opacity-90"
+                  >
+                    선택한 웹 자료 {webSel.length}개 배치
+                  </button>
+                )}
+              </div>
+            )}
+            {assetSugs.length > 0 && (
+              <div className="flex max-h-[200px] w-full flex-wrap items-start gap-t2 overflow-y-auto rounded-lg border border-border bg-surface/95 p-t2 shadow-lg backdrop-blur">
+                {assetSugs.map((a) => {
+                  const selected = assetSel.includes(assetKey(a));
+                  return (
+                    <button
+                      key={assetKey(a)}
+                      type="button"
+                      title={selected ? `'${a.tag}' 선택 해제` : `'${a.tag}' 선택`}
+                      onClick={() => {
+                        setAssetSel((sel) =>
+                          sel.includes(assetKey(a)) ? sel.filter((k) => k !== assetKey(a)) : [...sel, assetKey(a)],
+                        );
+                      }}
+                      className={`group w-[72px] shrink-0 rounded-sm border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft ${
+                        selected ? 'border-accent ring-2 ring-accent/40' : 'border-border hover:border-accent'
                       }`}
                     >
-                      {a.tag}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                      <img src={a.url} alt={a.tag} draggable={false} className="h-14 w-full rounded-xs object-cover" />
+                      <span
+                        className={`mt-0.5 block truncate text-[10px] font-medium ${
+                          selected ? 'text-accent' : 'text-fg-2 group-hover:text-accent'
+                        }`}
+                      >
+                        {a.tag}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {webSugs.length > 0 && (
+              <div className="flex max-h-[160px] w-full flex-wrap items-start gap-t2 overflow-y-auto rounded-lg border border-border bg-surface/95 p-t2 shadow-lg backdrop-blur">
+                <span className="flex w-full items-center gap-t1 px-1 text-overline text-fg-2">
+                  <Icon name="search" size={12} className="text-accent" /> 웹 자료 보관함
+                </span>
+                {webSugs.map((s) => {
+                  const selected = webSel.includes(s.url);
+                  const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(s.domain || s.title)}&sz=64`;
+                  return (
+                    <button
+                      key={s.url}
+                      type="button"
+                      title={selected ? `'${s.title}' 선택 해제` : `'${s.title}' 선택 — ${s.url}`}
+                      onClick={() => {
+                        setWebSel((sel) => (sel.includes(s.url) ? sel.filter((u) => u !== s.url) : [...sel, s.url]));
+                      }}
+                      className={`group flex w-[112px] shrink-0 flex-col items-center rounded-sm border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft ${
+                        selected ? 'border-accent ring-2 ring-accent/40' : 'border-border hover:border-accent'
+                      }`}
+                    >
+                      {s.thumb ? (
+                        // 대표 이미지 썸네일. 로드 실패 시 파비콘으로 폴백.
+                        <img
+                          src={s.thumb}
+                          alt={s.title}
+                          draggable={false}
+                          loading="lazy"
+                          onError={(e) => {
+                            e.currentTarget.src = favicon;
+                            e.currentTarget.className = 'h-8 w-8 rounded-sm';
+                          }}
+                          className="h-14 w-full rounded-xs object-cover"
+                        />
+                      ) : (
+                        <img src={favicon} alt="" draggable={false} className="h-8 w-8 rounded-sm" />
+                      )}
+                      <span
+                        className={`mt-0.5 block w-full truncate text-[10px] font-medium ${
+                          selected ? 'text-accent' : 'text-fg-2 group-hover:text-accent'
+                        }`}
+                      >
+                        {s.title}
+                      </span>
+                      {s.domain && s.domain !== s.title && (
+                        <span className="block w-full truncate text-[9px] text-fg-muted">{s.domain}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

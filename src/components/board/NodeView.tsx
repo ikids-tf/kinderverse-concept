@@ -199,6 +199,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const embedStr = typeof node.data?.embed === 'string' ? node.data.embed : '';
   const isMagicViewer = embedStr.includes('magic-viewer');
   const isGlbViewer = embedStr.includes('glb-viewer');
+  // 일반 영상 뷰어(유튜브·동영상) — 풀스크린·현재 내용 복원을 매직 뷰어와 동일하게 다룬다.
+  const isVideoViewer = embedStr.includes('youtube-viewer') || embedStr.includes('video-player');
   const [viewerMode, setViewerMode] = useState<string>(
     typeof node.data?.viewerMode === 'string' ? (node.data.viewerMode as string) : 'empty',
   );
@@ -232,6 +234,11 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           pushRedesign([node.id], embedDragRef.current.snap, '이동');
           embedDragRef.current = null;
         }
+        return;
+      }
+      // 뷰어 안 ⛶ → 풀스크린 오버레이 열기(3D 뷰어와 동일 경로).
+      if (d?.type === 'kv-embed-fullscreen') {
+        setFsOpen(true);
         return;
       }
       if (d?.type === 'kv-embed-present') {
@@ -941,8 +948,10 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               onPointerDown={down}
               onDoubleClick={(e) => { e.stopPropagation(); setEmbedInteract(true); }}
               title="드래그로 이동 · 더블클릭(또는 ‘조작’)하면 뷰어 조작"
-              className="absolute inset-0"
-              style={{ cursor: 'grab' }}
+              className="absolute inset-x-0 bottom-0"
+              // 헤더(링크 입력·재생·전체화면)가 보일 때는 그 위(상단 ~52px)를 덮지 않는다 —
+              // 이동 손잡이가 헤더 버튼을 가려 전체화면이 '됐다 안 됐다' 하던 문제를 막는다.
+              style={{ cursor: 'grab', top: selected || embedHover ? 52 : 0 }}
             />
           )}
           {/* 이동 ↔ 조작 토글 — 호버/선택/조작 중에 우하단에 표시(이동 손잡이 위). */}
@@ -970,19 +979,27 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           createPortal(
             <div className="fixed inset-0 bg-bg" style={{ zIndex: 9999, pointerEvents: 'auto' }}>
               {/* 풀스크린 모드(?fs)의 뷰어가 UI·1.5초 idle 페이드·종료(✕)를 직접
-                  처리하고, ✕는 kv-fs-exit 메시지로 닫기를 알린다. 매직 뷰어는 현재
+                  처리하고, ✕는 kv-fs-exit 메시지로 닫기를 알린다. 매직·영상 뷰어는 현재
                   내용(viewerSrc)을 &src=로 넘겨 같은 화면을 이어서 보여 준다(blob 제외). */}
               <iframe
                 src={(() => {
                   let u = `${embedStr}${embedStr.includes('?') ? '&' : '?'}fs=1`;
                   const vs = typeof node.data?.viewerSrc === 'string' ? node.data.viewerSrc : '';
-                  if (isMagicViewer && vs) u += `&src=${encodeURIComponent(vs)}`;
+                  if ((isMagicViewer || isVideoViewer) && vs) u += `&src=${encodeURIComponent(vs)}`;
                   return u;
                 })()}
                 title={`${embedTitle} (전체 화면)`}
                 className="h-full w-full"
                 style={{ border: 0, background: 'transparent' }}
               />
+              {/* 닫기 — Esc로도 닫히지만, 영상 뷰어처럼 자체 ✕가 없는 경우를 위해 항상 둔다. */}
+              <button
+                onClick={() => setFsOpen(false)}
+                title="전체 화면 닫기 (Esc)"
+                className="absolute right-t5 top-t5 z-10 inline-flex h-11 w-11 items-center justify-center rounded-pill border border-border bg-surface/90 text-fg-2 shadow-lg backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
+              >
+                <Icon name="x" size={20} />
+              </button>
             </div>,
             document.body,
           )}
@@ -1788,6 +1805,7 @@ interface SourceLinkData {
   title: string;
   url: string;
   domain: string;
+  thumb?: string;
 }
 interface SourceThumbData {
   thumb: string;
@@ -1843,14 +1861,29 @@ function SourceLinks({ links, thumbs, summary }: { links: SourceLinkData[]; thum
             title={l.url}
             className="group flex items-center gap-t2 rounded-md border border-border bg-surface px-t2 py-t1 no-underline transition-colors duration-150 ease-soft hover:border-accent"
           >
-            <img
-              src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(l.domain || l.title)}&sz=64`}
-              alt=""
-              width={18}
-              height={18}
-              draggable={false}
-              className="shrink-0 rounded-sm"
-            />
+            {l.thumb ? (
+              // 페이지 대표 이미지(og:image) — 실패 시 파비콘으로 폴백.
+              <img
+                src={l.thumb}
+                alt=""
+                draggable={false}
+                loading="lazy"
+                onError={(e) => {
+                  e.currentTarget.src = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(l.domain || l.title)}&sz=64`;
+                  e.currentTarget.className = 'h-[18px] w-[18px] shrink-0 rounded-sm';
+                }}
+                className="h-9 w-12 shrink-0 rounded-sm object-cover"
+              />
+            ) : (
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(l.domain || l.title)}&sz=64`}
+                alt=""
+                width={18}
+                height={18}
+                draggable={false}
+                className="shrink-0 rounded-sm"
+              />
+            )}
             <span className="min-w-0 flex-1 leading-tight">
               <span className="block truncate text-sm text-fg">{l.title}</span>
               {l.domain && l.domain !== l.title && (

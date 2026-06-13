@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleGatewayRequest, type GatewayConfig } from '../server/gateway/handler';
 import { streamChatResponse, type ChatStreamBody } from '../server/gateway/chat';
 import { searchYoutube } from '../server/gateway/youtube';
+import { unfurlLink } from '../server/gateway/unfurl';
 import { dbListLessons, dbSaveLesson, dbRemoveLesson } from '../server/gateway/lessons';
 
 /* Dev-only thin gateway: mounts POST /api/ai/run in the Vite dev server so the
@@ -110,6 +111,20 @@ export function devGateway(): Plugin {
           .catch((e) =>
             sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }),
           );
+      });
+
+      // 링크 미리보기(언퍼를) — 리다이렉트를 따라가 og:image·제목을 파싱. 웹 검색
+      // 결과 링크의 실제 썸네일을 가져오는 데 쓴다(브라우저는 CORS로 막혀 서버에서만 가능).
+      server.middlewares.use('/api/unfurl', (req, res) => {
+        const u = new URL(req.url ?? '', 'http://localhost');
+        const target = (u.searchParams.get('url') ?? '').trim();
+        if (!target) {
+          sendJson(res, 200, { ok: false, error: 'missing url' });
+          return;
+        }
+        unfurlLink(target)
+          .then((r) => sendJson(res, 200, { ok: true, ...r }))
+          .catch((e) => sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }));
       });
 
       // Streaming conversational answer (SSE) — reference KinderVerse parity.

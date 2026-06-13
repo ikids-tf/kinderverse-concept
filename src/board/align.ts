@@ -2,6 +2,7 @@ import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { worldBox } from './geometry';
 import { frameSubtree } from './frames';
 import { captureNodes, pushRedesign } from './commands';
+import { relayoutVideoFrame } from './workflow';
 
 /* 프레임 정렬 — 프레임을 '편집 디자인된 한 페이지'로 보고, 교사가 놓아 둔 배치를
    부수지 않는 "제자리 정돈"을 한다.
@@ -279,6 +280,15 @@ export function alignFrameCmd(frameId: string): boolean {
   if (!frame || frame.type !== 'frame') return false;
   const ids = [...new Set([...collectAffectedIds(frameId), ...frameSubtree(frameId)])];
   const before = captureNodes(ids);
+  // 동영상 모음 프레임(유튜브 뷰어 + 썸네일)은 고유 규칙(뷰어 상단 중앙 + 썸네일 행)을
+  // 복원한다 — 범용 행/열 정돈 대신.
+  const isVideoFrame = Object.values(b.nodes).some(
+    (n) => n.data?.frameId === frameId && String(n.data?.embed ?? '').includes('youtube-viewer'),
+  );
+  if (isVideoFrame && relayoutVideoFrame(frameId)) {
+    pushRedesign(ids, before, '동영상 프레임 정렬');
+    return true;
+  }
   alignFrameDeep(frameId);
   pushRedesign(ids, before, '프레임 정렬');
   return true;
