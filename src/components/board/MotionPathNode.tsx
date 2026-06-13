@@ -214,11 +214,16 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
         if (!cardId) return;
         const card = useBoardStore.getState().nodes[cardId];
         if (!card) return;
-        const nrot = (((card.rot ?? 0) + r2 + 540) % 360) - 180;
+        // 임베드 뷰어(3D·동영상·유튜브)는 '고정 UI'라 경로 스케일/회전을 누적하지 않는다 —
+        // 패스를 반복해서 키우면 뷰어 scale이 곱셈으로 불어나 거대해지고(예: 9.45×) 자체
+        // 리사이즈(w/h)로는 줄지 않던 문제를 막는다. 위치(끝점)만 따라가게 한다.
+        const isEmbed = typeof card.data?.embed === 'string';
+        const nrot = isEmbed ? (card.rot ?? 0) : (((card.rot ?? 0) + r2 + 540) % 360) - 180;
+        const nscale = isEmbed ? (card.scale ?? 1) : Math.max(0.2, Math.round((card.scale ?? 1) * s2 * 100) / 100);
         useBoardStore.getState().updateNodeRaw(cardId, {
           x: Math.round(cur.x + relPt.x - card.w / 2),
           y: Math.round(cur.y + relPt.y - renderHeight(card) / 2),
-          scale: Math.max(0.2, Math.round((card.scale ?? 1) * s2 * 100) / 100),
+          scale: nscale,
           rot: Math.round(nrot),
         });
       };
@@ -800,8 +805,10 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
     >
       {selected && !presenting && (
         <>
-          <div className="absolute -inset-1 rounded-lg border border-dashed border-accent/50" />
-          {/* 점선 테두리 잡고 끌면 라인+연결 카드가 함께 이동(내부는 클릭 통과) */}
+          {/* 점선 테두리는 '보기'만 — 내부 면은 클릭이 통과해 뒤 요소를 선택할 수 있게
+              pointer-events:none. 선택·이동은 외곽 EDGE_STRIPS(테두리)와 곡선(모션패스)만 담당. */}
+          <div className="absolute -inset-1 rounded-lg border border-dashed border-accent/50" style={{ pointerEvents: 'none' }} />
+          {/* 점선 테두리(외곽) 잡고 끌면 라인+연결 카드가 함께 이동(내부는 클릭 통과) */}
           {EDGE_STRIPS.map((pos, i) => (
             <div
               key={i}
