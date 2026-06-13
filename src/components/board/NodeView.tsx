@@ -17,6 +17,7 @@ import { WorksheetSheet } from '@/ui-registry/worksheet-sheet';
 import { downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-a4';
 import { separateImageLayers } from '@/ai/layers';
 import { ensureThumb } from '@/board/imageLod';
+import { getVideoAsset } from '@/board/videoAssets';
 import { MotionPathNode } from './MotionPathNode';
 
 /* Renders one board node (reference board model): frame container, runner control,
@@ -201,6 +202,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const isGlbViewer = embedStr.includes('glb-viewer');
   // 일반 영상 뷰어(유튜브·동영상) — 풀스크린·현재 내용 복원을 매직 뷰어와 동일하게 다룬다.
   const isVideoViewer = embedStr.includes('youtube-viewer') || embedStr.includes('video-player');
+  // 동영상 플레이어(<video>) — 드래그 레이어 위에 '재생/정지' 버튼을 띄워, 이동과
+  // 재생이 양립하게 한다(버튼만 조작, 나머지는 드래그). iframe이 kv-video-playing으로
+  // 상태를 알려 주면 아이콘을 맞추고, 클릭은 kvTogglePlay로 프록시한다.
+  const isVideoPlayer = embedStr.includes('video-player');
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoReady, setVideoReady] = useState<boolean>(typeof node.data?.videoAssetId === 'string');
   const [viewerMode, setViewerMode] = useState<string>(
     typeof node.data?.viewerMode === 'string' ? (node.data.viewerMode as string) : 'empty',
   );
@@ -268,17 +275,27 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           b.updateNodeRaw(node.id, { data: { ...(cur.data ?? {}), viewerMode: dm.mode } });
         }
       }
-      // 매직 뷰어 현재 내용 → 새로고침 복원용으로 영속화(휘발성 blob:은 제외).
+      // 매직 뷰어 현재 내용 → 새로고침 복원용으로 영속화(휘발성 blob:·대용량 data: 제외 —
+      // 생성 영상의 data URI는 videoAssetId로 IDB에서 복원하므로 스냅샷에 넣지 않는다).
       if (dm?.type === 'kv-viewer-content') {
         const b = useBoardStore.getState();
         const cur = b.nodes[node.id];
-        const src = typeof dm.src === 'string' && !dm.src.startsWith('blob:') ? dm.src : undefined;
+        const src =
+          typeof dm.src === 'string' && !dm.src.startsWith('blob:') && !dm.src.startsWith('data:')
+            ? dm.src
+            : undefined;
         if (cur && cur.data?.viewerSrc !== src) {
           const data = { ...(cur.data ?? {}) };
           if (src) data.viewerSrc = src;
           else delete data.viewerSrc;
           b.updateNodeRaw(node.id, { data });
         }
+      }
+      // 동영상 플레이어 재생 상태 — 카드 위 재생/정지 버튼 아이콘 동기화.
+      const dp = e.data as { type?: string; playing?: boolean; ready?: boolean } | null;
+      if (dp?.type === 'kv-video-playing') {
+        setVideoPlaying(!!dp.playing);
+        if (dp.ready) setVideoReady(true);
       }
     };
     // kv:embed-mode — 모션 라인 연결/해제가 뷰어의 프레젠테이션을 켜고 끈다.
@@ -397,15 +414,51 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       if (typeof d.deg === 'number') w?.setHeading?.(d.deg);
       else w?.clearHeading?.();
     };
+    // kv:video-load — Veo로 생성한 영상(data URI)을 이 동영상 뷰어에서 바로 재생.
+    const onVideoLoad = (e: Event) => {
+      const d = (e as CustomEvent).detail as { viewerId?: string; src?: string } | null;
+      if (!d?.src || d.viewerId !== node.id) return;
+      const w = embedFrameRef.current?.contentWindow as
+        | (Window & { loadSrc?: (u: string, name?: string) => void })
+        | null;
+      w?.loadSrc?.(d.src, '생성한 영상');
+    };
     window.addEventListener('kv:yt-play', onPlay);
     window.addEventListener('kv:yt-propose', onPropose);
     window.addEventListener('kv:motion-orient', onOrient);
+    window.addEventListener('kv:video-load', onVideoLoad);
     return () => {
       window.removeEventListener('kv:yt-play', onPlay);
       window.removeEventListener('kv:yt-propose', onPropose);
       window.removeEventListener('kv:motion-orient', onOrient);
+      window.removeEventListener('kv:video-load', onVideoLoad);
     };
   }, [node.id, node.data?.embed]);
+
+  // 새로고침 복원 — 저장된 생성 영상(videoAssetId)이 있으면 IDB에서 받아 뷰어에 로드.
+  // iframe이 아직 안 떴을 수 있어 loadSrc가 준비될 때까지 잠깐 재시도한다.
+  useEffect(() => {
+    if (!isVideoViewer) return;
+    const assetId = typeof node.data?.videoAssetId === 'string' ? (node.data.videoAssetId as string) : '';
+    if (!assetId) return;
+    let cancelled = false;
+    let tries = 0;
+    void getVideoAsset(assetId).then((src) => {
+      if (!src || cancelled) return;
+      const tryLoad = () => {
+        if (cancelled) return;
+        const w = embedFrameRef.current?.contentWindow as
+          | (Window & { loadSrc?: (u: string, name?: string) => void })
+          | null;
+        if (w?.loadSrc) w.loadSrc(src, '생성한 영상');
+        else if (tries++ < 20) setTimeout(tryLoad, 150);
+      };
+      tryLoad();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isVideoViewer, node.data?.videoAssetId]);
   const editable = node.type === 'sticky' || node.type === 'text' || node.type === 'image';
 
   // 이동 애니메이션에 연결된 카드인가(출발/도착) — 호버 시 '기다리는 동작' 선택 표시.
@@ -951,8 +1004,32 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               className="absolute inset-x-0 bottom-0"
               // 헤더(링크 입력·재생·전체화면)가 보일 때는 그 위(상단 ~52px)를 덮지 않는다 —
               // 이동 손잡이가 헤더 버튼을 가려 전체화면이 '됐다 안 됐다' 하던 문제를 막는다.
-              style={{ cursor: 'grab', top: selected || embedHover ? 52 : 0 }}
+              // 동영상 플레이어는 호버 시 하단 컨트롤 바(~56px)도 비워, 그 위에서
+              // 슬라이더·음소거·반복을 바로 쓰게 한다(나머지 영역은 그대로 드래그).
+              style={{
+                cursor: 'grab',
+                top: selected || embedHover ? 52 : 0,
+                bottom: isVideoPlayer && (selected || embedHover) ? 56 : 0,
+              }}
             />
+          )}
+          {/* 동영상 재생/정지 버튼 — 드래그 레이어보다 '위'(z-30)에 떠서, 이 버튼만
+              누르면 재생/정지, 나머지 영역은 그대로 끌어서 이동할 수 있다(조작 모드 불필요).
+              정지 상태에선 항상 보이고(한 번에 재생), 재생 중엔 호버/선택 시에만 보인다. */}
+          {isVideoPlayer && !embedPresent && !embedInteract && videoReady && (!videoPlaying || selected || embedHover) && (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                const w = embedFrameRef.current?.contentWindow as (Window & { kvTogglePlay?: () => void }) | null;
+                w?.kvTogglePlay?.();
+              }}
+              title={videoPlaying ? '일시정지' : '재생'}
+              className="absolute left-1/2 top-1/2 z-30 inline-flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-pill border border-border bg-surface/95 text-fg-2 shadow-lg backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
+              style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+            >
+              <span aria-hidden className="text-xl leading-none">{videoPlaying ? '⏸' : '▶'}</span>
+            </button>
           )}
           {/* 이동 ↔ 조작 토글 — 호버/선택/조작 중에 우하단에 표시(이동 손잡이 위). */}
           {!is3d && !embedPresent && (selected || embedHover || embedInteract) && (

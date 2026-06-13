@@ -1,5 +1,5 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd } from './commands';
 import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
@@ -7,8 +7,10 @@ import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/prom
 import {
   contentIntentFast,
   boardOp,
+  coreTopic,
   WORKSHEET_RE,
   PLAN_RE,
+  VIDEO_RE,
   DESIGN_CMD_RE,
   DECORATE_RE,
   type ContentIntent,
@@ -99,6 +101,63 @@ export function handleBoardPrompt(text: string): boolean {
       void searchVideosForViewer(videoViewer.id, text);
     }
     return true;
+  }
+
+  // 동영상 플레이어가 선택된 채 프롬프트:
+  //   · 미디어 링크 → 그 뷰어에 바로 로드(직접 영상 URL 재생).
+  //   · 보드 조작 지시(크게/정렬…)가 아니면 → 텍스트→비디오 생성(확인 게이트).
+  const videoPlayer =
+    sel.length === 1 && sel[0].type === 'sticky' && /video-player/.test(String(sel[0].data?.embed ?? ''))
+      ? sel[0]
+      : null;
+  if (videoPlayer) {
+    const link = extractMediaLink(text);
+    if (link) {
+      window.dispatchEvent(new CustomEvent('kv:yt-play', { detail: { videoId: link, target: videoPlayer.id } }));
+      return true;
+    }
+    const vop = boardOp(text);
+    const vgen = /만들|생성|그려|작성|써\s*줘|추가|넣어/.test(text);
+    if (!(vop && !vgen)) {
+      window.dispatchEvent(
+        new CustomEvent('kv:video-confirm', {
+          detail: { mode: 'text', viewerId: videoPlayer.id, anchorId: videoPlayer.id, request: text, topic: coreTopic(text) },
+        }),
+      );
+      return true;
+    }
+    // 순수 보드 조작 → 아래 공통 처리로 폴백
+  }
+
+  // 단일 카드 선택 + "영상 만들어줘" → 옆에 동영상 뷰어를 깔고 생성(확인 게이트).
+  //   · 이미지 카드 → 이미지→비디오(그 이미지가 첫 프레임)
+  //   · 계획/텍스트 카드(또는 계획을 담은 프레임) → 활동 내용 기반 텍스트→비디오
+  if (sel.length === 1 && VIDEO_RE.test(text)) {
+    const card = sel[0];
+    if (card.type === 'image' && card.src) {
+      const topic = (card.text ?? '').trim() || String(card.data?.title ?? '').trim() || coreTopic(text);
+      window.dispatchEvent(
+        new CustomEvent('kv:video-confirm', {
+          detail: { mode: 'image', spawnNear: card.id, anchorId: card.id, request: topic, imageSrc: card.src, topic },
+        }),
+      );
+      return true;
+    }
+    const activity = activityTextForVideo(card.id) || (card.text ?? '').trim();
+    if (activity) {
+      // 표시용 주제는 짧게(문서 제목/H1) — 본문 활동 텍스트는 request로 그대로 전달된다.
+      const topic =
+        String(card.data?.title ?? '').trim() ||
+        (card.text ?? '').split('\n')[0].replace(/^#+\s*/, '').trim().slice(0, 28) ||
+        '활동';
+      window.dispatchEvent(
+        new CustomEvent('kv:video-confirm', {
+          detail: { mode: 'plan', spawnNear: card.id, anchorId: card.id, request: activity, topic },
+        }),
+      );
+      return true;
+    }
+    // 사용할 내용이 없으면 아래 일반 처리로 폴백
   }
 
   const fast = contentIntentFast(text);

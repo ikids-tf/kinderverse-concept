@@ -32,6 +32,8 @@ export interface GatewayConfig {
   geminiKey?: string;
   /** Gemini image model, e.g. gemini-2.0-flash-preview-image-generation. */
   imageModel?: string;
+  /** Gemini Veo video model, e.g. veo-3.0-generate-001 (전용 영상 엔드포인트에서 사용). */
+  videoModel?: string;
   /** Optional model overrides, e.g. { 'anthropic.low': 'claude-haiku-4-5' }. */
   models?: Record<string, string>;
 }

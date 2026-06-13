@@ -71,6 +71,11 @@ export const INTENT_RE: Record<ContentIntent, RegExp> = {
   mindmap: build(WORDS.mindmap),
 };
 
+/** 동영상 '생성' 요청 — Veo 텍스트→/이미지→비디오 트리거(prompt.ts).
+    '영상/동영상/비디오/클립' + 만들/생성/제작 어미. 검색·추천·찾기는 의도적으로
+    제외해 유튜브 검색(영상 추천)과 충돌하지 않게 한다('영상'은 '동영상'도 포함). */
+export const VIDEO_RE = /(영상|비디오|클립)[^\n]{0,10}(만들|제작|생성|뽑아)/i;
+
 // 기존 코드 호환 별칭(prompt.ts / composer.ts의 *_RE 치환용).
 export const WORKSHEET_RE = INTENT_RE.worksheet;
 export const COLORING_RE = INTENT_RE.coloring;

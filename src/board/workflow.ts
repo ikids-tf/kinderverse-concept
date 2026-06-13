@@ -858,6 +858,68 @@ export async function recommendVideosForLink(viewerId: string, content: string, 
   }
 }
 
+/** 계획/텍스트 카드(또는 그 문서를 담은 프레임)에서 '영상화할 활동 텍스트'를 뽑는다.
+    recommendVideosForLink의 소스 해석을 재사용 — 프레임이면 안의 계획 문서를 찾고,
+    활동 표가 있으면 활동들을(제목과 함께) 모으고, 없으면 제목+본문 일부를 돌려준다.
+    연결당 영상 1개라 buildVeoPrompt가 이 텍스트를 한 장면으로 요약한다. */
+export function activityTextForVideo(sourceId: string): string {
+  const st = useBoardStore.getState();
+  let src = st.nodes[sourceId];
+  if (!src) return '';
+  const isPlanish = (n?: BoardNode) =>
+    !!n && (n.data?.role === 'plan' || (n.data?.payload as { type?: string } | undefined)?.type === 'WeeklyPlanGrid');
+  if (src.type === 'frame') {
+    const fid = src.id;
+    const kids = Object.values(st.nodes).filter((n) => n.data?.frameId === fid);
+    src =
+      kids.find(isPlanish) ??
+      kids.find((n) => planActivities(n).length >= 2) ??
+      kids.find((n) => !!(n.text ?? '').trim() || !!n.data?.doc) ??
+      src;
+  }
+  if (!src || src.type === 'frame') return '';
+  const acts = planActivities(src).map((a) => a.activity).filter(Boolean);
+  const title = String(src.data?.title ?? '').trim();
+  if (acts.length) return [title, ...acts].filter(Boolean).join(' / ').slice(0, 600);
+  const body = (src.text ?? '').trim();
+  return ([title, body].filter(Boolean).join('\n') || title).slice(0, 600);
+}
+
+/** 동영상 플레이어(빈) 뷰어를 보드에 추가하고 id를 돌려준다. nearId가 있으면 그
+    카드 오른쪽 옆에, 없으면 화면 중앙에. 카드 선택+"영상 만들어줘" 트리거가 쓴다. */
+export function spawnVideoPlayer(nearId?: string): string {
+  const b = useBoardStore.getState();
+  const W = 640;
+  const H = 420;
+  const GAP = 40;
+  const near = nearId ? b.nodes[nearId] : undefined;
+  let x: number;
+  let y: number;
+  if (near) {
+    const nb = worldBox(near);
+    x = Math.round(nb.x + nb.w + GAP);
+    y = Math.round(nb.y);
+  } else {
+    const c = viewportCenterBoardPoint();
+    x = Math.round(c.x - W / 2);
+    y = Math.round(c.y - H / 2);
+  }
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id,
+    type: 'sticky',
+    x,
+    y,
+    w: W,
+    h: H,
+    autoH: false,
+    text: '동영상 플레이어',
+    data: { embed: '/video-player.html', title: '동영상 플레이어' },
+  });
+  recordSpawnedNodes([id], '동영상 뷰어 추가');
+  return id;
+}
+
 /** "공룡 영상 검색해줘" → 검색어만 남긴다(영상/검색/지시 어미 제거). */
 function ytQuery(text: string): string {
   const q = text

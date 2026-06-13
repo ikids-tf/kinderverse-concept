@@ -63,6 +63,13 @@ export const GOVERNANCE_POLICIES: Policy[] = [
     status: 'enforced',
   },
   {
+    id: 'video',
+    label: 'AI 동영상 생성(Veo)',
+    rule: '생성=L1·과금 확인 게이트 / 공유=L2 / 아동 미생성(무인물 프롬프트+negativePrompt).',
+    enforcedAt: 'video.ts 확인 팝오버 · studio.ts KV_VIDEO_STYLE·KV_VIDEO_NEGATIVE',
+    status: 'enforced',
+  },
+  {
     id: 'no-shared-training',
     label: '공용 모델 학습 금지',
     rule: '학습 신호는 테넌트 로컬에만 누적, 공용 모델 학습 미사용.',

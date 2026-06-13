@@ -1,6 +1,6 @@
 import { callGateway } from '../client';
 import { extractJson } from '../json';
-import { requestedCount, imageSubject } from '../intent-lexicon';
+import { requestedCount, imageSubject, coreTopic } from '../intent-lexicon';
 import { PEDAGOGY_FOUNDATION } from '../pedagogy';
 import { validateRegistryPayload, type RegistryPayload, type StudioItem } from '@/ui-registry/contracts';
 import {
@@ -26,6 +26,52 @@ export const KV_ART_STYLE =
   '밝고 따뜻한 유아 그림책 일러스트 스타일, 부드러운 파스텔 색감, 둥근 형태, 단순하고 깔끔한 배경, 한 장면·단일 주제, 유아가 무서워할 요소 없음, 이미지 안에 글자·숫자·문자 절대 없음';
 export const KV_COLORING_STYLE =
   '유아용 흑백 색칠 도안, 굵고 선명한 윤곽선, 색과 음영 없음, 깨끗한 흰 배경, 닫힌 면으로 칠하기 쉬운 큰 영역, 이미지 안에 글자·숫자 없음';
+
+/* Veo(동영상) 스타일 — 영문 프롬프트 뒤에 붙여 톤을 고정(이미지 KV_ART_STYLE에 대응).
+   사람(특히 아동) 미등장·무자막은 PRD §9.5(아동 안전) + 거버넌스와 일치. */
+export const KV_VIDEO_STYLE =
+  'warm gentle preschool picture-book animation style, soft pastel colors, rounded simple shapes, calm slow camera, cozy storybook atmosphere, child-friendly, nothing scary, absolutely no text, letters, numbers, captions or watermark anywhere on screen';
+export const KV_VIDEO_NEGATIVE =
+  'text, words, letters, numbers, captions, subtitles, watermark, logo, scary, violent, photorealistic real children, human faces, distorted anatomy, fast flashing, jump cuts';
+
+/** 교사의 한국어 요청(또는 계획에서 뽑은 활동 내용)을 Veo용 영문 프롬프트로 변환.
+    공식 5요소(subject·action·scene·camera·composition·ambiance) 구조 + 유아 스타일.
+    저티어 LLM 1콜. 실패 시 휴리스틱 폴백(coreTopic + 스타일 접미사). */
+export async function buildVeoPrompt(request: string, ctx?: string): Promise<string> {
+  const topic = coreTopic(request) || request.trim();
+  const fallback = `A gentle short animated scene about "${topic}" for preschool children, no people on screen. ${KV_VIDEO_STYLE}`;
+  const res = await callGateway({
+    task: 'studio',
+    tier: 'low',
+    provider: 'auto',
+    responseFormat: 'json',
+    system: system(ctx),
+    messages: [
+      {
+        role: 'user',
+        content: `유아 활동 개념 영상을 만들려 한다. 아래 한국어 요청을 Veo(텍스트→비디오)용 영문 프롬프트 "한 단락"으로 바꿔라.
+요청: "${request}"
+[규칙]
+- 5요소를 한 흐름에 녹여라: subject(주체) · action(동작) · scene/context(장면·배경) · camera motion(카메라 움직임) · composition(구도) · ambiance(분위기).
+- 사람(특히 아동) 등장 금지 — 동물·사물·자연·그림책 캐릭터로 표현.
+- 화면에 글자·숫자·자막 넣지 마라.
+- 4초 내외의 짧고 잔잔한 장면.
+JSON만: { "prompt": "<English Veo prompt>" }`,
+      },
+    ],
+    meta: { kind: 'veo_prompt', title: topic },
+    maxTokens: 500,
+  });
+  if (res.ok && res.text) {
+    try {
+      const p = (extractJson(res.text) as { prompt?: string }).prompt;
+      if (p && p.trim().length > 8) return `${p.trim()} ${KV_VIDEO_STYLE}`;
+    } catch {
+      /* fall through to heuristic */
+    }
+  }
+  return fallback;
+}
 
 export interface StudioResult {
   payload: RegistryPayload;

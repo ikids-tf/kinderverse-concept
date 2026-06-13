@@ -5,6 +5,7 @@ import { handleGatewayRequest, type GatewayConfig } from '../server/gateway/hand
 import { streamChatResponse, type ChatStreamBody } from '../server/gateway/chat';
 import { searchYoutube } from '../server/gateway/youtube';
 import { unfurlLink } from '../server/gateway/unfurl';
+import { startVideo, pollVideo } from '../server/gateway/video';
 import { dbListLessons, dbSaveLesson, dbRemoveLesson } from '../server/gateway/lessons';
 
 /* Dev-only thin gateway: mounts POST /api/ai/run in the Vite dev server so the
@@ -49,6 +50,7 @@ export function devGateway(): Plugin {
         anthropicKey: env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY,
         geminiKey: env.GEMINI_API_KEY || process.env.GEMINI_API_KEY,
         imageModel: env.KV_GEMINI_IMAGE_MODEL || process.env.KV_GEMINI_IMAGE_MODEL,
+        videoModel: env.KV_GEMINI_VIDEO_MODEL || process.env.KV_GEMINI_VIDEO_MODEL,
         models: {
           ...(env.KV_ANTHROPIC_MODEL_LOW ? { 'anthropic.low': env.KV_ANTHROPIC_MODEL_LOW } : {}),
           ...(env.KV_ANTHROPIC_MODEL_MID ? { 'anthropic.mid': env.KV_ANTHROPIC_MODEL_MID } : {}),
@@ -124,6 +126,48 @@ export function devGateway(): Plugin {
         }
         unfurlLink(target)
           .then((r) => sendJson(res, 200, { ok: true, ...r }))
+          .catch((e) => sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }));
+      });
+
+      // 영상 생성 시작(Veo, 비동기) — 키는 서버에만. 텍스트/이미지→비디오 공용.
+      server.middlewares.use('/api/ai/video/start', (req, res) => {
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { ok: false, error: 'method not allowed' });
+          return;
+        }
+        readJsonBody(req)
+          .then((b) => {
+            const body = (b ?? {}) as {
+              prompt?: string;
+              imageDataUri?: string;
+              aspectRatio?: string;
+              durationSeconds?: number;
+              negativePrompt?: string;
+            };
+            return startVideo({
+              geminiKey: config.geminiKey,
+              model: config.videoModel,
+              prompt: body.prompt ?? '',
+              imageDataUri: body.imageDataUri,
+              aspectRatio: body.aspectRatio,
+              durationSeconds: body.durationSeconds,
+              negativePrompt: body.negativePrompt,
+            });
+          })
+          .then((r) => sendJson(res, 200, { ok: !r.error, ...r }))
+          .catch((e) => sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }));
+      });
+
+      // 영상 생성 폴링 — done:true면 서버가 mp4를 받아 data URI로 변환해 돌려준다.
+      server.middlewares.use('/api/ai/video/poll', (req, res) => {
+        const u = new URL(req.url ?? '', 'http://localhost');
+        const op = (u.searchParams.get('op') ?? '').trim();
+        if (!op) {
+          sendJson(res, 200, { ok: false, error: 'missing op' });
+          return;
+        }
+        pollVideo(op, config.geminiKey)
+          .then((r) => sendJson(res, 200, { ok: !r.error, ...r }))
           .catch((e) => sendJson(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) }));
       });
 

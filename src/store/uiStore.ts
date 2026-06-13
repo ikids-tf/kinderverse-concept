@@ -3,6 +3,20 @@ import { create } from 'zustand';
 /* Global UI slice — prompt bar shell state + per-page action context.
    The prompt bar is a persistent shell across all pages (CLAUDE.md §2, SKILL §7). */
 
+/** 동영상 '프롬프트 추가' 작성 모드 — 카드의 "프롬프트 추가하기"를 누르면 프롬프트 바가
+    이 컨텍스트로 들어간다: 입력창엔 추천 프롬프트가 placeholder로, 연결한 이미지 썸네일이
+    바 바로 위에 뜨고, 입력한 프롬프트 + 이미지로 영상을 생성한다(없으면 텍스트→비디오). */
+export interface VideoComposeCtx {
+  /** 이미지→비디오의 첫 프레임(있으면 바 위에 썸네일 표시). 없으면 텍스트→비디오. */
+  imageSrc?: string;
+  /** 결과를 로드할 대상 동영상 뷰어 id. */
+  viewerId: string;
+  /** 입력창 placeholder로 보여줄 추천 프롬프트(비워서 보내면 이 값을 사용). */
+  placeholder: string;
+  /** 표시용 주제 라벨. */
+  label: string;
+}
+
 interface UIState {
   /** Prompt bar collapsed = only the message icon shows (right round toggle / §7). */
   promptBarCollapsed: boolean;
@@ -10,6 +24,9 @@ interface UIState {
   favoritesOpen: boolean;
   /** Current prompt input draft (lifted so favorites/star↔send can read emptiness). */
   promptDraft: string;
+
+  /** 동영상 프롬프트 작성 모드(설정되면 프롬프트 바가 영상 생성 컨텍스트로 전환). */
+  videoCompose: VideoComposeCtx | null;
 
   /**
    * Actions available on the current page. The router only routes within this set
@@ -28,12 +45,14 @@ interface UIState {
   toggleFavorites: () => void;
   setPromptDraft: (v: string) => void;
   setAvailableActions: (actions: string[]) => void;
+  setVideoCompose: (v: VideoComposeCtx | null) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
   promptBarCollapsed: false,
   favoritesOpen: false,
   promptDraft: '',
+  videoCompose: null,
   availableActions: [],
   promptBarLeftInset: 0,
 
@@ -45,4 +64,6 @@ export const useUIStore = create<UIState>((set) => ({
   toggleFavorites: () => set((s) => ({ favoritesOpen: !s.favoritesOpen })),
   setPromptDraft: (v) => set({ promptDraft: v }),
   setAvailableActions: (actions) => set({ availableActions: actions }),
+  // 작성 모드 진입 시 입력 초안을 비워 placeholder(추천 프롬프트)가 보이게 한다.
+  setVideoCompose: (v) => set(v ? { videoCompose: v, promptDraft: '', promptBarCollapsed: false, favoritesOpen: false } : { videoCompose: null }),
 }));

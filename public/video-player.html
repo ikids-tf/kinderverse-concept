@@ -29,8 +29,15 @@
   }
 
   /* ── 상단: 파일 선택 — 평소엔 숨김(보드에선 화면만 보인다).
-        보드 카드가 호버/선택 시 kvSetChrome으로 연다. ── */
+        보드 카드가 호버/선택 시 kvSetChrome으로 연다.
+        position:absolute 오버레이라 나타나도 영상(.stage)을 밀어내지 않는다
+        (호버 시 영상이 위아래로 튀던 문제 해결 — 영상 화면은 항상 고정). ── */
   header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 6;
     display: none;
     align-items: center;
     gap: 10px;
@@ -158,7 +165,8 @@
     backdrop-filter: blur(6px);
     box-shadow: 0 4px 14px rgba(20, 19, 17, 0.10);
   }
-  body.loaded #controls { display: flex; }
+  /* 하단 컨트롤 바 — 평소엔 숨김, 호버/선택(chrome) 시에만 나타난다(헤더와 동일). */
+  body.loaded.chrome #controls { display: flex; }
   #controls button {
     display: inline-flex;
     align-items: center;
@@ -263,8 +271,20 @@
     playBtn.addEventListener('click', toggle);
     bigPlay.addEventListener('click', toggle);
     v.addEventListener('click', toggle);
-    v.addEventListener('play', () => { document.body.classList.remove('paused'); playBtn.textContent = '⏸'; });
-    v.addEventListener('pause', () => { document.body.classList.add('paused'); playBtn.textContent = '▶'; });
+    // 보드 카드(부모)가 재생/일시정지 상태를 알 수 있게 알린다 — 카드 위 '재생/정지'
+    // 버튼(드래그 레이어보다 위)이 이 상태로 아이콘을 동기화하고 kvTogglePlay로 조작한다.
+    const postState = () => {
+      try {
+        window.parent && window.parent.postMessage(
+          { type: 'kv-video-playing', playing: !v.paused, ready: document.body.classList.contains('loaded') },
+          '*',
+        );
+      } catch { /* standalone */ }
+    };
+    v.addEventListener('play', () => { document.body.classList.remove('paused'); playBtn.textContent = '⏸'; postState(); });
+    v.addEventListener('pause', () => { document.body.classList.add('paused'); playBtn.textContent = '▶'; postState(); });
+    // 외부(보드 카드)에서 재생/일시정지 토글 — 카드 위 버튼이 호출한다.
+    window.kvTogglePlay = toggle;
 
     const fmt = (s) => {
       if (!isFinite(s)) return '0:00';
@@ -277,7 +297,7 @@
       if (!seeking && v.duration) seek.value = String(Math.round((v.currentTime / v.duration) * 1000));
       renderTime();
     });
-    v.addEventListener('loadedmetadata', renderTime);
+    v.addEventListener('loadedmetadata', () => { renderTime(); postState(); });
     seek.addEventListener('input', () => {
       seeking = true;
       if (v.duration) v.currentTime = (Number(seek.value) / 1000) * v.duration;
@@ -310,15 +330,19 @@
     document.getElementById('exit').addEventListener('click', () => setPresent(false));
 
     // 보드 카드가 호버/선택에 맞춰 파일 선택 줄(UI)을 열고 닫는다.
-    window.kvSetChrome = (on) => document.body.classList.toggle('chrome', !!on);
+    // 호버 시 현재 상태도 다시 알려, 이미 로드된(이벤트가 지난) 영상도 카드 위
+    // 재생 버튼이 곧바로 올바른 아이콘으로 뜨게 한다.
+    window.kvSetChrome = (on) => { document.body.classList.toggle('chrome', !!on); postState(); };
     // 보드 카드의 전체 화면 버튼/모션 연결이 프레젠테이션을 켜고 끈다.
     window.kvSetPresent = setPresent;
 
-    // 외부에서 URL로 바로 재생 — 테스트·딥링크용.
-    window.loadSrc = (u) => {
+    // 외부에서 URL로 바로 재생 — 테스트·딥링크 + 생성 영상(data URI) 로드용.
+    // data:/blob: URI는 split('/').pop()이 거대한 base64가 되므로 name 인자를 우선 사용.
+    window.loadSrc = (u, name) => {
       v.src = u;
-      nameEl.textContent = u.split('/').pop();
+      nameEl.textContent = name || (/^(data|blob):/.test(u) ? '영상' : u.split('/').pop());
       document.body.classList.add('loaded');
+      postState();
       v.play().catch(() => {});
     };
     const q = new URLSearchParams(location.search).get('src');

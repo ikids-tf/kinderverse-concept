@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '@/lib/icons';
 import { AI_CHAT_PATH } from '@/lib/nav';
@@ -15,6 +15,54 @@ import { FavoriteCardRail } from './FavoriteCardRail';
 // Core generation steps (keywords only) streamed into the input on send.
 const GEN_STEPS = ['의도 분석', '자료 구성', '초안 생성', '누리과정 연계', '마무리'];
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/* 보관함 추천 애니메이션 — 섹션(박스) 단위로 순차 재생한다.
+   · 나타날 때: 프롬프트바에 가까운 '아래' 박스(boxOrder 0)부터 → 위 박스로.
+   · 사라질 때: 반대로 '위' 박스부터 → 아래 박스로(아래가 마지막에 사라진다).
+   · 한 박스 안에선 가로 중앙에서 양쪽으로 퍼지고, 다 나오면 박스 배경이 페이드인. */
+const LIB_STEP = 58; // 아이템 사이 stagger(ms) — 더 또렷한 순차감
+const LIB_ITEM_DUR = 300; // 아이템 페이드 시간
+const LIB_BOX_DUR = 240; // 섹션 박스 페이드 시간
+const LIB_BOX_GAP = 150; // 섹션(박스) 사이 순차 간격
+/** 박스 시작 기준 지연 — boxOrder 0 = 프롬프트바에 가장 가까운(아래) 박스.
+    열림은 아래부터(0,1,…), 닫힘은 위부터(반대). */
+function libBoxBase(boxOrder: number, boxCount: number, shown: boolean): number {
+  return (shown ? boxOrder : boxCount - 1 - boxOrder) * LIB_BOX_GAP;
+}
+/** i번째 아이템 스타일 — 박스 순서 지연 + 박스 안 중앙→양쪽(열림)/양쪽→중앙(닫힘). */
+function libItemStyle(
+  i: number,
+  count: number,
+  shown: boolean,
+  reduced: boolean,
+  boxOrder = 0,
+  boxCount = 1,
+): React.CSSProperties {
+  if (reduced) return { opacity: shown ? 1 : 0 }; // prefers-reduced-motion — 즉시
+  const center = (count - 1) / 2;
+  const dist = Math.abs(i - center);
+  const within = shown ? dist * LIB_STEP : (center - dist) * LIB_STEP;
+  const delay = libBoxBase(boxOrder, boxCount, shown) + within;
+  return {
+    opacity: shown ? 1 : 0,
+    transform: shown ? 'translateY(0) scale(1)' : 'translateY(6px) scale(0.96)',
+    transition: `opacity ${LIB_ITEM_DUR}ms ease, transform ${LIB_ITEM_DUR}ms ease`,
+    transitionDelay: `${Math.round(Math.max(0, delay))}ms`,
+  };
+}
+/** 섹션 박스(테두리·배경) 스타일 — 열림: 그 박스 아이템이 다 나온 뒤 / 닫힘: 그 박스 차례에 가장 먼저. */
+function libBoxStyle(count: number, shown: boolean, reduced: boolean, boxOrder = 0, boxCount = 1): React.CSSProperties {
+  if (reduced) return { opacity: shown ? 1 : 0 };
+  const base = libBoxBase(boxOrder, boxCount, shown);
+  const maxDist = (count - 1) / 2;
+  const delay = shown ? Math.round(base + maxDist * LIB_STEP + LIB_ITEM_DUR * 0.45) : Math.round(base);
+  return { opacity: shown ? 1 : 0, transition: `opacity ${LIB_BOX_DUR}ms ease`, transitionDelay: `${delay}ms` };
+}
+/** 닫힘 애니메이션이 끝나기까지 가장 긴 시간(언마운트 지연) — 마지막(아래) 박스 기준. */
+function libCloseMs(count: number, reduced: boolean, boxCount = 1): number {
+  if (reduced) return 0;
+  return Math.round((boxCount - 1) * LIB_BOX_GAP + ((count - 1) / 2) * LIB_STEP + LIB_ITEM_DUR + 60);
+}
 
 /* Shared prompt bar shell (CLAUDE.md §2 / SKILL.md §7).
    Persistent at the bottom of every page. Promoted to a common component for
@@ -66,12 +114,18 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const toggleFavorites = useUIStore((s) => s.toggleFavorites);
   const setDraft = useUIStore((s) => s.setPromptDraft);
   const availableActions = useUIStore((s) => s.availableActions);
+  // 동영상 '프롬프트 추가' 작성 모드 — 설정되면 입력창 placeholder가 추천 프롬프트로
+  // 바뀌고, 연결한 이미지 썸네일이 바 위에 뜨며, 전송 시 그 프롬프트+이미지로 영상 생성.
+  const videoCompose = useUIStore((s) => s.videoCompose);
+  const setVideoCompose = useUIStore((s) => s.setVideoCompose);
 
   const sendToRouter = useRouterStore((s) => s.send);
   const boardSelection = useBoardStore((s) => s.selection);
 
   const leftInset = useUIStore((s) => s.promptBarLeftInset);
   const hasText = draft.trim().length > 0;
+  // 작성 모드에선 빈 입력이어도 전송 가능(placeholder 프롬프트를 사용).
+  const canSend = hasText || !!videoCompose;
   const onChatPage = location.pathname === AI_CHAT_PATH;
 
   // 보관함 추천 — 보드에서 2자 이상 입력하면 태그/주제가 맞는 저장 자료를 바 위에
@@ -141,10 +195,59 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     void import('@/board/composer').then((m) => m.placeWebLinksOnBoard(chosen));
   }
 
-  // Keep the favorites rail mounted briefly after closing so it can play the
-  // reverse animation (cards descend back behind the bar) before unmounting.
+  // 즐겨찾기 레일 마운트 유지(닫힘 애니메이션용) — 보관함 strip 조건에서도 참조하므로
+  // 여기서 먼저 선언한다(아래 effect가 토글). 상세 동작은 그 effect 주석 참조.
   const [favRender, setFavRender] = useState(false);
   const [favClosing, setFavClosing] = useState(false);
+
+  // ── 보관함 섹션 열림/닫힘 애니메이션 ──
+  // libRender: 마운트 유지(닫힘 애니메이션을 끝까지 재생) · libShown: 펼침 상태 ·
+  // libDismissed: 배경/다른 버튼 클릭으로 닫음(같은 키워드로 다시 열리지 않게).
+  const prefersReduced = useMemo(
+    () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+    [],
+  );
+  const libHasContent = assetSugs.length > 0 || webSugs.length > 0;
+  const libCount = Math.max(assetSugs.length, webSugs.length);
+  // 보이는 박스 수와 각 박스의 '아래(프롬프트바)부터' 순번 — 렌더 순서는 이미지(위)→웹(아래).
+  const libBoxCount = (assetSugs.length > 0 ? 1 : 0) + (webSugs.length > 0 ? 1 : 0);
+  const assetBoxOrder = libBoxCount - 1; // 이미지 박스는 가장 위
+  const webBoxOrder = libBoxCount - 1 - (assetSugs.length > 0 ? 1 : 0); // 웹 박스는 아래(있으면 0)
+  const [libDismissed, setLibDismissed] = useState(false);
+  const [libRender, setLibRender] = useState(false);
+  const [libShown, setLibShown] = useState(false);
+  const libActive = libHasContent && !collapsed && !favRender && !libDismissed;
+  // 키워드가 바뀌면 '닫음' 해제 — 다시 입력하면 열린다.
+  useEffect(() => { setLibDismissed(false); }, [draft]);
+  useEffect(() => {
+    if (libActive) {
+      setLibRender(true);
+      // 다음 프레임에 펼침 → opacity-0에서 트랜지션이 실제로 발동한다.
+      const id = requestAnimationFrame(() => requestAnimationFrame(() => setLibShown(true)));
+      return () => cancelAnimationFrame(id);
+    }
+    if (libRender) {
+      setLibShown(false); // 역재생 시작
+      const t = setTimeout(() => setLibRender(false), libCloseMs(libCount, prefersReduced, libBoxCount));
+      return () => clearTimeout(t);
+    }
+  }, [libActive, libRender, libCount, libBoxCount, prefersReduced]);
+  // 배경·다른 버튼 클릭 → 닫기(역애니메이션). 스트립 자신·입력창 클릭은 유지.
+  useEffect(() => {
+    if (!libActive) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      if (t.closest('[data-kv-lib]') || t.closest('textarea')) return;
+      setLibDismissed(true);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [libActive]);
+
+  // Keep the favorites rail mounted briefly after closing so it can play the
+  // reverse animation (cards descend back behind the bar) before unmounting.
+  // (favRender/favClosing은 위 보관함 strip 조건에서 먼저 쓰여 상단에서 선언됨.)
   useEffect(() => {
     if (favoritesOpen) {
       setFavRender(true);
@@ -177,6 +280,14 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   // current selection. On My Board it scopes to the selected card(s)/frame.
   const boardSelectionCount = location.pathname.startsWith('/board') ? boardSelection.length : 0;
   const placeholder = (() => {
+    // 동영상 작성 모드 — 추천 프롬프트를 placeholder로(비워서 보내면 이 값을 사용).
+    if (videoCompose) {
+      const base = videoCompose.placeholder.trim().replace(/\s+/g, ' ').slice(0, 48);
+      if (videoCompose.imageSrc) {
+        return base ? `${base} — 어떻게 움직이면 좋을지 적어 보세요(비우면 그대로 생성)` : '이 이미지로 만들 영상을 설명해 주세요';
+      }
+      return base ? `${base} — 더 자세히 적어 보세요(비우면 그대로 생성)` : '만들 영상을 설명해 주세요';
+    }
     const p = location.pathname;
     if (p.startsWith('/board')) {
       return boardSelectionCount > 0
@@ -219,11 +330,27 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
       void import('@/board/workflow').then((m) => m.abortGeneration());
       return;
     }
+    // 동영상 작성 모드 — 입력(또는 placeholder) + 연결 이미지로 영상 생성.
+    if (videoCompose) {
+      runVideoCompose();
+      return;
+    }
     if (hasText) {
       void runGeneration(draft.trim());
     } else {
       toggleFavorites(); // raise the favorite card rail
     }
+  }
+
+  /** 동영상 작성 모드 제출 — 입력 프롬프트(없으면 추천 placeholder) + 연결 이미지로
+      generateVideoForViewer 호출. 이미지 있으면 이미지→비디오, 없으면 텍스트→비디오. */
+  function runVideoCompose() {
+    const vc = useUIStore.getState().videoCompose;
+    if (!vc) return;
+    const text = draft.trim() || vc.placeholder;
+    setVideoCompose(null);
+    setDraft('');
+    void import('@/board/video').then((m) => m.generateVideoForViewer(vc.viewerId, text, vc.imageSrc));
   }
 
   // Dispatch. 보드는 즉시 실행 — 실제 생성 단계가 boardStore.generating으로 입력창에
@@ -310,7 +437,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (hasText) onStarOrSend();
+      if (canSend) onStarOrSend();
     }
   }
 
@@ -327,16 +454,41 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             [배치] 버튼 = 보드 빈 자리에 그리드 정렬, 선택 상태로 프롬프트 제출 =
             배치 후 그 카드들에 명령. 화면 가로 폭(양옆 패딩 제외)을 꽉 채우고
             줄바꿈으로 쌓이며, 3줄을 넘으면 세로 스크롤. */}
-        {(assetSugs.length > 0 || webSugs.length > 0) && !collapsed && !favRender && (
+        {/* 동영상 작성 모드 — 연결한 이미지 썸네일이 바 바로 위 가로 중앙에 떠 있다.
+            ✕로 취소(작성 모드 해제). 이미지 없으면(텍스트→비디오) 라벨만. */}
+        {videoCompose && !collapsed && (
+          <div className="pointer-events-auto absolute bottom-full left-1/2 z-10 mb-t2 flex -translate-x-1/2 flex-col items-center gap-t1">
+            {videoCompose.imageSrc && (
+              <div className="relative">
+                <img
+                  src={videoCompose.imageSrc}
+                  alt=""
+                  className="h-20 w-20 rounded-lg border border-border object-cover shadow-lg"
+                />
+                <button
+                  type="button"
+                  onClick={() => setVideoCompose(null)}
+                  title="영상 만들기 취소"
+                  className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-pill border border-border bg-surface text-fg-2 shadow-md hover:border-accent hover:text-accent"
+                >
+                  <Icon name="x" size={13} />
+                </button>
+              </div>
+            )}
+            <span className="rounded-pill bg-fg/80 px-t3 py-0.5 text-overline text-on-dark shadow-sm">
+              🎬 {videoCompose.imageSrc ? '이 이미지로 영상 만들기' : '영상 만들기'}
+            </span>
+          </div>
+        )}
+
+        {libRender && !collapsed && !favRender && !videoCompose && (
           <div
+            data-kv-lib
             className="pointer-events-auto absolute bottom-full left-1/2 z-0 flex -translate-x-1/2 flex-col items-center gap-t2"
-            style={{
-              marginBottom: streaming && statusDetached ? 52 : 8,
-              width: `calc(100vw - ${(leftInset || 64) + 48}px)`,
-            }}
+            style={{ marginBottom: streaming && statusDetached ? 52 : 8 }}
           >
             {(assetSel.length > 0 || webSel.length > 0) && (
-              <div className="flex items-center gap-t2">
+              <div className="flex items-center gap-t2" style={{ opacity: libShown ? 1 : 0, transition: 'opacity 150ms ease' }}>
                 {assetSel.length > 0 && (
                   <button
                     type="button"
@@ -357,86 +509,109 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                 )}
               </div>
             )}
+            {/* 보관함 이미지 — w-max로 콘텐츠 핏(가운데 정렬), 넘치면 max-width에서 줄바꿈.
+                배경(테두리·그림자)은 별 레이어라 아이템이 다 나온 뒤 페이드인한다. */}
             {assetSugs.length > 0 && (
-              <div className="flex max-h-[200px] w-full flex-wrap items-start gap-t2 overflow-y-auto rounded-lg border border-border bg-surface/95 p-t2 shadow-lg backdrop-blur">
-                {assetSugs.map((a) => {
-                  const selected = assetSel.includes(assetKey(a));
-                  return (
-                    <button
-                      key={assetKey(a)}
-                      type="button"
-                      title={selected ? `'${a.tag}' 선택 해제` : `'${a.tag}' 선택`}
-                      onClick={() => {
-                        setAssetSel((sel) =>
-                          sel.includes(assetKey(a)) ? sel.filter((k) => k !== assetKey(a)) : [...sel, assetKey(a)],
-                        );
-                      }}
-                      className={`group w-[72px] shrink-0 rounded-sm border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft ${
-                        selected ? 'border-accent ring-2 ring-accent/40' : 'border-border hover:border-accent'
-                      }`}
-                    >
-                      <img src={a.url} alt={a.tag} draggable={false} className="h-14 w-full rounded-xs object-cover" />
-                      <span
-                        className={`mt-0.5 block truncate text-[10px] font-medium ${
-                          selected ? 'text-accent' : 'text-fg-2 group-hover:text-accent'
-                        }`}
-                      >
-                        {a.tag}
-                      </span>
-                    </button>
-                  );
-                })}
+              <div className="relative w-max" style={{ maxWidth: `calc(100vw - ${(leftInset || 64) + 48}px)` }}>
+                <div
+                  className="absolute inset-0 rounded-lg border border-border bg-surface/95 shadow-lg backdrop-blur"
+                  style={libBoxStyle(assetSugs.length, libShown, prefersReduced, assetBoxOrder, libBoxCount)}
+                />
+                <div className="relative flex w-full flex-wrap items-start gap-t2 overflow-y-auto p-t2" style={{ maxHeight: 200 }}>
+                  {assetSugs.map((a, i) => {
+                    const selected = assetSel.includes(assetKey(a));
+                    return (
+                      <div key={assetKey(a)} className="shrink-0" style={libItemStyle(i, assetSugs.length, libShown, prefersReduced, assetBoxOrder, libBoxCount)}>
+                        <button
+                          type="button"
+                          title={selected ? `'${a.tag}' 선택 해제` : `'${a.tag}' 선택`}
+                          onClick={() => {
+                            setAssetSel((sel) =>
+                              sel.includes(assetKey(a)) ? sel.filter((k) => k !== assetKey(a)) : [...sel, assetKey(a)],
+                            );
+                          }}
+                          className={`group w-[72px] rounded-sm border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft ${
+                            selected ? 'border-accent ring-2 ring-accent/40' : 'border-border hover:border-accent'
+                          }`}
+                        >
+                          <img src={a.url} alt={a.tag} draggable={false} className="h-14 w-full rounded-xs object-cover" />
+                          <span
+                            className={`mt-0.5 block truncate text-[10px] font-medium ${
+                              selected ? 'text-accent' : 'text-fg-2 group-hover:text-accent'
+                            }`}
+                          >
+                            {a.tag}
+                          </span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
             {webSugs.length > 0 && (
-              <div className="flex max-h-[160px] w-full flex-wrap items-start gap-t2 overflow-y-auto rounded-lg border border-border bg-surface/95 p-t2 shadow-lg backdrop-blur">
-                <span className="flex w-full items-center gap-t1 px-1 text-overline text-fg-2">
-                  <Icon name="search" size={12} className="text-accent" /> 웹 자료 보관함
-                </span>
-                {webSugs.map((s) => {
-                  const selected = webSel.includes(s.url);
-                  const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(s.domain || s.title)}&sz=64`;
-                  return (
-                    <button
-                      key={s.url}
-                      type="button"
-                      title={selected ? `'${s.title}' 선택 해제` : `'${s.title}' 선택 — ${s.url}`}
-                      onClick={() => {
-                        setWebSel((sel) => (sel.includes(s.url) ? sel.filter((u) => u !== s.url) : [...sel, s.url]));
-                      }}
-                      className={`group flex w-[112px] shrink-0 flex-col items-center rounded-sm border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft ${
-                        selected ? 'border-accent ring-2 ring-accent/40' : 'border-border hover:border-accent'
-                      }`}
-                    >
-                      {s.thumb ? (
-                        // 대표 이미지 썸네일. 로드 실패 시 파비콘으로 폴백.
-                        <img
-                          src={s.thumb}
-                          alt={s.title}
-                          draggable={false}
-                          loading="lazy"
-                          onError={(e) => {
-                            e.currentTarget.src = favicon;
-                            e.currentTarget.className = 'h-8 w-8 rounded-sm';
+              <div className="relative w-max" style={{ maxWidth: `calc(100vw - ${(leftInset || 64) + 48}px)` }}>
+                <div
+                  className="absolute inset-0 rounded-lg border border-border bg-surface/95 shadow-lg backdrop-blur"
+                  style={libBoxStyle(webSugs.length, libShown, prefersReduced, webBoxOrder, libBoxCount)}
+                />
+                {/* 라벨은 flex-wrap 밖 헤더로 — flex-wrap의 max-content가 '라벨+썸네일을
+                    한 줄'로 합산해 박스가 넓어지던 문제를 피한다(썸네일 기준으로만 콘텐츠 핏). */}
+                <div className="relative p-t2">
+                  <span
+                    className="mb-t1 flex items-center gap-t1 px-1 text-overline text-fg-2"
+                    style={libBoxStyle(webSugs.length, libShown, prefersReduced, webBoxOrder, libBoxCount)}
+                  >
+                    <Icon name="search" size={12} className="text-accent" /> 웹 자료 보관함
+                  </span>
+                  <div className="flex flex-wrap items-start gap-t2 overflow-y-auto" style={{ maxHeight: 140 }}>
+                  {webSugs.map((s, i) => {
+                    const selected = webSel.includes(s.url);
+                    const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(s.domain || s.title)}&sz=64`;
+                    return (
+                      <div key={s.url} className="shrink-0" style={libItemStyle(i, webSugs.length, libShown, prefersReduced, webBoxOrder, libBoxCount)}>
+                        <button
+                          type="button"
+                          title={selected ? `'${s.title}' 선택 해제` : `'${s.title}' 선택 — ${s.url}`}
+                          onClick={() => {
+                            setWebSel((sel) => (sel.includes(s.url) ? sel.filter((u) => u !== s.url) : [...sel, s.url]));
                           }}
-                          className="h-14 w-full rounded-xs object-cover"
-                        />
-                      ) : (
-                        <img src={favicon} alt="" draggable={false} className="h-8 w-8 rounded-sm" />
-                      )}
-                      <span
-                        className={`mt-0.5 block w-full truncate text-[10px] font-medium ${
-                          selected ? 'text-accent' : 'text-fg-2 group-hover:text-accent'
-                        }`}
-                      >
-                        {s.title}
-                      </span>
-                      {s.domain && s.domain !== s.title && (
-                        <span className="block w-full truncate text-[9px] text-fg-muted">{s.domain}</span>
-                      )}
-                    </button>
-                  );
-                })}
+                          className={`group flex w-[112px] flex-col items-center rounded-sm border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft ${
+                            selected ? 'border-accent ring-2 ring-accent/40' : 'border-border hover:border-accent'
+                          }`}
+                        >
+                          {s.thumb ? (
+                            // 대표 이미지 썸네일. 로드 실패 시 파비콘으로 폴백.
+                            <img
+                              src={s.thumb}
+                              alt={s.title}
+                              draggable={false}
+                              loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.src = favicon;
+                                e.currentTarget.className = 'h-8 w-8 rounded-sm';
+                              }}
+                              className="h-14 w-full rounded-xs object-cover"
+                            />
+                          ) : (
+                            <img src={favicon} alt="" draggable={false} className="h-8 w-8 rounded-sm" />
+                          )}
+                          <span
+                            className={`mt-0.5 block w-full truncate text-[10px] font-medium ${
+                              selected ? 'text-accent' : 'text-fg-2 group-hover:text-accent'
+                            }`}
+                          >
+                            {s.title}
+                          </span>
+                          {s.domain && s.domain !== s.title && (
+                            <span className="block w-full truncate text-[9px] text-fg-muted">{s.domain}</span>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -550,7 +725,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             <button
               type="submit"
               disabled={statusInline || collapsed}
-              aria-label={statusInline ? (hoverStop ? '생성 중단' : '생성 중') : hasText ? '전송' : '즐겨찾기 작업'}
+              aria-label={statusInline ? (hoverStop ? '생성 중단' : '생성 중') : canSend ? '전송' : '즐겨찾기 작업'}
               aria-pressed={!hasText && favoritesOpen}
               tabIndex={collapsed ? -1 : 0}
               onMouseEnter={() => setHoverStop(true)}
@@ -583,7 +758,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                   </svg>
                 )
               ) : (
-                <Icon name={hasText ? 'send' : 'star'} size={18} fill={!hasText && favoritesOpen ? 'currentColor' : 'none'} />
+                <Icon name={canSend ? 'send' : 'star'} size={18} fill={!canSend && favoritesOpen ? 'currentColor' : 'none'} />
               )}
             </button>
 

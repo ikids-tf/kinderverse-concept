@@ -3,7 +3,9 @@ import { useBoardStore, presentationVisibleSet, type BoardNode, type BoardLink }
 import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, type NodeSnap } from '@/board/commands';
 import { linkSequence } from '@/board/links';
 import { mindMapSubtree } from '@/board/composer';
-import { regenImageCard, genTextCard } from '@/board/workflow';
+import { regenImageCard, genTextCard, spawnVideoPlayer, activityTextForVideo } from '@/board/workflow';
+import { generateVideoForViewer } from '@/board/video';
+import { useUIStore } from '@/store/uiStore';
 import { frameMoveSet, rebindFrameMembership, frameOfPoint } from '@/board/frames';
 import { worldBox, renderHeight } from '@/board/geometry';
 import { IMG_PLACEHOLDER_ZOOM } from '@/board/imageLod';
@@ -347,6 +349,19 @@ export function BoardCanvas() {
   const [proposal, setProposal] = useState<{ id: string; topic: string; kind: 'memo' | 'image' } | null>(null);
   // 유튜브 뷰어에 자료를 연결했을 때 뜨는 선택 팝오버: 영상 추천 vs 웹 검색.
   const [viewerLink, setViewerLink] = useState<{ viewerId: string; content: string; topic: string; sourceId?: string } | null>(null);
+  // 동영상 생성 확인 팝오버(과금·시간 게이트) — 선 연결(이미지/계획 카드↔동영상 뷰어),
+  // 뷰어 선택+프롬프트(텍스트→비디오), 카드 선택+프롬프트(스폰 후 생성)가 모두 이 한
+  // 곳으로 모인다. viewerId 없으면 confirm 때 spawnNear 옆에 뷰어를 깔고 생성한다.
+  const [videoGen, setVideoGen] = useState<{
+    mode: 'image' | 'plan' | 'text';
+    request: string;
+    topic: string;
+    imageSrc?: string;
+    viewerId?: string;
+    anchorId: string;
+    sourceId?: string;
+    spawnNear?: string;
+  } | null>(null);
   // mode 'new' = 빈 포트에서 새 연결, 'detach' = 연결된 포트를 떼어내 분리/옮기기.
   // from = 고정된(반대쪽) 끝, keepFrom = 고정 끝이 링크의 from인지.
   const lk = useRef<{ mode: 'new' | 'detach'; from: string; x1: number; y1: number; linkId?: string; keepFrom?: boolean } | null>(null);
@@ -389,6 +404,34 @@ export function BoardCanvas() {
     window.addEventListener('kv:ports-hover', onPortsHover);
     return () => window.removeEventListener('kv:ports-hover', onPortsHover);
   }, [classroom, show]);
+
+  // 프롬프트바 트리거(prompt.ts) → 동영상 생성 확인 팝오버로 모은다(과금·시간 게이트).
+  //   text → 텍스트→비디오 / image · plan → 카드 옆에 뷰어 스폰 후 생성.
+  useEffect(() => {
+    const onConfirm = (e: Event) => {
+      const d = (e as CustomEvent).detail as {
+        mode?: 'image' | 'plan' | 'text';
+        request?: string;
+        topic?: string;
+        imageSrc?: string;
+        viewerId?: string;
+        anchorId?: string;
+        spawnNear?: string;
+      } | null;
+      if (!d?.mode || !d.anchorId) return;
+      setVideoGen({
+        mode: d.mode,
+        request: d.request ?? '',
+        topic: d.topic ?? '',
+        imageSrc: d.imageSrc,
+        viewerId: d.viewerId,
+        anchorId: d.anchorId,
+        spawnNear: d.spawnNear,
+      });
+    };
+    window.addEventListener('kv:video-confirm', onConfirm);
+    return () => window.removeEventListener('kv:video-confirm', onConfirm);
+  }, []);
 
   /** 캔버스 호버 → 포트를 보여줄 노드 추적(드래그/팬/박스/수업 모드 중엔 끔). */
   function onCanvasHover(e: React.PointerEvent) {
@@ -438,6 +481,7 @@ export function BoardCanvas() {
             const topicOf = (n?: BoardNode) =>
               n ? ((n.text ?? '') || String(n.data?.title ?? '')).split('\n')[0].trim() : '';
             const viewer = pair.find((n) => String(n.data?.embed ?? '').includes('youtube-viewer'));
+            const videoPlayerViewer = pair.find((n) => String(n.data?.embed ?? '').includes('video-player'));
             if (viewer) {
               // 유튜브 뷰어에 자료를 연결 → 즉시 추천(뷰어 아래 가로 중앙 썸네일,
               // 클릭 = 재생). 놀이계획안이면 요일별 활동마다 영상 1개씩, 그 외엔
@@ -449,6 +493,35 @@ export function BoardCanvas() {
               if (content) {
                 // 자동 실행하지 않고 — 뷰어 옆에 "영상 추천 / 웹 검색"을 물어보는 팝오버를 띄운다.
                 setViewerLink({ viewerId: viewer.id, content, topic: topicOf(other), sourceId: other?.id });
+              }
+            } else if (videoPlayerViewer) {
+              // 동영상 플레이어에 자료를 연결 → 영상 생성 확인 팝오버(과금·시간 게이트).
+              //  · 이미지 카드 → 이미지→비디오(그 이미지가 첫 프레임)
+              //  · 계획/텍스트 카드(또는 계획을 담은 프레임) → 활동 내용 텍스트→비디오
+              const other = pair.find((n) => n !== videoPlayerViewer);
+              if (other && other.type === 'image' && other.src) {
+                const topic = topicOf(other) || '이미지';
+                setVideoGen({
+                  mode: 'image',
+                  request: topic,
+                  topic,
+                  imageSrc: other.src,
+                  viewerId: videoPlayerViewer.id,
+                  anchorId: videoPlayerViewer.id,
+                  sourceId: other.id,
+                });
+              } else if (other) {
+                const activity = activityTextForVideo(other.id) || (other.text ?? '').trim();
+                if (activity) {
+                  setVideoGen({
+                    mode: 'plan',
+                    request: activity,
+                    topic: (topicOf(other) || '활동').replace(/^#+\s*/, '').slice(0, 28),
+                    viewerId: videoPlayerViewer.id,
+                    anchorId: videoPlayerViewer.id,
+                    sourceId: other.id,
+                  });
+                }
               }
             } else {
               // 빈 카드만 제안 — 채워진 이미지끼리 잇는 슬라이드 체인을 방해하지 않게.
@@ -598,12 +671,12 @@ export function BoardCanvas() {
       const b = useBoardStore.getState();
       // 수업 모드·슬라이드 쇼 — 화면에 보이는 수업자료만 박스 선택 대상(숨긴 요소 제외).
       const vis = presentationVisibleSet(b.nodes, b.classroom, b.show);
-      // Frames are NOT box-selectable — their large box always intersects a box drawn
-      // over their interior, which would wrongly pull the frame into the selection and
-      // move it when the inner cards are dragged. A frame is selected/moved only via
-      // its border strips or title tab. Box-select grabs loose cards/content only.
+      // Frames과 모션(이동 애니메이션)은 박스 선택 대상에서 제외 — 둘 다 '면적이 큰'
+      // 박스라, 그 안의 자료를 드래그로 복수 선택하면 영역이 겹쳐 프레임/모션까지 끌려
+      // 들어간다. 프레임은 테두리·제목 탭으로, 모션은 외곽선·곡선(모션패스)으로만 선택한다.
+      // Box-select grabs loose cards/content only.
       const hits = Object.values(b.nodes)
-        .filter((n) => n.type !== 'frame' && n.x < x1 && n.x + n.w > x0 && n.y < y1 && n.y + n.h > y0)
+        .filter((n) => n.type !== 'frame' && n.type !== 'motion' && n.x < x1 && n.x + n.w > x0 && n.y < y1 && n.y + n.h > y0)
         .filter((n) => !vis || vis.has(n.id))
         .map((n) => n.id);
       if (hits.length || !e.shiftKey) b.setSelection(hits);
@@ -1110,6 +1183,104 @@ export function BoardCanvas() {
                   </button>
                   <button
                     onClick={() => setViewerLink(null)}
+                    className="rounded-pill border border-border bg-surface text-fg-2 hover:bg-surface-2"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${12 / z}px` }}
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 동영상 생성 확인 팝오버 — 과금·시간 게이트(Veo). 선 연결·프롬프트 트리거가
+            모두 여기로 모인다. 확인 시 (필요하면) 뷰어를 깔고 generateVideoForViewer 실행. */}
+        {videoGen && nodes[videoGen.anchorId] && (() => {
+          const an = nodes[videoGen.anchorId];
+          const ab = worldBox(an);
+          const z = viewport.zoom;
+          const label =
+            videoGen.mode === 'image'
+              ? '이 이미지로 영상 만들기'
+              : videoGen.mode === 'plan'
+                ? '이 활동을 영상으로 만들기'
+                : '영상 만들기';
+          // 대상 뷰어 확정 — 선 연결 트리거선(일회성)은 지우고, 뷰어가 없으면 카드 옆에 깐다.
+          const resolveViewer = (g: NonNullable<typeof videoGen>) => {
+            if (g.sourceId && g.viewerId) {
+              const trig = useBoardStore
+                .getState()
+                .links.find(
+                  (l) =>
+                    (l.from === g.sourceId && l.to === g.viewerId) ||
+                    (l.from === g.viewerId && l.to === g.sourceId),
+                );
+              if (trig) removeLinkCmd(trig.id);
+            }
+            return g.viewerId ?? (g.spawnNear ? spawnVideoPlayer(g.spawnNear) : undefined);
+          };
+          // 바로 생성(추천 프롬프트로).
+          const make = () => {
+            const g = videoGen;
+            setVideoGen(null);
+            const vId = resolveViewer(g);
+            if (vId) void generateVideoForViewer(vId, g.request, g.imageSrc);
+          };
+          // 프롬프트 추가 — 프롬프트 바를 작성 모드로 전환(입력창 placeholder=추천 프롬프트,
+          // 연결 이미지 썸네일이 바 위에). 입력 후 전송하면 그 프롬프트+이미지로 생성한다.
+          const addPrompt = () => {
+            const g = videoGen;
+            setVideoGen(null);
+            const vId = resolveViewer(g);
+            if (!vId) return;
+            useUIStore.getState().setVideoCompose({
+              imageSrc: g.imageSrc,
+              viewerId: vId,
+              placeholder: g.request,
+              label: g.topic,
+            });
+          };
+          return (
+            <div
+              className="absolute z-40"
+              style={{ left: ab.x + ab.w / 2, top: ab.y + ab.h + 10 / z, transform: 'translateX(-50%)' }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div
+                className="rounded-lg border border-border bg-surface text-center shadow-lg"
+                style={{ padding: `${10 / z}px ${14 / z}px`, width: 'max-content', maxWidth: 360 / z }}
+              >
+                <p className="text-fg" style={{ fontSize: 13 / z, margin: 0, marginBottom: 4 / z, lineHeight: 1.45 }}>
+                  <b className="font-semibold text-accent">'{videoGen.topic || '활동'}'</b> 영상을 만들까요?
+                </p>
+                <p className="text-fg-muted" style={{ fontSize: 11 / z, margin: 0, marginBottom: 9 / z, lineHeight: 1.4 }}>
+                  생성에 수십 초~수 분 걸리고 과금돼요.
+                </p>
+                <div className="flex items-start justify-center" style={{ gap: 6 / z }}>
+                  {/* 기본 = 바로 생성. 버튼 호버 시 그 아래에 '프롬프트 추가하기'가 나타난다
+                      (이미지·계획 모드에서만 — 텍스트 모드는 이미 입력한 프롬프트가 있음). */}
+                  <div className="group/vm flex flex-col items-center" style={{ gap: 6 / z }}>
+                    <button
+                      onClick={make}
+                      className="rounded-pill bg-accent font-semibold text-on-accent hover:bg-accent-hover"
+                      style={{ fontSize: 12 / z, padding: `${5 / z}px ${14 / z}px` }}
+                    >
+                      {label}
+                    </button>
+                    {videoGen.mode !== 'text' && (
+                      <button
+                        onClick={addPrompt}
+                        title="프롬프트를 직접 입력해 영상을 만들어요"
+                        className="hidden whitespace-nowrap rounded-pill border border-accent bg-surface font-semibold text-accent shadow-sm hover:bg-accent-soft group-hover/vm:block"
+                        style={{ fontSize: 11 / z, padding: `${4 / z}px ${12 / z}px` }}
+                      >
+                        ✏️ 프롬프트 추가하기
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setVideoGen(null)}
                     className="rounded-pill border border-border bg-surface text-fg-2 hover:bg-surface-2"
                     style={{ fontSize: 12 / z, padding: `${5 / z}px ${12 / z}px` }}
                   >
