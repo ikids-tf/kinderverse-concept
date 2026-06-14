@@ -1,0 +1,119 @@
+/* 슬라이드 테마 — 슬라이드 '콘텐츠'에 한해 Milray Park 고정을 벗어나 다양한 전문 스타일을
+   허용한다(사용자 지시, slides-feature/CLAUDE.md의 예외). 앱 크롬(툴바·레일·프롬프트바)은
+   Milray 토큰 유지 — 콘텐츠만 테마. Claude Design 원칙(팔레트·타이포 일관성, 위계, 여백).
+
+   사용법: 뷰어가 .slides-root[data-theme="<id>"]를 설정 → 아래 --s-* 변수가 캐스케이드.
+   슬라이드 콘텐츠 CSS(slides.css)는 --s-* 만 참조한다. 폰트는 tokens.css에서 이미 로드된
+   Playfair Display / Noto Serif KR / Hanken Grotesk / Pretendard를 조합(추가 로드 없음). */
+
+.slides-root {
+  /* ── 기본값 = warm(브랜드) — 알 수 없는 테마도 여기로 폴백 ── */
+  --s-bg: #f1eee6;           /* 무대(슬라이드 뒤 배경) */
+  --s-canvas: #f8f7f2;       /* 슬라이드 면 */
+  --s-canvas-2: #efe7da;     /* 보조 면(이미지 패널·자리표시) */
+  --s-fg: #141311;           /* 헤드라인 잉크 */
+  --s-fg-2: #56524b;         /* 본문·부제 */
+  --s-fg-muted: #8c887f;     /* 캡션·쪽번호·경계 라벨 */
+  --s-accent: #f2733e;       /* 1차 악센트 */
+  --s-accent-2: #e0a62c;     /* 2차 악센트(gold 역할) */
+  --s-border: #e7e0d4;       /* 헤어라인·점선 자리표시 */
+  --s-display: 'Playfair Display', 'Noto Serif KR', Georgia, serif;
+  --s-body: 'Hanken Grotesk', 'Pretendard', -apple-system, sans-serif;
+  --s-shadow: 0 8px 24px rgba(40, 33, 24, 0.07);
+}
+
+/* ── ivory — 깨끗한 라이트 에디토리얼(흰 면 · 테라코타 악센트) ── */
+.slides-root[data-theme='ivory'] {
+  --s-bg: #eceae6;
+  --s-canvas: #ffffff;
+  --s-canvas-2: #f1efe9;
+  --s-fg: #1a1a18;
+  --s-fg-2: #4a4843;
+  --s-fg-muted: #9a968d;
+  --s-accent: #c8472e;
+  --s-accent-2: #b7892b;
+  --s-border: #e8e6df;
+  --s-display: 'Playfair Display', 'Noto Serif KR', Georgia, serif;
+  --s-body: 'Hanken Grotesk', 'Pretendard', sans-serif;
+  --s-shadow: 0 10px 30px rgba(20, 20, 18, 0.08);
+}
+
+/* ── midnight — 다크 모던(짙은 면 · 앰버 악센트) ── */
+.slides-root[data-theme='midnight'] {
+  --s-bg: #0f1115;
+  --s-canvas: #1a1d24;
+  --s-canvas-2: #242832;
+  --s-fg: #f5f3ec;
+  --s-fg-2: #bcc0c9;
+  --s-fg-muted: #7d828d;
+  --s-accent: #ffb454;
+  --s-accent-2: #f2733e;
+  --s-border: #2c313b;
+  --s-display: 'Playfair Display', 'Noto Serif KR', Georgia, serif;
+  --s-body: 'Hanken Grotesk', 'Pretendard', sans-serif;
+  --s-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* ── slate — 쿨 코퍼레이트(슬레이트 · 블루 악센트, 산세리프 헤드라인) ── */
+.slides-root[data-theme='slate'] {
+  --s-bg: #e6eaef;
+  --s-canvas: #ffffff;
+  --s-canvas-2: #eef2f6;
+  --s-fg: #18283a;
+  --s-fg-2: #45566a;
+  --s-fg-muted: #94a3b5;
+  --s-accent: #2563eb;
+  --s-accent-2: #0e7490;
+  --s-border: #dde4ec;
+  --s-display: 'Pretendard', 'Hanken Grotesk', sans-serif;
+  --s-body: 'Hanken Grotesk', 'Pretendard', sans-serif;
+  --s-shadow: 0 12px 34px rgba(24, 40, 58, 0.12);
+}
+
+/* ── sage — 차분한 자연(세이지 · 테라코타 악센트) ── */
+.slides-root[data-theme='sage'] {
+  --s-bg: #e5e9e0;
+  --s-canvas: #f7f8f3;
+  --s-canvas-2: #e3e8d9;
+  --s-fg: #232f23;
+  --s-fg-2: #4f5b49;
+  --s-fg-muted: #8b9483;
+  --s-accent: #c1683c;
+  --s-accent-2: #5e7c52;
+  --s-border: #dbe0d2;
+  --s-display: 'Playfair Display', 'Noto Serif KR', Georgia, serif;
+  --s-body: 'Hanken Grotesk', 'Pretendard', sans-serif;
+  --s-shadow: 0 10px 30px rgba(35, 47, 35, 0.1);
+}
+
+/* ── bloom — 밝고 다정한(수업·유아용. 피치 · 산호 악센트) ── */
+.slides-root[data-theme='bloom'] {
+  --s-bg: #fdeee5;
+  --s-canvas: #ffffff;
+  --s-canvas-2: #fde2d6;
+  --s-fg: #3a2b2b;
+  --s-fg-2: #6b5757;
+  --s-fg-muted: #b59b9b;
+  --s-accent: #ff6f61;
+  --s-accent-2: #2bb3a8;
+  --s-border: #fbe0d4;
+  --s-display: 'Playfair Display', 'Noto Serif KR', Georgia, serif;
+  --s-body: 'Hanken Grotesk', 'Pretendard', sans-serif;
+  --s-shadow: 0 12px 32px rgba(58, 43, 43, 0.1);
+}
+
+/* ── mono — 볼드 미니멀(흑백 · 강렬한 레드 악센트, 산세리프) ── */
+.slides-root[data-theme='mono'] {
+  --s-bg: #ededed;
+  --s-canvas: #ffffff;
+  --s-canvas-2: #f3f3f3;
+  --s-fg: #0a0a0a;
+  --s-fg-2: #3a3a3a;
+  --s-fg-muted: #9a9a9a;
+  --s-accent: #e5341c;
+  --s-accent-2: #0a0a0a;
+  --s-border: #e3e3e3;
+  --s-display: 'Pretendard', 'Hanken Grotesk', sans-serif;
+  --s-body: 'Hanken Grotesk', 'Pretendard', sans-serif;
+  --s-shadow: 0 12px 34px rgba(0, 0, 0, 0.12);
+}

@@ -19,6 +19,7 @@ import {
   type VesselMatch,
 } from '@/ai/intent-lexicon';
 import { runBoardOp } from './actions';
+import { generateSlidesForViewer } from './slides';
 import { runRouter } from '@/ai/agents/router';
 import { PAGE_ACTIONS } from '@/ai/actions';
 import { buildAgentContext } from '@/ai/context';
@@ -220,6 +221,23 @@ export function handleBoardPrompt(text: string): boolean {
           detail: { mode: 'text', viewerId: videoPlayer.id, anchorId: videoPlayer.id, request: text, topic: coreTopic(text) },
         }),
       );
+      return true;
+    }
+    // 순수 보드 조작 → 아래 공통 처리로 폴백
+  }
+
+  // 슬라이드 뷰어가 선택된 채 프롬프트: 한 줄 요청 → 장표 에이전트가 DeckSpec 생성 → 뷰어에 로드.
+  //   · 순수 보드 조작(크게/정렬/지워…)이면 아래 공통 처리로 폴백.
+  //   · 그 외(주제·생성 요청)는 모두 슬라이드 생성으로 — "봄 나비 관찰 수업"만 입력해도 만든다.
+  const slidesViewer =
+    sel.length === 1 && sel[0].type === 'sticky' && /slides-viewer/.test(String(sel[0].data?.embed ?? ''))
+      ? sel[0]
+      : null;
+  if (slidesViewer) {
+    const sop = boardOp(text);
+    const sgen = /만들|생성|그려|작성|써\s*줘|추가|넣어|짜\s*줘|구성|기획/.test(text);
+    if (!(sop && !sgen)) {
+      void generateSlidesForViewer(slidesViewer.id, text);
       return true;
     }
     // 순수 보드 조작 → 아래 공통 처리로 폴백

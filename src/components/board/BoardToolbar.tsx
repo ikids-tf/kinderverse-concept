@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Icon, type IconName } from '@/lib/icons';
-import { useBoardStore, type BoardNode, type NodeType } from '@/store/boardStore';
+import { useBoardStore, newId, type BoardNode, type NodeType } from '@/store/boardStore';
 import { SHAPE_PATHS } from '@/lib/shapes';
 import {
   addNodeCmd,
@@ -70,6 +70,17 @@ const MAGIC_VIEWER_PATCH: Partial<BoardNode> = {
   autoH: false,
   text: '매직 뷰어',
   data: { embed: '/magic-viewer.html', title: '매직 뷰어' },
+};
+
+/** 슬라이드 뷰어 — 교사가 레이아웃을 골라 직접 슬라이드를 만드는 자체 엔진(16:9).
+    임베드 src는 인스턴스마다 ?id=로 분리(addPreset에서 주입) — 덱이 섞이지 않게.
+    상세 아키텍처: slides-feature/CLAUDE.md(React 엔진·DeckSpec·레이아웃 enum). */
+const SLIDES_VIEWER_PATCH: Partial<BoardNode> = {
+  w: 720,
+  h: 470,
+  autoH: false,
+  text: '슬라이드',
+  data: { embed: '/slides-viewer.html', title: '슬라이드' },
 };
 
 /* 문서 폼 — 각 유아교육 양식의 A4 문서 스캐폴드(data.doc 마크다운). 교사가 그대로
@@ -362,6 +373,22 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
           },
         ],
       },
+      {
+        label: '직접 만들기',
+        items: [
+          {
+            id: 'slides', label: '슬라이드', desc: '레이아웃을 골라 수업·안내 슬라이드 제작 (16:9)',
+            nodeType: 'sticky',
+            patch: SLIDES_VIEWER_PATCH,
+            swatch: (
+              <svg viewBox="0 0 24 24" width={19} height={19} className="text-accent" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="3" y="4.5" width="18" height="15" rx="2.4" />
+                <path d="M6.5 9h7M6.5 12.5h11M6.5 16h8" />
+              </svg>
+            ),
+          },
+        ],
+      },
     ],
   },
   frame: {
@@ -457,7 +484,13 @@ export function BoardToolbar() {
     const c = viewCenterWorld();
     // 'video'·'doc'은 노드 타입이 아니라 툴 id — 프리셋은 모두 sticky(임베드/문서).
     const fallback: NodeType = type === 'video' || type === 'doc' ? 'sticky' : type;
-    addPresetNodeCmd(p.nodeType ?? fallback, c.x, c.y, p.patch, `${p.label} 추가`);
+    let patch = p.patch;
+    // 슬라이드 뷰어 — 인스턴스마다 고유 ?id=로 덱(localStorage 키)을 분리한다.
+    const data = patch.data as Record<string, unknown> | undefined;
+    if (data && typeof data.embed === 'string' && data.embed.startsWith('/slides-viewer.html')) {
+      patch = { ...patch, data: { ...data, embed: `/slides-viewer.html?id=${newId('deck')}` } };
+    }
+    addPresetNodeCmd(p.nodeType ?? fallback, c.x, c.y, patch, `${p.label} 추가`);
     setFly(null);
   };
 

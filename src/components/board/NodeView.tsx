@@ -487,15 +487,30 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         | null;
       w?.loadSrc?.(d.src, (typeof d.title === 'string' && d.title.trim()) || '생성한 영상');
     };
+    // kv:slides-load — 장표 에이전트가 만든 DeckSpec을 이 슬라이드 뷰어에 로드.
+    // iframe이 아직 안 떴을 수 있어 loadDeck이 준비될 때까지 잠깐 재시도한다.
+    const onSlidesLoad = (e: Event) => {
+      const d = (e as CustomEvent).detail as { viewerId?: string; deck?: unknown } | null;
+      if (!d?.deck || d.viewerId !== node.id) return;
+      let tries = 0;
+      const tryLoad = () => {
+        const w = embedFrameRef.current?.contentWindow as (Window & { loadDeck?: (deck: unknown) => void }) | null;
+        if (w?.loadDeck) w.loadDeck(d.deck);
+        else if (tries++ < 25) setTimeout(tryLoad, 150);
+      };
+      tryLoad();
+    };
     window.addEventListener('kv:yt-play', onPlay);
     window.addEventListener('kv:yt-propose', onPropose);
     window.addEventListener('kv:motion-orient', onOrient);
     window.addEventListener('kv:video-load', onVideoLoad);
+    window.addEventListener('kv:slides-load', onSlidesLoad);
     return () => {
       window.removeEventListener('kv:yt-play', onPlay);
       window.removeEventListener('kv:yt-propose', onPropose);
       window.removeEventListener('kv:motion-orient', onOrient);
       window.removeEventListener('kv:video-load', onVideoLoad);
+      window.removeEventListener('kv:slides-load', onSlidesLoad);
     };
   }, [node.id, node.data?.embed]);
 
