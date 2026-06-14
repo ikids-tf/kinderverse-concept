@@ -7,7 +7,7 @@ import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImag
 import { IMAGE_RE, coreTopic } from '@/ai/intent-lexicon';
 import { findAsset, saveAsset } from './assets';
 import { saveWebLinks } from './webLinks';
-import { fitFrameToChildren } from './frames';
+import { fitFrameToChildren, frameSubtree } from './frames';
 import { recordSpawnedNodes } from './commands';
 import { worldBox } from './geometry';
 import { linkedComponent } from './links';
@@ -477,6 +477,60 @@ export function animatePanBy(dx: number, dy: number): void {
     if (t < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
+}
+
+/** 생성 완료된 프레임(+자식 전체)을 '오른쪽 빈 곳'으로 옮긴다 — 다른 카드(이동 대상 제외)
+    들의 가장 오른쪽 + 여백으로 보내 기존과 겹치지 않게. 이동하는 동안 카메라가 같은 양
+    따라가 결과물은 화면 그 자리(중앙)에 머문 채(밖으로 안 나가게) 함께 이동한다.
+    중앙에서 생성→포커스한 뒤 호출. 이미 오른쪽 빈 곳이거나 빈 보드면 아무것도 안 한다. */
+export function slideFrameToEmpty(frameId: string): void {
+  const b = useBoardStore.getState();
+  const frame = b.nodes[frameId];
+  if (!frame) return;
+  // 프레임 자신 + 자기 자식(중첩 포함)만 옮긴다 — frameMoveSet은 '겹친 남의 카드'까지
+  // 끌어오고 프레임 자신은 빼므로 여기엔 부적합. frameSubtree(자식) + 프레임 id를 쓴다.
+  const ids = [frameId, ...frameSubtree(frameId).filter((id) => b.nodes[id]?.type !== 'motion')];
+  const moving = new Set(ids);
+  const others = Object.values(b.nodes).filter((n) => !moving.has(n.id) && n.type !== 'motion');
+  if (others.length === 0) return; // 빈 보드 — 옮길 필요 없음
+  const GAP = 96;
+  const maxRight = Math.max(...others.map((n) => { const o = worldBox(n); return o.x + o.w; }));
+  const dx = Math.round(maxRight + GAP - frame.x);
+  if (dx <= 0) return; // 이미 모든 카드 오른쪽(빈 곳)
+  const zoom = b.viewport.zoom;
+  const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) {
+    b.moveNodesRaw(ids, dx, 0);
+    b.setViewport({ ...b.viewport, panX: b.viewport.panX - dx * zoom });
+    return;
+  }
+  const token = ++panAnimToken; // cancelPanAnimation 토큰 공유 — 다른 카메라 연출과 충돌 방지
+  const startPan = b.viewport.panX;
+  const dur = Math.min(820, Math.max(420, dx * 0.3));
+  const t0 = performance.now();
+  const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+  let applied = 0;
+  const apply = (want: number) => {
+    const inc = want - applied;
+    const st = useBoardStore.getState();
+    if (inc) {
+      st.moveNodesRaw(ids, inc, 0);
+      applied = want;
+    }
+    // 카메라가 같은 양만큼 따라가 → 결과물은 화면 그 자리에 머문다(존재가 화면 밖으로 안 나감).
+    st.setViewport({ ...st.viewport, panX: startPan - want * zoom });
+  };
+  const step = (now: number) => {
+    if (token !== panAnimToken) return; // 취소/대체됨
+    const t = Math.min(1, (now - t0) / dur);
+    apply(Math.round(dx * ease(t)));
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  // rAF가 스로틀(백그라운드 탭 등)되어도 최종 위치는 보장 — 타임아웃으로 마무리한다.
+  setTimeout(() => {
+    if (token === panAnimToken && applied < dx) apply(dx);
+  }, dur + 140);
 }
 
 /** 배치된 카드 묶음이 화면 밖이면 뷰포트를 '최소한으로' 팬해 보이게 한다(줌 유지).

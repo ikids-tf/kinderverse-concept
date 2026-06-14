@@ -18,6 +18,7 @@ import {
   composeOrigin,
   cancelPanAnimation,
   animatePanBy,
+  slideFrameToEmpty,
   genSignal,
   PLAN_DOC_W,
   type SourceLink,
@@ -144,22 +145,25 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
     // it land and knows generation is running (cleared once the content is laid out).
     // If a previous composer frame exists, TOP-ALIGN the new frame to it (and match
     // heights at the end) so the frames sit neatly side by side.
-    const refFrame = rightmostComposerFrame();
-    const c = composeOrigin();
-    // 병렬 생성(복수 작업) — 동시에 시작한 다른 컴포즈와 같은 원점을 계산해 겹치지
-    // 않도록, 진행 중 작업 수만큼 아래 레인으로 비켜 배치한다.
+    // 생성은 '화면 중앙'에서 시작 — 교사가 만들어지는 과정을 그 자리에서 본다
+    // (완료 후 slideFrameToEmpty로 오른쪽 빈 곳으로 옮긴다).
+    const vc = viewportCenterBoardPoint();
+    // 병렬 생성(복수 작업) — 동시에 시작한 다른 컴포즈와 겹치지 않게 아래 레인으로 비켜 배치.
     const parallelLane = Math.max(0, useBoardStore.getState().genActive - 1);
     frameId = newId('frame');
     b.addNodeRaw({
       id: frameId,
       type: 'frame',
-      x: Math.round(c.x - 360),
-      y: (refFrame ? Math.round(refFrame.y) : Math.round(c.y - 200)) + parallelLane * 640,
+      x: Math.round(vc.x - 360),
+      y: Math.round(vc.y - 210) + parallelLane * 640,
       w: 720,
       h: 420,
       data: { title: frameTitle(text, template), templateId: template.id, composer: true, variant, loading: true, working: true, loadingLabel: '✨ AI가 자료를 만들고 있어요…', sourcePrompt: text },
     });
     created.push(frameId);
+    // 생성물이 교사에게 바로 보이게 — 새 프레임을 화면 중앙으로 카메라 포커스(채워지는
+    // 과정을 그 자리에서 지켜보게 한다). 병렬 레인(동시 생성)일 때는 카메라 경합을 피해 생략.
+    if (parallelLane === 0) useBoardStore.getState().focusNode(frameId);
 
     // Designed header (top-left of the frame) — placed precisely by designComposedFrame.
     created.push(spawnHeaderCard(frameId, frameTitle(text, template)));
@@ -214,8 +218,9 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
     designComposedFrame(frameId, spec.variant);
     decorateComposedFrame(frameId, text, spec.stickers);
     clearFrameLoading(frameId); // content is laid out → drop the in-frame loading state
-    // 병렬 레인으로 비켜 배치된 프레임은 기준 프레임에 재정렬하지 않는다(다시 겹침 방지).
-    if (refFrame && parallelLane === 0) alignFrameToReference(frameId, refFrame.id); // neat side-by-side: top + equal height
+    // 완료된 생성물을 오른쪽 빈 곳으로 슬라이드(카메라가 동행해 화면 안에 머문 채 이동).
+    // 병렬 레인은 카메라 경합을 피해 생략(각자 제자리에 둔다).
+    if (parallelLane === 0) slideFrameToEmpty(frameId);
     if (spec.coverRole) void generateCoverFor(frameId, spec.coverRole, text);
     recordSpawnedNodes(created, 'AI 보드 생성');
   } finally {
@@ -410,58 +415,6 @@ async function composePlanDocStream(
   }
   void generateCoverFor(frameId, 'plan', text); // 얇은 와이드 배너 표지(백그라운드)
   return frameId;
-}
-
-/** The rightmost top-level composer frame (the "parent" a new frame lands beside).
-    Excludes mind-map and nested sub-frames. */
-function rightmostComposerFrame(): BoardNode | undefined {
-  const frames = Object.values(useBoardStore.getState().nodes).filter(
-    (n) => n.type === 'frame' && n.data?.composer && !n.data?.sub && !n.data?.mindmap,
-  );
-  if (frames.length === 0) return undefined;
-  return frames.reduce((a, f) => (f.x + f.w > a.x + a.w ? f : a));
-}
-
-/** Every node that belongs to a frame — direct children + nested frames and their
-    descendants, recursively(임의 깊이의 중첩 프레임까지). */
-function frameDescendants(frameId: string, seen = new Set<string>()): string[] {
-  if (seen.has(frameId)) return [];
-  seen.add(frameId);
-  const nodes = Object.values(useBoardStore.getState().nodes);
-  const out: string[] = [];
-  for (const n of nodes) {
-    if (n.data?.frameId !== frameId) continue;
-    out.push(n.id);
-    if (n.type === 'frame') out.push(...frameDescendants(n.id, seen));
-  }
-  return out;
-}
-
-/** Make `newFrameId` sit neatly beside `refFrameId`: same TOP edge + equal HEIGHT
-    (the taller of the two, so neither clips). The existing parent frame grows to
-    match if the new one is taller — so the two read as an aligned pair. */
-function alignFrameToReference(newFrameId: string, refFrameId: string): void {
-  const b = useBoardStore.getState();
-  const nf = b.nodes[newFrameId];
-  const rf = b.nodes[refFrameId];
-  if (!nf || !rf || nf.type !== 'frame' || rf.type !== 'frame') return;
-
-  // Top-align: shift the new frame + all its children so its top matches the ref.
-  const dy = Math.round(rf.y - nf.y);
-  if (dy !== 0) {
-    b.updateNodeRaw(newFrameId, { y: nf.y + dy });
-    frameDescendants(newFrameId).forEach((id) => {
-      const k = b.nodes[id];
-      if (k) b.updateNodeRaw(id, { y: k.y + dy });
-    });
-  }
-  // Equal height — grow whichever frame is shorter to the taller one. Pin it via
-  // data.alignedH so a later content re-fit (e.g. an async cover image) can't break
-  // the alignment by shrinking the frame back to its own content height.
-  const h = Math.max(rf.h, nf.h);
-  const nfCur = b.nodes[newFrameId];
-  b.updateNodeRaw(newFrameId, { h, data: { ...(nfCur?.data ?? {}), alignedH: h } });
-  if (rf.h !== h) b.updateNodeRaw(refFrameId, { h, data: { ...(rf.data ?? {}), alignedH: h } });
 }
 
 /* ---------------- mind map (생각그물 — radial layout + connection lines) ---------------- */
