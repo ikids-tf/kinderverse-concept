@@ -1,5 +1,5 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd } from './commands';
 import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
@@ -69,12 +69,29 @@ export function handleBoardPrompt(text: string): boolean {
   const b = useBoardStore.getState();
   const sel = b.selection.map((id) => b.nodes[id]).filter(Boolean);
 
+  // 의미 없는 요청 어미만 들어오면 무시 — 한글 IME 잔여('줘'·'주세요' 등)가 단독 제출돼
+  // 엉뚱한 카드를 만들던 문제 방지(근본 원인은 PromptBar IME-Enter, 여기선 이중 안전장치).
+  if (/^(줘|줴|주|주세요|줄래|주라|다오|요|해)$/u.test(text.trim())) return true;
+
   // 주제 없는 "요소 N개 추가" → 빈 툴바 요소를 가로로 배치(AI 생성 안 함).
   // 선택 유무와 무관하게 가장 먼저 처리 — "이미지 카드 3개 추가해줘"는 항상 빈 카드.
   const prim = parseEmptyPrimitiveRequest(text);
   if (prim) {
     const c = viewportCenterBoardPoint();
     addPrimitivesRowCmd(prim.type, prim.count, c.x, c.y);
+    return true;
+  }
+
+  // 동영상 생성 요청은 선택이 없어도 '동영상'으로 만든다 — 컴포저(이미지/문서)로 새지 않게.
+  // 화면 중앙에 동영상 뷰어를 깔고 카메라를 맞춘 뒤(교사에게 보이게) 텍스트→비디오(확인 게이트).
+  if (sel.length === 0 && VIDEO_RE.test(text)) {
+    const vid = spawnVideoPlayer();
+    useBoardStore.getState().focusNode(vid);
+    window.dispatchEvent(
+      new CustomEvent('kv:video-confirm', {
+        detail: { mode: 'text', viewerId: vid, anchorId: vid, request: text, topic: coreTopic(text) },
+      }),
+    );
     return true;
   }
 

@@ -439,6 +439,9 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   // handled by focus-context separation in useKeyboardShortcuts.
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
+      // 한글(IME) 조합을 확정하는 Enter는 전송하지 않는다 — 조기 제출로 마지막 글자가
+      // 빠지거나, 조합 확정으로 남은 '줘' 같은 어미가 다음 제출로 새어 나가는 것을 막는다.
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       e.preventDefault();
       if (canSend) onStarOrSend();
     }
