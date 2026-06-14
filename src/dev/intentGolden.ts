@@ -5,10 +5,10 @@
    사전/프롬프트를 수정하면 이 평가로 회귀를 즉시 확인한다.
    케이스 추가: 실패 사례를 GOLDEN에 그대로 추가(현장 어휘 변형 환영). */
 
-import { contentIntentFast, boardOp, type ContentIntent } from '@/ai/intent-lexicon';
+import { contentIntentFast, boardOp, vesselIntent, type ContentIntent, type VesselKind } from '@/ai/intent-lexicon';
 import { runRouter } from '@/ai/agents/router';
 
-type Expect = ContentIntent | `board.${string}` | null; // null = 사전 미스가 정답(라우터 몫)
+type Expect = ContentIntent | `board.${string}` | `vessel:${VesselKind}` | null; // null = 사전 미스가 정답(라우터 몫)
 
 interface GoldenCase {
   text: string;
@@ -19,6 +19,17 @@ interface GoldenCase {
 }
 
 export const GOLDEN: GoldenCase[] = [
+  // ── 그릇(메모/노트/텍스트) — 그릇어가 있으면 빈 그릇 + 내용 (그릇 우선, P1a) ──
+  //    "메모→통신문" 오라우팅 회귀 방지. 그림·꾸미기 동반은 생성 경로(null).
+  { text: '메모 만들어줘', expect: 'vessel:memo' },
+  { text: '운동회 준비물 메모 만들어줘', expect: 'vessel:memo', note: '메모→통신문 오라우팅 회귀' },
+  { text: '회의 안건 메모해줘', expect: 'vessel:memo' },
+  { text: '내일 챙길 거 메모 적어줘', expect: 'vessel:memo' },
+  { text: '소풍 가서 본 것 노트로 적어줘', expect: 'vessel:note' },
+  { text: '관찰 노트 만들어줘', expect: 'vessel:note' },
+  { text: '제목 텍스트 넣어줘', expect: 'vessel:text' },
+  { text: '안내 문구 텍스트 추가해줘', expect: 'vessel:text' },
+  { text: '생일 메모카드 예쁘게 만들어줘', expect: null, note: '그릇+꾸미기 → 생성 경로(라우터 몫)' },
   // ── 활동지 (사용자 보고 실패 사례 + 변형) ──────────────────────────────
   { text: '활동지 만들어줘', expect: 'worksheet' },
   { text: '가을 나뭇잎 활동지', expect: 'worksheet' },
@@ -88,13 +99,17 @@ interface EvalRow {
 
 function evalFast(): { rows: EvalRow[]; acc: number } {
   const rows: EvalRow[] = GOLDEN.map((c) => {
+    // prompt.ts 디스패치 순서 반영: 그릇 우선 → (선택 시) 보드op → 콘텐츠 사전.
+    const vessel = vesselIntent(c.text);
     const op = c.sel ? boardOp(c.text) : null;
     const ci = contentIntentFast(c.text);
-    const got = op ? `board.${op.op}` : (ci ?? 'null');
-    // 생성 동사 가드(prompt.ts와 동일)를 반영: 조작 기대 케이스만 op 우선.
-    const effective = c.expect?.startsWith('board.') ? got : (ci ?? (op ? `board.${op.op}` : 'null'));
-    const pass = effective === (c.expect ?? 'null');
-    return { text: c.text, expect: String(c.expect), got: effective, pass };
+    const got = c.expect?.startsWith('board.')
+      ? (op ? `board.${op.op}` : vessel ? `vessel:${vessel.kind}` : (ci ?? 'null'))
+      : vessel
+        ? `vessel:${vessel.kind}`
+        : (ci ?? (op ? `board.${op.op}` : 'null'));
+    const pass = got === (c.expect ?? 'null');
+    return { text: c.text, expect: String(c.expect), got, pass };
   });
   const acc = rows.filter((r) => r.pass).length / rows.length;
   return { rows, acc };
@@ -103,6 +118,13 @@ function evalFast(): { rows: EvalRow[]; acc: number } {
 async function evalRouter(): Promise<{ rows: EvalRow[]; acc: number }> {
   const rows: EvalRow[] = [];
   for (const c of GOLDEN) {
+    // 그릇 케이스는 라우터 이전에 로컬 결정 — 라우터를 호출하지 않는다(무료·즉시).
+    if (c.expect?.startsWith('vessel:')) {
+      const v = vesselIntent(c.text);
+      const got = v ? `vessel:${v.kind}` : 'null';
+      rows.push({ text: c.text, expect: c.expect, got, pass: got === c.expect });
+      continue;
+    }
     const res = await runRouter({
       text: c.text,
       page: '/board',

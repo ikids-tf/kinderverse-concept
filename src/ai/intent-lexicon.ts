@@ -98,6 +98,50 @@ export function contentIntentFast(text: string): ContentIntent | null {
   return null;
 }
 
+/* ── 그릇(vessel) 의도 — 빈 1차 요소(메모/노트/텍스트)를 만든다 ──────────────────
+   "그릇 우선": 메모/노트/텍스트 같은 '담을 그릇' 단어가 있으면 형식을 그 그릇으로
+   고정하고, 남는 말은 그릇의 초기 내용으로 넣는다(무료·즉시·교사 직접 입력, L1).
+   생성 에이전트(통신문/계획…)로 새지 않게 라우터보다 먼저 결정한다 — "운동회 메모
+   만들어줘"가 통신문이 되던 오라우팅의 근본 차단.
+   ※ 그림·색칠·꾸미기(스튜디오)가 동반되면 보류(null) — 기존 생성 경로에 맡긴다.
+   ※ 문서 양식(doc_form)·뷰어는 이번 범위 밖(P1b/툴바). 어휘는 이 단일 출처에만 둔다. */
+export type VesselKind = 'memo' | 'note' | 'text';
+
+export interface VesselMatch {
+  kind: VesselKind;
+  /** 그릇 안에 넣을 초기 내용(남는 주제). 없으면 ''. */
+  content: string;
+}
+
+const VESSEL_MEMO = /메모|포스트\s*잇|쪽지/;
+const VESSEL_NOTE = /노트|공책|괘선/;
+const VESSEL_TEXT = /텍스트|글\s*상자|글자\s*카드/;
+/* 그릇을 '생성'으로 돌려야 하는 신호 — 그림/색칠/꾸미기가 붙으면 그릇 판정 보류. */
+const VESSEL_BAILOUT = /그려|그리기|색칠|도안|일러스트|디자인|예쁘게|꾸며|꾸미/;
+/* 그릇어·생성/추가 어미·개수·군더더기를 지워 '내용'만 남긴다. */
+const VESSEL_STRIP =
+  /메모지|메모(해|로)?|포스트\s*잇|쪽지|노트(에|로)?|공책|괘선|텍스트|글\s*상자|글자\s*카드|카드|박스|\d+\s*(개|장|가지)?|(한|두|세|네|다섯|여섯)\s*(개|장|가지)|만들어?\s*줘?|만들기|추가(해)?|넣어?\s*줘?|적어?\s*줘?|써\s*줘?|작성(해)?|생성(해)?|좀|새로|새|빈|그냥|하나|한\s*장|해\s*줘|주세요|줄래/g;
+
+function vesselContent(text: string): string {
+  return text
+    .replace(VESSEL_STRIP, ' ')
+    .replace(/[.,!?~\-·、，。]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/(으로|로|을|를|이|가|은|는|에|의|좀|줘)\s*$/u, '')
+    .trim();
+}
+
+/** 그릇 우선 판정 — 메모/노트/텍스트면 그 그릇 + 남는 내용, 아니면 null.
+    그림·색칠·꾸미기 동반이면 null(생성 경로). 보드 조작(지워/크게…)은 호출부에서
+    boardOp로 가드한다 — 여기선 그릇어만 본다. */
+export function vesselIntent(text: string): VesselMatch | null {
+  if (VESSEL_BAILOUT.test(text)) return null;
+  if (VESSEL_MEMO.test(text)) return { kind: 'memo', content: vesselContent(text) };
+  if (VESSEL_NOTE.test(text)) return { kind: 'note', content: vesselContent(text) };
+  if (VESSEL_TEXT.test(text)) return { kind: 'text', content: vesselContent(text) };
+  return null;
+}
+
 /* ── 산출물 개수·이미지 주제 파서(스튜디오·mock 공유) ─────────────────────── */
 
 const KO_COUNT: Record<string, number> = {

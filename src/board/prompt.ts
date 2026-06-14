@@ -1,12 +1,13 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
-import { addPrimitivesRowCmd } from './commands';
+import { addPrimitivesRowCmd, addPresetNodeCmd } from './commands';
 import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import {
   contentIntentFast,
   boardOp,
+  vesselIntent,
   coreTopic,
   WORKSHEET_RE,
   PLAN_RE,
@@ -14,12 +15,24 @@ import {
   DESIGN_CMD_RE,
   DECORATE_RE,
   type ContentIntent,
+  type VesselMatch,
 } from '@/ai/intent-lexicon';
 import { runBoardOp } from './actions';
 import { runRouter } from '@/ai/agents/router';
 import { PAGE_ACTIONS } from '@/ai/actions';
 import { buildAgentContext } from '@/ai/context';
+import { showToast } from '@/lib/toast';
 import type { RouteTarget } from '@/ai/contract';
+
+/** 입력 정규화(보수적) — 앞뒤 공백·따옴표 정리, 줄 안 공백 축약(줄바꿈은 보존).
+    오타·자모분해 교정은 과교정으로 오인식 위험이 있어 넣지 않는다. */
+function normalizeInput(text: string): string {
+  return text
+    .replace(/[\u200B-\u200D\uFEFF]/g, '') // zero-width 제거
+    .replace(/^[“”"'`\s]+|[“”"'`\s]+$/g, '') // 앞뒤 따옴표·공백
+    .replace(/[ \t\u00A0]+/g, ' ') // 줄 안 공백(탭·nbsp 포함) 축약
+    .replace(/ *\n */g, '\n'); // 줄 경계 공백 정리(줄바꿈 보존)
+}
 
 /** Map the lexicon's rich intent onto the popup's ReqIntent vocabulary.
     coloring is generated through the image path (도안 스타일은 프롬프트에 실림);
@@ -52,6 +65,25 @@ function extractMediaLink(text: string): string | null {
   return null;
 }
 
+/** 그릇(메모/노트/텍스트)을 화면 중앙에 즉시 생성하고 남는 말을 초기 내용으로 채운 뒤
+    바로 편집(autoEdit) 상태로 둔다. 무료·L1(되돌리기 가능) — '그릇 우선'의 실행부.
+    메모/노트는 sticky(노트는 괘선 deco), 텍스트는 text 노드. */
+function createVessel(v: VesselMatch): void {
+  const c = viewportCenterBoardPoint();
+  if (v.kind === 'text') {
+    const patch: Partial<BoardNode> = { autoH: true, data: { autoEdit: true } };
+    if (v.content) patch.text = v.content;
+    addPresetNodeCmd('text', c.x, c.y, patch, '텍스트 추가');
+    return;
+  }
+  const patch: Partial<BoardNode> =
+    v.kind === 'note'
+      ? { color: 'surface-2', w: 220, h: 160, autoH: false, data: { deco: 'note', autoEdit: true } }
+      : { data: { autoEdit: true } };
+  if (v.content) patch.text = v.content;
+  addPresetNodeCmd('sticky', c.x, c.y, patch, v.kind === 'note' ? '노트 추가' : '메모 추가');
+}
+
 /* Prompt-in-place on My Board: a board prompt ALWAYS acts on the board (never
    navigates to chat).
    - nothing selected → Frame Composer: classify → seed a frame → fill it
@@ -69,6 +101,9 @@ export function handleBoardPrompt(text: string): boolean {
   const b = useBoardStore.getState();
   const sel = b.selection.map((id) => b.nodes[id]).filter(Boolean);
 
+  // 입력 정규화(앞뒤 공백·따옴표, 줄 안 공백) — 다운스트림 매칭이 일관되게.
+  text = normalizeInput(text);
+
   // 의미 없는 요청 어미만 들어오면 무시 — 한글 IME 잔여('줘'·'주세요' 등)가 단독 제출돼
   // 엉뚱한 카드를 만들던 문제 방지(근본 원인은 PromptBar IME-Enter, 여기선 이중 안전장치).
   if (/^(줘|줴|주|주세요|줄래|주라|다오|요|해)$/u.test(text.trim())) return true;
@@ -79,6 +114,15 @@ export function handleBoardPrompt(text: string): boolean {
   if (prim) {
     const c = viewportCenterBoardPoint();
     addPrimitivesRowCmd(prim.type, prim.count, c.x, c.y);
+    return true;
+  }
+
+  // 그릇 우선(메모/노트/텍스트) — 그릇어가 있으면 그 그릇을 만들고 남는 말은 초기 내용으로.
+  // "운동회 메모 만들어줘"가 통신문으로 새던 오라우팅을 무료·즉시·L1로 차단(패널 P1a).
+  // 보드 조작 지시(지워/크게/정렬…)는 boardOp로 가드해 기존 경로에 맡긴다.
+  const vessel = vesselIntent(text);
+  if (vessel && !boardOp(text)) {
+    createVessel(vessel);
     return true;
   }
 
@@ -97,6 +141,14 @@ export function handleBoardPrompt(text: string): boolean {
 
   // Nothing selected → Frame Composer (a new frame is the right behavior here).
   if (sel.length === 0) {
+    // 안전한 폴백: 선택이 필요한 보드 조작(지워/크게/정렬/이동…)인데 대상이 없으면
+    // 빈 문서를 만들지 말고 무엇을 고를지 안내만 한다("이 메모 지워줘"가 문서로 새던 문제).
+    const noTargetOp = boardOp(text);
+    const wantsGen = /만들|생성|그려|작성|써\s*줘|추가|넣어/.test(text);
+    if (noTargetOp && !wantsGen) {
+      showToast('먼저 적용할 요소를 선택해 주세요', 'error');
+      return true;
+    }
     void composeFromPrompt(text);
     return true;
   }
