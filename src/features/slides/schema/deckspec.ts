@@ -42,14 +42,35 @@ export type Layout = (typeof LAYOUTS)[number];
 /** 슬라이드 악센트 역할 — 코랄(기본) 또는 골드(등급/강조 한정). 퍼플 등 임의색 금지. */
 export type AccentRole = 'coral' | 'gold';
 
+/** 블록 단위 스타일 오버라이드(교사 미세 조정 — 2단계). 모두 선택(미설정 시 레이아웃/테마 기본).
+    color는 토큰 키만(테마 --s-* 로 매핑) — 임의 hex 금지로 테마 일관성 유지. */
+export type BlockColor = 'default' | 'secondary' | 'muted' | 'accent' | 'gold';
+export interface BlockStyle {
+  fontPx?: number; // 캔버스(1280×720) 좌표계 px. 미설정 시 레이아웃 CSS 크기.
+  fontFam?: 'serif' | 'sans';
+  bold?: boolean;
+  color?: BlockColor;
+  align?: 'left' | 'center' | 'right';
+}
+/** 자유 배치(2단계 후반) — 1280×720의 %. 있으면 흐름에서 빼내 절대 배치. */
+export interface BlockPos {
+  xPct: number;
+  yPct: number;
+  wPct: number;
+}
+
 export type TextBlockType = 'title' | 'subtitle' | 'body' | 'caption';
 export interface TextBlock {
   type: TextBlockType;
   text: string;
+  style?: BlockStyle;
+  pos?: BlockPos;
 }
 export interface BulletsBlock {
   type: 'bullets';
   items: string[];
+  style?: BlockStyle;
+  pos?: BlockPos;
 }
 export type ImageRole = 'hero' | 'inline' | 'background' | 'icon';
 export interface ImageBlock {

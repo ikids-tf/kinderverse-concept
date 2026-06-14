@@ -12,7 +12,9 @@ export const SlideRenderer: FC<{
   h: EditHandlers;
   /** 현재 쪽번호(1-based). slide.number가 true일 때 우하단에 표시. */
   pageNumber?: number;
-}> = ({ slide, theme, editable, h, pageNumber }) => {
+  /** 현재 선택된 블록 인덱스(편집 — 스타일 툴바 대상). */
+  selected?: number | null;
+}> = ({ slide, theme, editable, h, pageNumber, selected }) => {
   const Cmp = LAYOUT_COMPONENTS[slide.layout] ?? LAYOUT_COMPONENTS.title;
   return (
     <div
@@ -21,7 +23,7 @@ export const SlideRenderer: FC<{
       data-layout={slide.layout}
       data-accent={slide.accentRole ?? 'coral'}
     >
-      <Cmp slide={slide} editable={editable} h={h} />
+      <Cmp slide={slide} editable={editable} h={h} selected={selected ?? null} />
       {slide.number && pageNumber ? (
         <span className="slide-number">{String(pageNumber).padStart(2, '0')}</span>
       ) : null}

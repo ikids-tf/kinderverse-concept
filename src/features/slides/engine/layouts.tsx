@@ -3,52 +3,64 @@
    메타)를 한 모듈로 묶는다(엔진 계약). 핫리로드 단위 분리가 목적이 아니라 의도된 동거다. */
 
 /* 레이아웃 컴포넌트 — DeckSpec의 layout enum → React 컴포넌트(불변식 3·4).
-   모든 글자는 여기서 contentEditable로 렌더(이미지에 굽지 않음 — 불변식 1).
-   삽화/차트는 자리표시(placeholder)만 — AI 삽화·Recharts는 다음 단계에서 채운다.
-   색·폰트·간격은 slides.css의 토큰 클래스만 사용(하드코딩 금지).
-   디자인: Claude Design 원칙(과감한 위계·비균일 여백·비대칭 편집)을 Milray 토큰으로. */
+   모든 글자는 contentEditable로 렌더(이미지에 굽지 않음 — 불변식 1).
+   블록 단위 스타일 오버라이드(크기·컬러·정렬·볼드·폰트)는 TextBlockView가 inline로 적용.
+   색·폰트·간격 기본은 slides.css의 테마 토큰(--s-*). */
 
-import type { FC, ReactNode } from 'react';
+import type { CSSProperties, FC, ReactNode } from 'react';
 import {
   type Slide,
   type Layout,
   type TextBlockType,
+  type BlockStyle,
+  type BlockPos,
   isText,
   isBullets,
   isImage,
 } from '../schema/deckspec';
+
+/** 자유 배치 — pos가 있으면 흐름에서 빼내 캔버스(%) 절대 좌표로. */
+function posStyle(pos?: BlockPos): CSSProperties | undefined {
+  return pos ? { position: 'absolute', left: `${pos.xPct}%`, top: `${pos.yPct}%`, width: `${pos.wPct}%` } : undefined;
+}
 
 /** 편집 핸들러 — 모두 뷰어에서 '최신 상태'에 함수형으로 적용(편집/구조변경 경쟁 방지). */
 export interface EditHandlers {
   onText: (blockIndex: number, text: string) => void;
   setBulletItem: (blockIndex: number, itemIndex: number, text: string) => void;
   mutateBullets: (blockIndex: number, fn: (items: string[]) => string[]) => void;
+  /** 블록 선택(플로팅 스타일 툴바 대상). */
+  select: (blockIndex: number) => void;
+  /** 선택 블록 스타일 오버라이드 패치. */
+  setBlockStyle: (blockIndex: number, patch: Partial<BlockStyle>) => void;
 }
 export interface LayoutProps {
   slide: Slide;
   editable: boolean;
   h: EditHandlers;
+  /** 현재 선택된 블록 인덱스(없으면 null). */
+  selected: number | null;
 }
 
 /* ── 블록 조회 헬퍼 ───────────────────────────────────────────────────── */
-function findText(slide: Slide, type: TextBlockType): { text: string; index: number } | null {
+function findText(slide: Slide, type: TextBlockType): { index: number } | null {
   for (let i = 0; i < slide.blocks.length; i++) {
     const b = slide.blocks[i];
-    if (isText(b) && b.type === type) return { text: b.text, index: i };
+    if (isText(b) && b.type === type) return { index: i };
   }
   return null;
 }
-function findAllText(slide: Slide, type: TextBlockType): { text: string; index: number }[] {
-  const out: { text: string; index: number }[] = [];
+function findAllText(slide: Slide, type: TextBlockType): { index: number }[] {
+  const out: { index: number }[] = [];
   slide.blocks.forEach((b, i) => {
-    if (isText(b) && b.type === type) out.push({ text: b.text, index: i });
+    if (isText(b) && b.type === type) out.push({ index: i });
   });
   return out;
 }
-function findBullets(slide: Slide): { items: string[]; index: number } | null {
+function findBullets(slide: Slide): { items: string[]; index: number; style?: BlockStyle; pos?: BlockPos } | null {
   for (let i = 0; i < slide.blocks.length; i++) {
     const b = slide.blocks[i];
-    if (isBullets(b)) return { items: b.items, index: i };
+    if (isBullets(b)) return { items: b.items, index: i, style: b.style, pos: b.pos };
   }
   return null;
 }
@@ -60,22 +72,47 @@ function findImages(slide: Slide): { index: number }[] {
   return out;
 }
 
+/* ── 블록 스타일 오버라이드 → inline CSS. 색은 테마 토큰(--s-*)으로만(임의 hex 금지). ── */
+const SERIF_STACK = "'Playfair Display','Noto Serif KR',Georgia,serif";
+const SANS_STACK = "'Hanken Grotesk','Pretendard',sans-serif";
+const COLOR_VAR: Record<NonNullable<BlockStyle['color']>, string | undefined> = {
+  default: undefined,
+  secondary: 'var(--s-fg-2)',
+  muted: 'var(--s-fg-muted)',
+  accent: 'var(--s-accent)',
+  gold: 'var(--s-accent-2)',
+};
+function blockStyleToCss(s?: BlockStyle): CSSProperties {
+  if (!s) return {};
+  const css: CSSProperties = {};
+  if (s.fontPx) css.fontSize = `${s.fontPx}px`;
+  if (s.fontFam) css.fontFamily = s.fontFam === 'serif' ? SERIF_STACK : SANS_STACK;
+  if (s.bold) css.fontWeight = 700;
+  if (s.color && COLOR_VAR[s.color]) css.color = COLOR_VAR[s.color];
+  if (s.align) css.textAlign = s.align;
+  return css;
+}
+
 /* ── 인라인 편집 가능한 텍스트 — commit on blur(타이핑 중 부모 리렌더 없음 → 캐럿 안정).
-   value가 비면 slides.css의 [data-ph]:empty::before로 placeholder 표시. ── */
+   onFocus로 블록 선택, inlineStyle로 오버라이드 적용. ── */
 const Editable: FC<{
   tag?: 'h1' | 'p' | 'div' | 'span';
   value: string;
   editable: boolean;
   placeholder?: string;
   className?: string;
+  inlineStyle?: CSSProperties;
+  onSelect?: () => void;
   onCommit: (text: string) => void;
-}> = ({ tag: Tag = 'div', value, editable, placeholder, className, onCommit }) => (
+}> = ({ tag: Tag = 'div', value, editable, placeholder, className, inlineStyle, onSelect, onCommit }) => (
   <Tag
     className={className}
+    style={inlineStyle}
     contentEditable={editable}
     suppressContentEditableWarning
     spellCheck={false}
     data-ph={placeholder}
+    onFocus={onSelect}
     onBlur={(e) => {
       const t = (e.currentTarget.textContent ?? '').trim();
       if (t !== value) onCommit(t);
@@ -85,8 +122,37 @@ const Editable: FC<{
   </Tag>
 );
 
-/** 상단 오버라인(eyebrow) — 작은 대문자 트래킹 라벨. 전문 덱의 시그니처 디테일.
-    accentRole==='gold'면 골드, 아니면 코랄. 없으면 렌더 안 함. (편집은 2단계.) */
+/** 텍스트 블록 1개 — 스타일 오버라이드 + 선택 윤곽을 자동 배선. */
+const TextBlockView: FC<{
+  slide: Slide;
+  index: number;
+  tag?: 'h1' | 'p' | 'div' | 'span';
+  className?: string;
+  placeholder?: string;
+  editable: boolean;
+  selected: number | null;
+  h: EditHandlers;
+}> = ({ slide, index, tag, className, placeholder, editable, selected, h }) => {
+  const b = slide.blocks[index];
+  const text = isText(b) ? b.text : '';
+  const style = isText(b) ? b.style : undefined;
+  const pos = isText(b) ? b.pos : undefined;
+  const el = (
+    <Editable
+      tag={tag}
+      className={`${className ?? ''}${selected === index ? ' sl-sel' : ''}`}
+      value={text}
+      editable={editable}
+      placeholder={placeholder}
+      inlineStyle={blockStyleToCss(style)}
+      onSelect={editable ? () => h.select(index) : undefined}
+      onCommit={(x) => h.onText(index, x)}
+    />
+  );
+  return pos ? <div className="sl-free" style={posStyle(pos)}>{el}</div> : el;
+};
+
+/** 상단 오버라인(eyebrow) — 작은 대문자 트래킹 라벨. accentRole==='gold'면 골드. */
 const Eyebrow: FC<{ slide: Slide }> = ({ slide }) =>
   slide.eyebrow ? (
     <span className={`sl-eyebrow${slide.accentRole === 'gold' ? ' is-gold' : ''}`}>{slide.eyebrow}</span>
@@ -102,79 +168,77 @@ const Placeholder: FC<{ icon: string; label?: string; sub?: string }> = ({ icon,
 );
 
 /* ── 레이아웃들 ───────────────────────────────────────────────────────── */
-const TitleLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const TitleLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
   const s = findText(slide, 'subtitle');
   return (
     <div className="sl sl--title">
       <Eyebrow slide={slide} />
-      {t && <Editable tag="h1" className="sl-title" value={t.text} editable={editable} placeholder="제목" onCommit={(x) => h.onText(t.index, x)} />}
-      {s && <Editable tag="p" className="sl-subtitle" value={s.text} editable={editable} placeholder="부제목" onCommit={(x) => h.onText(s.index, x)} />}
+      {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
+      {s && <TextBlockView slide={slide} index={s.index} tag="p" className="sl-subtitle" placeholder="부제목" editable={editable} selected={selected} h={h} />}
     </div>
   );
 };
 
-const SectionDividerLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const SectionDividerLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
   return (
     <div className="sl sl--section">
       <Eyebrow slide={slide} />
-      {t && <Editable tag="h1" className="sl-title" value={t.text} editable={editable} placeholder="섹션 제목" onCommit={(x) => h.onText(t.index, x)} />}
+      {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="섹션 제목" editable={editable} selected={selected} h={h} />}
     </div>
   );
 };
 
-const BigTextLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const BigTextLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
   return (
     <div className="sl sl--big">
       <Eyebrow slide={slide} />
-      {t && <Editable tag="h1" className="sl-title" value={t.text} editable={editable} placeholder="강조할 한 문장" onCommit={(x) => h.onText(t.index, x)} />}
+      {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="강조할 한 문장" editable={editable} selected={selected} h={h} />}
     </div>
   );
 };
 
-/** big-stat — caption=라벨(위) · title=큰 수치 · subtitle=맥락(아래). 수치를 첫눈에. */
-const BigStatLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const BigStatLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const label = findText(slide, 'caption');
   const num = findText(slide, 'title');
   const ctx = findText(slide, 'subtitle');
   return (
     <div className="sl sl--stat">
       <Eyebrow slide={slide} />
-      {label && <Editable className="sl-stat-label" value={label.text} editable={editable} placeholder="지표 이름" onCommit={(x) => h.onText(label.index, x)} />}
-      {num && <Editable tag="div" className="sl-stat-num" value={num.text} editable={editable} placeholder="00%" onCommit={(x) => h.onText(num.index, x)} />}
-      {ctx && <Editable className="sl-stat-ctx" value={ctx.text} editable={editable} placeholder="무엇을 뜻하는지 한 줄" onCommit={(x) => h.onText(ctx.index, x)} />}
+      {label && <TextBlockView slide={slide} index={label.index} className="sl-stat-label" placeholder="지표 이름" editable={editable} selected={selected} h={h} />}
+      {num && <TextBlockView slide={slide} index={num.index} tag="div" className="sl-stat-num" placeholder="00%" editable={editable} selected={selected} h={h} />}
+      {ctx && <TextBlockView slide={slide} index={ctx.index} className="sl-stat-ctx" placeholder="무엇을 뜻하는지 한 줄" editable={editable} selected={selected} h={h} />}
     </div>
   );
 };
 
-const TwoColumnLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const TwoColumnLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
   const bodies = findAllText(slide, 'body').slice(0, 2);
   return (
     <div className="sl sl--two">
       <Eyebrow slide={slide} />
-      {t && <Editable tag="h1" className="sl-title" value={t.text} editable={editable} placeholder="제목" onCommit={(x) => h.onText(t.index, x)} />}
+      {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
       <div className="sl-cols">
         {bodies.map((b) => (
-          <Editable key={b.index} tag="div" className="sl-body" value={b.text} editable={editable} placeholder="내용" onCommit={(x) => h.onText(b.index, x)} />
+          <TextBlockView key={b.index} slide={slide} index={b.index} tag="div" className="sl-body" placeholder="내용" editable={editable} selected={selected} h={h} />
         ))}
       </div>
     </div>
   );
 };
 
-/** image-feature — 텍스트(제목+본문) 좌 ~58% · 이미지 우 ~42%. 비대칭 편집 레이아웃. */
-const ImageFeatureLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const ImageFeatureLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
   const body = findText(slide, 'body');
   return (
     <div className="sl sl--feature">
       <div className="sl-feature-text">
         <Eyebrow slide={slide} />
-        {t && <Editable tag="h1" className="sl-title" value={t.text} editable={editable} placeholder="제목" onCommit={(x) => h.onText(t.index, x)} />}
-        {body && <Editable tag="div" className="sl-body" value={body.text} editable={editable} placeholder="핵심 설명" onCommit={(x) => h.onText(body.index, x)} />}
+        {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
+        {body && <TextBlockView slide={slide} index={body.index} tag="div" className="sl-body" placeholder="핵심 설명" editable={editable} selected={selected} h={h} />}
       </div>
       <div className="sl-feature-img">
         <Placeholder icon="🖼️" label="삽화" sub="이미지 연결은 다음 단계" />
@@ -183,15 +247,17 @@ const ImageFeatureLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
   );
 };
 
-const BulletsLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const BulletsLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
   const bl = findBullets(slide);
+  const bulletCss = blockStyleToCss(bl?.style);
   return (
     <div className="sl sl--bullets">
       <Eyebrow slide={slide} />
-      {t && <Editable tag="h1" className="sl-title" value={t.text} editable={editable} placeholder="제목" onCommit={(x) => h.onText(t.index, x)} />}
+      {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
       {bl && (
-        <ul className="sl-bullets">
+        <div className={bl.pos ? 'sl-free' : undefined} style={posStyle(bl.pos)}>
+        <ul className={`sl-bullets${selected === bl.index ? ' sl-sel' : ''}`}>
           {bl.items.map((it, i) => (
             <li key={i}>
               <Editable
@@ -200,6 +266,8 @@ const BulletsLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
                 value={it}
                 editable={editable}
                 placeholder="항목"
+                inlineStyle={bulletCss}
+                onSelect={editable ? () => h.select(bl.index) : undefined}
                 onCommit={(x) => h.setBulletItem(bl.index, i, x)}
               />
               {editable && bl.items.length > 1 && (
@@ -224,35 +292,36 @@ const BulletsLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
             </button>
           )}
         </ul>
+        </div>
       )}
     </div>
   );
 };
 
-const QuoteLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const QuoteLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const q = findText(slide, 'body');
   const c = findText(slide, 'caption');
   return (
     <div className="sl sl--quote">
       <Eyebrow slide={slide} />
-      {q && <Editable tag="div" className="sl-quote" value={q.text} editable={editable} placeholder="인용·핵심 메시지" onCommit={(x) => h.onText(q.index, x)} />}
-      {c && <Editable tag="div" className="sl-caption" value={c.text} editable={editable} placeholder="출처 · 발표자" onCommit={(x) => h.onText(c.index, x)} />}
+      {q && <TextBlockView slide={slide} index={q.index} tag="div" className="sl-quote" placeholder="인용·핵심 메시지" editable={editable} selected={selected} h={h} />}
+      {c && <TextBlockView slide={slide} index={c.index} tag="div" className="sl-caption" placeholder="출처 · 발표자" editable={editable} selected={selected} h={h} />}
     </div>
   );
 };
 
-const HeroImageLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const HeroImageLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
   return (
     <div className="sl sl--hero">
       <Eyebrow slide={slide} />
-      {t && <Editable tag="h1" className="sl-title" value={t.text} editable={editable} placeholder="제목" onCommit={(x) => h.onText(t.index, x)} />}
+      {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
       <Placeholder icon="🖼️" label="삽화 자리" sub="AI 삽화 생성은 다음 단계에서 채워져요" />
     </div>
   );
 };
 
-const PhotoGridLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const PhotoGridLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const imgs = findImages(slide);
   const c = findText(slide, 'caption');
   const cells = imgs.length ? imgs : [{ index: -1 }, { index: -2 }, { index: -3 }, { index: -4 }];
@@ -264,20 +333,20 @@ const PhotoGridLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
           <Placeholder key={im.index} icon="🖼️" />
         ))}
       </div>
-      {c && <Editable tag="div" className="sl-caption" value={c.text} editable={editable} placeholder="사진 설명" onCommit={(x) => h.onText(c.index, x)} />}
+      {c && <TextBlockView slide={slide} index={c.index} tag="div" className="sl-caption" placeholder="사진 설명" editable={editable} selected={selected} h={h} />}
     </div>
   );
 };
 
-const ChartLayout: FC<LayoutProps> = ({ slide, editable, h }) => {
+const ChartLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
   const c = findText(slide, 'caption');
   return (
     <div className="sl sl--chart">
       <Eyebrow slide={slide} />
-      {t && <Editable tag="h1" className="sl-title" value={t.text} editable={editable} placeholder="제목" onCommit={(x) => h.onText(t.index, x)} />}
+      {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
       <Placeholder icon="📊" label="차트 자리" sub="Recharts 차트(막대·꺾은선·원·레이더)는 다음 단계에서 연결돼요" />
-      {c && <Editable tag="div" className="sl-caption" value={c.text} editable={editable} placeholder="차트 설명" onCommit={(x) => h.onText(c.index, x)} />}
+      {c && <TextBlockView slide={slide} index={c.index} tag="div" className="sl-caption" placeholder="차트 설명" editable={editable} selected={selected} h={h} />}
     </div>
   );
 };

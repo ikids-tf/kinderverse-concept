@@ -10,14 +10,18 @@ import {
   type Slide,
   type Layout,
   type Theme,
+  type BlockPos,
   THEMES,
   THEME_LABEL,
   defaultDeck,
   defaultBlocks,
   relayout,
   isBullets,
+  isText,
 } from '../schema/deckspec';
 import { SlideRenderer } from '../engine/SlideRenderer';
+import { BlockToolbar } from '../engine/BlockToolbar';
+import { BlockFrame } from '../engine/BlockFrame';
 import { LAYOUT_META, type EditHandlers } from '../engine/layouts';
 import { loadDeck, saveDeck } from './persist';
 
@@ -26,7 +30,13 @@ const SLIDE_H = 720;
 const THUMB_W = 92; // 하단 레일 썸네일 폭(16:9 → 높이 ~52)
 
 /** 썸네일은 읽기 전용 — 편집 핸들러는 빈 동작. */
-const NOOP_HANDLERS: EditHandlers = { onText: () => {}, setBulletItem: () => {}, mutateBullets: () => {} };
+const NOOP_HANDLERS: EditHandlers = {
+  onText: () => {},
+  setBulletItem: () => {},
+  mutateBullets: () => {},
+  select: () => {},
+  setBlockStyle: () => {},
+};
 
 /** 테마 피커 스와치 — themes.css 대표 색(배경+악센트). 피커 미리보기 전용(엔진은 CSS가 결정). */
 const THEME_SWATCH: Record<Theme, { bg: string; accent: string }> = {
@@ -98,11 +108,16 @@ export function SlidesViewerApp() {
   // 썸네일 드래그 재정렬 상태 — { from: 잡은 슬라이드, to: 삽입 슬롯(0..N) }
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
   const dragRef = useRef<{ i: number; x: number; moved: boolean } | null>(null);
+  // 선택된 블록(스타일 툴바 대상). 슬라이드/편집 상태가 바뀌면 해제.
+  const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
 
   const total = deck.slides.length;
   const idx = Math.min(current, total - 1);
   const slide = deck.slides[idx];
   const editable = chrome && !present && !fsMode;
+
+  // 슬라이드 이동/편집 종료 시 선택 해제.
+  useEffect(() => { setSelectedBlock(null); }, [idx, editable]);
 
   const totalRef = useRef(total);
   totalRef.current = total;
@@ -150,6 +165,7 @@ export function SlidesViewerApp() {
     w.loadDeck = (d: DeckSpec) => {
       setDeck(d);
       setCurrent(0);
+      setSelectedBlock(null);
     };
     return () => {
       delete w.kvSetChrome;
@@ -249,9 +265,24 @@ export function SlidesViewerApp() {
           ...s,
           blocks: s.blocks.map((b, i) => (i === bi && isBullets(b) ? { ...b, items: fn(b.items) } : b)),
         })),
+      select: (bi) => setSelectedBlock(bi),
+      setBlockStyle: (bi, patch) =>
+        patchSlide(idx, (s) => ({
+          ...s,
+          blocks: s.blocks.map((b, i) =>
+            i === bi && (isText(b) || isBullets(b)) ? { ...b, style: { ...(b.style ?? {}), ...patch } } : b,
+          ),
+        })),
     }),
     [idx, patchSlide],
   );
+
+  // 블록 자유 배치(드래그) — pos 설정/해제. 항상 최신 상태에 함수형 적용.
+  const setBlockPos = (bi: number, pos: BlockPos | null) =>
+    patchSlide(idx, (s) => ({
+      ...s,
+      blocks: s.blocks.map((b, i) => (i === bi && (isText(b) || isBullets(b)) ? { ...b, pos: pos ?? undefined } : b)),
+    }));
 
   /* ── 구조 편집 ── */
   const addSlide = (layout: Layout) => {
@@ -334,6 +365,9 @@ export function SlidesViewerApp() {
   };
 
   const curLabel = LAYOUT_META.find((m) => m.id === slide.layout)?.label ?? '레이아웃';
+  const selBlk = selectedBlock !== null ? slide.blocks[selectedBlock] : null;
+  const selStyleable = !!selBlk && (isText(selBlk) || isBullets(selBlk));
+  const selHasPos = selBlk && (isText(selBlk) || isBullets(selBlk)) ? !!selBlk.pos : false;
 
   return (
     <div className="slides-root" data-theme={deck.theme}>
@@ -404,7 +438,14 @@ export function SlidesViewerApp() {
       </div>
 
       {/* 무대 */}
-      <div className="stage" ref={stageRef}>
+      <div
+        className="stage"
+        ref={stageRef}
+        onMouseDown={(e) => {
+          // 빈 캔버스 클릭 → 블록 선택 해제(편집 모드에서만).
+          if (editable && !(e.target as HTMLElement).closest('[contenteditable], .block-toolbar')) setSelectedBlock(null);
+        }}
+      >
         {present || fsMode ? (
           <>
             <button type="button" className="nav-arrow prev" title="이전" onClick={() => goRel(-1)}><Svg d={IC.chevLeft} /></button>
@@ -412,8 +453,22 @@ export function SlidesViewerApp() {
           </>
         ) : null}
         <div className="scaler" style={{ width: SLIDE_W, height: SLIDE_H, transform: `translate(-50%, -50%) scale(${scale})` }}>
-          <SlideRenderer key={`${idx}-${slide.layout}-${editable ? 'e' : 'v'}`} slide={slide} theme={deck.theme} editable={editable} h={handlers} pageNumber={idx + 1} />
+          <SlideRenderer key={`${idx}-${slide.layout}-${editable ? 'e' : 'v'}`} slide={slide} theme={deck.theme} editable={editable} h={handlers} pageNumber={idx + 1} selected={selectedBlock} />
         </div>
+        {editable && selectedBlock !== null && slide.blocks[selectedBlock] && (
+          <BlockToolbar
+            key={selectedBlock}
+            block={slide.blocks[selectedBlock]}
+            onStyle={(patch) => handlers.setBlockStyle(selectedBlock, patch)}
+          />
+        )}
+        {editable && selectedBlock !== null && selStyleable && (
+          <BlockFrame
+            key={`f${selectedBlock}`}
+            hasPos={selHasPos}
+            onPos={(p) => setBlockPos(selectedBlock, p)}
+          />
+        )}
       </div>
 
       {/* 하단 슬라이드 레일 — 실제 슬라이드 썸네일 + 드래그로 순서 변경 */}

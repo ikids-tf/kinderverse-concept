@@ -405,9 +405,117 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 .sl--chart .sl-title { font-size: 48px; max-width: 80%; }
 .sl--chart .sl-ph { flex: 1 1 auto; }
 
-/* ── 인라인 편집 — contentEditable 빈칸 placeholder ── */
+/* ── 인라인 편집 — contentEditable 빈칸 placeholder + 선택 윤곽 ── */
 [contenteditable] { cursor: text; }
-[contenteditable]:focus { outline: 2px solid var(--focus-ring); outline-offset: 6px; border-radius: 4px; }
+[contenteditable]:focus { outline: none; }
+/* 선택(=포커스) 블록 윤곽 — 테마 악센트. 불릿은 ul에 윤곽이 잡힌다. */
+.sl-sel { outline: 2px solid var(--s-accent); outline-offset: 8px; border-radius: 4px; }
+/* 자유 배치 블록 — pos(%)로 절대 배치(다른 블록은 흐름대로). 자식 마진 제거로
+   '흐름→절대' 전환 시 h1/p 기본 마진만큼 튀던 점프를 없앤다(흐름 레이아웃엔 영향 없음). */
+.sl-free { margin: 0; }
+.sl-free > * { margin: 0; }
+
+/* ── 블록 프레임(이동/너비 핸들 — fixed 오버레이, 손잡이만 클릭 가능) ── */
+.block-frame { position: fixed; z-index: 39; pointer-events: none; }
+.block-frame .bf-grip,
+.block-frame .bf-resize,
+.block-frame .bf-reset { pointer-events: auto; }
+.bf-grip {
+  position: absolute;
+  left: -14px;
+  top: -14px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--fg-2);
+  box-shadow: var(--shadow-sm);
+  cursor: grab;
+  touch-action: none;
+}
+.bf-grip:active { cursor: grabbing; }
+.bf-grip:hover { color: var(--accent); border-color: var(--accent); }
+.bf-resize {
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 28px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: var(--shadow-sm);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.bf-reset {
+  position: absolute;
+  right: -14px;
+  top: -14px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--fg-2);
+  font-size: 13px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+.bf-reset:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── 블록 스타일 툴바(앱 크롬 — Milray 토큰, 슬라이드 위에 fixed) ── */
+.block-toolbar {
+  position: fixed;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+.bt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-2);
+  font: 600 14px var(--font-sans);
+  line-height: 1;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.bt-btn:hover { background: var(--surface-2); color: var(--fg); }
+.bt-btn.on { background: var(--coral-soft); color: var(--accent); }
+.bt-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; flex: 0 0 auto; }
+.bt-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.bt-swatch:hover { transform: scale(1.1); }
+.bt-swatch.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
 [contenteditable][data-ph]:empty::before {
   content: attr(data-ph);
   color: var(--s-fg-muted);
