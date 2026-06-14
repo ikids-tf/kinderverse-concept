@@ -12,8 +12,9 @@
      ※ predict 계열은 inlineData가 아니라 bytesBase64Encoded를 쓴다(generateContent와 구분). */
 
 /** 기본 Veo 모델 — GEMINI_API_KEY가 있고 KV_GEMINI_VIDEO_MODEL 미설정 시 사용.
-    교체: veo-3.0-fast-generate-001(저가) · veo-2.0-generate-001 등. */
-export const DEFAULT_GEMINI_VIDEO_MODEL = 'veo-3.0-generate-001';
+    기본을 fast로 둬(저가 ≈$0.15/초 · 할당량 여유) 모든 PC가 별도 .env 없이 동작하게 한다.
+    고품질이 필요하면 env로 veo-3.0-generate-001(≈$0.40/초)·veo-2.0-generate-001 교체. */
+export const DEFAULT_GEMINI_VIDEO_MODEL = 'veo-3.0-fast-generate-001';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
