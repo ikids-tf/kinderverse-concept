@@ -1,13 +1,14 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
-import { addPrimitivesRowCmd, addPresetNodeCmd } from './commands';
+import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
 import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import {
   contentIntentFast,
   boardOp,
   vesselIntent,
+  requestedCount,
   coreTopic,
   WORKSHEET_RE,
   PLAN_RE,
@@ -70,18 +71,22 @@ function extractMediaLink(text: string): string | null {
     메모/노트는 sticky(노트는 괘선 deco), 텍스트는 text 노드. */
 function createVessel(v: VesselMatch): void {
   const c = viewportCenterBoardPoint();
+  const label = v.kind === 'note' ? '노트' : v.kind === 'text' ? '텍스트' : '메모';
+  let id: string;
   if (v.kind === 'text') {
     const patch: Partial<BoardNode> = { autoH: true, data: { autoEdit: true } };
     if (v.content) patch.text = v.content;
-    addPresetNodeCmd('text', c.x, c.y, patch, '텍스트 추가');
-    return;
+    id = addPresetNodeCmd('text', c.x, c.y, patch, '텍스트 추가');
+  } else {
+    const patch: Partial<BoardNode> =
+      v.kind === 'note'
+        ? { color: 'surface-2', w: 220, h: 160, autoH: false, data: { deco: 'note', autoEdit: true } }
+        : { data: { autoEdit: true } };
+    if (v.content) patch.text = v.content;
+    id = addPresetNodeCmd('sticky', c.x, c.y, patch, v.kind === 'note' ? '노트 추가' : '메모 추가');
   }
-  const patch: Partial<BoardNode> =
-    v.kind === 'note'
-      ? { color: 'surface-2', w: 220, h: 160, autoH: false, data: { deco: 'note', autoEdit: true } }
-      : { data: { autoEdit: true } };
-  if (v.content) patch.text = v.content;
-  addPresetNodeCmd('sticky', c.x, c.y, patch, v.kind === 'note' ? '노트 추가' : '메모 추가');
+  // 회복 UX(P1.5): 방금 만든 그릇을 1탭으로 되돌릴 수 있게 — 오인식이어도 즉시 복구.
+  showToast(`${label} 추가`, 'success', 5000, { label: '실행취소', run: () => deleteNodesCmd([id]) });
 }
 
 /* Prompt-in-place on My Board: a board prompt ALWAYS acts on the board (never
@@ -147,6 +152,16 @@ export function handleBoardPrompt(text: string): boolean {
     const wantsGen = /만들|생성|그려|작성|써\s*줘|추가|넣어/.test(text);
     if (noTargetOp && !wantsGen) {
       showToast('먼저 적용할 요소를 선택해 주세요', 'error');
+      return true;
+    }
+    // 비용 안전망(P1.5): 다개수 이미지 생성은 과금이 곱으로 늘어 사전 확인(정성적 경고).
+    //   단일 이미지·계획·통신문 등은 즉시 — 빠른 워크플로를 해치지 않게 '돈 곱연산'만 게이트.
+    const ci0 = contentIntentFast(text);
+    const cnt0 = requestedCount(text) ?? 1;
+    if ((ci0 === 'image' || ci0 === 'coloring') && cnt0 >= 2) {
+      window.dispatchEvent(
+        new CustomEvent('kv:gen-confirm', { detail: { count: cnt0, run: () => void composeFromPrompt(text) } }),
+      );
       return true;
     }
     void composeFromPrompt(text);

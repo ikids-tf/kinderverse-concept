@@ -1,4 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useBoardStore, presentationVisibleSet, type BoardNode, type BoardLink } from '@/store/boardStore';
 import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, type NodeSnap } from '@/board/commands';
 import { linkSequence } from '@/board/links';
@@ -367,6 +368,8 @@ export function BoardCanvas() {
     sourceId?: string;
     spawnNear?: string;
   } | null>(null);
+  // 비용 안전망(P1.5): 다개수 이미지 생성 사전 확인 — run = prompt.ts가 실어 보낸 실행 클로저.
+  const [genConfirm, setGenConfirm] = useState<{ count: number; run: () => void } | null>(null);
   // mode 'new' = 빈 포트에서 새 연결, 'detach' = 연결된 포트를 떼어내 분리/옮기기.
   // from = 고정된(반대쪽) 끝, keepFrom = 고정 끝이 링크의 from인지.
   const lk = useRef<{ mode: 'new' | 'detach'; from: string; x1: number; y1: number; linkId?: string; keepFrom?: boolean } | null>(null);
@@ -436,6 +439,17 @@ export function BoardCanvas() {
     };
     window.addEventListener('kv:video-confirm', onConfirm);
     return () => window.removeEventListener('kv:video-confirm', onConfirm);
+  }, []);
+
+  // 다개수 이미지 생성 확인(과금 곱연산 게이트) — prompt.ts가 run 클로저를 detail로 전달한다.
+  useEffect(() => {
+    const onGenConfirm = (e: Event) => {
+      const d = (e as CustomEvent).detail as { count?: number; run?: () => void } | null;
+      if (!d?.run) return;
+      setGenConfirm({ count: d.count ?? 1, run: d.run });
+    };
+    window.addEventListener('kv:gen-confirm', onGenConfirm);
+    return () => window.removeEventListener('kv:gen-confirm', onGenConfirm);
   }, []);
 
   /** 캔버스 호버 → 포트를 보여줄 노드 추적(드래그/팬/박스/수업 모드 중엔 끔). */
@@ -1297,6 +1311,42 @@ export function BoardCanvas() {
             </div>
           );
         })()}
+
+        {/* 다개수 이미지 생성 사전 확인(과금 곱연산 게이트) — 프롬프트바 위 중앙 비차단 팝오버.
+            createPortal로 캔버스 transform 밖(document.body)에 띄워 화면 고정 배치한다. */}
+        {genConfirm &&
+          createPortal(
+            <div
+              className="pointer-events-auto fixed bottom-28 left-1/2 z-[95] -translate-x-1/2"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div className="rounded-lg border border-border bg-surface px-t5 py-t4 text-center shadow-lg">
+                <p className="m-0 text-sm text-fg">
+                  이미지 <b className="font-semibold text-accent">{genConfirm.count}장</b>을 생성할까요?
+                </p>
+                <p className="mb-t3 mt-t1 text-xs text-fg-muted">여러 장 생성은 과금돼요.</p>
+                <div className="flex items-center justify-center gap-t2">
+                  <button
+                    onClick={() => {
+                      const g = genConfirm;
+                      setGenConfirm(null);
+                      g.run();
+                    }}
+                    className="rounded-pill bg-accent px-t4 py-t2 text-sm font-semibold text-on-accent hover:bg-accent-hover"
+                  >
+                    생성
+                  </button>
+                  <button
+                    onClick={() => setGenConfirm(null)}
+                    className="rounded-pill border border-border bg-surface px-t4 py-t2 text-sm text-fg-2 hover:bg-surface-2"
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
 
         {/* 연결 순번 배지 — 1(시작)부터 연결 순서대로, 카드 좌상단에 작게.
             슬라이드 쇼 중에는 표시하지 않는다(아이들 화면을 깨끗하게). */}

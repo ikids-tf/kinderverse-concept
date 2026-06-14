@@ -840,7 +840,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         {!isSub &&
           !presenting &&
           (chips.length > 0 ||
-            typeof node.data?.sourcePrompt === 'string' ||
+            (selected && typeof node.data?.sourcePrompt === 'string') ||
             !!(node.data?.libNotice as { items?: unknown[] } | undefined)?.items?.length) && (
           <div
             className="absolute left-0 flex flex-col items-start gap-t2"
@@ -873,8 +873,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               </div>
             )}
 
-            {/* 정정 칩(P3-10) — 라우팅이 틀렸을 때 같은 프롬프트를 다른 유형으로 */}
-            {typeof node.data?.sourcePrompt === 'string' && (
+            {/* 정정 칩(P3-10) — 선택했을 때만 노출(상시 부착 = '검수하라' 신호로 신뢰↓).
+                라우팅이 틀렸을 때 같은 프롬프트를 다른 유형으로 한 번에 재생성한다. */}
+            {selected && typeof node.data?.sourcePrompt === 'string' && (
               <div className="flex flex-wrap items-center gap-t1">
                 <span className="text-overline text-fg-muted">다른 결과를 원하셨나요?</span>
                 {REROUTES.filter(

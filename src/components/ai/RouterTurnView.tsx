@@ -97,18 +97,6 @@ function ChatAnswerView({ chat }: { chat: ChatAnswer }) {
   );
 }
 
-function ConfidenceBar({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  return (
-    <span className="inline-flex items-center gap-t2" title={`확신도 ${pct}%`}>
-      <span className="h-1.5 w-20 overflow-hidden rounded-pill bg-surface-3">
-        <span className="block h-full rounded-pill bg-accent" style={{ width: `${pct}%` }} />
-      </span>
-      <span className="text-overline text-fg-muted">{pct}%</span>
-    </span>
-  );
-}
-
 function SuggestedNext({ output }: { output: RouterOutput }) {
   const visible = output.suggested_next.filter((s) => s.confidence >= SUGGESTION_HIDE_BELOW);
   if (visible.length === 0) return null;
@@ -183,7 +171,6 @@ function DecisionCard({ turn }: { turn: RouterTurn }) {
             {output.mode === 'observation' ? '관찰기록' : '놀이기록'}
           </span>
         )}
-        <ConfidenceBar value={output.confidence} />
       </div>
 
       {!hasResult && (

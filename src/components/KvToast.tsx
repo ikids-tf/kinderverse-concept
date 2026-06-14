@@ -38,6 +38,17 @@ export function KvToast() {
         <Icon name={toast.kind === 'success' ? 'check' : 'x'} size={15} className="text-accent" />
       )}
       {toast.text}
+      {toast.action && (
+        <button
+          onClick={() => {
+            toast.action!.run();
+            setToast(null);
+          }}
+          className="pointer-events-auto ml-t2 rounded-pill bg-on-dark/15 px-t3 py-0.5 font-semibold text-on-dark transition-colors duration-150 ease-soft hover:bg-on-dark/25"
+        >
+          {toast.action.label}
+        </button>
+      )}
     </div>,
     document.body,
   );

@@ -4,14 +4,22 @@
 
 export type ToastKind = 'progress' | 'success' | 'error';
 
+/** 토스트의 1탭 액션(예: 방금 만든 것 '실행취소'). run은 같은 윈도우에서 호출돼 안전. */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface ToastDetail {
   text: string;
   kind: ToastKind;
   /** 자동 닫힘(ms). progress 기본 = 유지(0), success/error 기본 = 2200. */
   duration?: number;
+  /** 있으면 텍스트 옆에 액션 버튼을 그린다(누르면 run 후 닫힘). */
+  action?: ToastAction;
 }
 
-export function showToast(text: string, kind: ToastKind = 'success', duration?: number): void {
+export function showToast(text: string, kind: ToastKind = 'success', duration?: number, action?: ToastAction): void {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent<ToastDetail>('kv:toast', { detail: { text, kind, duration } }));
+  window.dispatchEvent(new CustomEvent<ToastDetail>('kv:toast', { detail: { text, kind, duration, action } }));
 }
