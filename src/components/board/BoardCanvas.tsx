@@ -7,6 +7,7 @@ import { mindMapSubtree } from '@/board/composer';
 import { regenImageCard, genTextCard, spawnVideoPlayer, activityTextForVideo } from '@/board/workflow';
 import { generateVideoForViewer } from '@/board/video';
 import { useUIStore } from '@/store/uiStore';
+import { showToast } from '@/lib/toast';
 import { frameMoveSet, rebindFrameMembership, frameOfPoint } from '@/board/frames';
 import { worldBox, renderHeight } from '@/board/geometry';
 import { IMG_PLACEHOLDER_ZOOM } from '@/board/imageLod';
@@ -370,6 +371,8 @@ export function BoardCanvas() {
   } | null>(null);
   // 비용 안전망(P1.5): 다개수 이미지 생성 사전 확인 — run = prompt.ts가 실어 보낸 실행 클로저.
   const [genConfirm, setGenConfirm] = useState<{ count: number; run: () => void } | null>(null);
+  // 빈 동영상 뷰어 생성 직후 "무엇을 할까요?"(영상 생성 / 자료 연결) 질문 팝오버.
+  const [viewerAsk, setViewerAsk] = useState<{ viewerId: string } | null>(null);
   // mode 'new' = 빈 포트에서 새 연결, 'detach' = 연결된 포트를 떼어내 분리/옮기기.
   // from = 고정된(반대쪽) 끝, keepFrom = 고정 끝이 링크의 from인지.
   const lk = useRef<{ mode: 'new' | 'detach'; from: string; x1: number; y1: number; linkId?: string; keepFrom?: boolean } | null>(null);
@@ -450,6 +453,16 @@ export function BoardCanvas() {
     };
     window.addEventListener('kv:gen-confirm', onGenConfirm);
     return () => window.removeEventListener('kv:gen-confirm', onGenConfirm);
+  }, []);
+
+  // 빈 동영상 뷰어 생성(prompt.ts) → "영상 생성 / 자료 연결" 질문 팝오버를 그 뷰어에 붙인다.
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const d = (e as CustomEvent).detail as { viewerId?: string } | null;
+      if (d?.viewerId) setViewerAsk({ viewerId: d.viewerId });
+    };
+    window.addEventListener('kv:viewer-ask', onAsk);
+    return () => window.removeEventListener('kv:viewer-ask', onAsk);
   }, []);
 
   /** 캔버스 호버 → 포트를 보여줄 노드 추적(드래그/팬/박스/수업 모드 중엔 끔). */
@@ -1304,6 +1317,56 @@ export function BoardCanvas() {
                     className="rounded-pill border border-border bg-surface text-fg-2 hover:bg-surface-2"
                     style={{ fontSize: 12 / z, padding: `${5 / z}px ${12 / z}px` }}
                   >
+                    취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 빈 동영상 뷰어 생성 직후 — "영상 생성 / 자료 연결" 질문(뷰어 아래 비차단 팝오버). */}
+        {viewerAsk && nodes[viewerAsk.viewerId] && (() => {
+          const an = nodes[viewerAsk.viewerId];
+          const ab = worldBox(an);
+          const z = viewport.zoom;
+          const close = () => setViewerAsk(null);
+          const story = () => {
+            close();
+            // 프롬프트바를 '동영상 스토리 작성' 모드로 — 입력창이 활성화되고 안내가 placeholder로,
+            // 입력·전송하면 그 이야기로 텍스트→비디오가 이 뷰어에 생성된다(setVideoCompose 재사용).
+            useUIStore.getState().setVideoCompose({
+              viewerId: viewerAsk.viewerId,
+              placeholder: '동영상으로 만들 이야기를 적어 주세요',
+              label: '동영상 스토리',
+            });
+          };
+          const connect = () => {
+            close();
+            useBoardStore.getState().setSelection([viewerAsk.viewerId]);
+            showToast('연결할 이미지·자료 카드를 클릭한 뒤 "영상 만들기", 또는 유튜브·영상 링크를 붙여넣으세요', 'success', 4500);
+          };
+          return (
+            <div
+              className="absolute z-40"
+              style={{ left: ab.x + ab.w / 2, top: ab.y + ab.h + 10 / z, transform: 'translateX(-50%)' }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div
+                className="rounded-lg border border-border bg-surface text-center shadow-lg"
+                style={{ padding: `${10 / z}px ${14 / z}px`, width: 'max-content', maxWidth: 400 / z }}
+              >
+                <p className="text-fg" style={{ fontSize: 13 / z, margin: 0, marginBottom: 8 / z, lineHeight: 1.45 }}>
+                  이 동영상으로 무엇을 할까요?
+                </p>
+                <div className="flex items-center justify-center" style={{ gap: 6 / z }}>
+                  <button onClick={story} className="rounded-pill bg-accent font-semibold text-on-accent hover:bg-accent-hover" style={{ fontSize: 12 / z, padding: `${5 / z}px ${14 / z}px` }}>
+                    📝 스토리 입력
+                  </button>
+                  <button onClick={connect} className="rounded-pill border border-accent bg-surface font-semibold text-accent hover:bg-accent-soft" style={{ fontSize: 12 / z, padding: `${5 / z}px ${14 / z}px` }}>
+                    🔗 자료 연결
+                  </button>
+                  <button onClick={close} className="rounded-pill border border-border bg-surface text-fg-2 hover:bg-surface-2" style={{ fontSize: 12 / z, padding: `${5 / z}px ${12 / z}px` }}>
                     취소
                   </button>
                 </div>

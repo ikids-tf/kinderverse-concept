@@ -1,5 +1,5 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
 import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
@@ -131,11 +131,23 @@ export function handleBoardPrompt(text: string): boolean {
     return true;
   }
 
+  // 그릇 우선(뷰어): "동영상"·"영상"·"비디오"처럼 뷰어 단어만 들어오면(주제·생성동사 없이)
+  // 빈 동영상 플레이어를 깔고 "무엇을 할지" 묻는다(영상 생성 / 자료 연결) — 활동 이미지가
+  // 엉뚱하게 생성되던 문제 차단(메모와 같은 그릇 우선). 실제 생성은 "○○ 동영상 만들어줘"에서만.
+  if (/^(동영상|영상|비디오|클립)(\s*(플레이어|뷰어|보기))?$/.test(text.trim())) {
+    const vid = spawnVideoPlayer();
+    useBoardStore.getState().focusNode(vid);
+    slideFrameToEmpty(vid); // 다른 요소와 겹치지 않게 가장 가까운 오른쪽 빈자리로(컴포저와 동일)
+    window.dispatchEvent(new CustomEvent('kv:viewer-ask', { detail: { viewerId: vid } }));
+    return true;
+  }
+
   // 동영상 생성 요청은 선택이 없어도 '동영상'으로 만든다 — 컴포저(이미지/문서)로 새지 않게.
   // 화면 중앙에 동영상 뷰어를 깔고 카메라를 맞춘 뒤(교사에게 보이게) 텍스트→비디오(확인 게이트).
   if (sel.length === 0 && VIDEO_RE.test(text)) {
     const vid = spawnVideoPlayer();
     useBoardStore.getState().focusNode(vid);
+    slideFrameToEmpty(vid); // 생성 동영상도 다른 요소와 겹치지 않게 오른쪽 빈자리로
     window.dispatchEvent(
       new CustomEvent('kv:video-confirm', {
         detail: { mode: 'text', viewerId: vid, anchorId: vid, request: text, topic: coreTopic(text) },
