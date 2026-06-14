@@ -479,6 +479,34 @@ export function animatePanBy(dx: number, dy: number): void {
   requestAnimationFrame(step);
 }
 
+/** 주어진 박스를 기준으로 '가장 가까운 오른쪽 빈 자리'의 x를 돌려준다 — 박스와 세로로 겹치는
+    (같은 가로 띠) 카드만 장애물로 보고, box.x에서 폭 box.w가 들어갈 첫 빈 x를 찾는다(보드 전체
+    오른쪽 끝까지 가지 않음 — 교사가 보던 화면 근처). movingIds(자기 자신·자식)는 장애물 제외.
+    슬라이드(slideFrameToEmpty)와 신규 배치(놀이계획 단일 문서 등)가 같은 규칙을 공유한다. */
+export function nearestEmptyRightX(box: { x: number; y: number; w: number; h: number }, movingIds?: Set<string>): number {
+  const b = useBoardStore.getState();
+  const GAP = 80;
+  const bandTop = box.y - GAP;
+  const bandBot = box.y + box.h + GAP;
+  const intervals = Object.values(b.nodes)
+    .filter((n) => !movingIds?.has(n.id) && n.type !== 'motion')
+    .map(worldBox)
+    .filter((o) => o.y < bandBot && o.y + o.h > bandTop) // 세로로 겹치는 카드만
+    .map((o) => [o.x - GAP, o.x + o.w + GAP] as [number, number])
+    .sort((a, z) => a[0] - z[0]);
+  const merged: [number, number][] = [];
+  for (const iv of intervals) {
+    const last = merged[merged.length - 1];
+    if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+    else merged.push([iv[0], iv[1]]);
+  }
+  let cand = box.x;
+  for (const [s, e] of merged) {
+    if (cand < e && cand + box.w > s) cand = e; // 그 구간과 겹치면 오른쪽으로 밀기
+  }
+  return cand;
+}
+
 /** 생성 완료된 프레임(+자식 전체)을 '지금 자리에서 가장 가까운 오른쪽 빈 자리'로 옮긴다 —
     같은 가로 띠(세로로 겹치는) 카드만 장애물로 보고 그 오른쪽 첫 빈 자리로 보낸다(보드 전체
     오른쪽 끝까지 가지 않음 — 교사가 보던 화면 근처에 둔다). 이동하는 동안 카메라가 같은 양
@@ -493,29 +521,8 @@ export function slideFrameToEmpty(frameId: string): void {
   const ids = [frameId, ...frameSubtree(frameId).filter((id) => b.nodes[id]?.type !== 'motion')];
   const moving = new Set(ids);
   const fb = worldBox(frame);
-  const GAP = 80;
-  // 같은 가로 띠(세로로 겹치는) 카드만 장애물 — 그 띠에서 '오른쪽으로 가장 가까운' 빈 자리를
-  // 찾는다(보드 끝이 아니라 지금 보고 있는 줄의 바로 옆 여백).
-  const bandTop = fb.y - GAP;
-  const bandBot = fb.y + fb.h + GAP;
-  const intervals = Object.values(b.nodes)
-    .filter((n) => !moving.has(n.id) && n.type !== 'motion')
-    .map(worldBox)
-    .filter((o) => o.y < bandBot && o.y + o.h > bandTop) // 세로로 겹치는 카드만
-    .map((o) => [o.x - GAP, o.x + o.w + GAP] as [number, number])
-    .sort((a, z) => a[0] - z[0]);
-  // 겹치는 구간 병합(디스조인트) → fb.x에서 폭 fb.w가 들어갈 가장 가까운 오른쪽 빈 자리.
-  const merged: [number, number][] = [];
-  for (const iv of intervals) {
-    const last = merged[merged.length - 1];
-    if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
-    else merged.push([iv[0], iv[1]]);
-  }
-  let cand = fb.x;
-  for (const [s, e] of merged) {
-    if (cand < e && cand + fb.w > s) cand = e; // 그 구간과 겹치면 오른쪽으로 밀기
-  }
-  const dx = Math.round(cand - fb.x);
+  // 같은 가로 띠에서 '오른쪽으로 가장 가까운' 빈 자리(보드 끝이 아니라 지금 보던 줄의 옆 여백).
+  const dx = Math.round(nearestEmptyRightX(fb, moving) - fb.x);
   if (dx <= 0) return; // 현재 자리가 이미 빈 곳 — 이동 불필요
   const zoom = b.viewport.zoom;
   const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;

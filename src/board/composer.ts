@@ -19,6 +19,7 @@ import {
   cancelPanAnimation,
   animatePanBy,
   slideFrameToEmpty,
+  nearestEmptyRightX,
   genSignal,
   PLAN_DOC_W,
   type SourceLink,
@@ -275,14 +276,14 @@ async function composePlanDocStream(
   const frameW = DOC_W + PAD * 2;
   const frameH = DOC_H + PAD * 2;
 
-  // 빈 자리 — 기존 콘텐츠의 오른쪽(겹침 방지), 빈 보드면 현재 뷰 중심.
+  // 빈 자리 — 현재 화면에서 '가장 가까운 오른쪽 여백'(보드 맨 오른쪽 끝이 아니라 컴포저와 동일
+  //   규칙). 빈 보드면 현재 뷰 중심. nearestEmptyRightX가 같은 띠의 카드만 피해 첫 빈 자리를 준다.
   const all = Object.values(b.nodes);
-  const GAP = 220;
   const vc = viewportCenterBoardPoint();
-  const fx = all.length
-    ? Math.round(Math.max(...all.map((n) => n.x + n.w)) + GAP)
-    : Math.round(vc.x - frameW / 2);
-  const fy = all.length ? Math.round(Math.min(...all.map((n) => n.y))) : Math.round(vc.y - frameH / 2);
+  const startX = Math.round(vc.x - frameW / 2);
+  const startY = Math.round(vc.y - frameH / 2);
+  const fx = all.length ? Math.round(nearestEmptyRightX({ x: startX, y: startY, w: frameW, h: frameH })) : startX;
+  const fy = startY;
 
   const frameId = newId('frame');
   b.addNodeRaw({
