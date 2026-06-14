@@ -3,7 +3,7 @@
 
 import type { FC } from 'react';
 import type { DeckSpec, Slide } from '../schema/deckspec';
-import { LAYOUT_COMPONENTS, type EditHandlers } from './layouts';
+import { LAYOUT_COMPONENTS, NO_SELECTION, type EditHandlers, type Selection } from './layouts';
 import { SlideBg } from './SlideImage';
 
 export const SlideRenderer: FC<{
@@ -13,8 +13,8 @@ export const SlideRenderer: FC<{
   h: EditHandlers;
   /** 현재 쪽번호(1-based). slide.number가 true일 때 우하단에 표시. */
   pageNumber?: number;
-  /** 현재 선택된 블록 인덱스(편집 — 스타일 툴바 대상). */
-  selected?: number | null;
+  /** 현재 선택(다중 블록 + eyebrow). 없으면 빈 선택. */
+  selected?: Selection;
 }> = ({ slide, theme, editable, h, pageNumber, selected }) => {
   const Cmp = LAYOUT_COMPONENTS[slide.layout] ?? LAYOUT_COMPONENTS.title;
   return (
@@ -26,7 +26,7 @@ export const SlideRenderer: FC<{
       data-bg={slide.background ? '1' : undefined}
     >
       <SlideBg background={slide.background} />
-      <Cmp slide={slide} editable={editable} h={h} selected={selected ?? null} />
+      <Cmp slide={slide} theme={theme} editable={editable} h={h} selected={selected ?? NO_SELECTION} />
       {slide.number && pageNumber ? (
         <span className="slide-number">{String(pageNumber).padStart(2, '0')}</span>
       ) : null}

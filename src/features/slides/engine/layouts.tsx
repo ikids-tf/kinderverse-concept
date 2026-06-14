@@ -11,38 +11,65 @@ import type { CSSProperties, FC, ReactNode } from 'react';
 import {
   type Slide,
   type Layout,
+  type Theme,
   type TextBlockType,
   type BlockStyle,
   type BlockPos,
+  type ChartBlock,
   isText,
   isBullets,
   isImage,
+  isChart,
 } from '../schema/deckspec';
 import { SlideImage } from './SlideImage';
+import { SlideChart } from './SlideChart';
 
-/** 자유 배치 — pos가 있으면 흐름에서 빼내 캔버스(%) 절대 좌표로. */
+/** 자유 배치 — pos가 있으면 흐름에서 빼내 캔버스(%) 절대 좌표로(+높이·회전). */
 function posStyle(pos?: BlockPos): CSSProperties | undefined {
-  return pos ? { position: 'absolute', left: `${pos.xPct}%`, top: `${pos.yPct}%`, width: `${pos.wPct}%` } : undefined;
+  if (!pos) return undefined;
+  const css: CSSProperties = {
+    position: 'absolute',
+    left: `${pos.xPct}%`,
+    top: `${pos.yPct}%`,
+    width: `${pos.wPct}%`,
+  };
+  if (pos.hPct != null) css.height = `${pos.hPct}%`;
+  if (pos.rot) {
+    css.transform = `rotate(${pos.rot}deg)`;
+    css.transformOrigin = 'center center';
+  }
+  return css;
 }
+
+/** 현재 선택 — 다중 블록(Set) + eyebrow 단일. 빈 Set + eyebrow=false면 선택 없음. */
+export interface Selection {
+  blocks: ReadonlySet<number>;
+  eyebrow: boolean;
+}
+export const NO_SELECTION: Selection = { blocks: new Set(), eyebrow: false };
 
 /** 편집 핸들러 — 모두 뷰어에서 '최신 상태'에 함수형으로 적용(편집/구조변경 경쟁 방지). */
 export interface EditHandlers {
   onText: (blockIndex: number, text: string) => void;
   setBulletItem: (blockIndex: number, itemIndex: number, text: string) => void;
   mutateBullets: (blockIndex: number, fn: (items: string[]) => string[]) => void;
-  /** 블록 선택(플로팅 스타일 툴바 대상). */
-  select: (blockIndex: number) => void;
+  /** 블록 선택. 'eyebrow'는 슬라이드 오버라인 라벨. additive(Shift)=토글 다중선택. */
+  select: (target: number | 'eyebrow', additive?: boolean) => void;
   /** 선택 블록 스타일 오버라이드 패치. */
   setBlockStyle: (blockIndex: number, patch: Partial<BlockStyle>) => void;
   /** 이미지 블록의 이미지 선택(피커 열기). */
   pickImage: (blockIndex: number) => void;
+  /** eyebrow(오버라인 라벨) 텍스트 편집 → slide.eyebrow. */
+  onEyebrow: (text: string) => void;
 }
 export interface LayoutProps {
   slide: Slide;
+  /** 현재 덱 테마 — 차트 등 토큰을 JS로 읽어야 하는 컴포넌트에 전달(SVG는 var() 불가). */
+  theme: Theme;
   editable: boolean;
   h: EditHandlers;
-  /** 현재 선택된 블록 인덱스(없으면 null). */
-  selected: number | null;
+  /** 현재 선택(다중 블록 + eyebrow). */
+  selected: Selection;
 }
 
 /* ── 블록 조회 헬퍼 ───────────────────────────────────────────────────── */
@@ -67,13 +94,36 @@ function findBullets(slide: Slide): { items: string[]; index: number; style?: Bl
   }
   return null;
 }
-function findImages(slide: Slide): { index: number; assetId?: string | null; fit?: 'cover' | 'contain' }[] {
-  const out: { index: number; assetId?: string | null; fit?: 'cover' | 'contain' }[] = [];
+interface ImgInfo {
+  index: number;
+  assetId?: string | null;
+  fit?: 'cover' | 'contain';
+  pos?: BlockPos;
+}
+function findImages(slide: Slide): ImgInfo[] {
+  const out: ImgInfo[] = [];
   slide.blocks.forEach((b, i) => {
-    if (isImage(b)) out.push({ index: i, assetId: b.assetId, fit: b.fit });
+    if (isImage(b)) out.push({ index: i, assetId: b.assetId, fit: b.fit, pos: b.pos });
   });
   return out;
 }
+function findChart(slide: Slide): { block: ChartBlock; index: number } | null {
+  for (let i = 0; i < slide.blocks.length; i++) {
+    const b = slide.blocks[i];
+    if (isChart(b)) return { block: b, index: i };
+  }
+  return null;
+}
+
+/** 이미지 블록 렌더 — pos 있으면 자유배치(절대 박스), 없으면 흐름(슬롯 채움) + data-bi(측정용). */
+const FreeImage: FC<{ info: ImgInfo; editable: boolean; onPick: () => void }> = ({ info, editable, onPick }) =>
+  info.pos ? (
+    <div className="sl-free sl-free-media" data-bi={info.index} style={posStyle(info.pos)}>
+      <SlideImage assetId={info.assetId} fit={info.fit} editable={editable} onPick={onPick} />
+    </div>
+  ) : (
+    <SlideImage assetId={info.assetId} fit={info.fit} editable={editable} dataBi={info.index} onPick={onPick} />
+  );
 
 /* ── 블록 스타일 오버라이드 → inline CSS. 색은 테마 토큰(--s-*)으로만(임의 hex 금지). ── */
 const SERIF_STACK = "'Playfair Display','Noto Serif KR',Georgia,serif";
@@ -105,9 +155,12 @@ const Editable: FC<{
   placeholder?: string;
   className?: string;
   inlineStyle?: CSSProperties;
-  onSelect?: () => void;
+  /** 흐름 모드에서 이 요소가 곧 블록 박스 — 측정/선택용 data-bi. */
+  dataBi?: number;
+  /** additive=Shift(다중선택 토글). Shift면 caret 포커스를 막아 텍스트 편집 대신 선택만. */
+  onSelect?: (additive: boolean) => void;
   onCommit: (text: string) => void;
-}> = ({ tag: Tag = 'div', value, editable, placeholder, className, inlineStyle, onSelect, onCommit }) => (
+}> = ({ tag: Tag = 'div', value, editable, placeholder, className, inlineStyle, dataBi, onSelect, onCommit }) => (
   <Tag
     className={className}
     style={inlineStyle}
@@ -115,7 +168,17 @@ const Editable: FC<{
     suppressContentEditableWarning
     spellCheck={false}
     data-ph={placeholder}
-    onFocus={onSelect}
+    data-bi={dataBi}
+    onPointerDown={
+      onSelect
+        ? (e) => {
+            onSelect(e.shiftKey);
+            // Shift=다중선택: caret 포커스를 막고 기존 편집을 블러(객체 모드 → Delete 등 가능).
+            if (e.shiftKey) { e.preventDefault(); (document.activeElement as HTMLElement | null)?.blur(); }
+          }
+        : undefined
+    }
+    onFocus={onSelect ? () => onSelect(false) : undefined}
     onBlur={(e) => {
       const t = (e.currentTarget.textContent ?? '').trim();
       if (t !== value) onCommit(t);
@@ -133,33 +196,57 @@ const TextBlockView: FC<{
   className?: string;
   placeholder?: string;
   editable: boolean;
-  selected: number | null;
+  selected: Selection;
   h: EditHandlers;
 }> = ({ slide, index, tag, className, placeholder, editable, selected, h }) => {
   const b = slide.blocks[index];
   const text = isText(b) ? b.text : '';
   const style = isText(b) ? b.style : undefined;
   const pos = isText(b) ? b.pos : undefined;
+  const isSel = selected.blocks.has(index);
   const el = (
     <Editable
       tag={tag}
-      className={`${className ?? ''}${selected === index ? ' sl-sel' : ''}`}
+      className={`${className ?? ''}${!pos && isSel ? ' sl-sel' : ''}`}
+      dataBi={pos ? undefined : index}
       value={text}
       editable={editable}
       placeholder={placeholder}
       inlineStyle={blockStyleToCss(style)}
-      onSelect={editable ? () => h.select(index) : undefined}
+      onSelect={editable ? (add) => h.select(index, add) : undefined}
       onCommit={(x) => h.onText(index, x)}
     />
   );
-  return pos ? <div className="sl-free" style={posStyle(pos)}>{el}</div> : el;
+  return pos ? (
+    <div className={`sl-free${isSel ? ' sl-sel' : ''}`} data-bi={index} style={posStyle(pos)}>
+      {el}
+    </div>
+  ) : el;
 };
 
-/** 상단 오버라인(eyebrow) — 작은 대문자 트래킹 라벨. accentRole==='gold'면 골드. */
-const Eyebrow: FC<{ slide: Slide }> = ({ slide }) =>
-  slide.eyebrow ? (
-    <span className={`sl-eyebrow${slide.accentRole === 'gold' ? ' is-gold' : ''}`}>{slide.eyebrow}</span>
-  ) : null;
+/** 상단 오버라인(eyebrow) — 작은 대문자 트래킹 라벨. accentRole==='gold'면 골드.
+    편집 모드에선 인라인 편집/선택(비어 있어도 클릭해 추가). 보기 모드에선 값이 있을 때만. */
+const Eyebrow: FC<{ slide: Slide; editable: boolean; selected: Selection; h: EditHandlers }> = ({
+  slide,
+  editable,
+  selected,
+  h,
+}) => {
+  if (!editable && !slide.eyebrow) return null;
+  const isSel = selected.eyebrow;
+  return (
+    <Editable
+      tag="span"
+      className={`sl-eyebrow${slide.accentRole === 'gold' ? ' is-gold' : ''}${isSel ? ' sl-sel' : ''}`}
+      value={slide.eyebrow ?? ''}
+      editable={editable}
+      placeholder="오버라인 라벨"
+      inlineStyle={blockStyleToCss(slide.eyebrowStyle)}
+      onSelect={editable ? () => h.select('eyebrow') : undefined}
+      onCommit={(x) => h.onEyebrow(x)}
+    />
+  );
+};
 
 /** 자리표시 박스 — 삽화/차트(다음 단계에서 실제 콘텐츠로 교체). */
 const Placeholder: FC<{ icon: string; label?: string; sub?: string }> = ({ icon, label, sub }) => (
@@ -176,7 +263,7 @@ const TitleLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const s = findText(slide, 'subtitle');
   return (
     <div className="sl sl--title">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
       {s && <TextBlockView slide={slide} index={s.index} tag="p" className="sl-subtitle" placeholder="부제목" editable={editable} selected={selected} h={h} />}
     </div>
@@ -187,7 +274,7 @@ const SectionDividerLayout: FC<LayoutProps> = ({ slide, editable, h, selected })
   const t = findText(slide, 'title');
   return (
     <div className="sl sl--section">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="섹션 제목" editable={editable} selected={selected} h={h} />}
     </div>
   );
@@ -197,7 +284,7 @@ const BigTextLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
   return (
     <div className="sl sl--big">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="강조할 한 문장" editable={editable} selected={selected} h={h} />}
     </div>
   );
@@ -209,7 +296,7 @@ const BigStatLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const ctx = findText(slide, 'subtitle');
   return (
     <div className="sl sl--stat">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       {label && <TextBlockView slide={slide} index={label.index} className="sl-stat-label" placeholder="지표 이름" editable={editable} selected={selected} h={h} />}
       {num && <TextBlockView slide={slide} index={num.index} tag="div" className="sl-stat-num" placeholder="00%" editable={editable} selected={selected} h={h} />}
       {ctx && <TextBlockView slide={slide} index={ctx.index} className="sl-stat-ctx" placeholder="무엇을 뜻하는지 한 줄" editable={editable} selected={selected} h={h} />}
@@ -222,7 +309,7 @@ const TwoColumnLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const bodies = findAllText(slide, 'body').slice(0, 2);
   return (
     <div className="sl sl--two">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
       <div className="sl-cols">
         {bodies.map((b) => (
@@ -239,7 +326,7 @@ const ImageFeatureLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) =
   return (
     <div className="sl sl--feature">
       <div className="sl-feature-text">
-        <Eyebrow slide={slide} />
+        <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
         {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
         {body && <TextBlockView slide={slide} index={body.index} tag="div" className="sl-body" placeholder="핵심 설명" editable={editable} selected={selected} h={h} />}
       </div>
@@ -247,7 +334,7 @@ const ImageFeatureLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) =
         {(() => {
           const img = findImages(slide)[0];
           return img ? (
-            <SlideImage assetId={img.assetId} fit={img.fit} editable={editable} onPick={() => h.pickImage(img.index)} />
+            <FreeImage info={img} editable={editable} onPick={() => h.pickImage(img.index)} />
           ) : (
             <Placeholder icon="🖼️" label="삽화" />
           );
@@ -263,11 +350,15 @@ const BulletsLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const bulletCss = blockStyleToCss(bl?.style);
   return (
     <div className="sl sl--bullets">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
       {bl && (
-        <div className={bl.pos ? 'sl-free' : undefined} style={posStyle(bl.pos)}>
-        <ul className={`sl-bullets${selected === bl.index ? ' sl-sel' : ''}`}>
+        <div
+          className={`${bl.pos ? 'sl-free' : 'sl-bullets-wrap'}${bl.pos && selected.blocks.has(bl.index) ? ' sl-sel' : ''}`}
+          data-bi={bl.pos ? bl.index : undefined}
+          style={posStyle(bl.pos)}
+        >
+        <ul className={`sl-bullets${!bl.pos && selected.blocks.has(bl.index) ? ' sl-sel' : ''}`} data-bi={bl.pos ? undefined : bl.index}>
           {bl.items.map((it, i) => (
             <li key={i}>
               <Editable
@@ -277,7 +368,7 @@ const BulletsLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
                 editable={editable}
                 placeholder="항목"
                 inlineStyle={bulletCss}
-                onSelect={editable ? () => h.select(bl.index) : undefined}
+                onSelect={editable ? (add) => h.select(bl.index, add) : undefined}
                 onCommit={(x) => h.setBulletItem(bl.index, i, x)}
               />
               {editable && bl.items.length > 1 && (
@@ -313,7 +404,7 @@ const QuoteLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const c = findText(slide, 'caption');
   return (
     <div className="sl sl--quote">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       {q && <TextBlockView slide={slide} index={q.index} tag="div" className="sl-quote" placeholder="인용·핵심 메시지" editable={editable} selected={selected} h={h} />}
       {c && <TextBlockView slide={slide} index={c.index} tag="div" className="sl-caption" placeholder="출처 · 발표자" editable={editable} selected={selected} h={h} />}
     </div>
@@ -325,10 +416,10 @@ const HeroImageLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const img = findImages(slide)[0];
   return (
     <div className="sl sl--hero">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
       {img ? (
-        <SlideImage assetId={img.assetId} fit={img.fit} editable={editable} onPick={() => h.pickImage(img.index)} />
+        <FreeImage info={img} editable={editable} onPick={() => h.pickImage(img.index)} />
       ) : (
         <Placeholder icon="🖼️" label="삽화" />
       )}
@@ -341,11 +432,11 @@ const PhotoGridLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const c = findText(slide, 'caption');
   return (
     <div className="sl sl--grid">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       <div className="sl-grid">
         {imgs.length > 0
           ? imgs.map((im) => (
-              <SlideImage key={im.index} assetId={im.assetId} fit={im.fit} editable={editable} onPick={() => h.pickImage(im.index)} />
+              <FreeImage key={im.index} info={im} editable={editable} onPick={() => h.pickImage(im.index)} />
             ))
           : [0, 1, 2, 3].map((i) => <Placeholder key={i} icon="🖼️" />)}
       </div>
@@ -354,14 +445,25 @@ const PhotoGridLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   );
 };
 
-const ChartLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
+const ChartLayout: FC<LayoutProps> = ({ slide, theme, editable, h, selected }) => {
   const t = findText(slide, 'title');
   const c = findText(slide, 'caption');
+  const chart = findChart(slide);
   return (
     <div className="sl sl--chart">
-      <Eyebrow slide={slide} />
+      <Eyebrow slide={slide} editable={editable} selected={selected} h={h} />
       {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
-      <Placeholder icon="📊" label="차트 자리" sub="Recharts 차트(막대·꺾은선·원·레이더)는 다음 단계에서 연결돼요" />
+      {chart ? (
+        chart.block.pos ? (
+          <div className="sl-free sl-free-media" data-bi={chart.index} style={posStyle(chart.block.pos)}>
+            <SlideChart block={chart.block} theme={theme} />
+          </div>
+        ) : (
+          <SlideChart block={chart.block} theme={theme} dataBi={chart.index} />
+        )
+      ) : (
+        <Placeholder icon="📊" label="차트 자리" sub="차트 레이아웃에 차트 블록을 추가하세요" />
+      )}
       {c && <TextBlockView slide={slide} index={c.index} tag="div" className="sl-caption" placeholder="차트 설명" editable={editable} selected={selected} h={h} />}
     </div>
   );

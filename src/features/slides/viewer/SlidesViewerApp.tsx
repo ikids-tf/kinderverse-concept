@@ -11,6 +11,7 @@ import {
   type Layout,
   type Theme,
   type BlockPos,
+  type BlockStyle,
   THEMES,
   THEME_LABEL,
   defaultDeck,
@@ -19,12 +20,14 @@ import {
   isBullets,
   isText,
   isImage,
+  isChart,
 } from '../schema/deckspec';
 import { SlideRenderer } from '../engine/SlideRenderer';
-import { BlockToolbar } from '../engine/BlockToolbar';
-import { BlockFrame } from '../engine/BlockFrame';
-import { LAYOUT_META, type EditHandlers } from '../engine/layouts';
+import { BlockEditorOverlay } from '../engine/BlockEditorOverlay';
+import { MultiSelectOverlay } from '../engine/MultiSelectOverlay';
+import { LAYOUT_META, type EditHandlers, type Selection } from '../engine/layouts';
 import { ImagePicker } from './ImagePicker';
+import { exportDeck } from './exportDeck';
 import { loadDeck, saveDeck } from './persist';
 
 const SLIDE_W = 1280;
@@ -39,6 +42,7 @@ const NOOP_HANDLERS: EditHandlers = {
   select: () => {},
   setBlockStyle: () => {},
   pickImage: () => {},
+  onEyebrow: () => {},
 };
 
 /** 테마 피커 스와치 — themes.css 대표 색(배경+악센트). 피커 미리보기 전용(엔진은 CSS가 결정). */
@@ -90,6 +94,7 @@ const IC = {
   expand: 'M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3M21 16v3a2 2 0 0 1-2 2h-3',
   x: 'M18 6 6 18M6 6l12 12',
   image: 'M3 5h18v14H3zM3 16l4-4 3 3 5-5 6 6M9 10a1 1 0 1 1-2 0 1 1 0 0 1 2 0z',
+  download: 'M12 3v12M7 10l5 5 5-5M5 21h14',
 };
 
 export function SlidesViewerApp() {
@@ -97,6 +102,8 @@ export function SlidesViewerApp() {
   const fsMode = useMemo(() => readParam('fs') === '1', []);
 
   const [deck, setDeck] = useState<DeckSpec>(() => loadDeck(id) ?? defaultDeck());
+  const deckRef = useRef(deck);
+  deckRef.current = deck;
   const [current, setCurrent] = useState(0);
   const [chrome, setChrome] = useState(false);
   const [present, setPresent] = useState(false);
@@ -112,18 +119,34 @@ export function SlidesViewerApp() {
   // 썸네일 드래그 재정렬 상태 — { from: 잡은 슬라이드, to: 삽입 슬롯(0..N) }
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
   const dragRef = useRef<{ i: number; x: number; moved: boolean } | null>(null);
-  // 선택된 블록(스타일 툴바 대상). 슬라이드/편집 상태가 바뀌면 해제.
-  const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
+  // 선택 — 다중 블록(Shift 토글) + eyebrow. 슬라이드/편집 상태가 바뀌면 해제.
+  const [sel, setSel] = useState<{ blocks: number[]; eyebrow: boolean }>({ blocks: [], eyebrow: false });
+  const selRef = useRef(sel);
+  selRef.current = sel;
+  const selection: Selection = useMemo(() => ({ blocks: new Set(sel.blocks), eyebrow: sel.eyebrow }), [sel]);
+  const select = useCallback((target: number | 'eyebrow', additive = false) => {
+    if (target === 'eyebrow') return setSel({ blocks: [], eyebrow: true });
+    setSel((s) =>
+      additive
+        ? { blocks: s.blocks.includes(target) ? s.blocks.filter((b) => b !== target) : [...s.blocks, target], eyebrow: false }
+        : { blocks: [target], eyebrow: false },
+    );
+  }, []);
+  const clearSel = useCallback(() => setSel({ blocks: [], eyebrow: false }), []);
   // 이미지 피커 대상(블록 이미지 / 배경 / 닫힘).
   const [pickerTarget, setPickerTarget] = useState<{ kind: 'block'; index: number } | { kind: 'bg' } | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportMenu, setExportMenu] = useState(false);
 
   const total = deck.slides.length;
   const idx = Math.min(current, total - 1);
+  const idxRef = useRef(idx);
+  idxRef.current = idx;
   const slide = deck.slides[idx];
   const editable = chrome && !present && !fsMode;
 
   // 슬라이드 이동/편집 종료 시 선택 해제.
-  useEffect(() => { setSelectedBlock(null); }, [idx, editable]);
+  useEffect(() => { clearSel(); }, [idx, editable, clearSel]);
 
   const totalRef = useRef(total);
   totalRef.current = total;
@@ -135,6 +158,45 @@ export function SlidesViewerApp() {
     const t = window.setTimeout(() => saveDeck(id, deck), 300);
     return () => window.clearTimeout(t);
   }, [deck, id]);
+
+  /* ── Undo/Redo 히스토리 — 변경을 디바운스(350ms)로 묶어 스냅샷(드래그/타이핑 한 단계). ── */
+  const history = useRef<DeckSpec[]>([deck]);
+  const histPtr = useRef(0);
+  const traveling = useRef(false);
+  const histTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (traveling.current) { traveling.current = false; return; }
+    if (deck === history.current[histPtr.current]) return;
+    window.clearTimeout(histTimer.current);
+    histTimer.current = window.setTimeout(() => {
+      const h = history.current.slice(0, histPtr.current + 1);
+      h.push(deck);
+      if (h.length > 60) h.shift();
+      history.current = h;
+      histPtr.current = h.length - 1;
+    }, 350);
+  }, [deck]);
+  const undo = useCallback(() => {
+    window.clearTimeout(histTimer.current);
+    if (deckRef.current !== history.current[histPtr.current]) {
+      const h = history.current.slice(0, histPtr.current + 1);
+      h.push(deckRef.current);
+      history.current = h;
+      histPtr.current = h.length - 1;
+    }
+    if (histPtr.current <= 0) return;
+    histPtr.current -= 1;
+    traveling.current = true;
+    setDeck(history.current[histPtr.current]);
+    setSel({ blocks: [], eyebrow: false });
+  }, []);
+  const redo = useCallback(() => {
+    if (histPtr.current >= history.current.length - 1) return;
+    histPtr.current += 1;
+    traveling.current = true;
+    setDeck(history.current[histPtr.current]);
+    setSel({ blocks: [], eyebrow: false });
+  }, []);
 
   /* ── 무대 크기에 맞춰 슬라이드 캔버스 스케일(16:9 유지) ── */
   useEffect(() => {
@@ -171,7 +233,10 @@ export function SlidesViewerApp() {
     w.loadDeck = (d: DeckSpec) => {
       setDeck(d);
       setCurrent(0);
-      setSelectedBlock(null);
+      setSel({ blocks: [], eyebrow: false });
+      history.current = [d];
+      histPtr.current = 0;
+      traveling.current = true;
     };
     return () => {
       delete w.kvSetChrome;
@@ -271,7 +336,7 @@ export function SlidesViewerApp() {
           ...s,
           blocks: s.blocks.map((b, i) => (i === bi && isBullets(b) ? { ...b, items: fn(b.items) } : b)),
         })),
-      select: (bi) => setSelectedBlock(bi),
+      select,
       setBlockStyle: (bi, patch) =>
         patchSlide(idx, (s) => ({
           ...s,
@@ -280,8 +345,9 @@ export function SlidesViewerApp() {
           ),
         })),
       pickImage: (bi) => setPickerTarget({ kind: 'block', index: bi }),
+      onEyebrow: (text) => patchSlide(idx, (s) => ({ ...s, eyebrow: text.trim() || undefined })),
     }),
-    [idx, patchSlide],
+    [idx, patchSlide, select],
   );
 
   // 피커에서 고른 이미지(assetId)를 대상(블록/배경)에 적용.
@@ -297,12 +363,133 @@ export function SlidesViewerApp() {
   };
   const removeBackground = () => patchSlide(idx, (s) => ({ ...s, background: undefined }));
 
-  // 블록 자유 배치(드래그) — pos 설정/해제. 항상 최신 상태에 함수형 적용.
+  // 블록 자유 배치(드래그/리사이즈/회전) — pos 설정/해제. 모든 블록 타입에 적용.
   const setBlockPos = (bi: number, pos: BlockPos | null) =>
     patchSlide(idx, (s) => ({
       ...s,
-      blocks: s.blocks.map((b, i) => (i === bi && (isText(b) || isBullets(b)) ? { ...b, pos: pos ?? undefined } : b)),
+      blocks: s.blocks.map((b, i) => (i === bi ? { ...b, pos: pos ?? undefined } : b)),
     }));
+  const setEyebrowStyle = (patch: Partial<BlockStyle>) =>
+    patchSlide(idx, (s) => ({ ...s, eyebrowStyle: { ...(s.eyebrowStyle ?? {}), ...patch } }));
+
+  // 트랜스폼 시작 시 — 슬라이드의 모든 블록을 '현재 위치 그대로' 절대좌표(pos)로 고정한다.
+  // 한 블록만 절대화하면 나머지 흐름 블록이 재정렬(가운데로 모임)되므로, 전부 동시에 고정해 리플로를 없앤다.
+  const freezeSlide = () => {
+    const cv = document.querySelector<HTMLElement>('.stage .slide-canvas');
+    if (!cv) return;
+    const cur = deck.slides[idx];
+    const need = cur.blocks.some((b, i) => !(b as { pos?: BlockPos }).pos && cv.querySelector(`[data-bi="${i}"]`));
+    if (!need) return; // 이미 전부 고정됨
+    const c = cv.getBoundingClientRect();
+    const measured: Record<number, BlockPos> = {};
+    cv.querySelectorAll<HTMLElement>('[data-bi]').forEach((el) => {
+      const bi = Number(el.getAttribute('data-bi'));
+      if (!Number.isInteger(bi) || measured[bi]) return;
+      const r = el.getBoundingClientRect();
+      measured[bi] = {
+        xPct: ((r.left - c.left) / c.width) * 100,
+        yPct: ((r.top - c.top) / c.height) * 100,
+        wPct: (r.width / c.width) * 100,
+        hPct: (r.height / c.height) * 100,
+      };
+    });
+    patchSlide(idx, (s) => ({
+      ...s,
+      blocks: s.blocks.map((b, i) => {
+        if ((b as { pos?: BlockPos }).pos || !measured[i]) return b;
+        const m = measured[i];
+        // 텍스트/불릿은 높이 자동 → hPct 생략. 이미지/차트는 높이 고정 필요 → hPct 유지.
+        const needsH = isImage(b) || isChart(b);
+        return { ...b, pos: needsH ? m : { xPct: m.xPct, yPct: m.yPct, wPct: m.wPct } };
+      }),
+    }));
+  };
+
+  /* ── 단축키 액션 — 현재 선택/슬라이드에 작용(refs로 최신값 읽음). ── */
+  const deleteSelected = () => {
+    const s = selRef.current;
+    if (s.eyebrow) { patchSlide(idxRef.current, (sl) => ({ ...sl, eyebrow: undefined, eyebrowStyle: undefined })); clearSel(); return; }
+    if (!s.blocks.length) return;
+    const set = new Set(s.blocks);
+    patchSlide(idxRef.current, (sl) => ({ ...sl, blocks: sl.blocks.filter((_, i) => !set.has(i)) }));
+    clearSel();
+  };
+  const selectAll = () => {
+    const cur = deckRef.current.slides[idxRef.current];
+    const all = cur.blocks.map((_, i) => i).filter((i) => isText(cur.blocks[i]) || isBullets(cur.blocks[i]));
+    setSel({ blocks: all, eyebrow: false });
+  };
+  // 선택 블록을 dxPct/dyPct만큼 이동 — 전체를 freeze(좌표 부여)한 뒤 대상만 이동(리플로 없음).
+  const freezeAndMove = (targets: number[], dxPct: number, dyPct: number) => {
+    const cv = document.querySelector<HTMLElement>('.stage .slide-canvas');
+    if (!cv) return;
+    const c = cv.getBoundingClientRect();
+    const measured: Record<number, BlockPos> = {};
+    cv.querySelectorAll<HTMLElement>('[data-bi]').forEach((el) => {
+      const bi = Number(el.getAttribute('data-bi'));
+      if (!Number.isInteger(bi) || measured[bi]) return;
+      const r = el.getBoundingClientRect();
+      measured[bi] = { xPct: ((r.left - c.left) / c.width) * 100, yPct: ((r.top - c.top) / c.height) * 100, wPct: (r.width / c.width) * 100, hPct: (r.height / c.height) * 100 };
+    });
+    const tset = new Set(targets);
+    patchSlide(idxRef.current, (s) => ({
+      ...s,
+      blocks: s.blocks.map((b, i) => {
+        let base = (b as { pos?: BlockPos }).pos;
+        if (!base && measured[i]) {
+          const m = measured[i];
+          base = isImage(b) || isChart(b) ? m : { xPct: m.xPct, yPct: m.yPct, wPct: m.wPct };
+        }
+        if (!base) return b;
+        if (tset.has(i)) base = { ...base, xPct: base.xPct + dxPct, yPct: base.yPct + dyPct };
+        return { ...b, pos: base };
+      }),
+    }));
+  };
+  const nudge = (key: string, big: boolean) => {
+    const s = selRef.current;
+    if (!s.blocks.length) return;
+    const step = big ? 5 : 1;
+    const dx = key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0;
+    const dy = key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0;
+    if (dx || dy) freezeAndMove(s.blocks, dx, dy);
+  };
+
+  /* ── 편집 단축키 — undo/redo·삭제·복제·복사/붙여넣기·전체선택·이동·Esc(텍스트 입력 중엔 일부 비활성) ── */
+  useEffect(() => {
+    if (!editable) return;
+    const onKey = (e: KeyboardEvent) => {
+      const ae = document.activeElement as HTMLElement | null;
+      const typing = !!ae && ae.isContentEditable;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+      // Esc: 편집 중이면 블러(객체 모드, 선택 유지) → 한 번 더면 선택 해제.
+      if (e.key === 'Escape') { if (typing && ae) ae.blur(); else clearSel(); return; }
+      if (typing) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); return; }
+      if (mod && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); selectAll(); return; }
+      if (e.key.startsWith('Arrow') && selRef.current.blocks.length) { e.preventDefault(); nudge(e.key, e.shiftKey); return; }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // 액션들은 refs로 최신값을 읽으므로 deps 불필요(undo/redo/clearSel만 안정 참조).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editable, undo, redo, clearSel]);
+
+  // PDF/PPTX 내보내기.
+  const runExport = async (format: 'pdf' | 'pptx') => {
+    setExportMenu(false);
+    setExporting(true);
+    try {
+      await exportDeck(deckRef.current, format);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('슬라이드 내보내기 실패', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   /* ── 구조 편집 ── */
   const addSlide = (layout: Layout) => {
@@ -385,9 +572,10 @@ export function SlidesViewerApp() {
   };
 
   const curLabel = LAYOUT_META.find((m) => m.id === slide.layout)?.label ?? '레이아웃';
-  const selBlk = selectedBlock !== null ? slide.blocks[selectedBlock] : null;
+  const singleIdx = sel.blocks.length === 1 ? sel.blocks[0] : null;
+  const selBlk = singleIdx !== null ? slide.blocks[singleIdx] ?? null : null;
   const selStyleable = !!selBlk && (isText(selBlk) || isBullets(selBlk));
-  const selHasPos = selBlk && (isText(selBlk) || isBullets(selBlk)) ? !!selBlk.pos : false;
+  const selHasPos = !!selBlk && (isText(selBlk) || isBullets(selBlk)) ? !!selBlk.pos : false;
 
   return (
     <div className="slides-root" data-theme={deck.theme}>
@@ -458,6 +646,17 @@ export function SlidesViewerApp() {
         <button type="button" className="pbtn" title="현재 레이아웃으로 새 슬라이드 추가" onClick={() => addSlide(slide.layout)}>
           <Svg d={IC.plus} /> 슬라이드
         </button>
+        <div className="laywrap">
+          <button type="button" className="ibtn" title="PDF·PPTX 내보내기" disabled={exporting} onClick={() => setExportMenu((v) => !v)}>
+            {exporting ? <span className="be-spin" aria-label="내보내는 중" /> : <Svg d={IC.download} />}
+          </button>
+          {exportMenu && (
+            <div className="export-menu" onMouseLeave={() => setExportMenu(false)}>
+              <button type="button" className="export-item" onClick={() => runExport('pdf')}>PDF로 내보내기</button>
+              <button type="button" className="export-item" onClick={() => runExport('pptx')}>PPTX로 내보내기</button>
+            </div>
+          )}
+        </div>
         <button type="button" className="ibtn" title="전체 화면" onClick={openFullscreen}><Svg d={IC.expand} /></button>
       </div>
 
@@ -466,8 +665,8 @@ export function SlidesViewerApp() {
         className="stage"
         ref={stageRef}
         onMouseDown={(e) => {
-          // 빈 캔버스 클릭 → 블록 선택 해제(편집 모드에서만).
-          if (editable && !(e.target as HTMLElement).closest('[contenteditable], .block-toolbar')) setSelectedBlock(null);
+          // 빈 캔버스 클릭 → 블록 선택 해제(편집 모드에서만). 오버레이/툴바 클릭은 제외.
+          if (editable && !(e.target as HTMLElement).closest('[contenteditable], .be-toolbar, .be-frame, .be-multi')) clearSel();
         }}
       >
         {present || fsMode ? (
@@ -477,20 +676,39 @@ export function SlidesViewerApp() {
           </>
         ) : null}
         <div className="scaler" style={{ width: SLIDE_W, height: SLIDE_H, transform: `translate(-50%, -50%) scale(${scale})` }}>
-          <SlideRenderer key={`${idx}-${slide.layout}-${editable ? 'e' : 'v'}`} slide={slide} theme={deck.theme} editable={editable} h={handlers} pageNumber={idx + 1} selected={selectedBlock} />
+          <SlideRenderer key={`${idx}-${slide.layout}-${editable ? 'e' : 'v'}`} slide={slide} theme={deck.theme} editable={editable} h={handlers} pageNumber={idx + 1} selected={selection} />
         </div>
-        {editable && selectedBlock !== null && slide.blocks[selectedBlock] && (
-          <BlockToolbar
-            key={selectedBlock}
-            block={slide.blocks[selectedBlock]}
-            onStyle={(patch) => handlers.setBlockStyle(selectedBlock, patch)}
+        {editable && sel.eyebrow && (
+          <BlockEditorOverlay
+            key="eyebrow"
+            target="eyebrow"
+            block={null}
+            style={slide.eyebrowStyle}
+            hasPos={false}
+            transformable={false}
+            onStyle={(patch) => setEyebrowStyle(patch)}
+            onPos={() => {}}
+            onFreezeStart={freezeSlide}
           />
         )}
-        {editable && selectedBlock !== null && selStyleable && (
-          <BlockFrame
-            key={`f${selectedBlock}`}
+        {editable && singleIdx !== null && slide.blocks[singleIdx] && (
+          <BlockEditorOverlay
+            key={`b${singleIdx}`}
+            target={singleIdx}
+            block={selBlk}
+            style={selBlk && (isText(selBlk) || isBullets(selBlk)) ? selBlk.style : undefined}
             hasPos={selHasPos}
-            onPos={(p) => setBlockPos(selectedBlock, p)}
+            transformable={selStyleable}
+            onStyle={(patch) => handlers.setBlockStyle(singleIdx, patch)}
+            onPos={(p) => setBlockPos(singleIdx, p)}
+            onFreezeStart={freezeSlide}
+          />
+        )}
+        {editable && sel.blocks.length > 1 && (
+          <MultiSelectOverlay
+            key={`m${sel.blocks.join('-')}`}
+            indices={sel.blocks}
+            onFreezeMove={(dx, dy) => freezeAndMove(sel.blocks, dx, dy)}
           />
         )}
       </div>

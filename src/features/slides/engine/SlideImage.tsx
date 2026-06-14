@@ -27,13 +27,15 @@ export function useSlideImage(assetId?: string | null): string | null {
   return url;
 }
 
-/** 블록 이미지 — 있으면 <img>, 없으면 클릭 가능한 '이미지 추가' 자리표시. */
+/** 블록 이미지 — 있으면 <img>, 없으면 클릭 가능한 '이미지 추가' 자리표시.
+    dataBi: 흐름 모드에서 freeze 측정용 블록 인덱스(data-bi). */
 export const SlideImage: FC<{
   assetId?: string | null;
   fit?: 'cover' | 'contain';
   editable: boolean;
+  dataBi?: number;
   onPick?: () => void;
-}> = ({ assetId, fit, editable, onPick }) => {
+}> = ({ assetId, fit, editable, dataBi, onPick }) => {
   const url = useSlideImage(assetId);
   if (url) {
     return (
@@ -41,13 +43,14 @@ export const SlideImage: FC<{
         className="sl-img"
         src={url}
         alt=""
+        data-bi={dataBi}
         style={{ objectFit: fit ?? 'cover' }}
         onClick={editable ? onPick : undefined}
       />
     );
   }
   return (
-    <button type="button" className="sl-ph sl-ph--add" onClick={editable ? onPick : undefined} disabled={!editable}>
+    <button type="button" className="sl-ph sl-ph--add" data-bi={dataBi} onClick={editable ? onPick : undefined} disabled={!editable}>
       <span className="ph-ic" aria-hidden>🖼️</span>
       <span className="ph-label">{editable ? '이미지 추가' : '이미지'}</span>
     </button>

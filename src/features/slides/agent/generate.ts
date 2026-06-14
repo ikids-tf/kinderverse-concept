@@ -3,7 +3,7 @@
           ② 장표 에이전트(lesson/parent=Sonnet, admin=Haiku)로 DeckSpec JSON 생성.
    출력은 펜스 제거 → 스키마 검증 → 실패 시 1회 재요청(slides-feature/SKILL §7·9).
    프롬프트 원문 단일 출처: slides-feature/PROMPTS.md (아래 인라인은 그 사본).
-   ※ M1: 이미지/차트는 엔진에서 자리표시로 렌더(실제 삽화·Recharts는 다음 단계). */
+   ※ 차트는 SlideChart(recharts)로 실제 렌더, 이미지는 IDB asset 연결(자리표시는 미설정 시에만). */
 
 import { callGateway } from '@/ai/client';
 import { extractJson } from '@/ai/json';
@@ -149,7 +149,13 @@ layout enum: title, section-divider, big-text, big-stat, two-column, image-featu
 - {"type":"title|subtitle|body|caption","text":"..."}
 - {"type":"bullets","items":["...","..."]}   // 3~5개 권장, 최대 7
 - {"type":"image","role":"hero|inline|background|icon","prompt":"<삽화 내용만>","assetId":null}
-- {"type":"chart","chartType":"bar|line|pie|radar","data":[...],"caption":"<선택>"}
+- {"type":"chart","chartType":"bar|line|pie|radar","data":[...]}
+  · data 형식(반드시 지킴): 각 항목 = 라벨 1개 + 숫자값. 항목 4~6개.
+    bar/line:  [{"label":"3월","value":18},{"label":"4월","value":21}, ...]
+    두 계열 비교: [{"label":"3월","우리반":18,"전체평균":15}, ...]   // 숫자 키 2개(키 이름이 범례가 됨)
+    pie:  [{"label":"블록놀이","value":35},{"label":"역할놀이","value":25}, ...]   // 3~5개, 합 100 권장
+    radar:[{"label":"언어","value":80},{"label":"신체","value":70}, ...]   // 4~6축, 0~100
+  · chart 슬라이드는 title(제목)+chart+caption(결론 한 줄)을 함께 둔다. 숫자는 실제 의미 있는 값으로.
 
 big-stat의 blocks는 caption(라벨)+title(수치)+subtitle(맥락) 순서.
 첫 장은 title(표지, eyebrow 없이). 다양한 레이아웃을 섞어라. JSON DeckSpec만 출력.`;

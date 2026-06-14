@@ -52,11 +52,15 @@ export interface BlockStyle {
   color?: BlockColor;
   align?: 'left' | 'center' | 'right';
 }
-/** 자유 배치(2단계 후반) — 1280×720의 %. 있으면 흐름에서 빼내 절대 배치. */
+/** 자유 배치 — `.sl` 콘텐츠(패딩) 박스 기준 %. 있으면 흐름에서 빼내 절대 배치.
+    xPct/yPct=좌상단, wPct=너비. hPct=높이(이미지/차트처럼 콘텐츠 높이가 자동이 아닌 블록만;
+    텍스트는 생략해 내용에 맞춰 자동). rot=회전(도, 박스 중심 기준). */
 export interface BlockPos {
   xPct: number;
   yPct: number;
   wPct: number;
+  hPct?: number;
+  rot?: number;
 }
 
 export type TextBlockType = 'title' | 'subtitle' | 'body' | 'caption';
@@ -82,6 +86,7 @@ export interface ImageBlock {
   /** 슬라이드 이미지 IDB(slideAssets) 참조 id. 데이터는 덱에 넣지 않는다(용량). */
   assetId?: string | null;
   fit?: 'cover' | 'contain';
+  pos?: BlockPos;
 }
 
 /** 슬라이드 배경 이미지 — assetId 참조 + 가독용 스크림(dim). */
@@ -96,6 +101,7 @@ export interface ChartBlock {
   chartType: ChartType;
   data: Record<string, unknown>[];
   caption?: string;
+  pos?: BlockPos;
 }
 export type Block = TextBlock | BulletsBlock | ImageBlock | ChartBlock;
 
@@ -106,6 +112,8 @@ export interface Slide {
   background?: SlideBackground;
   /** 상단 오버라인 라벨(섹션·맥락) — 전문 덱의 작은 대문자 트래킹 라벨. 선택. */
   eyebrow?: string;
+  /** eyebrow 텍스트 스타일 오버라이드(교사 편집). 선택. */
+  eyebrowStyle?: BlockStyle;
   /** 쪽번호 표시 여부(선택). 표지/섹션 구분에는 보통 숨긴다. */
   number?: boolean;
   /** 이 슬라이드의 악센트 색 역할(코랄 기본 / 골드 강조). 선택. */
@@ -188,9 +196,20 @@ export function defaultBlocks(layout: Layout): Block[] {
         { type: 'caption', text: '활동 사진' },
       ];
     case 'chart':
+      // 수동 추가 시에도 바로 예쁜 차트가 보이도록 샘플 데이터를 채워 둔다(교사가 값만 바꾸면 됨).
       return [
-        { type: 'chart', chartType: 'bar', data: [] },
-        { type: 'caption', text: '차트 설명' },
+        { type: 'title', text: '월별 출석 현황' },
+        {
+          type: 'chart',
+          chartType: 'bar',
+          data: [
+            { label: '3월', value: 18 },
+            { label: '4월', value: 21 },
+            { label: '5월', value: 20 },
+            { label: '6월', value: 23 },
+          ],
+        },
+        { type: 'caption', text: '꾸준히 늘어난 우리 반 출석' },
       ];
     default:
       return [{ type: 'title', text: '제목' }];

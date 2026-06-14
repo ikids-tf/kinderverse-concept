@@ -375,7 +375,7 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 .sl-quote { font-family: var(--s-display); font-weight: 500; font-style: italic; font-size: 58px; line-height: 1.28; color: var(--s-fg); max-width: 88%; }
 .sl--quote .sl-caption { font-size: 24px; }
 
-/* hero-image / photo-grid / chart — 자리표시(실제 삽화·차트는 다음 단계) */
+/* hero-image / photo-grid — 이미지 자리표시. chart — recharts 차트(SlideChart). */
 .sl--hero { padding: 76px 104px; gap: 26px; }
 .sl--hero .sl-title { font-size: 56px; max-width: 80%; }
 .sl-ph {
@@ -401,9 +401,15 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 .sl-grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 20px; }
 .sl-grid .sl-ph .ph-ic { font-size: 38px; }
 
-.sl--chart { padding: 72px 104px; gap: 22px; }
-.sl--chart .sl-title { font-size: 48px; max-width: 80%; }
-.sl--chart .sl-ph { flex: 1 1 auto; }
+.sl--chart { padding: 72px 104px; gap: 18px; }
+.sl--chart .sl-title { font-size: 46px; max-width: 80%; }
+/* 차트 영역 — 남은 높이를 꽉 채우고, recharts SVG 텍스트(축·라벨·범례)도 테마 본문 폰트로. */
+.sl-chart { flex: 1 1 auto; min-height: 0; width: 100%; }
+.sl-chart > .sl-ph { height: 100%; }
+.sl-chart text { font-family: var(--s-body); }
+.sl-chart .recharts-cartesian-axis-tick text { font-weight: 500; }
+.sl-chart .recharts-legend-item-text { color: var(--s-fg-2) !important; }
+.sl--chart .sl-caption { color: var(--s-fg-muted); }
 
 /* ── 이미지 — 블록 이미지(<img>)와 '이미지 추가' 자리표시(button) ── */
 .sl-img { display: block; width: 100%; height: 100%; border-radius: var(--r-md); }
@@ -481,83 +487,145 @@ body.chrome:not(.present):not(.fs) .sl-img { cursor: pointer; }
 /* ── 인라인 편집 — contentEditable 빈칸 placeholder + 선택 윤곽 ── */
 [contenteditable] { cursor: text; }
 [contenteditable]:focus { outline: none; }
-/* 선택(=포커스) 블록 윤곽 — 테마 악센트. 불릿은 ul에 윤곽이 잡힌다. */
-.sl-sel { outline: 2px solid var(--s-accent); outline-offset: 8px; border-radius: 4px; }
-/* 자유 배치 블록 — pos(%)로 절대 배치(다른 블록은 흐름대로). 자식 마진 제거로
-   '흐름→절대' 전환 시 h1/p 기본 마진만큼 튀던 점프를 없앤다(흐름 레이아웃엔 영향 없음). */
+/* 선택 마커(.sl-sel) — 텍스트/불릿은 편집 오버레이가 박스를 그리므로 시각 표시 없음(쿼리용).
+   eyebrow만 자체 윤곽(오버레이는 툴바만 표시). */
+.sl-eyebrow.sl-sel { outline: 1.5px solid var(--accent); outline-offset: 4px; border-radius: 3px; }
+/* 흐름 모드 불릿 래퍼 — 레이아웃에 영향 없게 투명(박스 미생성). */
+.sl-bullets-wrap { display: contents; }
+/* 자유 배치 블록 — pos(%)로 절대 배치(다른 블록은 흐름대로). 자식은 박스를 가득 채운다.
+   레이아웃별 max-width(예: .sl--title .sl-title 86%)를 확실히 덮어야 박스=텍스트가 일치한다. */
 .sl-free { margin: 0; }
-.sl-free > * { margin: 0; }
+.sl-free > * { margin: 0 !important; max-width: none !important; width: 100% !important; }
+/* 자유 배치 이미지/차트 — 박스를 가득 채움. */
+.sl-free-media { display: flex; }
+.sl-free-media > * { width: 100%; height: 100%; }
 
-/* ── 블록 프레임(이동/너비 핸들 — fixed 오버레이, 손잡이만 클릭 가능) ── */
-.block-frame { position: fixed; z-index: 39; pointer-events: none; }
-.block-frame .bf-grip,
-.block-frame .bf-resize,
-.block-frame .bf-reset { pointer-events: auto; }
-.bf-grip {
-  position: absolute;
-  left: -14px;
-  top: -14px;
-  width: 26px;
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  background: var(--surface);
-  color: var(--fg-2);
-  box-shadow: var(--shadow-sm);
-  cursor: grab;
-  touch-action: none;
-}
-.bf-grip:active { cursor: grabbing; }
-.bf-grip:hover { color: var(--accent); border-color: var(--accent); }
-.bf-resize {
-  position: absolute;
-  right: -6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 12px;
-  height: 28px;
-  border-radius: var(--r-pill);
-  background: var(--accent);
-  border: 2px solid var(--surface);
-  box-shadow: var(--shadow-sm);
-  cursor: ew-resize;
-  touch-action: none;
-}
-.bf-reset {
-  position: absolute;
-  right: -14px;
-  top: -14px;
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  background: var(--surface);
-  color: var(--fg-2);
-  font-size: 13px;
-  box-shadow: var(--shadow-sm);
-  cursor: pointer;
-}
-.bf-reset:hover { color: var(--accent); border-color: var(--accent); }
-
-/* ── 블록 스타일 툴바(앱 크롬 — Milray 토큰, 슬라이드 위에 fixed) ── */
-.block-toolbar {
+/* ── 블록 편집 오버레이(앱 크롬 — Milray 토큰, 화면 fixed) ──
+   본체는 pointer-events:none(본문 텍스트 편집 통과), 테두리·핸들·회전만 잡힌다. */
+.be-frame {
   position: fixed;
   z-index: 40;
+  pointer-events: none;
+  outline: 1.5px solid var(--accent);
+  transform-origin: center center;
+}
+.be-frame .be-edge,
+.be-frame .be-handle,
+.be-frame .be-rotate { pointer-events: auto; touch-action: none; }
+
+/* 이동 — 4변 테두리(절반은 바깥쪽) */
+.be-edge { position: absolute; }
+.be-edge-t { top: 0; left: 0; right: 0; height: 14px; transform: translateY(-50%); cursor: move; }
+.be-edge-b { bottom: 0; left: 0; right: 0; height: 14px; transform: translateY(50%); cursor: move; }
+.be-edge-l { left: 0; top: 0; bottom: 0; width: 14px; transform: translateX(-50%); cursor: move; }
+.be-edge-r { right: 0; top: 0; bottom: 0; width: 14px; transform: translateX(50%); cursor: move; }
+
+/* 리사이즈 핸들(코너=폰트 스케일, 좌우=너비) */
+.be-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  background: var(--surface);
+  border: 1.5px solid var(--accent);
+  border-radius: 3px;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+/* 회전 핸들 + 연결선(상단 중앙) */
+.be-rotate-line { position: absolute; left: 50%; top: 0; width: 1.5px; height: 22px; background: var(--accent); transform: translate(-50%, -100%); }
+.be-rotate {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, calc(-100% - 22px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  cursor: grab;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+.be-rotate:active { cursor: grabbing; }
+
+/* ── 블록 스타일 툴바(박스 위에 붙어 따라다님) ── */
+.be-toolbar {
+  position: fixed;
+  z-index: 41;
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 6px;
+  padding: 5px 7px;
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
   background: var(--surface);
   box-shadow: var(--shadow-pop);
 }
+
+/* 다중 선택 박스 — 합집합 영역, 드래그로 전체 이동 */
+.be-multi {
+  position: fixed;
+  z-index: 40;
+  border: 1.5px dashed var(--accent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  cursor: move;
+  touch-action: none;
+}
+.be-multi-count {
+  position: absolute;
+  left: 0;
+  top: -24px;
+  font: 600 11px var(--font-sans);
+  color: var(--surface);
+  background: var(--accent);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+
+/* 내보내기(PDF/PPTX) 메뉴 + 진행 스피너 */
+.export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+}
+.export-item {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg);
+  font: 500 13px var(--font-sans);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.export-item:hover { background: var(--surface-2); color: var(--accent); }
+.be-spin {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: be-spin 0.7s linear infinite;
+}
+@keyframes be-spin { to { transform: rotate(360deg); } }
 .bt-btn {
   display: inline-flex;
   align-items: center;
