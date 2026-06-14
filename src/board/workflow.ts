@@ -479,10 +479,11 @@ export function animatePanBy(dx: number, dy: number): void {
   requestAnimationFrame(step);
 }
 
-/** 생성 완료된 프레임(+자식 전체)을 '오른쪽 빈 곳'으로 옮긴다 — 다른 카드(이동 대상 제외)
-    들의 가장 오른쪽 + 여백으로 보내 기존과 겹치지 않게. 이동하는 동안 카메라가 같은 양
+/** 생성 완료된 프레임(+자식 전체)을 '지금 자리에서 가장 가까운 오른쪽 빈 자리'로 옮긴다 —
+    같은 가로 띠(세로로 겹치는) 카드만 장애물로 보고 그 오른쪽 첫 빈 자리로 보낸다(보드 전체
+    오른쪽 끝까지 가지 않음 — 교사가 보던 화면 근처에 둔다). 이동하는 동안 카메라가 같은 양
     따라가 결과물은 화면 그 자리(중앙)에 머문 채(밖으로 안 나가게) 함께 이동한다.
-    중앙에서 생성→포커스한 뒤 호출. 이미 오른쪽 빈 곳이거나 빈 보드면 아무것도 안 한다. */
+    중앙에서 생성→포커스한 뒤 호출. 현재 자리가 이미 빈 곳이면 움직이지 않는다. */
 export function slideFrameToEmpty(frameId: string): void {
   const b = useBoardStore.getState();
   const frame = b.nodes[frameId];
@@ -491,12 +492,31 @@ export function slideFrameToEmpty(frameId: string): void {
   // 끌어오고 프레임 자신은 빼므로 여기엔 부적합. frameSubtree(자식) + 프레임 id를 쓴다.
   const ids = [frameId, ...frameSubtree(frameId).filter((id) => b.nodes[id]?.type !== 'motion')];
   const moving = new Set(ids);
-  const others = Object.values(b.nodes).filter((n) => !moving.has(n.id) && n.type !== 'motion');
-  if (others.length === 0) return; // 빈 보드 — 옮길 필요 없음
-  const GAP = 96;
-  const maxRight = Math.max(...others.map((n) => { const o = worldBox(n); return o.x + o.w; }));
-  const dx = Math.round(maxRight + GAP - frame.x);
-  if (dx <= 0) return; // 이미 모든 카드 오른쪽(빈 곳)
+  const fb = worldBox(frame);
+  const GAP = 80;
+  // 같은 가로 띠(세로로 겹치는) 카드만 장애물 — 그 띠에서 '오른쪽으로 가장 가까운' 빈 자리를
+  // 찾는다(보드 끝이 아니라 지금 보고 있는 줄의 바로 옆 여백).
+  const bandTop = fb.y - GAP;
+  const bandBot = fb.y + fb.h + GAP;
+  const intervals = Object.values(b.nodes)
+    .filter((n) => !moving.has(n.id) && n.type !== 'motion')
+    .map(worldBox)
+    .filter((o) => o.y < bandBot && o.y + o.h > bandTop) // 세로로 겹치는 카드만
+    .map((o) => [o.x - GAP, o.x + o.w + GAP] as [number, number])
+    .sort((a, z) => a[0] - z[0]);
+  // 겹치는 구간 병합(디스조인트) → fb.x에서 폭 fb.w가 들어갈 가장 가까운 오른쪽 빈 자리.
+  const merged: [number, number][] = [];
+  for (const iv of intervals) {
+    const last = merged[merged.length - 1];
+    if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+    else merged.push([iv[0], iv[1]]);
+  }
+  let cand = fb.x;
+  for (const [s, e] of merged) {
+    if (cand < e && cand + fb.w > s) cand = e; // 그 구간과 겹치면 오른쪽으로 밀기
+  }
+  const dx = Math.round(cand - fb.x);
+  if (dx <= 0) return; // 현재 자리가 이미 빈 곳 — 이동 불필요
   const zoom = b.viewport.zoom;
   const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   if (reduce) {
