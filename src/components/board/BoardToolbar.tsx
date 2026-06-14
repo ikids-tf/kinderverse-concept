@@ -26,15 +26,15 @@ function viewCenterWorld() {
   return { x: (cx - panX) / zoom, y: (cy - panY) / zoom };
 }
 
-type ToolId = PrimitiveType | 'frame' | 'video' | 'motion';
+type ToolId = PrimitiveType | 'frame' | 'video' | 'motion' | 'doc';
 
 const TOOLS: Array<{ id: ToolId; icon: IconName; label: string }> = [
   { id: 'frame', icon: 'frame', label: '프레임' },
   { id: 'text', icon: 'writing', label: '텍스트' },
-  { id: 'sticky', icon: 'record', label: '메모' },
+  { id: 'sticky', icon: 'memo', label: '메모' },
+  { id: 'doc', icon: 'plan', label: '문서' },
   { id: 'image', icon: 'gallery', label: '이미지' },
-  { id: 'video', icon: 'video', label: '동영상' },
-  { id: 'shape', icon: 'board', label: '도형' },
+  { id: 'video', icon: 'video', label: '뷰어' },
   { id: 'motion', icon: 'motion', label: '애니메이션' },
 ];
 
@@ -54,7 +54,7 @@ const MOTION_PATCH = (loop: boolean): Partial<BoardNode> => ({
   },
 });
 
-/** 동영상 플레이어 임베드 카드 — 툴바 동영상 버튼과 플라이아웃이 함께 쓴다. */
+/** 동영상 플레이어 임베드 카드 — 뷰어 플라이아웃의 '개별 뷰어'에서 쓴다. */
 const VIDEO_PLAYER_PATCH: Partial<BoardNode> = {
   w: 640,
   h: 420,
@@ -62,6 +62,73 @@ const VIDEO_PLAYER_PATCH: Partial<BoardNode> = {
   text: '동영상 플레이어',
   data: { embed: '/video-player.html', title: '동영상 플레이어' },
 };
+
+/** 매직 뷰어 — 뷰어 버튼 기본 클릭(유튜브·동영상·3D를 담는 내용에 맞춰 하나로). */
+const MAGIC_VIEWER_PATCH: Partial<BoardNode> = {
+  w: 640,
+  h: 420,
+  autoH: false,
+  text: '매직 뷰어',
+  data: { embed: '/magic-viewer.html', title: '매직 뷰어' },
+};
+
+/* 문서 폼 — 각 유아교육 양식의 A4 문서 스캐폴드(data.doc 마크다운). 교사가 그대로
+   프린트하거나, 선택 후 프롬프트로 채워(에이전트) 완성한다. 빈 양식이 보드에 바로 놓인다. */
+const DOC_TEMPLATES: Array<{ id: string; label: string; desc: string; text: string }> = [
+  {
+    id: 'basic', label: '기본형', desc: '제목 + 본문 — 자유 문서',
+    text: '# 제목\n\n내용을 입력하세요.',
+  },
+  {
+    id: 'plan', label: '놀이계획', desc: '주간 놀이계획 — 요일별 표',
+    text:
+      '# 주간 놀이계획\n\n**대상** 만 OO세 · **기간** OO월 OO주 · **주제** \n\n' +
+      '## 주간 교육목표\n- \n\n## 요일별 놀이\n' +
+      '| 요일 | 누리과정 영역 | 놀이 활동 | 준비물 |\n|---|---|---|---|\n' +
+      '| 월 |  |  |  |\n| 화 |  |  |  |\n| 수 |  |  |  |\n| 목 |  |  |  |\n| 금 |  |  |  |',
+  },
+  {
+    id: 'story', label: '놀이기록', desc: '놀이이야기 — 학부모 공유용',
+    text:
+      '# 놀이 이야기\n\n**날짜** 20OO.OO.OO · **놀이 주제** \n\n' +
+      '## 오늘의 놀이\n아이들이 어떤 놀이를 했는지 이야기처럼 적어요.\n\n' +
+      '## 배움과 성장\n놀이 속에서 발견한 배움·성장을 적어요.\n\n## 가정 연계\n',
+  },
+  {
+    id: 'observation', label: '관찰기록', desc: '발달 관찰 — 영역 연계',
+    text:
+      '# 관찰기록\n\n**아동** OOO · **일시** 20OO.OO.OO · **장면** \n\n' +
+      '## 관찰 내용\n객관적 사실을 중심으로 기록해요.\n\n' +
+      '## 발달 영역 연계\n- \n\n## 해석 및 지원 계획\n',
+  },
+  {
+    id: 'notice', label: '알림장', desc: '가정통신문·안내문',
+    text:
+      '# 알림장\n\nOOO 학부모님께,\n\n안내 내용을 적어요.\n\n' +
+      '## 안내 사항\n- \n\n20OO년 OO월 OO일\nOO반 드림',
+  },
+];
+
+/** 문서 카드 패치 — A4 세로 비율 고정(480 : 679 ≈ 짧은 변 기준 1:√2). autoH를 끄고
+    고정 높이로 둬 한 장(A4)처럼 보이게 한다. 바운드 박스 스케일은 data.doc 락으로
+    이미 '정비례만' 적용되므로(BoardCanvas freeform 제외) 비율이 유지된다. */
+const A4_W = 480;
+const A4_H = 679;
+const docPatch = (label: string, text: string): Partial<BoardNode> => ({
+  w: A4_W,
+  h: A4_H,
+  autoH: false,
+  text,
+  data: { doc: true, title: label },
+});
+
+/** 문서 미니 스와치 — A4 페이지 + 본문 줄. */
+const docSwatch = () => (
+  <svg viewBox="0 0 24 24" width={18} height={18} className="text-fg-2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="5" y="3" width="14" height="18" rx="2" />
+    <path d="M8 8h8M8 12h8M8 16h5" />
+  </svg>
+);
 
 interface PresetItem {
   id: string;
@@ -183,15 +250,29 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
       },
     ],
   },
+  doc: {
+    title: '문서',
+    sections: [
+      {
+        items: DOC_TEMPLATES.map((t) => ({
+          id: t.id,
+          label: t.label,
+          desc: t.desc,
+          nodeType: 'sticky' as NodeType,
+          patch: docPatch(t.label, t.text),
+          swatch: docSwatch(),
+        })),
+      },
+    ],
+  },
   image: {
-    title: '이미지 카드',
+    title: '이미지',
     sections: [
       {
         items: [
-          { id: 'basic', label: '기본', desc: '200×150 — 자료 사진', patch: {}, swatch: ratioBox(21, 16) },
-          { id: 'wide', label: '와이드', desc: '320×180 — 환경판·배너', patch: { w: 320, h: 180 }, swatch: ratioBox(25, 14) },
-          { id: 'portrait', label: '세로', desc: '180×240 — 인물·관찰 컷', patch: { w: 180, h: 240 }, swatch: ratioBox(14, 19) },
-          { id: 'square', label: '정사각', desc: '200×200 — 짝맞추기 카드', patch: { w: 200, h: 200 }, swatch: ratioBox(17, 17) },
+          { id: 'image', label: '이미지', desc: '자료 사진·AI 그림 (가로)', patch: {}, swatch: ratioBox(21, 16) },
+          { id: 'worksheet', label: '활동지', desc: '인쇄용 활동지·도안 (세로 3:4)', patch: { w: 360, h: 480 }, swatch: ratioBox(15, 20) },
+          { id: 'card', label: '카드', desc: '그림·낱말·짝맞추기 카드 (정사각)', patch: { w: 200, h: 200 }, swatch: ratioBox(17, 17) },
         ],
       },
     ],
@@ -233,7 +314,7 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
           {
             id: 'magic', label: '매직 뷰어', desc: '유튜브·동영상·3D를 하나로 — 링크·파일·프롬프트로 알아서',
             nodeType: 'sticky',
-            patch: { w: 640, h: 420, autoH: false, text: '매직 뷰어', data: { embed: '/magic-viewer.html', title: '매직 뷰어' } },
+            patch: MAGIC_VIEWER_PATCH,
             swatch: (
               <svg viewBox="0 0 24 24" width={19} height={19} className="text-accent" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M5 19 19 5M14 5h5v5" />
@@ -268,6 +349,17 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
               </svg>
             ),
           },
+          {
+            id: 'glb', label: '3D 뷰어', desc: '3D 모델(GLB) 보기·애니메이션 재생',
+            nodeType: 'sticky',
+            patch: { w: 520, h: 480, autoH: false, text: '3D 뷰어', data: { embed: '/glb-viewer.html', title: '3D 뷰어' } },
+            swatch: (
+              <svg viewBox="0 0 24 24" width={19} height={19} className="text-fg-2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden>
+                <path d="M12 2.8 20 7v10l-8 4.2L4 17V7z" />
+                <path d="M4 7l8 4 8-4M12 11v10" />
+              </svg>
+            ),
+          },
         ],
       },
     ],
@@ -281,17 +373,6 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
           { id: 'a4l', label: 'A4 가로', desc: '680×480 — 가로 인쇄물', patch: { w: 680, h: 480, data: { title: 'A4 가로' } }, swatch: ratioBox(20, 14, true) },
           { id: 'square', label: '정사각', desc: '520×520 — 게시 카드', patch: { w: 520, h: 520, data: { title: '정사각' } }, swatch: ratioBox(17, 17, true) },
           { id: 'wide', label: '와이드 16:9', desc: '640×360 — 화면·배너', patch: { w: 640, h: 360, data: { title: '와이드' } }, swatch: ratioBox(24, 13.5, true) },
-          {
-            id: 'glb', label: '3D 뷰어', desc: '3D 모델(GLB) 보기·애니메이션 재생',
-            nodeType: 'sticky',
-            patch: { w: 520, h: 480, autoH: false, text: '3D 뷰어', data: { embed: '/glb-viewer.html', title: '3D 뷰어' } },
-            swatch: (
-              <svg viewBox="0 0 24 24" width={19} height={19} className="text-fg-2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden>
-                <path d="M12 2.8 20 7v10l-8 4.2L4 17V7z" />
-                <path d="M4 7l8 4 8-4M12 11v10" />
-              </svg>
-            ),
-          },
         ],
       },
     ],
@@ -344,10 +425,17 @@ export function BoardToolbar() {
       addFrameCmd(c.x - 260, c.y - 200, '새 프레임');
       return;
     }
-    // 동영상 버튼 클릭 = 동영상 플레이어 카드(파일 불러와 재생) 바로 생성.
+    // 뷰어 버튼 클릭 = 매직 뷰어(유튜브·동영상·3D를 담는 내용에 맞춰) 바로 생성.
     if (type === 'video') {
       const c = viewCenterWorld();
-      addPresetNodeCmd('sticky', c.x, c.y, VIDEO_PLAYER_PATCH, '동영상 플레이어 추가');
+      addPresetNodeCmd('sticky', c.x, c.y, MAGIC_VIEWER_PATCH, '매직 뷰어 추가');
+      return;
+    }
+    // 문서 버튼 클릭 = 기본형 문서 바로 생성(호버 플라이아웃에서 양식 선택).
+    if (type === 'doc') {
+      const c = viewCenterWorld();
+      const t = DOC_TEMPLATES[0];
+      addPresetNodeCmd('sticky', c.x, c.y, docPatch(t.label, t.text), '문서 추가');
       return;
     }
     // 애니메이션 버튼 클릭 = 이동 경로(한 번 이동) 바로 생성.
@@ -357,13 +445,18 @@ export function BoardToolbar() {
       return;
     }
     const c = viewCenterWorld();
-    addNodeCmd(type, c.x - 90, c.y - 70);
+    const id = addNodeCmd(type, c.x - 90, c.y - 70);
+    // 메모·텍스트는 추가 즉시 편집 모드로 — 더블클릭 없이 바로 타이핑(스티키 노트 UX).
+    if (type === 'sticky' || type === 'text') {
+      const n = useBoardStore.getState().nodes[id];
+      if (n) useBoardStore.getState().updateNodeRaw(id, { data: { ...(n.data ?? {}), autoEdit: true } });
+    }
   };
 
   const addPreset = (type: ToolId, p: PresetItem) => {
     const c = viewCenterWorld();
-    // 'video' is a tool id, not a node type — its presets are stickies (embed).
-    const fallback: NodeType = type === 'video' ? 'sticky' : type;
+    // 'video'·'doc'은 노드 타입이 아니라 툴 id — 프리셋은 모두 sticky(임베드/문서).
+    const fallback: NodeType = type === 'video' || type === 'doc' ? 'sticky' : type;
     addPresetNodeCmd(p.nodeType ?? fallback, c.x, c.y, p.patch, `${p.label} 추가`);
     setFly(null);
   };

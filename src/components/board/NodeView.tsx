@@ -1,4 +1,4 @@
-import { memo as reactMemo, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -19,6 +19,7 @@ import { separateImageLayers } from '@/ai/layers';
 import { ensureThumb } from '@/board/imageLod';
 import { getVideoAsset, saveVideoAsset } from '@/board/videoAssets';
 import { saveAsset } from '@/board/assets';
+import { isEditableTarget } from '@/hooks/useKeyboardShortcuts';
 import { MotionPathNode } from './MotionPathNode';
 
 /* Renders one board node (reference board model): frame container, runner control,
@@ -521,6 +522,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     return () => {
       cancelled = true;
     };
+    // title은 표시용 라벨일 뿐 — 의존성에 넣으면 제목을 바꿀 때마다 영상이 다시 로드되므로
+    // 제외하고 현재 값을 스냅샷으로 읽는다(복원은 videoAssetId 변경 시에만).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVideoViewer, node.data?.videoAssetId]);
   const editable = node.type === 'sticky' || node.type === 'text' || node.type === 'image';
 
@@ -559,7 +563,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   }, [node.id]);
 
   useEffect(() => {
-    if (editing) ref.current?.focus();
+    if (!editing) return;
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    const end = el.value.length;
+    el.setSelectionRange(end, end); // 캐럿을 끝으로 — '선택 후 타이핑' 시드 글자 뒤에 위치
   }, [editing]);
 
   // 이미지 LOD(2-2): 보드 표시용 ~400px 썸네일을 백그라운드 생성(원본 node.src 보존).
@@ -641,6 +650,51 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       useBoardStore.getState().focusNode(node.id);
     }
   };
+
+  // 새로 추가된 메모/텍스트(toolbar) → 바로 편집 모드로(더블클릭 없이 타이핑).
+  // data.autoEdit는 1회용 신호 — 소비 즉시 제거해 스냅샷에 남거나 재발동하지 않게 한다.
+  useEffect(() => {
+    if (!node.data?.autoEdit) return;
+    if (node.type === 'sticky' || node.type === 'text') {
+      setDraft(node.text ?? '');
+      setEditing(true);
+    }
+    const cur = useBoardStore.getState().nodes[node.id];
+    if (cur?.data?.autoEdit) {
+      const d = { ...(cur.data ?? {}) };
+      delete d.autoEdit;
+      useBoardStore.getState().updateNodeRaw(node.id, { data: d });
+    }
+  }, [node.data?.autoEdit, node.id, node.type, node.text]);
+
+  // 선택된 메모/텍스트에서 글자를 입력하면 바로 편집 모드로 — 더블클릭 없이 '선택 후 타이핑'.
+  // 영문/숫자/기호는 그 글자를 그대로 이어 넣고, 한글(IME) 조합·Enter는 편집기만 열어
+  // 곧바로 타이핑하게 한다(단일 선택일 때만, 다른 입력 중에는 가로채지 않음).
+  useEffect(() => {
+    if (!selected || editing || node.locked) return;
+    if (node.type !== 'sticky' && node.type !== 'text') return;
+    if (node.data?.embed || node.data?.doc) return; // 뷰어·문서 카드 제외 — 평문 메모/텍스트만
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (isEditableTarget(e.target)) return; // 프롬프트바 등 다른 입력 중이면 무시
+      if (useBoardStore.getState().selection.length !== 1) return; // 단일 선택만
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        setDraft(node.text ?? '');
+        setEditing(true);
+      } else if (e.isComposing || e.keyCode === 229) {
+        // 한글 등 IME 조합 시작 — 편집기만 열고(첫 조합은 에디터에서 다시) preventDefault 안 함.
+        setDraft(node.text ?? '');
+        setEditing(true);
+      } else if (e.key.length === 1 && e.key !== ' ') {
+        e.preventDefault();
+        setDraft((node.text ?? '') + e.key);
+        setEditing(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected, editing, node.locked, node.type, node.data?.embed, node.data?.doc, node.text, node.id]);
 
   /* ---------- motion: 이동 애니메이션 경로 (출발→도착 곡선 + 재생) ---------- */
   if (node.type === 'motion') {
@@ -1323,15 +1377,6 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             thumbs={Array.isArray(node.data?.thumbs) ? (node.data.thumbs as SourceThumbData[]) : undefined}
             summary={node.data?.summary as string | undefined}
           />
-        ) : editing && !isNote && !isDoc ? (
-          // 일반 메모 — 보이던 모습(굵은 제목 + 본문) 그대로 제자리에서 수정.
-          <MemoEdit
-            initial={draft}
-            onCommit={(t2) => {
-              setEditing(false);
-              editTextCmd(node.id, node.text ?? '', t2);
-            }}
-          />
         ) : editing ? (
           <textarea
             ref={ref}
@@ -1893,47 +1938,6 @@ function LockBadge() {
     </span>
   );
 }
-
-/* 메모 제자리 편집 — MemoText와 똑같은 마크업(굵은 제목 + 본문)을 contentEditable로
-   그대로 수정한다. 내용은 마운트 시 한 번만 그리고(외부 리렌더로 캐럿이 리셋되지
-   않게 메모이즈), blur 시 innerText를 커밋한다. <p> 블록 사이는 innerText에서 빈
-   줄(\n\n)로 직렬화되므로 첫 줄바꿈 묶음만 제목/본문 구분자(\n) 하나로 정규화한다. */
-const MemoEdit = reactMemo(
-  function MemoEdit({ initial, onCommit }: { initial: string; onCommit: (text: string) => void }) {
-    const ref = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-      const el = ref.current;
-      if (!el) return;
-      el.focus();
-      // 캐럿을 내용 끝으로
-      const sel = window.getSelection();
-      if (sel) {
-        const r = document.createRange();
-        r.selectNodeContents(el);
-        r.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(r);
-      }
-    }, []);
-    const nl = initial.indexOf('\n');
-    const title = nl >= 0 ? initial.slice(0, nl) : initial;
-    const body = nl >= 0 ? initial.slice(nl + 1).trim() : '';
-    return (
-      <div
-        ref={ref}
-        data-kv-editable="true"
-        contentEditable
-        suppressContentEditableWarning
-        onBlur={() => onCommit((ref.current?.innerText ?? '').replace(/\n+/, '\n').trimEnd())}
-        className="cursor-text focus:outline-none"
-      >
-        <p className="font-semibold leading-snug text-fg" style={{ fontSize: '0.95rem' }}>{title}</p>
-        {body ? <p className="mt-t1 whitespace-pre-wrap text-sm leading-relaxed text-fg-2">{body}</p> : null}
-      </div>
-    );
-  },
-  () => true, // 편집 중엔 절대 되그리지 않는다 — 타이핑 캐럿 보존
-);
 
 /* Memo editorial design — first line is a bold title, the rest is body text. */
 function MemoText({ text }: { text?: string }) {
