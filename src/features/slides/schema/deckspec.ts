@@ -79,7 +79,16 @@ export interface ImageBlock {
   /** 삽화 내용만. 스타일 접미(style-lock)는 이미지 워커가 덧붙인다(M2). 텍스트 지시 금지. */
   prompt: string;
   characterRef?: string;
+  /** 슬라이드 이미지 IDB(slideAssets) 참조 id. 데이터는 덱에 넣지 않는다(용량). */
   assetId?: string | null;
+  fit?: 'cover' | 'contain';
+}
+
+/** 슬라이드 배경 이미지 — assetId 참조 + 가독용 스크림(dim). */
+export interface SlideBackground {
+  assetId: string;
+  dim?: number; // 0..1 어두운 오버레이(글자 가독성)
+  fit?: 'cover' | 'contain';
 }
 export type ChartType = 'bar' | 'line' | 'pie' | 'radar';
 export interface ChartBlock {
@@ -93,6 +102,8 @@ export type Block = TextBlock | BulletsBlock | ImageBlock | ChartBlock;
 export interface Slide {
   layout: Layout;
   blocks: Block[];
+  /** 슬라이드 배경 이미지(선택). */
+  background?: SlideBackground;
   /** 상단 오버라인 라벨(섹션·맥락) — 전문 덱의 작은 대문자 트래킹 라벨. 선택. */
   eyebrow?: string;
   /** 쪽번호 표시 여부(선택). 표지/섹션 구분에는 보통 숨긴다. */

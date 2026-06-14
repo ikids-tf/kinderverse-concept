@@ -18,6 +18,7 @@ import {
   isBullets,
   isImage,
 } from '../schema/deckspec';
+import { SlideImage } from './SlideImage';
 
 /** 자유 배치 — pos가 있으면 흐름에서 빼내 캔버스(%) 절대 좌표로. */
 function posStyle(pos?: BlockPos): CSSProperties | undefined {
@@ -33,6 +34,8 @@ export interface EditHandlers {
   select: (blockIndex: number) => void;
   /** 선택 블록 스타일 오버라이드 패치. */
   setBlockStyle: (blockIndex: number, patch: Partial<BlockStyle>) => void;
+  /** 이미지 블록의 이미지 선택(피커 열기). */
+  pickImage: (blockIndex: number) => void;
 }
 export interface LayoutProps {
   slide: Slide;
@@ -64,10 +67,10 @@ function findBullets(slide: Slide): { items: string[]; index: number; style?: Bl
   }
   return null;
 }
-function findImages(slide: Slide): { index: number }[] {
-  const out: { index: number }[] = [];
+function findImages(slide: Slide): { index: number; assetId?: string | null; fit?: 'cover' | 'contain' }[] {
+  const out: { index: number; assetId?: string | null; fit?: 'cover' | 'contain' }[] = [];
   slide.blocks.forEach((b, i) => {
-    if (isImage(b)) out.push({ index: i });
+    if (isImage(b)) out.push({ index: i, assetId: b.assetId, fit: b.fit });
   });
   return out;
 }
@@ -241,7 +244,14 @@ const ImageFeatureLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) =
         {body && <TextBlockView slide={slide} index={body.index} tag="div" className="sl-body" placeholder="핵심 설명" editable={editable} selected={selected} h={h} />}
       </div>
       <div className="sl-feature-img">
-        <Placeholder icon="🖼️" label="삽화" sub="이미지 연결은 다음 단계" />
+        {(() => {
+          const img = findImages(slide)[0];
+          return img ? (
+            <SlideImage assetId={img.assetId} fit={img.fit} editable={editable} onPick={() => h.pickImage(img.index)} />
+          ) : (
+            <Placeholder icon="🖼️" label="삽화" />
+          );
+        })()}
       </div>
     </div>
   );
@@ -312,26 +322,32 @@ const QuoteLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
 
 const HeroImageLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
   const t = findText(slide, 'title');
+  const img = findImages(slide)[0];
   return (
     <div className="sl sl--hero">
       <Eyebrow slide={slide} />
       {t && <TextBlockView slide={slide} index={t.index} tag="h1" className="sl-title" placeholder="제목" editable={editable} selected={selected} h={h} />}
-      <Placeholder icon="🖼️" label="삽화 자리" sub="AI 삽화 생성은 다음 단계에서 채워져요" />
+      {img ? (
+        <SlideImage assetId={img.assetId} fit={img.fit} editable={editable} onPick={() => h.pickImage(img.index)} />
+      ) : (
+        <Placeholder icon="🖼️" label="삽화" />
+      )}
     </div>
   );
 };
 
 const PhotoGridLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
-  const imgs = findImages(slide);
+  const imgs = findImages(slide).slice(0, 4);
   const c = findText(slide, 'caption');
-  const cells = imgs.length ? imgs : [{ index: -1 }, { index: -2 }, { index: -3 }, { index: -4 }];
   return (
     <div className="sl sl--grid">
       <Eyebrow slide={slide} />
       <div className="sl-grid">
-        {cells.slice(0, 4).map((im) => (
-          <Placeholder key={im.index} icon="🖼️" />
-        ))}
+        {imgs.length > 0
+          ? imgs.map((im) => (
+              <SlideImage key={im.index} assetId={im.assetId} fit={im.fit} editable={editable} onPick={() => h.pickImage(im.index)} />
+            ))
+          : [0, 1, 2, 3].map((i) => <Placeholder key={i} icon="🖼️" />)}
       </div>
       {c && <TextBlockView slide={slide} index={c.index} tag="div" className="sl-caption" placeholder="사진 설명" editable={editable} selected={selected} h={h} />}
     </div>

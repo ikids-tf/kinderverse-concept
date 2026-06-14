@@ -18,11 +18,13 @@ import {
   relayout,
   isBullets,
   isText,
+  isImage,
 } from '../schema/deckspec';
 import { SlideRenderer } from '../engine/SlideRenderer';
 import { BlockToolbar } from '../engine/BlockToolbar';
 import { BlockFrame } from '../engine/BlockFrame';
 import { LAYOUT_META, type EditHandlers } from '../engine/layouts';
+import { ImagePicker } from './ImagePicker';
 import { loadDeck, saveDeck } from './persist';
 
 const SLIDE_W = 1280;
@@ -36,6 +38,7 @@ const NOOP_HANDLERS: EditHandlers = {
   mutateBullets: () => {},
   select: () => {},
   setBlockStyle: () => {},
+  pickImage: () => {},
 };
 
 /** 테마 피커 스와치 — themes.css 대표 색(배경+악센트). 피커 미리보기 전용(엔진은 CSS가 결정). */
@@ -86,6 +89,7 @@ const IC = {
   moveRight: 'M5 12h14M13 6l6 6-6 6',
   expand: 'M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3M21 16v3a2 2 0 0 1-2 2h-3',
   x: 'M18 6 6 18M6 6l12 12',
+  image: 'M3 5h18v14H3zM3 16l4-4 3 3 5-5 6 6M9 10a1 1 0 1 1-2 0 1 1 0 0 1 2 0z',
 };
 
 export function SlidesViewerApp() {
@@ -110,6 +114,8 @@ export function SlidesViewerApp() {
   const dragRef = useRef<{ i: number; x: number; moved: boolean } | null>(null);
   // 선택된 블록(스타일 툴바 대상). 슬라이드/편집 상태가 바뀌면 해제.
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
+  // 이미지 피커 대상(블록 이미지 / 배경 / 닫힘).
+  const [pickerTarget, setPickerTarget] = useState<{ kind: 'block'; index: number } | { kind: 'bg' } | null>(null);
 
   const total = deck.slides.length;
   const idx = Math.min(current, total - 1);
@@ -273,9 +279,23 @@ export function SlidesViewerApp() {
             i === bi && (isText(b) || isBullets(b)) ? { ...b, style: { ...(b.style ?? {}), ...patch } } : b,
           ),
         })),
+      pickImage: (bi) => setPickerTarget({ kind: 'block', index: bi }),
     }),
     [idx, patchSlide],
   );
+
+  // 피커에서 고른 이미지(assetId)를 대상(블록/배경)에 적용.
+  const applyPickedImage = (assetId: string) => {
+    if (!pickerTarget) return;
+    if (pickerTarget.kind === 'bg') {
+      patchSlide(idx, (s) => ({ ...s, background: { assetId, dim: 0.35 } }));
+    } else {
+      const bi = pickerTarget.index;
+      patchSlide(idx, (s) => ({ ...s, blocks: s.blocks.map((b, i) => (i === bi && isImage(b) ? { ...b, assetId } : b)) }));
+    }
+    setPickerTarget(null);
+  };
+  const removeBackground = () => patchSlide(idx, (s) => ({ ...s, background: undefined }));
 
   // 블록 자유 배치(드래그) — pos 설정/해제. 항상 최신 상태에 함수형 적용.
   const setBlockPos = (bi: number, pos: BlockPos | null) =>
@@ -431,6 +451,10 @@ export function SlidesViewerApp() {
             </div>
           )}
         </div>
+        <div className="bar-group">
+          <button type="button" className="ibtn" title="슬라이드 배경 이미지" onClick={() => setPickerTarget({ kind: 'bg' })}><Svg d={IC.image} /></button>
+          {slide.background && <button type="button" className="ibtn" title="배경 제거" onClick={removeBackground}><Svg d={IC.x} /></button>}
+        </div>
         <button type="button" className="pbtn" title="현재 레이아웃으로 새 슬라이드 추가" onClick={() => addSlide(slide.layout)}>
           <Svg d={IC.plus} /> 슬라이드
         </button>
@@ -497,6 +521,14 @@ export function SlidesViewerApp() {
 
       {/* 풀스크린 종료 ✕ */}
       <button type="button" className="fs-exit" title="전체 화면 종료 (Esc)" onClick={exitFs}><Svg d={IC.x} /></button>
+
+      {editable && pickerTarget && (
+        <ImagePicker
+          title={pickerTarget.kind === 'bg' ? '배경 이미지' : '블록 이미지'}
+          onPick={applyPickedImage}
+          onClose={() => setPickerTarget(null)}
+        />
+      )}
     </div>
   );
 }

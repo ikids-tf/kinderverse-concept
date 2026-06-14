@@ -4,6 +4,7 @@
 import type { FC } from 'react';
 import type { DeckSpec, Slide } from '../schema/deckspec';
 import { LAYOUT_COMPONENTS, type EditHandlers } from './layouts';
+import { SlideBg } from './SlideImage';
 
 export const SlideRenderer: FC<{
   slide: Slide;
@@ -22,7 +23,9 @@ export const SlideRenderer: FC<{
       data-theme={theme}
       data-layout={slide.layout}
       data-accent={slide.accentRole ?? 'coral'}
+      data-bg={slide.background ? '1' : undefined}
     >
+      <SlideBg background={slide.background} />
       <Cmp slide={slide} editable={editable} h={h} selected={selected ?? null} />
       {slide.number && pageNumber ? (
         <span className="slide-number">{String(pageNumber).padStart(2, '0')}</span>
