@@ -763,6 +763,8 @@ body.chrome:not(.present):not(.fs) .rail { display: flex; }
   transition: opacity 300ms ease, border-color 150ms ease, color 150ms ease;
 }
 body.fs .fs-exit { display: inline-flex; }
+/* 단독 페이지(보드 임베드 아님) 발표 모드에서도 종료 ✕ 노출 — 우상단(풀스크린 버튼 자리). */
+body.standalone.present .fs-exit { display: inline-flex; }
 .fs-exit:hover { border-color: var(--accent); color: var(--accent); }
 .fs-exit svg { width: 18px; height: 18px; display: block; }
 

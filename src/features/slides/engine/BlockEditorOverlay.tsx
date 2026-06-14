@@ -13,6 +13,7 @@ import { type Block, type BlockPos, type BlockStyle, isText, isBullets } from '.
 import { StyleRow } from './BlockToolbar';
 
 const CANVAS_W = 1280;
+const ROTATE_REACH = 48; // 박스 위로 뻗는 회전 핸들 길이(연결선+핸들) — 툴바를 그 위로 띄울 때 사용.
 const selEl = (): HTMLElement | null => document.querySelector<HTMLElement>('.stage .sl-sel');
 const canvasEl = (): HTMLElement | null => document.querySelector<HTMLElement>('.stage .slide-canvas');
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -114,10 +115,14 @@ export function BlockEditorOverlay({
         const y = cy + (px - cx) * sn + (py - cy) * cs;
         if (y < minY) minY = y;
       }
+      // 회전 핸들(박스 위 ~ROTATE_REACH)을 가리지 않도록 그 위로 띄운다.
+      const frameShown = !!frameRef.current && frameRef.current.style.display !== 'none';
+      const rotateY = frameShown ? cy + -(b.h / 2 + ROTATE_REACH) * cs : minY;
+      const topRef = Math.min(minY, rotateY);
       const tw = tb.offsetWidth || 320;
       const th = tb.offsetHeight || 42;
       const left = clamp(cx - tw / 2, 8, window.innerWidth - tw - 8);
-      let topT = minY - th - 12;
+      let topT = topRef - th - 10;
       if (topT < 8) topT = Math.min(b.top + b.h + 12, window.innerHeight - th - 8);
       tb.style.left = `${left}px`;
       tb.style.top = `${topT}px`;

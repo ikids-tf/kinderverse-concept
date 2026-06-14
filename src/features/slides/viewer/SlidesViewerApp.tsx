@@ -100,6 +100,14 @@ const IC = {
 export function SlidesViewerApp() {
   const id = useMemo(() => readParam('id') || 'default', []);
   const fsMode = useMemo(() => readParam('fs') === '1', []);
+  // 보드 카드(iframe)로 임베드됐는가. 단독 페이지면 풀스크린을 네이티브 API로 처리한다.
+  const embedded = useMemo(() => {
+    try {
+      return window.parent !== window;
+    } catch {
+      return true;
+    }
+  }, []);
 
   const [deck, setDeck] = useState<DeckSpec>(() => loadDeck(id) ?? defaultDeck());
   const deckRef = useRef(deck);
@@ -218,6 +226,15 @@ export function SlidesViewerApp() {
   /* ── body 클래스 동기화 ── */
   useEffect(() => { document.body.classList.toggle('chrome', chrome); }, [chrome]);
   useEffect(() => { document.body.classList.toggle('present', present); }, [present]);
+  useEffect(() => { document.body.classList.toggle('standalone', !embedded); }, [embedded]);
+
+  /* ── 단독 페이지 — 네이티브 풀스크린과 present(발표 모드) 동기화. ── */
+  useEffect(() => {
+    if (embedded) return;
+    const onFs = () => setPresent(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, [embedded]);
 
   /* ── 덱 제목 → 카드 헤더(kv-video-title 핸들러가 node.data.title에 영속) ── */
   useEffect(() => { postParent({ type: 'kv-video-title', title: deck.title }); }, [deck.title]);
@@ -308,12 +325,15 @@ export function SlidesViewerApp() {
       else if (e.key === 'ArrowLeft') { e.preventDefault(); goRel(-1); }
       else if (e.key === 'Escape') {
         if (fsMode) exitFs();
-        else if (present) (window as KvWindow).kvSetPresent?.(false);
+        else if (present) {
+          if (!embedded && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+          else (window as KvWindow).kvSetPresent?.(false);
+        }
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [present, fsMode, goRel, exitFs]);
+  }, [present, fsMode, goRel, exitFs, embedded]);
 
   /* ── 편집 핸들러 — 항상 '최신 상태'에 함수형 적용(편집/구조변경 경쟁 방지) ── */
   const patchSlide = useCallback((slideIdx: number, fn: (s: Slide) => Slide) => {
@@ -371,30 +391,42 @@ export function SlidesViewerApp() {
     }));
   const setEyebrowStyle = (patch: Partial<BlockStyle>) =>
     patchSlide(idx, (s) => ({ ...s, eyebrowStyle: { ...(s.eyebrowStyle ?? {}), ...patch } }));
+  const setEyebrowPos = (pos: BlockPos | null) =>
+    patchSlide(idx, (s) => ({ ...s, eyebrowPos: pos ?? undefined }));
 
   // 트랜스폼 시작 시 — 슬라이드의 모든 블록을 '현재 위치 그대로' 절대좌표(pos)로 고정한다.
   // 한 블록만 절대화하면 나머지 흐름 블록이 재정렬(가운데로 모임)되므로, 전부 동시에 고정해 리플로를 없앤다.
+  // 캔버스 화면 rect 기준 %. (이미지/차트는 hPct까지, 텍스트/eyebrow는 호출측에서 hPct 제거)
+  const measurePos = (el: HTMLElement, c: DOMRect): BlockPos => {
+    const r = el.getBoundingClientRect();
+    return {
+      xPct: ((r.left - c.left) / c.width) * 100,
+      yPct: ((r.top - c.top) / c.height) * 100,
+      wPct: (r.width / c.width) * 100,
+      hPct: (r.height / c.height) * 100,
+    };
+  };
   const freezeSlide = () => {
     const cv = document.querySelector<HTMLElement>('.stage .slide-canvas');
     if (!cv) return;
     const cur = deck.slides[idx];
-    const need = cur.blocks.some((b, i) => !(b as { pos?: BlockPos }).pos && cv.querySelector(`[data-bi="${i}"]`));
-    if (!need) return; // 이미 전부 고정됨
+    const needBlocks = cur.blocks.some((b, i) => !(b as { pos?: BlockPos }).pos && cv.querySelector(`[data-bi="${i}"]`));
+    const needEyebrow = !cur.eyebrowPos && !!cv.querySelector('[data-bi="eyebrow"]');
+    if (!needBlocks && !needEyebrow) return; // 이미 전부 고정됨
     const c = cv.getBoundingClientRect();
     const measured: Record<number, BlockPos> = {};
+    let measuredEye: BlockPos | null = null;
     cv.querySelectorAll<HTMLElement>('[data-bi]').forEach((el) => {
-      const bi = Number(el.getAttribute('data-bi'));
+      const raw = el.getAttribute('data-bi');
+      if (raw === 'eyebrow') { if (!measuredEye) measuredEye = measurePos(el, c); return; }
+      const bi = Number(raw);
       if (!Number.isInteger(bi) || measured[bi]) return;
-      const r = el.getBoundingClientRect();
-      measured[bi] = {
-        xPct: ((r.left - c.left) / c.width) * 100,
-        yPct: ((r.top - c.top) / c.height) * 100,
-        wPct: (r.width / c.width) * 100,
-        hPct: (r.height / c.height) * 100,
-      };
+      measured[bi] = measurePos(el, c);
     });
     patchSlide(idx, (s) => ({
       ...s,
+      // eyebrow는 블록이 아니라 슬라이드 필드 — 함께 고정해야 블록 이동 시 안 밀린다(높이 자동 → hPct 생략).
+      eyebrowPos: s.eyebrowPos ?? (measuredEye ? { xPct: measuredEye.xPct, yPct: measuredEye.yPct, wPct: measuredEye.wPct } : undefined),
       blocks: s.blocks.map((b, i) => {
         if ((b as { pos?: BlockPos }).pos || !measured[i]) return b;
         const m = measured[i];
@@ -425,15 +457,19 @@ export function SlidesViewerApp() {
     if (!cv) return;
     const c = cv.getBoundingClientRect();
     const measured: Record<number, BlockPos> = {};
+    let measuredEye: BlockPos | null = null;
     cv.querySelectorAll<HTMLElement>('[data-bi]').forEach((el) => {
-      const bi = Number(el.getAttribute('data-bi'));
+      const raw = el.getAttribute('data-bi');
+      if (raw === 'eyebrow') { if (!measuredEye) measuredEye = measurePos(el, c); return; }
+      const bi = Number(raw);
       if (!Number.isInteger(bi) || measured[bi]) return;
-      const r = el.getBoundingClientRect();
-      measured[bi] = { xPct: ((r.left - c.left) / c.width) * 100, yPct: ((r.top - c.top) / c.height) * 100, wPct: (r.width / c.width) * 100, hPct: (r.height / c.height) * 100 };
+      measured[bi] = measurePos(el, c);
     });
     const tset = new Set(targets);
     patchSlide(idxRef.current, (s) => ({
       ...s,
+      // 블록 이동 시 eyebrow도 함께 고정(이동 대상 아님 — 제자리 유지).
+      eyebrowPos: s.eyebrowPos ?? (measuredEye ? { xPct: measuredEye.xPct, yPct: measuredEye.yPct, wPct: measuredEye.wPct } : undefined),
       blocks: s.blocks.map((b, i) => {
         let base = (b as { pos?: BlockPos }).pos;
         if (!base && measured[i]) {
@@ -567,8 +603,20 @@ export function SlidesViewerApp() {
     setDrag(null);
   };
   const openFullscreen = () => {
-    saveDeck(id, deck); // 풀스크린 iframe이 localStorage에서 읽으므로 먼저 flush
-    postParent({ type: 'kv-embed-fullscreen' });
+    if (embedded) {
+      saveDeck(id, deck); // 보드 풀스크린 오버레이(iframe)가 localStorage에서 읽으므로 먼저 flush
+      postParent({ type: 'kv-embed-fullscreen' });
+      return;
+    }
+    // 단독 페이지 — 부모 보드가 없으니 네이티브 풀스크린으로 토글(fullscreenchange가 present 동기화).
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    else document.documentElement.requestFullscreen?.().catch(() => {});
+  };
+  // 종료 ✕ — 보드 오버레이(fsMode) / 단독 네이티브 풀스크린 / 발표(present) 모두 처리.
+  const exitPresentation = () => {
+    if (fsMode) { exitFs(); return; }
+    if (!embedded && document.fullscreenElement) { document.exitFullscreen?.().catch(() => {}); return; }
+    if (present) setPresent(false);
   };
 
   const curLabel = LAYOUT_META.find((m) => m.id === slide.layout)?.label ?? '레이아웃';
@@ -581,6 +629,18 @@ export function SlidesViewerApp() {
     <div className="slides-root" data-theme={deck.theme}>
       {/* 상단 편집 툴바 */}
       <div className="bar">
+        {!embedded && (
+          <button
+            type="button"
+            className="ibtn"
+            style={{ width: 'auto', padding: '0 10px', gap: 4 }}
+            title="보드로 돌아가기"
+            onClick={() => { window.location.href = '/'; }}
+          >
+            <Svg d={IC.chevLeft} />
+            <span style={{ font: '600 var(--fs-xs) var(--font-sans)' }}>보드</span>
+          </button>
+        )}
         <div className="laywrap">
           <button type="button" className="ibtn" style={{ width: 'auto', padding: '0 10px', gap: 4 }} title="이 슬라이드의 레이아웃" onClick={() => setLayMenu((v) => !v)}>
             <span style={{ font: '600 var(--fs-xs) var(--font-sans)' }}>{curLabel}</span>
@@ -682,12 +742,12 @@ export function SlidesViewerApp() {
           <BlockEditorOverlay
             key="eyebrow"
             target="eyebrow"
-            block={null}
+            block={{ type: 'caption' as const, text: slide.eyebrow ?? '', pos: slide.eyebrowPos, style: slide.eyebrowStyle }}
             style={slide.eyebrowStyle}
-            hasPos={false}
-            transformable={false}
+            hasPos={!!slide.eyebrowPos}
+            transformable={true}
             onStyle={(patch) => setEyebrowStyle(patch)}
-            onPos={() => {}}
+            onPos={(p) => setEyebrowPos(p)}
             onFreezeStart={freezeSlide}
           />
         )}
@@ -737,8 +797,8 @@ export function SlidesViewerApp() {
         <button type="button" className="rail-add" title="슬라이드 추가" onClick={() => addSlide(slide.layout)}><Svg d={IC.plus} /></button>
       </div>
 
-      {/* 풀스크린 종료 ✕ */}
-      <button type="button" className="fs-exit" title="전체 화면 종료 (Esc)" onClick={exitFs}><Svg d={IC.x} /></button>
+      {/* 풀스크린/발표 종료 ✕ (보드 오버레이 + 단독 네이티브 풀스크린) */}
+      <button type="button" className="fs-exit" title="전체 화면 종료 (Esc)" onClick={exitPresentation}><Svg d={IC.x} /></button>
 
       {editable && pickerTarget && (
         <ImagePicker

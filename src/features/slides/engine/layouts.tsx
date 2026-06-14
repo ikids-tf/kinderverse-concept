@@ -155,8 +155,8 @@ const Editable: FC<{
   placeholder?: string;
   className?: string;
   inlineStyle?: CSSProperties;
-  /** 흐름 모드에서 이 요소가 곧 블록 박스 — 측정/선택용 data-bi. */
-  dataBi?: number;
+  /** 흐름 모드에서 이 요소가 곧 블록 박스 — 측정/선택용 data-bi(블록 인덱스 또는 'eyebrow'). */
+  dataBi?: number | string;
   /** additive=Shift(다중선택 토글). Shift면 caret 포커스를 막아 텍스트 편집 대신 선택만. */
   onSelect?: (additive: boolean) => void;
   onCommit: (text: string) => void;
@@ -234,10 +234,12 @@ const Eyebrow: FC<{ slide: Slide; editable: boolean; selected: Selection; h: Edi
 }) => {
   if (!editable && !slide.eyebrow) return null;
   const isSel = selected.eyebrow;
-  return (
+  const pos = slide.eyebrowPos;
+  const el = (
     <Editable
       tag="span"
-      className={`sl-eyebrow${slide.accentRole === 'gold' ? ' is-gold' : ''}${isSel ? ' sl-sel' : ''}`}
+      className={`sl-eyebrow${slide.accentRole === 'gold' ? ' is-gold' : ''}${!pos && isSel ? ' sl-sel' : ''}`}
+      dataBi={pos ? undefined : 'eyebrow'}
       value={slide.eyebrow ?? ''}
       editable={editable}
       placeholder="오버라인 라벨"
@@ -246,6 +248,11 @@ const Eyebrow: FC<{ slide: Slide; editable: boolean; selected: Selection; h: Edi
       onCommit={(x) => h.onEyebrow(x)}
     />
   );
+  return pos ? (
+    <div className={`sl-free${isSel ? ' sl-sel' : ''}`} data-bi="eyebrow" style={posStyle(pos)}>
+      {el}
+    </div>
+  ) : el;
 };
 
 /** 자리표시 박스 — 삽화/차트(다음 단계에서 실제 콘텐츠로 교체). */

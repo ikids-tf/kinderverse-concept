@@ -114,6 +114,8 @@ export interface Slide {
   eyebrow?: string;
   /** eyebrow 텍스트 스타일 오버라이드(교사 편집). 선택. */
   eyebrowStyle?: BlockStyle;
+  /** eyebrow 자유 배치(freeze/이동). 있으면 흐름에서 빼내 절대 배치 — 다른 블록 이동 시 안 밀림. */
+  eyebrowPos?: BlockPos;
   /** 쪽번호 표시 여부(선택). 표지/섹션 구분에는 보통 숨긴다. */
   number?: boolean;
   /** 이 슬라이드의 악센트 색 역할(코랄 기본 / 골드 강조). 선택. */
