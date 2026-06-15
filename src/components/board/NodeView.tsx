@@ -8,7 +8,7 @@ import { SHAPE_PATHS } from '@/lib/shapes';
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { editTextCmd, captureNodes, pushRedesign, deleteNodesCmd } from '@/board/commands';
 import { runWorkflowStep, type RunnerData, type StepKind } from '@/board/workflow';
-import { saveFrameToFolder, fitFrameToChildren } from '@/board/frames';
+import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren } from '@/board/frames';
 import { alignFrameCmd } from '@/board/align';
 import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
 import type { RouteTarget } from '@/ai/contract';
@@ -63,6 +63,7 @@ const IDLE_OPTIONS: Array<{ id: string; label: string; title: string }> = [
   { id: 'bob', label: '둥실', title: '위아래로 둥실둥실 반복' },
   { id: 'fidget', label: '두리번', title: '랜덤하게 꼼지락거리며 기다리기' },
   { id: 'bounce', label: '콩콩', title: '가끔 콩콩 뛰기' },
+  { id: 'follow', label: '팔로우', title: '메인 캐릭터가 이 지점에 닿으면 시간차를 두고 따라가기 (경유지 연결 전용)' },
 ];
 
 /** 카드 '위' 화면 좌표에 고정 크기로 렌더(보드 줌/카드 크기와 무관) — 클릭(선택) 시
@@ -194,6 +195,14 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 풀스크린 — body 레벨 포털 오버레이로 화면 전체를 덮는다(캔버스 변형 밖이라
   // 확실히 꽉 차고, 보드의 다른 요소를 가려 클릭·선택을 차단). Esc·✕로 닫는다.
   const [fsOpen, setFsOpen] = useState(false);
+  // 이미지 카드 풀스크린 — 원본(node.src)을 화면 전체에 크게 본다(뷰어 오버레이와 별개).
+  const [imgFs, setImgFs] = useState(false);
+  useEffect(() => {
+    if (!imgFs) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setImgFs(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [imgFs]);
   const hide3dTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const embedFrameRef = useRef<HTMLIFrameElement>(null);
   const fsFrameRef = useRef<HTMLIFrameElement>(null); // 풀스크린 오버레이 iframe(영상 로드용)
@@ -284,6 +293,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       if (d?.type === 'kv-embed-click') {
         useBoardStore.getState().setSelection([node.id]);
         if (isGlbViewer || (isMagicViewer && viewerModeRef.current === '3d')) setShow3dUi(true);
+      }
+      // 뷰어 본문(3D 모델 등 iframe 안)을 더블클릭 → 카드를 화면 중앙에 포커스.
+      // iframe은 부모로 더블클릭 이벤트를 넘기지 않으므로 뷰어가 메시지로 알린다.
+      if (d?.type === 'kv-embed-dblclick') {
+        useBoardStore.getState().setSelection([node.id]);
+        useBoardStore.getState().focusNode(node.id);
       }
       // 매직 뷰어 모드 변경(빈/유튜브/동영상/3D) → 카드 UI를 그 모드에 맞춰 전환 + 영속화.
       const dm = e.data as { type?: string; mode?: string; src?: string } | null;
@@ -546,13 +561,20 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 이동 애니메이션에 연결된 카드인가(출발/도착) — 호버 시 '기다리는 동작' 선택 표시.
   const motionLinked = useBoardStore((s) =>
     Object.values(s.nodes).some(
-      (n) => n.type === 'motion' && (n.data?.aStart === node.id || n.data?.aEnd === node.id),
+      (n) =>
+        n.type === 'motion' &&
+        (n.data?.aStart === node.id ||
+          n.data?.aEnd === node.id ||
+          n.data?.aMid1 === node.id ||
+          n.data?.aMid2 === node.id),
     ),
   );
   motionLinkedRef.current = motionLinked; // 위 message 리스너용 미러
   // 대기 동작 클래스 — 독립 translate 속성 애니메이션이라 rotate/scale과 안 부딪힌다.
   // 모션 패스에 연결돼 있는 동안만 동작(라인이 분리되면 즉시 멈춘다).
-  const idleCls = motionLinked && node.data?.idle ? ` kv-idle-${node.data.idle}` : '';
+  // 'follow'는 CSS 루프가 아니라 재생 루프가 처리하므로 클래스에서 제외한다.
+  const idleCls =
+    motionLinked && node.data?.idle && node.data.idle !== 'follow' ? ` kv-idle-${node.data.idle}` : '';
   // 반경·속도 — 피커 슬라이더 값이 카드 인라인 CSS 변수로 들어가 키프레임에 반영된다.
   const idleVars = (motionLinked && node.data?.idle
     ? { '--idle-amp': String(node.data.idleAmp ?? 1), '--idle-speed': String(node.data.idleSpeed ?? 1) }
@@ -655,14 +677,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     // 관찰기록·활동지 등 data.doc)는 렌더된 형태를 유지하고 raw 마크다운 textarea를
     // 띄우지 않는다(활동지는 시트 내부의 제목·안내가 인라인 편집됨).
     const isDocCard = !!node.data?.doc;
-    if (editable && !node.locked && !isDocCard) {
-      // 제자리 편집 — 보이던 모습 그대로 바로 수정. 센터+줌 점프를 하지 않는다
-      // (시점이 튀면 '갑자기 다른 화면'처럼 느껴진다).
+    // 이미지 캡션 영역 더블클릭은 캡션 편집(아래 분기), 그 외(그림)는 100% 보기.
+    const onImageCaption = node.type === 'image' && !!t?.closest?.('[data-kv-caption]');
+    // 평문 메모/텍스트(또는 이미지 캡션) → 제자리 편집. 시점 점프 없음.
+    if (editable && !node.locked && !isDocCard && (node.type !== 'image' || onImageCaption)) {
       setDraft(node.text ?? '');
       setEditing(true);
     } else {
-      // 편집 불가 카드(문서·잠금)만 기존 동작: 카드를 화면 중앙에 풀로(센터 + 줌).
-      useBoardStore.getState().focusNode(node.id);
+      // 문서·자료(이미지)·잠금 카드 → 100%(실제 크기)로 화면 중앙에 보여 준다.
+      useBoardStore.getState().centerNodeActualSize(node.id);
     }
   };
 
@@ -1007,10 +1030,31 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               </svg>
             </button>
           )}
+          {/* 호버 시 — 다운로드 + 풀스크린(동영상 카드와 동일). 생성/보관 이미지에만. */}
+          {node.src && !lod && !node.loading && !presenting && typeof node.data?.ytId !== 'string' && (
+            <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity duration-150 ease-soft group-hover/card:opacity-100">
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); downloadImage(node.src!, imgTitle(node.text)); }}
+                title="다운로드"
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+              >
+                <Icon name="download" size={13} />
+              </button>
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); setImgFs(true); }}
+                title="크게 보기 (풀스크린)"
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+              >
+                <Icon name="present" size={13} />
+              </button>
+            </div>
+          )}
           {selected && !node.locked && <RadiusHandle node={node} />}
         </div>
         {(node.text || editing) && (
-          <div className="group/cap relative px-t2 py-t1">
+          <div data-kv-caption className="group/cap relative px-t2 py-t1">
             {editing ? (
               <textarea
                 ref={ref}
@@ -1039,6 +1083,33 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         {node.locked && <LockBadge />}
         {/* 모션 연결 카드 — 클릭(선택)하면 카드 위 고정 크기 툴바(동작 + 반경·속도) */}
         {idlePickerVisible && <IdlePicker node={node} />}
+        {/* 풀스크린 — body 레벨 포털로 화면 전체를 덮어 원본 이미지를 크게(아이들에게 보여주기). */}
+        {imgFs && node.src && createPortal(
+          <div
+            onClick={() => setImgFs(false)}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(20,19,17,.82)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}
+          >
+            <img src={node.src} alt={node.text ?? ''} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,.4)' }} />
+            <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 8 }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); downloadImage(node.src!, imgTitle(node.text)); }}
+                title="다운로드"
+                style={{ width: 40, height: 40, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,.92)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
+              >
+                <Icon name="download" size={18} />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setImgFs(false); }}
+                title="닫기 (Esc)"
+                style={{ width: 40, height: 40, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,.92)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
+              >
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
       </div>
     );
   }
@@ -1137,8 +1208,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           {!is3d && !embedPresent && !embedInteract && (
             <div
               onPointerDown={down}
-              onDoubleClick={(e) => { e.stopPropagation(); setEmbedInteract(true); }}
-              title="드래그로 이동 · 더블클릭(또는 ‘조작’)하면 뷰어 조작"
+              onDoubleClick={(e) => { e.stopPropagation(); useBoardStore.getState().focusNode(node.id); }}
+              title="드래그로 이동 · 더블클릭하면 화면 중앙에 포커스 · ‘조작’으로 뷰어 안 UI 사용"
               className="absolute inset-x-0 bottom-0"
               // 헤더(링크 입력·재생·전체화면)가 보일 때는 그 위(상단 ~52px)를 덮지 않는다 —
               // 이동 손잡이가 헤더 버튼을 가려 전체화면이 '됐다 안 됐다' 하던 문제를 막는다.
@@ -1542,6 +1613,48 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         <StickerDecos items={decorations} />
         {/* 우상단 라운드 코너 드래그 핸들 — 일반 메모(포스트잇·노트)만 */}
         {selected && !editing && !isDoc && !srcLinks && !isIdea && !node.locked && <RadiusHandle node={node} />}
+        {/* 문서 카드 — 선택 시 바운딩박스 하단 툴바: (좌)저장·좋아요  (우)편집 */}
+        {isDoc && selected && !editing && !node.locked && (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            className="absolute -bottom-5 left-0 right-0 flex items-center justify-between"
+          >
+            <div className="flex items-center gap-t1 rounded-pill border border-border bg-surface px-1 py-1 shadow-lg">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const ok = saveDocToFolder(node.id);
+                  showToast(ok ? '폴더에 저장했어요' : '저장하지 못했어요', ok ? 'success' : 'error');
+                }}
+                title="폴더에 저장"
+                className="flex h-7 items-center gap-t1 rounded-pill px-t2 text-xs font-semibold text-fg-2 transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
+              >
+                <Icon name="folder" size={14} /> 저장
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const cur = useBoardStore.getState().nodes[node.id];
+                  const liked = !cur?.data?.liked;
+                  useBoardStore.getState().updateNodeRaw(node.id, { data: { ...(cur?.data ?? {}), liked } });
+                }}
+                title={node.data?.liked ? '좋아요 취소' : '좋아요'}
+                className={`flex h-7 w-7 items-center justify-center rounded-pill transition-colors duration-150 ease-soft ${
+                  node.data?.liked ? 'text-accent' : 'text-fg-2 hover:bg-surface-2 hover:text-accent'
+                }`}
+              >
+                <Icon name="heart" size={14} fill={node.data?.liked ? 'currentColor' : 'none'} />
+              </button>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setDraft(node.text ?? ''); setEditing(true); }}
+              title="문서 편집"
+              className="flex h-9 items-center gap-t1 rounded-pill border border-border bg-surface px-t3 text-xs font-semibold text-fg-2 shadow-lg transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
+            >
+              <Icon name="writing" size={14} /> 편집
+            </button>
+          </div>
+        )}
         {node.locked && <LockBadge />}
       </div>
     );
@@ -1976,6 +2089,16 @@ function imgTitle(text?: string): string {
   // brackets ([...]/【...】), an em-dash note, or a parenthetical.
   const cut = first.split(/\s*[—–([【]/)[0].trim();
   return (cut || first).slice(0, 30);
+}
+
+/** 이미지(원본 data/URL) 다운로드 — 파일명은 캡션, 없으면 'kinderverse'. */
+function downloadImage(src: string, name?: string) {
+  const a = document.createElement('a');
+  a.href = src;
+  a.download = `${(name || 'kinderverse').replace(/[\\/:*?"<>|]/g, '_')}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /* ---- corner sticker decoration (Design Director — decorate pillar) ---- */

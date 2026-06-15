@@ -45,6 +45,36 @@ export function centerOf(n: BoardNode): P {
   return { x: n.x + n.w / 2, y: n.y + renderHeight(n) / 2 };
 }
 
+/** 모션의 연결 가능한 4개 점(월드 좌표) — 출발(p1)·중간1(⅓)·중간2(⅔)·도착(p2).
+    중간 두 점은 베지어 곡선 위 t=⅓·⅔ 위치다. 도착이 카드에 연결돼 있으면 그 중심을 쓴다. */
+export type MotionSlot = 'aStart' | 'aMid1' | 'aMid2' | 'aEnd';
+export function motionPoints(n: BoardNode): Record<MotionSlot, P> {
+  const st = useBoardStore.getState();
+  const e = n.data?.aEnd ? st.nodes[n.data.aEnd as string] : undefined;
+  const p1 = { x: n.x + getP(n, 'p1').x, y: n.y + getP(n, 'p1').y };
+  const c1 = { x: n.x + getP(n, 'c1').x, y: n.y + getP(n, 'c1').y };
+  const c2 = { x: n.x + getP(n, 'c2').x, y: n.y + getP(n, 'c2').y };
+  const p2 = e ? centerOf(e) : { x: n.x + getP(n, 'p2').x, y: n.y + getP(n, 'p2').y };
+  const at = (t: number): P => ({ x: bz(t, p1.x, c1.x, c2.x, p2.x), y: bz(t, p1.y, c1.y, c2.y, p2.y) });
+  return { aStart: p1, aMid1: at(1 / 3), aMid2: at(2 / 3), aEnd: p2 };
+}
+
+/** 월드 점(wx,wy)에서 반경 r 안에 든 가장 가까운 모션 연결점 — { motionId, slot } 또는 null. */
+export function nearestMotionSlot(wx: number, wy: number, r = 26): { motionId: string; slot: MotionSlot } | null {
+  const st = useBoardStore.getState();
+  let best: { motionId: string; slot: MotionSlot; d: number } | null = null;
+  for (const n of Object.values(st.nodes)) {
+    if (n.type !== 'motion') continue;
+    const pts = motionPoints(n);
+    (Object.keys(pts) as MotionSlot[]).forEach((slot) => {
+      const p = pts[slot];
+      const d = Math.hypot(p.x - wx, p.y - wy);
+      if (d <= r && (!best || d < best.d)) best = { motionId: n.id, slot, d };
+    });
+  }
+  return best ? { motionId: best.motionId, slot: best.slot } : null;
+}
+
 /** 점 드래그/연결 카드 이동 후 — 점들의 헐(bbox)로 모션 노드 박스를 다시 감싼다. */
 export function normalizeMotionNode(id: string): void {
   const st = useBoardStore.getState();

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Icon, type IconName } from '@/lib/icons';
 import { useBoardStore, newId, type BoardNode, type NodeType } from '@/store/boardStore';
 import { SHAPE_PATHS } from '@/lib/shapes';
@@ -439,6 +439,9 @@ export function BoardToolbar() {
   const show = useBoardStore((s) => s.show);
   const [fly, setFly] = useState<ToolId | null>(null);
 
+  // 호버 중 툴바가 사라져도(슬라이드 쇼 진입 등) body 클래스가 남지 않게 정리.
+  useEffect(() => () => document.body.classList.remove('kv-toolbar-hover'), []);
+
   const add = (type: ToolId) => {
     // 기본 클릭 = 기존 동작 그대로 (프레임은 선택 감싸기 우선).
     if (type === 'frame') {
@@ -497,7 +500,11 @@ export function BoardToolbar() {
   if (show) return null; // 슬라이드 쇼 중 — 화면을 깨끗하게(풀스크린처럼)
 
   return (
-    <div className="pointer-events-auto absolute left-t3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-md backdrop-blur">
+    <div
+      // 툴바 호버 → 프롬프트바를 또렷하게(body 클래스로 CSS가 바 투명도를 올린다).
+      onPointerEnter={() => document.body.classList.add('kv-toolbar-hover')}
+      onPointerLeave={() => document.body.classList.remove('kv-toolbar-hover')}
+      className="pointer-events-auto absolute left-t3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-md backdrop-blur">
       <button
         title="선택"
         className="flex h-10 w-10 items-center justify-center rounded-pill bg-surface-3 text-fg"

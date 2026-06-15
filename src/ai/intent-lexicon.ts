@@ -76,6 +76,46 @@ export const INTENT_RE: Record<ContentIntent, RegExp> = {
     제외해 유튜브 검색(영상 추천)과 충돌하지 않게 한다('영상'은 '동영상'도 포함). */
 export const VIDEO_RE = /(영상|비디오|클립)[^\n]{0,10}(만들|제작|생성|뽑아)/i;
 
+/* 아동 행동 상담 의도 — 교사가 아이의 걱정/이상 행동을 묘사하며 "어떻게 하면 좋을까"
+   식으로 조언을 구하는 문장. 감지되면 기본형 문서에 발달·심리 기반 전문 상담 답변을
+   생성한다(요소 선택을 요구하지 않는다). 생성 동사(만들/그려…)가 있으면 일반 생성으로
+   넘긴다 — 상담은 '질문'이지 '제작 요청'이 아니다. */
+const BEHAVIOR_SUBJECT_RE = /(아이|아동|원아|아기|유아|애기|애가|걔|친구)/;
+const BEHAVIOR_CONCERN_RE =
+  /(안\s*먹|먹지\s*않|안\s*자|자지\s*않|울(어|고|음|기|만|보|며)|운다|웁니|떼(를|쓰|써)|소리\s*(를\s*)?질|때(리|려|림)|물(어|어요|기)|깨물|공격|불안|위축|산만|집중\s*(을|못|안|이)|말(을|이)?\s*(안|없|못|늦)|틱|반복|고집|혼자(만|서|놀)|앉아(만|서)|움직이지\s*않|참여(를|하지)?\s*(안|못)|친구(와|랑|들)?\s*(안|못)\s*(어울|놀)|분리\s*불안|떼쓰|징징|난폭|예민|과(잉|민)|던(지|져|짐)|뺏|소심|낯(을|가))/;
+const BEHAVIOR_ASK_RE =
+  /(어떻게|어떡|왜\s|이유|괜찮을까|문제(일|가|인)|걱정|어쩌|방법|해결|지도|대(처|응)|상담|도와|조언|이상(한|해|행동)|발달(이|에|상)?)/;
+
+/** 아동 행동 상담 질문인가 — 주체(아이) + 걱정 행동 + 조언 요청이 함께 있으면 true.
+    "○○ 만들어줘"처럼 명확한 제작 요청이면 false(일반 생성 경로로). */
+export function isBehaviorConsult(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 6) return false;
+  if (/(만들어|그려|작성해|써\s*줘|제작|디자인)/.test(t)) return false; // 명시적 제작 요청 제외
+  const hasSubject = BEHAVIOR_SUBJECT_RE.test(t);
+  const hasConcern = BEHAVIOR_CONCERN_RE.test(t);
+  const hasAsk = BEHAVIOR_ASK_RE.test(t) || /[?？]/.test(t);
+  // 주체 + (걱정행동) 이 있고, 질문/조언 요청 신호가 있으면 상담으로 본다.
+  return hasSubject && hasConcern && hasAsk;
+}
+
+/* 유아교육 놀이 주제 오타·표기흔들림 교정 — 의미 없는 표기를 표준 활동어로 바로잡아
+   다운스트림(이미지 캡션 기획 등)이 엉뚱한 의미로 새지 않게 한다. 매우 보수적으로,
+   유아교육에서 사실상 표준형이 하나뿐인 단어만 교정한다(예: '몰놀이'는 존재하지 않음 →
+   '물놀이'가 분명). 일반어로도 쓰일 수 있는 표기는 넣지 않는다. */
+const PLAY_THEME_FIXES: Array<[RegExp, string]> = [
+  [/몰놀이/g, '물놀이'],   // 물놀이(water play) 오타
+  [/물노리/g, '물놀이'],
+  [/모래노리/g, '모래놀이'],
+  [/역활놀이/g, '역할놀이'], // 역할놀이(role play) 빈번 오타
+  [/역활/g, '역할'],
+];
+export function normalizePlayTheme(text: string): string {
+  let out = text;
+  for (const [re, to] of PLAY_THEME_FIXES) out = out.replace(re, to);
+  return out;
+}
+
 // 기존 코드 호환 별칭(prompt.ts / composer.ts의 *_RE 치환용).
 export const WORKSHEET_RE = INTENT_RE.worksheet;
 export const COLORING_RE = INTENT_RE.coloring;

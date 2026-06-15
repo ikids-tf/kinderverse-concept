@@ -86,14 +86,21 @@ export function frameMoveSet(frameId: string): string[] {
   const f = b.nodes[frameId];
   if (!f || f.type !== 'frame') return [];
   const fb = worldBox(f);
-  // 1) 소속 하위는 항상 — 단, 모션 라인(이동 애니메이션)은 제외. 모션은 연결된
-  //    카드를 따라 엔드포인트가 알아서 따라가므로, 프레임과 함께 통째로 옮기면
-  //    이중으로 움직이거나 자유 끝점이 끌려간다. (프레임에 태깅돼 있어도 제외.)
-  const ids = new Set<string>(frameSubtree(frameId).filter((id) => b.nodes[id]?.type !== 'motion'));
+  // 1) 소속 하위는 항상 — 프레임에 '태깅된' 모션 라인(이동 애니메이션)도 포함한다.
+  //    모션은 자체 x/y로 경로를 가지므로 프레임과 함께 평행이동하면 그대로 따라온다.
+  //    연결 카드가 있어도 드래그 셋에 모션이 포함되면 offFor가 이중 오프셋을 0으로
+  //    만들어(MotionPathNode) 끝점이 두 번 끌리지 않는다.
+  const ids = new Set<string>(frameSubtree(frameId));
   for (const n of Object.values(b.nodes)) {
     if (n.id === frameId || ids.has(n.id)) continue;
-    // 모션 라인은 프레임과 박스가 겹쳐도 따라오지 않는다(연결 카드만 따라간다).
-    if (n.type === 'motion') continue;
+    // 모션 라인: 태깅 안 됐어도, '연결 없는 자유 모션'이 프레임 안에 들어가 있으면
+    // 함께 옮긴다(엔드포인트가 따라갈 카드가 없어 안 그러면 제자리에 남는다).
+    // 카드에 연결된 모션은 그 카드를 따라 끝점이 움직이므로 여기선 제외(이중 이동 방지).
+    if (n.type === 'motion') {
+      const free = !n.data?.aStart && !n.data?.aEnd;
+      if (free && boxContains(fb, worldBox(n))) ids.add(n.id);
+      continue;
+    }
     const nb = worldBox(n);
     if (n.type === 'frame') {
       // 4) 프레임 — 완전 포함일 때만. 이 프레임의 조상이면(사이클) 제외.
@@ -458,4 +465,34 @@ export function saveFrameToFolder(frameId: string): string | null {
   const frame = b.nodes[frameId];
   if (frame) b.updateNodeRaw(frameId, { data: { ...(frame.data ?? {}), savedBundleId: bundle.id } });
   return bundle.id;
+}
+
+/** 단일 문서 카드(data.doc)를 폴더에 저장 — 제목으로 폴더를 만들고 그 안에 .pdf 한 장.
+    저장된 노드에는 savedToFolder 표시를 남긴다(중복 저장 시 토스트로 안내). */
+export function saveDocToFolder(nodeId: string): boolean {
+  const b = useBoardStore.getState();
+  const n = b.nodes[nodeId];
+  if (!n || !n.data?.doc) return false;
+  const title = (n.text ?? '').match(/^#\s*(.+)$/m)?.[1]?.replace(/[#*]/g, '').trim()
+    || (n.text ?? '').split('\n')[0].replace(/[#*]/g, '').trim()
+    || '문서';
+  const safe = title.replace(/[\\/:*?"<>|]/g, ' ').slice(0, 40).trim() || '문서';
+  const folder = {
+    kind: 'folder' as const,
+    id: savedEntryId(),
+    name: safe,
+    children: [
+      {
+        kind: 'file' as const,
+        id: savedEntryId(),
+        name: `${safe}.pdf`,
+        type: 'doc' as const,
+        content: n.text ?? '',
+        ...(typeof n.data?.coverImage === 'string' ? { cover: n.data.coverImage as string } : {}),
+      },
+    ],
+  };
+  useFolderStore.getState().addSavedFolder(folder);
+  b.updateNodeRaw(nodeId, { data: { ...(n.data ?? {}), savedToFolder: true } });
+  return true;
 }

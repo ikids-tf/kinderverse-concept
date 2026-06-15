@@ -483,6 +483,13 @@
       }
       if (document.body.classList.contains('present')) document.body.classList.toggle('chrome');
     });
+    // 모델 더블클릭 → 보드(부모)에 알려 카드를 화면 중앙에 포커스한다(본문이 iframe이라
+    // 부모가 직접 더블클릭을 못 받으므로 메시지로 전달).
+    mv.addEventListener('dblclick', () => {
+      if (window.parent && window.parent !== window) {
+        try { window.parent.postMessage({ type: 'kv-embed-dblclick' }, '*'); } catch { /* 무시 */ }
+      }
+    });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setPresent(false); });
 
     // 프레젠테이션 중 애니메이션 바 보이기/숨기기 토글.

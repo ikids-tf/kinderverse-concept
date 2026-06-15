@@ -1,6 +1,6 @@
 import { callGateway } from '../client';
 import { extractJson } from '../json';
-import { requestedCount, imageSubject, coreTopic } from '../intent-lexicon';
+import { requestedCount, imageSubject, coreTopic, normalizePlayTheme } from '../intent-lexicon';
 import { PEDAGOGY_FOUNDATION } from '../pedagogy';
 import { validateRegistryPayload, type RegistryPayload, type StudioItem } from '@/ui-registry/contracts';
 import {
@@ -291,6 +291,8 @@ export async function planStudioImages(
   opts?: { simple?: boolean; count?: number },
 ): Promise<StudioImagePlan> {
   const style = kind === '도안' ? KV_COLORING_STYLE : KV_ART_STYLE;
+  // 유아교육 놀이 주제 오타 교정(예: '몰놀이'→'물놀이') — 엉뚱한 의미로 새지 않게.
+  request = normalizePlayTheme(request);
   const subject = imageSubject(request);
   // 명시 개수: 호출자 지정 > 요청문 파싱("10개/열 장"). 다개수면 simple이라도 멀티로.
   const reqN = opts?.count ?? requestedCount(request) ?? undefined;
@@ -313,9 +315,18 @@ export async function planStudioImages(
       {
         role: 'user',
         content: `요청: "${request}"\n${sel}\n${kind === '도안' ? '색칠 도안' : '개념 일러스트'} 정확히 ${n}개의 캡션과 이미지 프롬프트를 제안하라(실제 아동 사진 아님).
+[의도 파악 — 유아교육 도메인]
+- 이 요청은 한국 유아교육(유치원·어린이집) 맥락이다. 한국어 활동·놀이 용어로 정확히 해석하라.
+- "○○놀이/활동에 필요한 도구·준비물" 요청이면, 그 놀이에서 유아가 실제로 쓰는 준비물·놀잇감을 나열한다(추상 개념·엉뚱한 범주 금지).
+  · 물놀이 → 물총, 물조리개(물뿌리개), 양동이, 튜브, 페트병, 물놀이 컵, 스펀지, 물장구판
+  · 모래놀이 → 모래삽, 모래틀, 양동이, 갈퀴, 체, 모래성 틀
+  · 역할놀이(병원) → 청진기, 주사기 장난감, 약통, 붕대, 진료 가운
+  · 미술놀이 → 색종이, 크레파스, 풀, 가위, 물감, 붓
+  · 요리활동 → 앞치마, 거품기, 그릇, 나무주걱, 계량컵
+- 모호하면 가장 일반적인 유아 놀이로 해석하고, 동음이의·오타로 보이면 유아교육에서 흔한 활동으로 합리적으로 보정하라.
 [캡션 규칙]
 - 각 항목은 요청 범주 안의 '서로 다른 대상' 하나씩 (예: "직업 자동차 10개" → 소방차, 경찰차, 구급차, 우편차…).
-- caption은 그 대상의 짧은 이름 1~3단어만 (예: "소방차"). 요청 문장이나 "개념 N" 같은 표현을 캡션에 쓰지 마라.
+- caption은 그 대상의 짧은 이름 1~3단어만 (예: "물총"). 요청 문장이나 "개념 N" 같은 표현을 캡션에 쓰지 마라.
 - prompt는 그 대상 '하나'를 그릴 구체적 묘사 1문장.
 JSON만:\n{ "items": [ { "caption": string, "prompt": string } ] } — items는 정확히 ${n}개.`,
       },

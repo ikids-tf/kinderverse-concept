@@ -1,5 +1,5 @@
 import { useBoardStore } from '@/store/boardStore';
-import { generateDeck } from '@/features/slides/agent/generate';
+import { generateDeck, fillDeckImages } from '@/features/slides/agent/generate';
 import { showToast } from '@/lib/toast';
 
 /* 슬라이드 뷰어에 한 줄 요청 → 장표 에이전트로 DeckSpec 생성 → 뷰어(iframe)에 로드.
@@ -22,13 +22,21 @@ export async function generateSlidesForViewer(viewerId: string, request: string)
   b.setGenerating('🖼️ 슬라이드를 구성하고 있어요…');
   try {
     const deck = await generateDeck(request);
-    window.dispatchEvent(new CustomEvent('kv:slides-load', { detail: { viewerId, deck } }));
+    const load = () => window.dispatchEvent(new CustomEvent('kv:slides-load', { detail: { viewerId, deck } }));
+    // 1차 — 글(레이아웃)부터 바로 보여 준다(이미지는 자리표시). 체감 속도 ↑.
+    load();
     // 카드 헤더 제목 = 덱 제목(새로고침·갤러리 표시와 일관).
     const cur = useBoardStore.getState().nodes[viewerId];
     if (cur) {
       useBoardStore.getState().updateNodeRaw(viewerId, { data: { ...(cur.data ?? {}), title: deck.title } });
     }
-    showToast(`🖼️ 슬라이드 ${deck.slides.length}장을 만들었어요`, 'success');
+    showToast(`🖼️ 슬라이드 ${deck.slides.length}장 — 페이지 이미지를 그리는 중…`, 'progress');
+    // 2차 — 페이지 내용에 맞는 삽화를 생성해 채운 뒤 같은 뷰어에 다시 로드(그림이 보임).
+    await fillDeckImages(deck, (d, t) =>
+      useBoardStore.getState().setGenerating(`🎨 슬라이드 이미지 ${d}/${t} 그리는 중…`),
+    );
+    load();
+    showToast(`🖼️ 슬라이드 ${deck.slides.length}장을 완성했어요`, 'success');
   } catch (e) {
     showToast(`슬라이드 생성에 실패했어요 — ${e instanceof Error ? e.message : String(e)}`, 'error', 4000);
   } finally {

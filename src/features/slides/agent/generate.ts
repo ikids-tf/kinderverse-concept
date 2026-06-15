@@ -7,8 +7,11 @@
 
 import { callGateway } from '@/ai/client';
 import { extractJson } from '@/ai/json';
+import { KV_ART_STYLE } from '@/ai/agents/studio';
+import { storeSlideImage } from '../assets/slideAssets';
 import {
   validateDeck,
+  isImage,
   THEMES,
   type DeckSpec,
   type Category,
@@ -196,6 +199,59 @@ big-stat의 blocks는 caption(라벨)+title(수치)+subtitle(맥락) 순서.
     }
   }
   return null;
+}
+
+/** 덱의 이미지 블록(prompt 있고 assetId 없음)을 실제 이미지로 채운다 — 슬라이드
+    '해당 페이지 내용'에 맞는 삽화를 생성해 IDB(slideAssets)에 저장하고 assetId를 연결한다.
+    슬라이드 제목·본문 맥락을 prompt에 더해 그 페이지에 어울리는 그림이 나오게 한다.
+    deck을 제자리(in place)에서 수정하므로, 호출 후 같은 deck을 다시 로드하면 그림이 보인다. */
+export async function fillDeckImages(
+  deck: DeckSpec,
+  onProgress?: (done: number, total: number) => void,
+): Promise<void> {
+  type Target = { prompt: string; set: (id: string) => void };
+  const targets: Target[] = [];
+  for (const slide of deck.slides) {
+    // 같은 슬라이드의 텍스트(제목·본문)를 맥락으로 묶어 '그 페이지에 맞는' 그림을 유도.
+    const ctxText = slide.blocks
+      .map((b) => (b.type === 'title' || b.type === 'subtitle' || b.type === 'body' || b.type === 'caption' ? b.text : ''))
+      .filter(Boolean)
+      .join(' / ')
+      .slice(0, 80);
+    for (const blk of slide.blocks) {
+      if (isImage(blk) && blk.prompt && blk.prompt.trim() && !blk.assetId) {
+        const scene = ctxText ? `${blk.prompt} (슬라이드 주제: ${ctxText})` : blk.prompt;
+        targets.push({ prompt: scene, set: (id) => { blk.assetId = id; } });
+      }
+    }
+  }
+  if (targets.length === 0) return;
+
+  let done = 0;
+  let idx = 0;
+  const CONCURRENCY = 3; // 게이트웨이 과부하 방지 + 체감 속도 균형
+  const worker = async () => {
+    while (idx < targets.length) {
+      const t = targets[idx++];
+      try {
+        const res = await callGateway({
+          task: 'image',
+          provider: 'auto',
+          messages: [],
+          meta: { prompt: `${t.prompt} — ${KV_ART_STYLE}`, caption: t.prompt.slice(0, 40) },
+        });
+        if (res.image) {
+          const id = await storeSlideImage(res.image);
+          if (id) t.set(id);
+        }
+      } catch {
+        /* 한 장 실패해도 나머지는 계속 — 자리표시로 남는다 */
+      }
+      done += 1;
+      onProgress?.(done, targets.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
 }
 
 /** 한 줄 요청 → DeckSpec(테마는 에이전트가 주제에 맞게 선택). 실패 시 '제목만 채운' 최소 덱. */

@@ -39,30 +39,36 @@ function captureVideoPoster(dataUri: string): Promise<string | undefined> {
         try { v.load(); } catch { /* noop */ }
         resolve(out);
       };
+      const grab = () => {
+        try {
+          const vw = v.videoWidth;
+          const vh = v.videoHeight;
+          if (!vw || !vh) return done(undefined);
+          // 갤러리·뷰어에서 선명하게 보이도록 긴 변 720px까지(원본보다 키우진 않음).
+          const MAX = 720;
+          const scale = Math.min(1, MAX / Math.max(vw, vh));
+          const W = Math.max(1, Math.round(vw * scale));
+          const H = Math.max(1, Math.round(vh * scale));
+          const cv = document.createElement('canvas');
+          cv.width = W;
+          cv.height = H;
+          const ctx = cv.getContext('2d');
+          if (!ctx) return done(undefined);
+          ctx.drawImage(v, 0, 0, W, H);
+          done(cv.toDataURL('image/jpeg', 0.85));
+        } catch {
+          done(undefined);
+        }
+      };
       v.addEventListener('error', () => done(undefined), { once: true });
-      v.addEventListener(
-        'loadeddata',
-        () => {
-          try {
-            const vw = v.videoWidth;
-            const vh = v.videoHeight;
-            if (!vw || !vh) return done(undefined);
-            const W = 160;
-            const H = Math.max(1, Math.round((W * vh) / vw));
-            const cv = document.createElement('canvas');
-            cv.width = W;
-            cv.height = H;
-            const ctx = cv.getContext('2d');
-            if (!ctx) return done(undefined);
-            ctx.drawImage(v, 0, 0, W, H);
-            done(cv.toDataURL('image/jpeg', 0.7));
-          } catch {
-            done(undefined);
-          }
-        },
-        { once: true },
-      );
-      setTimeout(() => done(undefined), 4000); // 안전 타임아웃
+      // Veo 영상은 검은 화면에서 페이드인 → 첫 프레임은 검다. 내용이 있는 중간
+      // 지점(25%, 최대 1.2초)으로 시킹한 뒤 그 프레임을 포스터로 캡처한다.
+      v.addEventListener('loadedmetadata', () => {
+        const d = v.duration;
+        v.currentTime = isFinite(d) && d > 0 ? Math.min(1.2, d * 0.25) : 0.5;
+      }, { once: true });
+      v.addEventListener('seeked', grab, { once: true });
+      setTimeout(grab, 4000); // 시킹이 안 끝나도 마지막엔 현재 프레임이라도
       v.src = dataUri;
     } catch {
       resolve(undefined);

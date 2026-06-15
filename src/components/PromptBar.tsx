@@ -79,10 +79,16 @@ function libCloseMs(count: number, reduced: boolean, boxCount = 1): number {
    M1: routing + interaction only. Actual model dispatch is wired when the router
    lands in M2. */
 
+/** + 업로드 첨부 — 이미지(데이터 URL) 또는 텍스트 문서(내용). 전송 시 보드에 카드로
+    올린 뒤 선택해, 입력한 프롬프트가 그 자료에 대한 생성/명령으로 작동한다. */
+type PromptAttachment = { id: string; kind: 'image' | 'text'; name: string; dataUrl?: string; text?: string };
+
 export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline' }) {
   const navigate = useNavigate();
   const location = useLocation();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
 
   // Generation feedback: stream keyword steps into the input + spin the button.
   const [generating, setGenerating] = useState(false);
@@ -124,9 +130,37 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
 
   const leftInset = useUIStore((s) => s.promptBarLeftInset);
   const hasText = draft.trim().length > 0;
-  // 작성 모드에선 빈 입력이어도 전송 가능(placeholder 프롬프트를 사용).
-  const canSend = hasText || !!videoCompose;
+  // 작성 모드에선 빈 입력이어도 전송 가능(placeholder 프롬프트를 사용). 첨부만 있어도 전송 가능.
+  const canSend = hasText || !!videoCompose || attachments.length > 0;
   const onChatPage = location.pathname === AI_CHAT_PATH;
+
+  // 입력이 길어지면 스크롤 대신 바가 위로 확장 — textarea 높이를 내용에 맞춘다(한눈에 다 보이게).
+  // 너무 긴 입력은 화면을 덮지 않게 CSS max-height(42vh)에서만 스크롤(안전장치).
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el || statusInline) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft, statusInline, collapsed, videoCompose]);
+
+  // + 버튼 → 파일 선택 → 첨부(이미지: data URL · 텍스트 문서: 내용 읽기).
+  function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ''; // 같은 파일을 다시 고를 수 있게 비운다
+    for (const f of files) {
+      const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const reader = new FileReader();
+      if (f.type.startsWith('image/')) {
+        reader.onload = () =>
+          setAttachments((a) => [...a, { id, kind: 'image', name: f.name, dataUrl: String(reader.result) }]);
+        reader.readAsDataURL(f);
+      } else {
+        reader.onload = () =>
+          setAttachments((a) => [...a, { id, kind: 'text', name: f.name, text: String(reader.result).slice(0, 8000) }]);
+        reader.readAsText(f);
+      }
+    }
+  }
 
   // 보관함 추천 — 보드에서 2자 이상 입력하면 태그/주제가 맞는 저장 자료를 바 위에
   // 카드로 띄운다. 클릭 = 복수 선택 토글 → [배치] 버튼 또는 프롬프트 제출로 적용.
@@ -335,7 +369,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
       runVideoCompose();
       return;
     }
-    if (hasText) {
+    if (hasText || attachments.length > 0) {
       void runGeneration(draft.trim());
     } else {
       toggleFavorites(); // raise the favorite card rail
@@ -390,6 +424,33 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     //    보관함 추천에서 자료를 선택한 상태로 제출하면: 먼저 보드에 정렬 배치하고
     //    (배치가 그 카드들을 선택함) 프롬프트를 그 카드들에 대한 명령으로 실행.
     if (path.startsWith('/board')) {
+      // 업로드 첨부 — 이미지는 이미지 카드, 텍스트 문서는 메모 카드로 보드에 올린 뒤
+      // 그 카드들을 선택하고, 입력한 프롬프트를 그 대상에 대한 명령으로 실행한다.
+      if (attachments.length > 0) {
+        const atts = attachments;
+        setAttachments([]);
+        void (async () => {
+          const ids: string[] = [];
+          const wf = await import('@/board/workflow');
+          const imgs = atts.filter((a) => a.kind === 'image' && a.dataUrl);
+          if (imgs.length) {
+            ids.push(
+              ...wf.placeAssetsOnBoard(
+                imgs.map((a) => ({ tag: a.name.replace(/\.[^.]+$/, ''), url: a.dataUrl!, kind: 'image' })),
+              ),
+            );
+          }
+          for (const t of atts.filter((a) => a.kind === 'text' && a.text)) {
+            ids.push(wf.spawnMemoCard(t.name.replace(/\.[^.]+$/, ''), t.text!));
+          }
+          if (ids.length) useBoardStore.getState().setSelection(ids);
+          if (text) {
+            const pm = await import('@/board/prompt');
+            pm.handleBoardPrompt(text);
+          }
+        })();
+        return;
+      }
       const chosen = assetSel
         .map((k) => assetSugs.find((a) => assetKey(a) === k))
         .filter((a): a is ImageAsset => !!a);
@@ -655,12 +716,45 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
           </div>
         )}
 
+        {/* 업로드 첨부 트레이 — 이미지 썸네일/문서 칩. ✕로 제거. 전송 시 보드에 카드로
+            올라가 그 자료에 대한 생성/명령으로 처리된다. */}
+        {attachments.length > 0 && !collapsed && (
+          <div className="pointer-events-auto mx-auto mb-t2 flex w-full max-w-3xl flex-wrap items-center gap-t2 px-t2">
+            {attachments.map((att) => (
+              <div
+                key={att.id}
+                className="relative flex items-center gap-t2 rounded-lg border border-border bg-surface/95 py-t1 pl-t1 pr-t6 shadow-sm backdrop-blur"
+              >
+                {att.kind === 'image' ? (
+                  <img src={att.dataUrl} alt={att.name} className="h-10 w-10 rounded-md border border-border object-cover" />
+                ) : (
+                  <span className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-surface-2 text-fg-2">
+                    <Icon name="memo" size={18} />
+                  </span>
+                )}
+                <span className="max-w-[10rem] truncate text-xs font-medium text-fg-2">{att.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setAttachments((a) => a.filter((x) => x.id !== att.id))}
+                  title="첨부 제거"
+                  className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-pill border border-border bg-surface text-fg-2 shadow-sm hover:border-accent hover:text-accent"
+                >
+                  <Icon name="x" size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className={`kv-pbar-glow ${!collapsed && boardSelectionCount > 0 ? 'kv-pbar-glow-on' : ''}`}>
         <form
           onSubmit={onSubmit}
-          className={`kv-pbar-vt relative z-10 mx-auto flex w-full items-center overflow-hidden rounded-2xl border backdrop-blur transition-all duration-300 ease-soft ${
+          className={`kv-pbar-vt relative z-10 mx-auto flex w-full items-end overflow-hidden rounded-2xl border backdrop-blur transition-all duration-300 ease-soft ${
             collapsed
               ? 'max-w-[3.25rem] gap-0 border-transparent bg-transparent p-0 shadow-none'
-              : `max-w-3xl gap-t2 border-border bg-surface/95 px-t2 py-t4 pl-t3 shadow-lg ${streaming ? 'kv-pbar-streaming' : ''}`
+              : `max-w-3xl gap-t2 kv-pbar-glass px-t2 py-t4 pl-t3 shadow-lg ${
+                  streaming ? 'kv-pbar-streaming' : boardSelectionCount > 0 ? 'kv-pbar-selected' : 'border-border'
+                }`
           }`}
         >
           {/* Message icon — collapsed: orange expand pill · expanded: AI 채팅 nav */}
@@ -685,12 +779,22 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
               collapsed ? 'max-w-0 flex-none opacity-0' : 'max-w-full flex-1 opacity-100'
             }`}
           >
-            {/* + add (placeholder for attachments/context, wired later) */}
+            {/* + add — 이미지/텍스트 문서 업로드 → 그와 관련한 생성 요청 */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.txt,.md,.markdown,.csv,.json,text/*"
+              multiple
+              hidden
+              onChange={onPickFiles}
+            />
             <button
               type="button"
-              aria-label="추가"
+              aria-label="이미지·문서 첨부"
+              title="이미지·텍스트 문서 업로드 — 그 자료로 생성을 요청해요"
               tabIndex={collapsed ? -1 : 0}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-pill text-fg-2 transition-colors duration-150 ease-soft hover:bg-surface-3"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex h-10 w-10 shrink-0 items-center justify-center self-end rounded-pill text-fg-2 transition-colors duration-150 ease-soft hover:bg-surface-3"
             >
               <Icon name="plus" size={20} />
             </button>
@@ -734,7 +838,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                 onKeyDown={onKeyDown}
                 tabIndex={collapsed ? -1 : 0}
                 placeholder={placeholder}
-                className="max-h-32 min-h-[40px] flex-1 resize-none self-center bg-transparent px-t1 py-t2 font-sans text-body text-fg placeholder:text-fg-muted focus:outline-none"
+                style={{ maxHeight: '42vh' }}
+                className="min-h-[40px] flex-1 resize-none self-end overflow-y-auto bg-transparent px-t1 py-t2 font-sans text-body text-fg placeholder:text-fg-muted focus:outline-none"
               />
             )}
 
@@ -791,6 +896,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             </button>
           </div>
         </form>
+        </div>
 
         {/* AI 면책 안내 — AI 채팅 페이지에서만, 펼쳐졌을 때 */}
         {onChatPage && !collapsed && (

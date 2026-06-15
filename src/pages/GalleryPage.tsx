@@ -1,13 +1,116 @@
-import { useEffect, useMemo, useState } from 'react';
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PageHero } from '@/components/PageHero';
 import {
   NotebookPen, Palette, Shapes, BookOpen, Image as ImageIcon, Tag, Sparkles,
   Cake, FileStack, FileText, Search, LayoutGrid, List, Maximize2, Wand2,
-  Share2, Bookmark, Download, X, Check, Video, Play, Link as LinkIcon, type LucideIcon,
+  Share2, Bookmark, Download, X, Check, Video, Play, Link as LinkIcon, Heart, type LucideIcon,
 } from 'lucide-react';
 import { listAssets, type ImageAsset } from '@/board/assets';
 import { listWebLinks, type WebLink } from '@/board/webLinks';
+import { getVideoAsset } from '@/board/videoAssets';
+import { getThumb } from '@/board/thumbs';
+
+/* 좋아요 — 로컬 영속(백엔드 없이 새로고침해도 유지). id별 on/off. */
+const LIKES_KEY = 'kv:gallery:likes:v1';
+function loadLikes(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(LIKES_KEY) || '{}'); } catch { return {}; }
+}
+function setLike(id: string, on: boolean) {
+  const m = loadLikes();
+  if (on) m[id] = true; else delete m[id];
+  try { localStorage.setItem(LIKES_KEY, JSON.stringify(m)); } catch { /* quota */ }
+}
+
+/* 항목별 '사용수/좋아요수' — 실제 집계가 없어 id 해시로 안정적인 의사 수치를 만든다
+   (같은 카드는 항상 같은 값). 좋아요를 누르면 +1. */
+function hashNum(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h;
+}
+const usageCount = (id: string) => 8 + (hashNum(id) % 320);
+const baseLikes = (id: string) => 2 + (hashNum(id + 'L') % 90);
+
+/** 자료 다운로드 — 이미지/도안은 썸네일(원본 data URI), 동영상은 mp4, 웹은 새 탭. */
+async function downloadItem(it: GalleryItem) {
+  if (it.assetKind === 'web' && it.href) { window.open(it.href, '_blank', 'noopener'); return; }
+  let url = it.thumb;
+  let ext = 'jpg';
+  if (it.assetKind === 'video') {
+    url = await loadVideoSrc(it.videoAssetId);
+    ext = 'mp4';
+  }
+  if (!url) return;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${it.t || 'kinderverse'}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/* 동영상 자산의 실제 mp4(data URI)를 id로 한 번만 읽어 캐시 — 카드 호버 재생과
+   뷰어가 공유한다(같은 영상을 두 번 IDB에서 읽지 않게). */
+const videoSrcCache = new Map<string, Promise<string | undefined>>();
+function loadVideoSrc(id?: string): Promise<string | undefined> {
+  if (!id) return Promise.resolve(undefined);
+  let p = videoSrcCache.get(id);
+  if (!p) {
+    p = getVideoAsset(id);
+    videoSrcCache.set(id, p);
+  }
+  return p;
+}
+
+/* 저장된 mp4(data URI)에서 선명한 포스터(긴 변 720px)를 떠 온다 — 예전에 160px로
+   구워진 포스터가 갤러리에서 깨져 보이던 것을 카드 마운트 시 교체하는 용도. */
+const posterCache = new Map<string, Promise<string | undefined>>();
+function hiResPoster(id?: string): Promise<string | undefined> {
+  if (!id) return Promise.resolve(undefined);
+  let p = posterCache.get(id);
+  if (!p) {
+    p = loadVideoSrc(id).then(
+      (src) =>
+        new Promise<string | undefined>((resolve) => {
+          if (!src) return resolve(undefined);
+          const v = document.createElement('video');
+          v.muted = true;
+          v.preload = 'auto';
+          let settled = false;
+          const done = (out?: string) => { if (settled) return; settled = true; resolve(out); };
+          const grab = () => {
+            try {
+              const vw = v.videoWidth, vh = v.videoHeight;
+              if (!vw || !vh) return done(undefined);
+              const scale = Math.min(1, 720 / Math.max(vw, vh));
+              const cv = document.createElement('canvas');
+              cv.width = Math.max(1, Math.round(vw * scale));
+              cv.height = Math.max(1, Math.round(vh * scale));
+              const ctx = cv.getContext('2d');
+              if (!ctx) return done(undefined);
+              ctx.drawImage(v, 0, 0, cv.width, cv.height);
+              done(cv.toDataURL('image/jpeg', 0.85));
+            } catch {
+              done(undefined);
+            }
+          };
+          // Veo 영상은 검은 화면에서 페이드인 → 도입 프레임은 검다. 내용이 있는
+          // 중간 지점(25%, 최대 1.2초)으로 시킹한 뒤 그 프레임을 포스터로 캡처한다.
+          v.addEventListener('loadedmetadata', () => {
+            const d = v.duration;
+            v.currentTime = isFinite(d) && d > 0 ? Math.min(1.2, d * 0.25) : 0.5;
+          }, { once: true });
+          v.addEventListener('seeked', grab, { once: true });
+          v.addEventListener('error', () => done(undefined), { once: true });
+          setTimeout(grab, 4000); // 시킹이 안 끝나도 마지막엔 현재 프레임이라도
+          v.src = src;
+        }),
+    );
+    posterCache.set(id, p);
+  }
+  return p;
+}
 
 /* ---------------- Gallery (자료 갤러리) ----------------
    Browse teacher resources (worksheets, coloring, storybooks, posters, name
@@ -119,24 +222,148 @@ function galHeuristic(query: string): string[] {
   return GALLERY_ITEMS.filter((it) => words.some((w) => it.t.includes(w) || it.sub.includes(w) || it.cat.includes(w))).map((it) => it.id);
 }
 
+/** 카드가 뷰포트(+여유 마진)에 들어오면 true — 한 번 보이면 계속 true(스크롤 시 깜빡임 방지).
+    보이는 카드만 썸네일을 굽고 이미지를 그려, 128장 풀해상도를 한 번에 디코딩하던 비용을 없앤다. */
+function useInView<T extends HTMLElement>(rootMargin = '500px'): { ref: React.RefObject<T>; inView: boolean } {
+  const ref = useRef<T>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    if (inView) return;
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === 'undefined') { setInView(true); return; }
+    const io = new IntersectionObserver(
+      (entries) => { if (entries.some((e) => e.isIntersecting)) setInView(true); },
+      { rootMargin },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [inView, rootMargin]);
+  return { ref, inView };
+}
+
+/* 마조너리(높이 가변)지만 '행 우선' 정렬 — 항목을 열에 라운드로빈으로 분배해
+   맨 윗줄이 왼→오로 최신순이 되게 한다. CSS columns는 세로 우선이라 왼쪽 열부터
+   채워져(최신이 왼쪽 열에 쌓임) 이 동작을 못 한다. */
+function MasonryGrid({ items, onOpen }: { items: GalleryItem[]; onOpen: (it: GalleryItem) => void }) {
+  const COL = 228;
+  const GAP = 16;
+  const ref = useRef<HTMLDivElement>(null);
+  const [cols, setCols] = useState(1);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      setCols(Math.max(1, Math.floor((w + GAP) / (COL + GAP))));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // 라운드로빈 분배 — i번째 항목 → (i % cols)열. 0번(최신)이 0열 맨 위.
+  const buckets: GalleryItem[][] = Array.from({ length: cols }, () => []);
+  items.forEach((it, i) => buckets[i % cols].push(it));
+  return (
+    <div ref={ref} style={{ display: 'flex', gap: GAP, alignItems: 'flex-start' }}>
+      {buckets.map((bucket, ci) => (
+        <div key={ci} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: GAP }}>
+          {bucket.map((it) => <GalleryCard key={it.id} it={it} onOpen={() => onOpen(it)} />)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function GalleryCard({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
   const a = C.coral;
   const Icon = it.icon;
+  const isVideo = it.assetKind === 'video';
+  const isImage = it.assetKind === 'image';
+  // 보이는 카드만 썸네일을 굽고 그린다(화면 밖 카드는 자리만 잡는 빈 면).
+  const { ref, inView } = useInView<HTMLButtonElement>();
+  const vidRef = useRef<HTMLVideoElement>(null);
+  const [vidSrc, setVidSrc] = useState<string | undefined>();
+  const [playing, setPlaying] = useState(false);
+  // 그리드용 작은 썸네일(긴 변 384px ≈ 30KB) — 풀해상도(it.thumb)는 뷰어/다운로드에서만.
+  const [thumbSrc, setThumbSrc] = useState<string | undefined>();
+  useEffect(() => {
+    if (!inView || !isImage || !it.thumb) return;
+    let alive = true;
+    void getThumb(it.id, it.thumb).then((t) => { if (alive) setThumbSrc(t); });
+    return () => { alive = false; };
+  }, [inView, isImage, it.thumb, it.id]);
+  // 예전 저해상도 포스터 → 저장된 mp4에서 선명한 포스터로 교체(보일 때만 디코딩).
+  const [poster, setPoster] = useState<string | undefined>(it.thumb);
+  useEffect(() => {
+    if (!inView || !isVideo || !it.videoAssetId) return;
+    let alive = true;
+    void hiResPoster(it.videoAssetId).then((hi) => { if (alive && hi) setPoster(hi); });
+    return () => { alive = false; };
+  }, [inView, isVideo, it.videoAssetId]);
+
+  // 호버 → 실제 영상을 카드 안에서 재생(음소거·반복). 떠나면 멈추고 포스터로.
+  const onEnter = () => {
+    if (!isVideo) return;
+    if (vidSrc) { setPlaying(true); return; }
+    void loadVideoSrc(it.videoAssetId).then((src) => { if (src) { setVidSrc(src); setPlaying(true); } });
+  };
+  const onLeave = () => {
+    if (!isVideo) return;
+    setPlaying(false);
+    const v = vidRef.current;
+    if (v) { v.pause(); v.currentTime = 0; }
+  };
+  useEffect(() => {
+    const v = vidRef.current;
+    if (v && playing) v.play().catch(() => {});
+  }, [playing, vidSrc]);
+
+  // 좋아요(영속) · 사용수/좋아요수(안정적 의사 수치)
+  const [liked, setLiked] = useState(false);
+  useEffect(() => { setLiked(!!loadLikes()[it.id]); }, [it.id]);
+  const uses = usageCount(it.id);
+  const likes = baseLikes(it.id) + (liked ? 1 : 0);
+  const toggleLike = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setLiked((v) => { const n = !v; setLike(it.id, n); return n; });
+  };
+  const onDownload = (e: React.MouseEvent) => { e.stopPropagation(); void downloadItem(it); };
+
   return (
     <button
+      ref={ref}
       className="kv-galcard"
       onClick={onOpen}
-      style={{ breakInside: 'avoid', marginBottom: 16, width: '100%', display: 'block', textAlign: 'left', padding: 0, border: `1px solid ${C.line}`, borderRadius: 16, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', overflow: 'hidden', boxShadow: C.shadow1, transition: 'transform .15s, border-color .15s, box-shadow .15s' }}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      style={{ width: '100%', display: 'block', textAlign: 'left', padding: 0, border: `1px solid ${C.line}`, borderRadius: 16, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', overflow: 'hidden', boxShadow: C.shadow1, transition: 'transform .15s, border-color .15s, box-shadow .15s' }}
     >
       <div style={{ position: 'relative', aspectRatio: it.ratio, background: C.thumb, display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
-        {it.thumb ? (
-          <img src={it.thumb} alt={it.t} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        {(isVideo ? poster : isImage ? thumbSrc : undefined) ? (
+          <img src={isVideo ? poster : thumbSrc} alt={it.t} draggable={false} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: 'auto' }} />
         ) : it.assetKind === 'web' && faviconOf(it.href) ? (
           <img src={faviconOf(it.href)} alt="" width={44} height={44} style={{ borderRadius: 10 }} />
+        ) : isVideo || (isImage && it.thumb) ? (
+          // 자산 이미지이지만 썸네일 준비 전(또는 화면 밖) — 자리만 잡는 옅은 면
+          <Icon size={36} color={C.line} strokeWidth={1.5} />
         ) : (
           <Icon size={40} color={a} strokeWidth={1.7} />
         )}
-        {it.assetKind === 'video' && (
+        {/* 호버 인라인 재생 — 포스터 위에 덮어 그린다(음소거·반복) */}
+        {isVideo && vidSrc && (
+          <video
+            ref={vidRef}
+            src={vidSrc}
+            muted
+            loop
+            playsInline
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: playing ? 1 : 0, transition: 'opacity .15s' }}
+          />
+        )}
+        {/* 재생 배지 — 재생 중에는 숨긴다 */}
+        {isVideo && !playing && (
           <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
             <span style={{ width: 46, height: 46, borderRadius: 999, background: a, display: 'grid', placeItems: 'center', boxShadow: '0 6px 16px rgba(20,19,17,.3)', border: '2px solid rgba(255,255,255,.85)' }}>
               <Play size={20} color="#fff" fill="#fff" style={{ marginLeft: 2 }} />
@@ -144,11 +371,35 @@ function GalleryCard({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
           </span>
         )}
         <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: a, background: '#fff', borderRadius: 999, padding: '3px 9px', boxShadow: C.shadow1 }}>{it.cat}</span>
+        {/* 호버 시 — 다운로드 + 확대 */}
+        <span
+          className="kv-galmax"
+          role="button"
+          title="다운로드"
+          onClick={onDownload}
+          style={{ position: 'absolute', top: 10, right: 44, width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,.92)', display: 'grid', placeItems: 'center', color: C.ink, boxShadow: C.shadow1 }}
+        >
+          <Download size={14} />
+        </span>
         <span className="kv-galmax" style={{ position: 'absolute', top: 10, right: 10, width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,.92)', display: 'grid', placeItems: 'center', color: C.ink }}><Maximize2 size={14} /></span>
       </div>
-      <div style={{ padding: '11px 14px 14px' }}>
+      <div style={{ padding: '11px 14px 12px' }}>
         <div style={{ fontWeight: 700, fontSize: 14.5, lineHeight: 1.35 }}>{it.t}</div>
         <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{it.sub}</div>
+        {/* 상시 표시 — 사용수 · 좋아요 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 9, fontSize: 12, color: C.muted }}>
+          <span title="사용 횟수" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Wand2 size={13} color={C.muted} /> {uses.toLocaleString()}
+          </span>
+          <span
+            role="button"
+            title={liked ? '좋아요 취소' : '좋아요'}
+            onClick={toggleLike}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: liked ? a : C.muted, cursor: 'pointer', fontWeight: liked ? 700 : 400, marginLeft: 'auto' }}
+          >
+            <Heart size={13} color={liked ? a : C.muted} fill={liked ? a : 'none'} /> {likes.toLocaleString()}
+          </span>
+        </div>
       </div>
     </button>
   );
@@ -157,15 +408,27 @@ function GalleryCard({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
 function GalleryRow({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
   const a = C.coral;
   const Icon = it.icon;
+  const isImage = it.assetKind === 'image';
+  const { ref, inView } = useInView<HTMLButtonElement>();
+  const [thumbSrc, setThumbSrc] = useState<string | undefined>();
+  useEffect(() => {
+    if (!inView || !isImage || !it.thumb) return;
+    let alive = true;
+    void getThumb(it.id, it.thumb).then((t) => { if (alive) setThumbSrc(t); });
+    return () => { alive = false; };
+  }, [inView, isImage, it.thumb, it.id]);
+  // 이미지는 작은 썸네일, 영상/웹의 thumb(포스터/없음)은 그대로.
+  const rowImg = isImage ? thumbSrc : it.thumb;
   return (
     <button
+      ref={ref}
       className="kv-galcard"
       onClick={onOpen}
       style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', textAlign: 'left', padding: 10, border: `1px solid ${C.line}`, borderRadius: 14, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', boxShadow: C.shadow1, transition: 'transform .15s, border-color .15s, box-shadow .15s' }}
     >
       <div style={{ position: 'relative', width: 58, height: 58, borderRadius: 12, background: C.thumb, display: 'grid', placeItems: 'center', flexShrink: 0, overflow: 'hidden' }}>
-        {it.thumb ? (
-          <img src={it.thumb} alt={it.t} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        {rowImg ? (
+          <img src={rowImg} alt={it.t} draggable={false} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : it.assetKind === 'web' && faviconOf(it.href) ? (
           <img src={faviconOf(it.href)} alt="" width={24} height={24} style={{ borderRadius: 6 }} />
         ) : (
@@ -191,6 +454,14 @@ function GalleryRow({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
 function GalleryViewer({ item, onClose, onAction }: { item: GalleryItem; onClose: () => void; onAction: (m: string) => void }) {
   const a = C.coral;
   const Icon = item.icon;
+  // 동영상 뷰어 — 실제 mp4를 IDB에서 읽어 원본 크기로 재생(없으면 포스터 폴백).
+  const [viewerVideo, setViewerVideo] = useState<string | undefined>();
+  useEffect(() => {
+    if (item.assetKind !== 'video') return;
+    let alive = true;
+    void loadVideoSrc(item.videoAssetId).then((src) => { if (alive) setViewerVideo(src); });
+    return () => { alive = false; };
+  }, [item.assetKind, item.videoAssetId]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -205,18 +476,21 @@ function GalleryViewer({ item, onClose, onAction }: { item: GalleryItem; onClose
   return createPortal(
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(20,19,17,.6)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative', background: C.bg, borderRadius: 20, width: 'min(1040px, 100%)', height: 'min(86vh, 760px)', display: 'flex', flexDirection: 'row', overflow: 'hidden', boxShadow: C.shadow2 }}>
-        {/* large preview — 실제 자산은 썸네일/포스터, mock은 종이 카드 */}
-        <div style={{ flex: 1, minHeight: 0, background: C.thumb, display: 'grid', placeItems: 'center', padding: 30, overflow: 'hidden' }}>
-          {item.thumb ? (
+        {/* large preview — 동영상은 실제 mp4를 원본 크기로 바로 재생, 그 외는 썸네일/포스터, mock은 종이 카드 */}
+        <div style={{ flex: 1, minHeight: 0, background: item.assetKind === 'video' ? '#000' : C.thumb, display: 'grid', placeItems: 'center', padding: item.assetKind === 'video' ? 0 : 30, overflow: 'hidden' }}>
+          {item.assetKind === 'video' ? (
+            <video
+              src={viewerVideo}
+              poster={item.thumb}
+              controls
+              autoPlay
+              loop
+              playsInline
+              style={{ maxHeight: '100%', maxWidth: '100%', width: 'auto', height: 'auto', objectFit: 'contain', background: '#000' }}
+            />
+          ) : item.thumb ? (
             <div style={{ position: 'relative', maxHeight: '100%', maxWidth: '100%', display: 'grid', placeItems: 'center' }}>
               <img src={item.thumb} alt={item.t} style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', borderRadius: 12, boxShadow: C.shadow2 }} />
-              {item.assetKind === 'video' && (
-                <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
-                  <span style={{ width: 64, height: 64, borderRadius: 999, background: a, display: 'grid', placeItems: 'center', boxShadow: '0 8px 22px rgba(20,19,17,.35)', border: '3px solid rgba(255,255,255,.85)' }}>
-                    <Play size={28} color="#fff" fill="#fff" style={{ marginLeft: 3 }} />
-                  </span>
-                </span>
-              )}
             </div>
           ) : (
             <div style={{ background: '#fff', borderRadius: 10, boxShadow: C.shadow2, aspectRatio: item.ratio, maxHeight: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '26px 30px', boxSizing: 'border-box' }}>
@@ -271,10 +545,13 @@ export function GalleryPage() {
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2200); return () => clearTimeout(t); }, [toast]);
 
   // 보관함(이미지·도안·동영상 + 웹 링크) 자동 로드 → 갤러리에 자산 카드로 표시.
+  // 페이지 셸·기본 자료가 먼저 그려지도록 비긴급(startTransition) 업데이트로 둔다.
   useEffect(() => {
     let alive = true;
     void Promise.all([listAssets(), listWebLinks()])
-      .then(([assets, links]) => { if (alive) setDynItems(buildArchiveItems(assets, links)); })
+      .then(([assets, links]) => {
+        if (alive) startTransition(() => setDynItems(buildArchiveItems(assets, links)));
+      })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -346,9 +623,7 @@ export function GalleryPage() {
         {items.length === 0 ? (
           <div style={{ textAlign: 'center', color: C.muted, marginTop: 80, fontSize: 14 }}>{ai ? `‘${ai.label}’에 어울리는 자료를 찾지 못했어요.` : `‘${q || cat}’에 해당하는 자료가 없어요.`}</div>
         ) : view === 'grid' ? (
-          <div style={{ columns: '228px', columnGap: 16 }}>
-            {items.map((it) => <GalleryCard key={it.id} it={it} onOpen={() => setSel(it)} />)}
-          </div>
+          <MasonryGrid items={items} onOpen={(it) => setSel(it)} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 880, margin: '0 auto' }}>
             {items.map((it) => <GalleryRow key={it.id} it={it} onOpen={() => setSel(it)} />)}

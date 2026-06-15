@@ -172,6 +172,8 @@ interface BoardState {
   fit: () => void;
   /** Center one node in the visible canvas and zoom so it fills the view. */
   focusNode: (id: string, maxZoom?: number) => void;
+  /** 노드를 100%(zoom 1) 실제 크기로 화면(프롬프트바 위 영역) 중앙에 둔다 — 더블클릭. */
+  centerNodeActualSize: (id: string) => void;
   /** 여러 노드의 합집합 박스를 화면에 풀로 맞춘다(모션 묶음 그룹 쇼 등). */
   focusBounds: (ids: string[], maxZoom?: number) => void;
   toggleClassroomMode: () => void;
@@ -370,6 +372,27 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         panY: targetY - cr.top - ncy * zoom,
       },
     });
+  },
+  centerNodeActualSize: (id) => {
+    const s = get();
+    const n = s.nodes[id];
+    if (!n) return;
+    // 실제 크기(zoom 1). 노드의 기하 중심을 캔버스(프롬프트바 위) 중앙에 맞춘다.
+    const doc = typeof document !== 'undefined' ? document : null;
+    const canvas = doc?.querySelector('[data-kv-canvas]') as HTMLElement | null;
+    const cr = canvas
+      ? canvas.getBoundingClientRect()
+      : ({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } as DOMRect);
+    const pbar = doc?.querySelector('.kv-pbar-vt') as HTMLElement | null;
+    const pr = pbar ? pbar.getBoundingClientRect() : undefined;
+    const padTop = 24;
+    const bottomY = pr ? pr.top - 16 : cr.top + cr.height - 140;
+    const ncx = n.x + n.w / 2;
+    const ncy = n.y + renderHeight(n) / 2; // center invariant under center-anchored scale
+    // 가로는 프롬프트바 중앙, 세로는 캔버스 영역(상단~프롬프트바) 중앙.
+    const targetX = pr ? pr.left + pr.width / 2 : cr.left + cr.width / 2;
+    const targetY = cr.top + padTop + (bottomY - (cr.top + padTop)) / 2;
+    set({ viewport: { zoom: 1, panX: targetX - cr.left - ncx, panY: targetY - cr.top - ncy } });
   },
   focusBounds: (ids, maxZoom = 2) => {
     const s = get();

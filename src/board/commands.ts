@@ -1,6 +1,7 @@
 import { useBoardStore, newId, type BoardNode, type NodeType } from '@/store/boardStore';
 import { useHistoryStore } from '@/store/historyStore';
 import { worldBox } from './geometry';
+import { motionPoints } from './motionGeometry';
 
 /** Primitive node types addable from the toolbar (frame/runner are seeded). */
 export type PrimitiveType = 'sticky' | 'text' | 'shape' | 'image';
@@ -261,6 +262,55 @@ export function relinkCmd(linkId: string, next: { from: string; to: string } | n
     undo: () => {
       if (created) board().removeLinkRaw(created.id);
       board().addLinkRaw(old);
+    },
+  });
+}
+
+/** 요소를 모션의 슬롯(출발·중간1·중간2·도착)에 연결 — 요소 링크 포트를 모션 점에
+    드롭했을 때. 출발은 곡선 시작점을 요소 중심에 맞추고, 중간(경유지)은 요소를 그
+    웨이포인트 위로 옮긴다. 같은 ⌘Z로 되돌아간다. */
+export function attachMotionSlotCmd(
+  motionId: string,
+  slot: 'aStart' | 'aMid1' | 'aMid2' | 'aEnd',
+  elementId: string,
+): void {
+  const b = board();
+  const motion = b.nodes[motionId];
+  const el = b.nodes[elementId];
+  if (!motion || motion.type !== 'motion' || !el || elementId === motionId) return;
+  // 같은 요소가 두 슬롯에 동시에 붙지 않게 — 다른 슬롯에 있으면 비운다.
+  const slots = ['aStart', 'aMid1', 'aMid2', 'aEnd'] as const;
+  const beforeMotion = { ...(motion.data ?? {}) } as Record<string, unknown>;
+  const beforeEl = { x: el.x, y: el.y };
+  const nextData: Record<string, unknown> = { ...beforeMotion };
+  for (const s of slots) if (nextData[s] === elementId) delete nextData[s];
+  // 출발은 곡선 시작점을 요소 중심으로 당긴다(점프 없음).
+  if (slot === 'aStart') {
+    const cx = el.x + el.w / 2;
+    const cy = el.y + (typeof el.data?.renderH === 'number' ? (el.data.renderH as number) : el.h) / 2;
+    nextData.aStart = elementId;
+    nextData.p1 = { x: cx - motion.x, y: cy - motion.y };
+  } else {
+    nextData[slot] = elementId;
+  }
+  // 중간(경유지) 연결 — 요소를 그 웨이포인트 위로 옮겨 둔다(실제 위치 = 곡선 위 ⅓·⅔).
+  let elPatch: { x: number; y: number } | null = null;
+  if (slot === 'aMid1' || slot === 'aMid2') {
+    const pts = motionPoints({ ...motion, data: nextData } as BoardNode);
+    const wp = pts[slot];
+    const rh = typeof el.data?.renderH === 'number' ? (el.data.renderH as number) : el.h;
+    elPatch = { x: Math.round(wp.x - el.w / 2), y: Math.round(wp.y - rh / 2) };
+  }
+  history().execute({
+    id: newId('cmd'),
+    label: '모션에 연결',
+    do: () => {
+      board().updateNodeRaw(motionId, { data: nextData });
+      if (elPatch) board().updateNodeRaw(elementId, elPatch);
+    },
+    undo: () => {
+      board().updateNodeRaw(motionId, { data: beforeMotion });
+      if (elPatch) board().updateNodeRaw(elementId, beforeEl);
     },
   });
 }

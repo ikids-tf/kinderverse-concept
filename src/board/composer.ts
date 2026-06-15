@@ -20,6 +20,8 @@ import {
   animatePanBy,
   slideFrameToEmpty,
   nearestEmptyRightX,
+  openDocSpot,
+  generateActivityImages,
   genSignal,
   PLAN_DOC_W,
   type SourceLink,
@@ -1462,6 +1464,21 @@ export async function runComposerChip(frameId: string, chipId: string): Promise<
   const chip = (frame?.data?.nextSteps as ComposerChip[] | undefined)?.find((c) => c.id === chipId);
   if (!chip || chip.status === 'running') return;
   setChipStatus(frameId, chipId, 'running');
+  // 활동 이미지 추가(studio.images) + 프레임에 계획안이 있으면 — 일반 갤러리 대신
+  // '계획 활동마다 1장씩(최대 5)'을 프레임 오른쪽에 세로로 그린다(활동 정확 분석).
+  const hasPlan = Object.values(b.nodes).some(
+    (n) => n.data?.frameId === frameId &&
+      (n.data?.role === 'plan' || (n.data?.payload as { type?: string } | undefined)?.type === 'WeeklyPlanGrid'),
+  );
+  if (chip.action === 'studio.images' && hasPlan) {
+    try {
+      await generateActivityImages(frameId);
+      setChipStatus(frameId, chipId, 'done');
+    } catch {
+      setChipStatus(frameId, chipId, 'idle');
+    }
+    return;
+  }
   // fillRegion이 진행 메시지(say)를 띄우므로 begin/endGen 짝이 필요 — 없으면
   // 마지막 메시지("…그리는 중 (3/3)")가 생성이 끝나도 영원히 남는다.
   b.beginGen();
@@ -1658,6 +1675,114 @@ export async function decorateDocCard(nodeId: string, _prompt: string): Promise<
     fitFrameToChildren(frameId);
   }
   recordSpawnedNodes([id], '소식지 꾸미기');
+}
+
+/* 아동 행동 상담 — 교사가 아이의 이상/걱정 행동을 질문하면(예: "아이가 먹지 않고
+   앉아만 있어 어떻게 하면 좋을까?") 기본형 문서에 전문 상담 답변을 생성한다.
+   유아 발달·아동심리 관점으로 상태를 해석하고, 교실/가정 지원 방안과 관찰 기록
+   가이드를 담아 — 학부모 상담·기록·조기 대처에 바로 쓰는 문서로. 진단이 아니라
+   관찰 기반 참고 자료임을 명시한다(무근거 단정 금지). */
+const CONSULT_SYSTEM =
+  '너는 유아교육 현장의 교사를 돕는 아동 행동 상담 전문가다. 유아 발달심리학(예: 에릭슨 심리사회 발달, 애착이론, 기질, 자기조절 발달)과 아동·보육 현장 지식에 근거해, 교사가 묘사한 아이 행동을 해석하고 실행 가능한 지원 방안을 제시한다. ' +
+  '원칙: (1) 진단하지 말 것 — 가능한 해석을 "~일 수 있어요"처럼 가설로 제시한다. (2) 교사가 말하지 않은 사실을 지어내지 말 것 — 더 확인이 필요한 부분은 관찰 항목으로 돌린다. (3) 따뜻하고 전문적인 어조. (4) 마크다운만 출력(코드펜스·머리말 금지).\n' +
+  '아래 구조로 작성하라(섹션 제목 그대로 사용):\n' +
+  '# (행동을 요약한 제목)\n' +
+  '## 관찰된 행동\n교사가 말한 내용을 객관적 행동 서술로 1~3줄.\n' +
+  '## 발달·심리학적 해석\n가능한 원인을 발달·정서·기질·환경 관점에서 2~4가지, 각 "~일 수 있어요" 가설로(가능하면 이론·개념 이름을 가볍게 근거로). 글머리표.\n' +
+  '## 교실에서의 지원 방안\n바로 적용 가능한 단계별 전략 3~5가지(글머리표, 구체적 지침).\n' +
+  '## 가정 연계 · 학부모 상담 포인트\n학부모와 나눌 대화 포인트·가정 제안을 "> " 인용 블록(콜아웃)으로.\n' +
+  '## 더 관찰·기록할 점\n판단을 정교화할 관찰·기록 항목 3~5가지(빈도·상황·맥락, 글머리표).\n' +
+  '## 전문가 의뢰를 고려할 신호\n지속·심화 시 전문기관 연계를 고려할 신호 2~3가지(글머리표).\n' +
+  '마지막 줄에 "> ⚠️ 이 자료는 진단이 아니라 관찰에 근거한 참고용이며, 지속적 관찰과 전문가 협의가 필요해요." 콜아웃. 핵심 낱말은 **굵게**. 700~1100자.';
+
+export async function consultBehavior(text: string): Promise<void> {
+  const b = useBoardStore.getState();
+  // 기존 콘텐츠와 겹치지 않는 자리 — 오른쪽 옆, 가장 위 콘텐츠와 상단을 맞춘 빈자리에
+  // 놓는다(막혔으면 그 아래/다음 열). 카메라가 이 자리를 화면 상단 중앙으로 잡아 준다.
+  const spot = openDocSpot(DOC_WIDTH, 760);
+  const docX = spot.x;
+  const docY = spot.y;
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id, type: 'sticky',
+    x: docX, y: docY, w: DOC_WIDTH, h: 300, autoH: true,
+    text: '🧑‍⚕️ 아동 행동을 분석하고 상담 자료를 정리하고 있어요…', color: 'paper',
+    data: { doc: true, role: 'record', loadingDoc: true, sourcePrompt: text },
+  });
+  b.setSelection([id]);
+  b.beginGen();
+  b.setGenerating('🧑‍⚕️ 발달·심리 관점으로 아이 행동을 살펴보고 있어요…');
+
+  // 실사이즈(zoom 1)로 — 문서를 캔버스 가로 중앙·상단(상단 툴바 아래)에서 시작하게 팬.
+  // 진행 중이던 부드러운 팬이 카메라를 끌고 가지 않도록 먼저 중단한다.
+  cancelPanAnimation();
+  const railW = 64;
+  const cw = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) - railW);
+  const TOP = 84; // 문서 상단의 화면 y(상단 툴바 아래)
+  b.setViewport({ zoom: 1, panX: Math.round(cw / 2 - (docX + DOC_WIDTH / 2)), panY: Math.round(TOP - docY) });
+
+  // 놀이계획처럼 — 문서 맨 위부터 글이 흘러내리도록 스트리밍(80ms 스로틀). 첫 토큰이
+  // 오면 로딩 플레이스홀더를 지우고 그 자리에 실제 글을 써 내려간다. 정지 버튼 지원.
+  // 내용이 화면(프롬프트바 위)보다 길어지면 '쓰는 곳'을 따라 카메라가 아래로 이동해
+  // 교사가 실사이즈 글씨로 끝까지 읽을 수 있게 한다(채팅 자동 스크롤처럼).
+  const signal = genSignal();
+  let draft = '';
+  let started = false;
+  let flushTimer: number | undefined;
+  const BOTTOM_GUARD = 150; // 프롬프트바 위 여유 — 쓰는 줄이 이 선 위에 머문다
+  const followStream = () => {
+    const st = useBoardStore.getState();
+    const d = st.nodes[id];
+    if (!d) return;
+    const rh = Math.max(typeof d.data?.renderH === 'number' ? (d.data.renderH as number) : 0, d.h);
+    const { zoom, panY } = st.viewport;
+    const ch = Math.max(320, typeof window !== 'undefined' ? window.innerHeight : 800);
+    const bottomOnScreen = (d.y + rh) * zoom + panY;
+    const limit = ch - BOTTOM_GUARD;
+    if (bottomOnScreen > limit) st.setViewport({ panY: Math.round(panY - (bottomOnScreen - limit)) }); // 아래로만 따라간다
+  };
+  // 카메라 추적은 rAF 루프로 — renderH(실제 높이)는 ResizeObserver가 한 프레임 늦게
+  // 갱신하므로, flush 때 한 번만 보지 말고 매 프레임 확인해 갱신 즉시 따라간다.
+  let following = true;
+  const followLoop = () => {
+    if (!following) return;
+    followStream();
+    requestAnimationFrame(followLoop);
+  };
+  requestAnimationFrame(followLoop);
+  const flush = () => {
+    if (useBoardStore.getState().nodes[id]) {
+      const cur = useBoardStore.getState().nodes[id];
+      useBoardStore.getState().updateNodeRaw(id, { text: draft, data: { ...(cur?.data ?? {}), loadingDoc: false } });
+    }
+  };
+  try {
+    await streamChat([{ role: 'user', content: `다음은 교사가 관찰한 아이 행동에 대한 질문이야:\n"${text}"\n\n전문 상담 문서를 작성해줘.` }], {
+      system: CONSULT_SYSTEM,
+      signal,
+      onDelta: (t) => {
+        draft += t;
+        started = true;
+        if (flushTimer === undefined) {
+          flushTimer = window.setTimeout(() => { flushTimer = undefined; flush(); }, 80);
+        }
+      },
+    });
+  } catch {
+    /* 스트림 실패/중단 — 아래에서 마무리 */
+  }
+  if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined; }
+  if (!started || !draft.trim()) {
+    const cur = useBoardStore.getState().nodes[id];
+    if (cur) b.updateNodeRaw(id, { text: '상담 자료 생성에 실패했어요. 다시 시도해 주세요.', data: { ...(cur.data ?? {}), loadingDoc: false } });
+  } else {
+    flush();
+  }
+  // 마지막 줄까지 따라가도록 — 최종 renderH가 ResizeObserver로 반영될 시간을 준 뒤 추적 종료.
+  await new Promise((r) => setTimeout(r, 700));
+  following = false;
+  useBoardStore.getState().endGen();
+  recordSpawnedNodes([id], '아동 행동 상담');
 }
 
 /** Rewrite a plan/worksheet document into a warm, parent-facing weekly newsletter. */

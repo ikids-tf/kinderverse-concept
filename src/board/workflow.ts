@@ -717,6 +717,29 @@ export function placeAssetOnBoard(asset: { tag: string; url: string }): string {
   return placeAssetsOnBoard([asset])[0];
 }
 
+/** 업로드한 텍스트 문서 → 내용을 담은 메모 카드로 보드에 올리고 id 반환(프롬프트가 이 카드를
+    선택 대상으로 삼아 "이걸로 활동지 만들어줘"처럼 작동하게 한다). */
+export function spawnMemoCard(title: string, content: string): string {
+  const b = useBoardStore.getState();
+  const c = viewportCenterBoardPoint();
+  const body = content.trim().slice(0, 4000);
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id,
+    type: 'sticky',
+    x: Math.round(c.x),
+    y: Math.round(c.y),
+    w: 300,
+    h: 220,
+    autoH: true,
+    text: title ? `${title}\n\n${body}` : body,
+    data: { role: 'memo', uploaded: true },
+  });
+  recordSpawnedNodes([id], '문서 업로드');
+  ensureBoxVisible([id]);
+  return id;
+}
+
 /* ---- 유튜브 뷰어 + 프롬프트 = 영상 검색 → 뷰어 아래 썸네일 가로 배열 ---- */
 
 /* ---- 생성 중단(정지 버튼) — 공유 AbortController ----------------------------
@@ -982,6 +1005,87 @@ export function activityTextForVideo(sourceId: string): string {
   if (acts.length) return [title, ...acts].filter(Boolean).join(' / ').slice(0, 600);
   const body = (src.text ?? '').trim();
   return ([title, body].filter(Boolean).join('\n') || title).slice(0, 600);
+}
+
+/** 계획안(또는 그 계획을 담은 프레임)에서 '활동 이미지'를 만든다 — 계획 안의 활동
+    개수만큼(최대 5·최소 1) 활동마다 1장씩, 그 활동을 하는 유아의 모습을 그려 프레임
+    '오른쪽에 세로로' 배치한다. 자리(스피너)를 먼저 깔고 활동별로 채운다(앞→뒤). */
+export async function generateActivityImages(sourceId: string): Promise<void> {
+  const b = useBoardStore.getState();
+  const start = b.nodes[sourceId];
+  if (!start) return;
+  // 소스 해석 — 프레임이면 안에서 계획 문서를 찾고, 그 프레임을 배치 기준으로 쓴다.
+  const isPlanish = (n?: BoardNode) =>
+    !!n && (n.data?.role === 'plan' || (n.data?.payload as { type?: string } | undefined)?.type === 'WeeklyPlanGrid');
+  let planNode: BoardNode | undefined;
+  let frameId: string | undefined; // 활동 이미지를 '안에' 넣을 프레임(있으면)
+  if (start.type === 'frame') {
+    const kids = Object.values(b.nodes).filter((n) => n.data?.frameId === start.id);
+    planNode = kids.find(isPlanish) ?? kids.find((n) => planActivities(n).length >= 1);
+    frameId = start.id;
+  } else {
+    planNode = start;
+    frameId = (start.data?.frameId as string | undefined) && b.nodes[start.data!.frameId as string] ? (start.data!.frameId as string) : undefined;
+  }
+  const acts = (planNode ? planActivities(planNode) : [])
+    .map((a) => a.activity.trim())
+    .filter(Boolean)
+    .slice(0, 5); // 최대 5장
+  // 활동을 못 뽑으면 제목 1개로라도(최소 1장) — 계획 제목 기반 대표 활동 이미지.
+  const list = acts.length ? acts : [String(planNode?.data?.title ?? planNode?.text ?? '놀이 활동').split('\n')[0].replace(/[#*]/g, '').trim() || '놀이 활동'];
+
+  // 계획안(문서) '바로 오른쪽'에 세로로 — 프레임이 있으면 그 안에 넣고(같이 이동·저장),
+  // 끝나면 프레임을 늘려 감싼다. 기준은 계획 문서의 월드 박스(프레임 전체가 아니라).
+  const ref = planNode ?? start;
+  const rb = worldBox(ref);
+  const W = 240;
+  const IMG_H = 200; // 그림 영역
+  const CAP = 44; // 활동명 캡션(길면 2줄) 여유
+  const GAP = 28; // 카드 사이 세로 간격(겹침 방지)
+  const STEP = IMG_H + CAP + GAP;
+  const colX = Math.round(rb.x + rb.w + 32); // 계획안 오른쪽 + 여백
+  const topY = Math.round(rb.y);
+
+  b.beginGen();
+  b.setGenerating('🎨 계획안의 활동을 분석해 활동 이미지를 그리고 있어요…');
+  // 1) 자리 먼저 — 활동 수만큼 세로 스피너 카드(프레임 안 자식으로 태깅).
+  const ids: string[] = [];
+  list.forEach((act, i) => {
+    const id = newId('image');
+    b.addNodeRaw({
+      id, type: 'image',
+      x: colX, y: topY + i * STEP, w: W, h: IMG_H, autoH: true,
+      loading: true, text: act.slice(0, 40),
+      data: { role: 'image', activityImage: true, ...(frameId ? { frameId } : {}) },
+    });
+    ids.push(id);
+  });
+  // 프레임이 새 이미지 열을 감싸도록 즉시 한 번 늘려 둔다(생성 전에도 자리 확보).
+  if (frameId) fitFrameToChildren(frameId);
+
+  // 2) 활동별로 '그 활동을 하는 유아의 모습'을 그려 앞에서부터 채운다.
+  for (let i = 0; i < list.length; i++) {
+    const act = list[i];
+    b.setGenerating(`🎨 '${act.slice(0, 18)}' 활동 이미지를 그리는 중… (${i + 1}/${list.length})`);
+    try {
+      const prompt =
+        `유아(어린이)들이 '${act}' 놀이/활동을 즐겁고 활기차게 하고 있는 장면. 활동하는 동작이 분명히 드러나게. ${KV_ART_STYLE}`;
+      const res = await callGateway({ task: 'image', provider: 'auto', messages: [], meta: { prompt, caption: act } });
+      if (!useBoardStore.getState().nodes[ids[i]]) continue; // 사용자가 지운 경우
+      useBoardStore.getState().updateNodeRaw(ids[i], { loading: false, src: res.image, text: act.slice(0, 40) });
+      if (res.image && !res.mocked) void saveAsset(act, 'image', res.image, planNode ? String(planNode.data?.title ?? '놀이 활동') : undefined);
+    } catch {
+      if (useBoardStore.getState().nodes[ids[i]]) useBoardStore.getState().updateNodeRaw(ids[i], { loading: false });
+    }
+  }
+
+  recordSpawnedNodes(ids.filter((id) => useBoardStore.getState().nodes[id]), '활동 이미지');
+  // 캡션 높이가 측정된 뒤 프레임을 정확히 다시 감싼다(이미지 열이 프레임 안에 들어오게).
+  if (frameId) {
+    await new Promise((r) => setTimeout(r, 260));
+    fitFrameToChildren(frameId);
+  }
+  useBoardStore.getState().endGen();
 }
 
 /** 동영상 플레이어(빈) 뷰어를 보드에 추가하고 id를 돌려준다. nearId가 있으면 그
@@ -1400,6 +1504,35 @@ export function viewportCenterBoardPoint(): { x: number; y: number } {
   const cw = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) - railW);
   const ch = Math.max(320, typeof window !== 'undefined' ? window.innerHeight : 800);
   return { x: (cw / 2 - panX) / zoom, y: (ch / 2 - panY) / zoom };
+}
+
+/** 새 문서의 '겹치지 않는 좌상단' 자리 — 기존 콘텐츠의 오른쪽, 가장 위 콘텐츠와
+    상단을 맞춘 자리에서 시작한다. 그 열(오른쪽 옆)에 이미 자료가 있으면 그 아래로
+    내려가며 빈자리를 찾고, 한 열이 꽉 차면 한 칸 더 오른쪽 열로 넘어간다.
+    빈 보드면 현재 뷰 중앙 기준. (w,h = 새 문서의 대략 크기 — 세로는 넉넉히 추정) */
+export function openDocSpot(w: number, h: number): { x: number; y: number } {
+  const b = useBoardStore.getState();
+  const boxes = Object.values(b.nodes)
+    .filter((n) => n.type !== 'motion')
+    .map(worldBox);
+  if (boxes.length === 0) {
+    const c = viewportCenterBoardPoint();
+    return { x: Math.round(c.x - w / 2), y: Math.round(c.y - 160) };
+  }
+  const GAP = 48;
+  const top = Math.min(...boxes.map((bx) => bx.y)); // 가장 위 콘텐츠와 상단 정렬
+  const rightEdge = Math.max(...boxes.map((bx) => bx.x + bx.w)); // 모든 콘텐츠의 오른쪽 끝
+  const hit = (x: number, y: number) =>
+    boxes.some((o) => x < o.x + o.w + GAP && x + w + GAP > o.x && y < o.y + o.h + GAP && y + h + GAP > o.y);
+  // 첫 열은 '기존 콘텐츠 바로 오른쪽'. 위→아래로 빈자리 스캔, 막히면 다음 열로.
+  for (let col = 0; col < 16; col++) {
+    const x = rightEdge + GAP + col * (w + GAP);
+    for (let row = 0; row < 60; row++) {
+      const y = top + row * (h + GAP);
+      if (!hit(x, y)) return { x: Math.round(x), y: Math.round(y) };
+    }
+  }
+  return { x: Math.round(rightEdge + GAP), y: Math.round(top) };
 }
 
 /** Anchor point for NEW composed content. Returns a CENTER point whose content —

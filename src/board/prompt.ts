@@ -1,8 +1,8 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
-import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode } from './composer';
+import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior } from './composer';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import {
   contentIntentFast,
@@ -10,6 +10,8 @@ import {
   vesselIntent,
   requestedCount,
   coreTopic,
+  isBehaviorConsult,
+  normalizePlayTheme,
   WORKSHEET_RE,
   PLAN_RE,
   VIDEO_RE,
@@ -29,11 +31,11 @@ import type { RouteTarget } from '@/ai/contract';
 /** 입력 정규화(보수적) — 앞뒤 공백·따옴표 정리, 줄 안 공백 축약(줄바꿈은 보존).
     오타·자모분해 교정은 과교정으로 오인식 위험이 있어 넣지 않는다. */
 function normalizeInput(text: string): string {
-  return text
+  return normalizePlayTheme(text
     .replace(/[\u200B-\u200D\uFEFF]/g, '') // zero-width 제거
     .replace(/^[“”"'`\s]+|[“”"'`\s]+$/g, '') // 앞뒤 따옴표·공백
     .replace(/[ \t\u00A0]+/g, ' ') // 줄 안 공백(탭·nbsp 포함) 축약
-    .replace(/ *\n */g, '\n'); // 줄 경계 공백 정리(줄바꿈 보존)
+    .replace(/ *\n */g, '\n')); // 줄 경계 공백 정리 + 흔한 놀이 주제 오타 교정(몰놀이→물놀이)
 }
 
 /** Map the lexicon's rich intent onto the popup's ReqIntent vocabulary.
@@ -161,6 +163,13 @@ export function handleBoardPrompt(text: string): boolean {
   if (sel.length === 0) {
     // 안전한 폴백: 선택이 필요한 보드 조작(지워/크게/정렬/이동…)인데 대상이 없으면
     // 빈 문서를 만들지 말고 무엇을 고를지 안내만 한다("이 메모 지워줘"가 문서로 새던 문제).
+    // 아동 행동 상담 질문("아이가 안 먹고 앉아만 있어 어떻게 하면 좋을까?") → 요소 선택을
+    // 요구하지 말고 기본형 문서에 발달·심리 기반 전문 상담 답변을 생성한다.
+    // boardOp 가드보다 먼저 — 상담 문장에 '크게 운다'처럼 조작어가 섞여도 상담이 우선.
+    if (isBehaviorConsult(text)) {
+      void consultBehavior(text);
+      return true;
+    }
     const noTargetOp = boardOp(text);
     const wantsGen = /만들|생성|그려|작성|써\s*줘|추가|넣어/.test(text);
     if (noTargetOp && !wantsGen) {
@@ -276,6 +285,23 @@ export function handleBoardPrompt(text: string): boolean {
 
   const fast = contentIntentFast(text);
   const intent = toReqIntent(fast);
+
+  // 계획안(또는 계획을 담은 프레임) 선택 + '활동 이미지' 요청 → 계획 활동마다 1장씩
+  // (최대 5·최소 1) 그 활동을 하는 유아 모습을 프레임 오른쪽에 세로로 그린다.
+  // 일반 이미지 생성/프레임 채우기로 새지 않도록 프레임 분기보다 먼저 처리한다.
+  const planish = (n: BoardNode) =>
+    n.data?.role === 'plan' || (n.data?.payload as { type?: string } | undefined)?.type === 'WeeklyPlanGrid';
+  const wantsActivityImg = fast === 'image' || fast === 'coloring' || /활동\s*(이미지|그림|사진)/.test(text);
+  if (sel.length === 1 && wantsActivityImg) {
+    const n = sel[0];
+    const isPlanSel =
+      planish(n) ||
+      (n.type === 'frame' && Object.values(b.nodes).some((k) => k.data?.frameId === n.id && planish(k)));
+    if (isPlanSel) {
+      void generateActivityImages(n.id);
+      return true;
+    }
+  }
 
   // ── specialized single-target cases (unchanged) ──
   // Single document card + a "decorate / share with parents" prompt → newsletter.

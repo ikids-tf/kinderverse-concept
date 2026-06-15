@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { Icon } from '@/lib/icons';
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { renderHeight, worldBox } from '@/board/geometry';
-import { getP, bz, centerOf, normalizeMotionNode, type P } from '@/board/motionGeometry';
+import { getP, bz, centerOf, normalizeMotionNode, motionPoints, type P } from '@/board/motionGeometry';
+import { attachMotionSlotCmd } from '@/board/commands';
 import { analyzeImageFacing, type Facing } from '@/ai/facing';
 
 /* 이동 애니메이션 노드 (type: 'motion') — 출발·도착 원을 잇는 곡선(3차 베지어)을
@@ -17,6 +18,8 @@ import { analyzeImageFacing, type Facing } from '@/ai/facing';
 /** 재생 시간 = BASE_DUR ÷ 배속(data.speedX, 슬라이더 0.3~4×).
     구버전 3단(data.speed: slow/normal/fast)은 같은 체감의 배속으로 승격. */
 const BASE_DUR = 3;
+/** 'follow' 경유지 요소가 무버를 따라갈 때의 시간차(ms) — 약간 늦게 쫓아온다. */
+const FOLLOW_DELAY = 420;
 const SPEED_MIN = 0.05; // 달팽이 — 한 번 이동에 60초
 const SPEED_MAX = 4;
 const LEGACY_SPEED: Record<string, number> = { slow: 0.6, normal: 1, fast: 2.2 };
@@ -143,6 +146,28 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
 
   const [playing, setPlaying] = useState(false);
   const [done, setDone] = useState(false);
+
+  // 경유지(중간) 연결 요소 — 재생 중이 아닐 때는 항상 그 웨이포인트(곡선 ⅓·⅔) 위에
+  // 머문다. 곡선을 다듬거나 도착 카드가 움직이면 경유지도 따라 위치를 갱신한다.
+  const aMid1 = node.data?.aMid1 as string | undefined;
+  const aMid2 = node.data?.aMid2 as string | undefined;
+  useEffect(() => {
+    if (playing) return;
+    const st = useBoardStore.getState();
+    const cur = st.nodes[node.id];
+    if (!cur) return;
+    const pts = motionPoints(cur);
+    for (const slot of ['aMid1', 'aMid2'] as const) {
+      const midId = cur.data?.[slot] as string | undefined;
+      const mn = midId ? st.nodes[midId] : undefined;
+      if (!mn) continue;
+      const wp = pts[slot];
+      const nx = Math.round(wp.x - mn.w / 2);
+      const ny = Math.round(wp.y - renderHeight(mn) / 2);
+      if (mn.x !== nx || mn.y !== ny) st.updateNodeRaw(midId!, { x: nx, y: ny });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, aMid1, aMid2, node.x, node.y, node.data?.p1, node.data?.c1, node.data?.c2, node.data?.p2, node.data?.aEnd, endNode?.x, endNode?.y]);
   // 구간 효과 — 열린 패널(조절점·출발/도착 원 클릭 토글)과 재생 중 말풍선(화면 좌표).
   const [wpOpen, setWpOpen] = useState<null | WpKey>(null);
   // 구간 효과 패널 — 이 모션 노드 바깥(배경·다른 카드)을 클릭하면 닫는다.
@@ -320,6 +345,8 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
     lastDeg?: number;
     /** 3D 뷰어용 부드러운 헤딩 — 목표 각도를 점프 대신 초당 일정 속도로 따라간다. */
     headingDeg?: number;
+    /** 무버 중심 위치 기록 — 'follow' 경유지 요소가 시간차로 따라가는 트레일 버퍼. */
+    hist?: Array<{ t: number; x: number; y: number }>;
   } | null>(null);
   /** 첫 재생 직전 무버의 회전값 — ↺(처음으로)에서 방향까지 원복하기 위함. */
   const origRotRef = useRef<number | null>(null);
@@ -429,6 +456,29 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
         // 클릭 — 이 지점의 효과 패널(구간 속도·점프·말풍선) 토글
         setWpOpen((prev) => (prev === key ? null : key));
         return;
+      }
+      // 모션 → 카드 방향 연결 — 경유지 점을 카드 위에 놓으면 그 카드를 이 웨이포인트
+      // (⅓·⅔)에 연결한다(요소 → 모션점 방향과 양방향). 빈 곳이면 곡선 휘기만 확정.
+      // linkable이 frame/motion/runner를 제외하므로 프레임 면에 놓아도 연결되지 않는다.
+      const st = useBoardStore.getState();
+      const cur = st.nodes[node.id];
+      const slot: 'aMid1' | 'aMid2' = key === 'm1' ? 'aMid1' : 'aMid2';
+      if (cur) {
+        const wp = motionPoints(cur)[slot];
+        const target = [...st.order]
+          .reverse()
+          .map((id) => st.nodes[id])
+          .find((n) => {
+            if (!n || !linkable(n)) return false;
+            const b2 = worldBox(n);
+            return wp.x >= b2.x && wp.x <= b2.x + b2.w && wp.y >= b2.y && wp.y <= b2.y + b2.h;
+          });
+        if (target) {
+          attachMotionSlotCmd(node.id, slot, target.id);
+          hint(`'${cardLabel(target)}'를 경유지에 연결했어요 — 선택하면 동작(둥실·팔로우 등)을 줄 수 있어요`);
+          normalize();
+          return;
+        }
       }
       normalize();
     };
@@ -726,6 +776,31 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
       }
     }
     st.updateNodeRaw(moverId, patch);
+
+    // ── 경유지(중간) 연결 요소 — 웨이포인트에 머물다가, 'follow'면 무버가 그 지점을
+    //    지난 뒤 FOLLOW_DELAY만큼 시간차를 두고 무버를 따라간다(트레일 버퍼). ──
+    const moverCx = px;
+    const moverCy = py - jumpOff;
+    pr.hist = pr.hist ?? [];
+    pr.hist.push({ t: now, x: moverCx, y: moverCy });
+    while (pr.hist.length > 2 && now - pr.hist[0].t > 1500) pr.hist.shift();
+    for (const [slot, wt] of [['aMid1', 1 / 3], ['aMid2', 2 / 3]] as const) {
+      const midId = cur.data?.[slot] as string | undefined;
+      const mn = midId ? st.nodes[midId] : undefined;
+      if (!mn) continue;
+      const rhm = renderHeight(mn);
+      let cxw = bz(wt, w.P1.x, w.C1.x, w.C2.x, w.P2.x); // 기본 — 그 웨이포인트
+      let cyw = bz(wt, w.P1.y, w.C1.y, w.C2.y, w.P2.y);
+      if (mn.data?.idle === 'follow' && t >= wt) {
+        // 무버가 이 지점을 지난 뒤 — FOLLOW_DELAY 전 무버 위치를 목표로(시간차 트레일).
+        const want = now - FOLLOW_DELAY;
+        let hp = pr.hist[0];
+        for (const h of pr.hist) { if (h.t <= want) hp = h; else break; }
+        cxw = hp.x;
+        cyw = hp.y;
+      }
+      st.updateNodeRaw(midId!, { x: Math.round(cxw - mn.w / 2), y: Math.round(cyw - rhm / 2) });
+    }
     if (!loop && pr.t >= 1) {
       meet(); // 한 번 이동 — 도착 반응
       stopPlay();
@@ -944,10 +1019,24 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
             {/* 곡선 조절 점 둘(선 위 ⅓·⅔ 지점) — 각각 드래그해 S자·파도 등 다채로운
                 곡선을. 크게 + 근처만 가도 잡히는 넓은 히트 영역 */}
             {([
-              { key: 'm1' as const, pt: m1 },
-              { key: 'm2' as const, pt: m2 },
-            ]).map(({ key, pt }) => (
+              { key: 'm1' as const, pt: m1, slot: 'aMid1' as const },
+              { key: 'm2' as const, pt: m2, slot: 'aMid2' as const },
+            ]).map(({ key, pt, slot }) => {
+              const midLinked = !!node.data?.[slot];
+              return (
               <g key={key}>
+                {/* 경유지에 카드가 연결되면 실선 링으로 표시(출발/도착처럼) */}
+                {midLinked && (
+                  <circle
+                    cx={pt.x}
+                    cy={pt.y}
+                    r={24}
+                    fill="none"
+                    stroke="var(--accent)"
+                    strokeWidth={2.5}
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
                 <circle
                   cx={pt.x}
                   cy={pt.y}
@@ -962,7 +1051,7 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
                   <circle
                     cx={pt.x}
                     cy={pt.y}
-                    r={25}
+                    r={midLinked ? 31 : 25}
                     fill="none"
                     stroke="var(--accent)"
                     strokeWidth={2.5}
@@ -978,10 +1067,15 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
                   style={{ pointerEvents: 'auto', cursor: 'grab' }}
                   onPointerDown={dragPoint(key)}
                 >
-                  <title>드래그 = 곡선 휘기 · 클릭 = 이 지점 효과(구간 속도·점프·말풍선)</title>
+                  <title>
+                    {midLinked
+                      ? '경유지 — 카드 연결됨 · 드래그 = 곡선 휘기 · 클릭 = 이 지점 효과'
+                      : '드래그 = 곡선 휘기(카드 위에 놓으면 경유지 연결) · 클릭 = 이 지점 효과(구간 속도·점프·말풍선)'}
+                  </title>
                 </circle>
               </g>
-            ))}
+              );
+            })}
           </>
         )}
       </svg>

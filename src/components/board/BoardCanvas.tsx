@@ -1,8 +1,9 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useBoardStore, presentationVisibleSet, type BoardNode, type BoardLink } from '@/store/boardStore';
-import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, type NodeSnap } from '@/board/commands';
+import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, attachMotionSlotCmd, type NodeSnap } from '@/board/commands';
 import { linkSequence } from '@/board/links';
+import { nearestMotionSlot } from '@/board/motionGeometry';
 import { mindMapSubtree } from '@/board/composer';
 import { regenImageCard, genTextCard, spawnVideoPlayer, activityTextForVideo } from '@/board/workflow';
 import { generateVideoForViewer } from '@/board/video';
@@ -502,7 +503,21 @@ export function BoardCanvas() {
       const w = handlePointerToWorld(e.clientX, e.clientY);
       const target = linkableAt(w.x, w.y);
       if (st.mode === 'new') {
-        if (target && target.id !== st.from) {
+        // 요소 링크를 모션의 연결점(출발·중간1·중간2·도착) 위에 놓으면 → 그 슬롯에 연결.
+        // (일반 요소-요소 링크보다 먼저 — 모션 점이 카드와 겹쳐도 모션 연결이 우선.)
+        const mh = nearestMotionSlot(w.x, w.y);
+        if (mh && mh.motionId !== st.from && st.from) {
+          attachMotionSlotCmd(mh.motionId, mh.slot, st.from);
+          setPortsId(null);
+          return;
+        }
+        // 프레임 자식에서 끌어낸 링크를 '그 프레임 면'에 놓으면 연결하지 않는다
+        // (프레임은 담는 그릇 — 안의 요소가 자기 그릇에 연결되는 건 의미가 없다).
+        // 다른 요소로 연결하거나, 빈 프레임 면에 놓으면 그냥 취소된다.
+        const srcNode = useBoardStore.getState().nodes[st.from];
+        const dropOnOwnFrame =
+          target?.type === 'frame' && srcNode?.data?.frameId === target.id;
+        if (target && target.id !== st.from && !dropOnOwnFrame) {
           const created = addLinkCmd(st.from, target.id);
           // 연결 직후 제안 — 상대 요소의 캡션/제목을 주제로:
           //  · 유튜브 뷰어 ↔ 요소 → 뷰어 안 "영상을 찾아 연결할까요?" (뷰어가 처리)
