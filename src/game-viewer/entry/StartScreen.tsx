@@ -13,6 +13,7 @@ import { EXAMPLE_COUNTING, EXAMPLE_SILHOUETTE } from "../schema/examples";
 import { generateGameSpec } from "../generate/generateGameSpec";
 import { palette, radius, shadow } from "../theme";
 import { GameViewer } from "../engine/GameViewer";
+import { useFullscreen } from "../engine/useFullscreen";
 import { TemplateGallery } from "./TemplateGallery";
 import { TemplateForm } from "./TemplateForm";
 import { PromptBar } from "./PromptBar";
@@ -26,6 +27,7 @@ type View =
 export function StartScreen({ onExit }: { onExit?: () => void }) {
   const [view, setView] = useState<View>({ kind: "gallery" });
   const [busy, setBusy] = useState(false);
+  const { isFs, toggle: toggleFs } = useFullscreen();
 
   const tab: "template" | "prompt" = view.kind === "prompt" ? "prompt" : "template";
   const home = () => setView(tab === "prompt" ? { kind: "prompt" } : { kind: "gallery" });
@@ -62,6 +64,16 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
             <span style={{ fontSize: 24, fontWeight: 900, color: palette.textSoft }}>놀이 만들기</span>
           </div>
           <div style={{ flex: 1 }} />
+          <motion.button
+            type="button"
+            aria-label={isFs ? "전체 화면 끄기" : "전체 화면"}
+            title={isFs ? "전체 화면 끄기" : "전체 화면으로 보기"}
+            onClick={toggleFs}
+            whileTap={{ scale: 0.9 }}
+            style={{ width: 42, height: 42, borderRadius: radius.pill, border: "none", background: palette.outline, boxShadow: shadow.soft, fontSize: 18, cursor: "pointer", color: palette.textSoft }}
+          >
+            {isFs ? "🡼" : "⛶"}
+          </motion.button>
           {onExit && (
             <motion.button
               type="button"

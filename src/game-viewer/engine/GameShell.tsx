@@ -16,6 +16,7 @@ import { palette, radius, shadow, spring, touch } from "../theme";
 import type { GameSpec } from "../schema/gameSpec";
 import { useGameAudio, type GameAudio, isGameMuted, setGameMuted } from "./useGameAudio";
 import { fireConfetti, RewardOverlay, rewardWantsConfetti } from "./rewards";
+import { useFullscreen } from "./useFullscreen";
 
 export interface RoundFlow<R> {
   round: R;
@@ -51,6 +52,7 @@ export function GameShell<R>({ spec, rounds, roundPrompt, onExit, children }: Ga
   const [showReward, setShowReward] = useState(false);
   const [won, setWon] = useState(false);
   const [muted, setMuted] = useState(isGameMuted());
+  const { isFs, toggle: toggleFs } = useFullscreen();
   const advanceTimer = useRef<number | null>(null);
 
   const round = rounds[idx];
@@ -150,6 +152,7 @@ export function GameShell<R>({ spec, rounds, roundPrompt, onExit, children }: Ga
         <div style={{ flex: 1 }} />
         <RoundButton label="다시 듣기" onClick={() => audio.voice(promptText)}>🔊</RoundButton>
         <RoundButton label={muted ? "소리 켜기" : "소리 끄기"} onClick={toggleMute}>{muted ? "🔇" : "🔈"}</RoundButton>
+        <RoundButton label={isFs ? "전체 화면 끄기" : "전체 화면"} onClick={toggleFs}>{isFs ? "🡼" : "⛶"}</RoundButton>
         {onExit && <RoundButton label="닫기" onClick={onExit}>✕</RoundButton>}
       </header>
 

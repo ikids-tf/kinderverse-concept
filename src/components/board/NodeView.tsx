@@ -294,11 +294,13 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         useBoardStore.getState().setSelection([node.id]);
         if (isGlbViewer || (isMagicViewer && viewerModeRef.current === '3d')) setShow3dUi(true);
       }
-      // 뷰어 본문(3D 모델 등 iframe 안)을 더블클릭 → 카드를 화면 중앙에 포커스.
-      // iframe은 부모로 더블클릭 이벤트를 넘기지 않으므로 뷰어가 메시지로 알린다.
+      // 뷰어 본문(iframe 안)을 더블클릭 → 그 자리에서 '조작 모드'로 진입(중앙 포커스 ❌).
+      // iframe은 부모로 더블클릭을 넘기지 않으므로 뷰어가 메시지로 알린다.
+      // 동영상은 자체 컨트롤이 이동 모드에서 바로 동작하므로 기존(중앙 포커스) 유지.
       if (d?.type === 'kv-embed-dblclick') {
         useBoardStore.getState().setSelection([node.id]);
-        useBoardStore.getState().focusNode(node.id);
+        if (isVideoPlayer) useBoardStore.getState().focusNode(node.id);
+        else setEmbedInteract(true);
       }
       // 매직 뷰어 모드 변경(빈/유튜브/동영상/3D) → 카드 UI를 그 모드에 맞춰 전환 + 영속화.
       const dm = e.data as { type?: string; mode?: string; src?: string } | null;
@@ -392,7 +394,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       window.removeEventListener('message', onMsg);
       window.removeEventListener('kv:embed-mode', onMode);
     };
-  }, [node.id, node.data?.embed, isGlbViewer, isMagicViewer]);
+  }, [node.id, node.data?.embed, isGlbViewer, isMagicViewer, isVideoPlayer]);
 
   // 카드 선택/호버 ↔ 뷰어 UI 동기화 — 3D 뷰어 컨트롤(✕·동작보기·애니 바)은 클릭
   // (선택)했을 때만, 일반 뷰어(유튜브·동영상)의 입력 줄은 호버만 해도 열린다.
@@ -1208,8 +1210,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           {!is3d && !embedPresent && !embedInteract && (
             <div
               onPointerDown={down}
-              onDoubleClick={(e) => { e.stopPropagation(); useBoardStore.getState().focusNode(node.id); }}
-              title="드래그로 이동 · 더블클릭하면 화면 중앙에 포커스 · ‘조작’으로 뷰어 안 UI 사용"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                // 더블클릭 = 화면 중앙 포커스 ❌ → 그 자리에서 '조작 모드'로 진입(뷰어 안 UI 사용).
+                // 동영상은 자체 컨트롤이 이동 모드에서 바로 동작하므로 기존(중앙 포커스) 유지.
+                if (isVideoPlayer) { useBoardStore.getState().focusNode(node.id); return; }
+                useBoardStore.getState().setSelection([node.id]);
+                setEmbedInteract(true);
+              }}
+              title="드래그로 이동 · 더블클릭하면 조작 모드(뷰어 안 UI 사용) · 빈 곳/다른 요소 클릭하면 이동 모드"
               className="absolute inset-x-0 bottom-0"
               // 헤더(링크 입력·재생·전체화면)가 보일 때는 그 위(상단 ~52px)를 덮지 않는다 —
               // 이동 손잡이가 헤더 버튼을 가려 전체화면이 '됐다 안 됐다' 하던 문제를 막는다.
