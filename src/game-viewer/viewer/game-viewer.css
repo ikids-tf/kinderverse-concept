@@ -1,0 +1,40 @@
+/* 게임 뷰어 전용 베이스 — 아이 대면 파스텔. 🔴 Milray 토큰 미적용(의도).
+   둥근 한글 폰트(Jua)로 큐트하게. 색/모션/간격은 theme.ts 인라인 토큰이 담당. */
+@import url("https://fonts.googleapis.com/css2?family=Jua&display=swap");
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+#kv-game-root {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+
+.kv-game-root {
+  height: 100%;
+  font-family: "Jua", "Gmarket Sans", "NanumSquareRound", "Pretendard", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  color: #5a5a66;
+}
+
+.kv-game-root * {
+  box-sizing: border-box;
+}
+
+.kv-game-root button {
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 접근성 — 모션 최소화 선호 시 전환을 차분히(Motion도 confetti도 함께 존중). */
+@media (prefers-reduced-motion: reduce) {
+  .kv-game-root * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -66,11 +66,11 @@ export function nearestMotionSlot(wx: number, wy: number, r = 26): { motionId: s
   for (const n of Object.values(st.nodes)) {
     if (n.type !== 'motion') continue;
     const pts = motionPoints(n);
-    (Object.keys(pts) as MotionSlot[]).forEach((slot) => {
+    for (const slot of Object.keys(pts) as MotionSlot[]) {
       const p = pts[slot];
       const d = Math.hypot(p.x - wx, p.y - wy);
       if (d <= r && (!best || d < best.d)) best = { motionId: n.id, slot, d };
-    });
+    }
   }
   return best ? { motionId: best.motionId, slot: best.slot } : null;
 }

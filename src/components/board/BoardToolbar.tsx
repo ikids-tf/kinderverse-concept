@@ -83,6 +83,17 @@ const SLIDES_VIEWER_PATCH: Partial<BoardNode> = {
   data: { embed: '/slides-viewer.html', title: '슬라이드' },
 };
 
+/** 게임 뷰어 — 교사가 템플릿/프롬프트로 만들고 아이가 즐기는 인터랙티브 놀이(파스텔).
+    화면 안쪽은 Milray 미적용(아이 대면) — src/game-viewer/theme.ts 토큰. 셸은 Milray 유지.
+    상세 아키텍처: game-viewer-handoff/CLAUDE.md(템플릿+GameSpec 단일 계약). */
+const GAME_VIEWER_PATCH: Partial<BoardNode> = {
+  w: 760,
+  h: 560,
+  autoH: false,
+  text: '놀이 만들기',
+  data: { embed: '/game-viewer.html', title: '놀이 만들기' },
+};
+
 /* 문서 폼 — 각 유아교육 양식의 A4 문서 스캐폴드(data.doc 마크다운). 교사가 그대로
    프린트하거나, 선택 후 프롬프트로 채워(에이전트) 완성한다. 빈 양식이 보드에 바로 놓인다. */
 const DOC_TEMPLATES: Array<{ id: string; label: string; desc: string; text: string }> = [
@@ -387,6 +398,19 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
               </svg>
             ),
           },
+          {
+            id: 'game', label: '놀이 만들기', desc: '숫자 세기·그림자 맞추기 등 아이용 인터랙티브 놀이 (음성·보상)',
+            nodeType: 'sticky',
+            patch: GAME_VIEWER_PATCH,
+            swatch: (
+              <svg viewBox="0 0 24 24" width={19} height={19} className="text-accent" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="2.5" y="7" width="19" height="10" rx="5" />
+                <path d="M7 12h2.4M8.2 10.8v2.4" />
+                <circle cx="15.4" cy="11.3" r="0.5" fill="currentColor" />
+                <circle cx="17.2" cy="13" r="0.5" fill="currentColor" />
+              </svg>
+            ),
+          },
         ],
       },
     ],
@@ -476,8 +500,9 @@ export function BoardToolbar() {
     }
     const c = viewCenterWorld();
     const id = addNodeCmd(type, c.x - 90, c.y - 70);
-    // 메모·텍스트는 추가 즉시 편집 모드로 — 더블클릭 없이 바로 타이핑(스티키 노트 UX).
-    if (type === 'sticky' || type === 'text') {
+    // 텍스트 라벨만 추가 즉시 편집 모드로(빈 라벨은 바로 타이핑이 자연스럽다).
+    // 포스트잇(메모)은 먼저 드래그 가능한 카드로 등장 — 편집은 더블클릭/선택 후 타이핑.
+    if (type === 'text') {
       const n = useBoardStore.getState().nodes[id];
       if (n) useBoardStore.getState().updateNodeRaw(id, { data: { ...(n.data ?? {}), autoEdit: true } });
     }

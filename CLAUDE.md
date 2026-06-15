@@ -56,3 +56,9 @@
 
 ## 7. 작업 순서
 현재 마일스톤: **M1**(디자인 토큰 · 셸 · LNB · 프롬프트바). 단계별 지시는 `docs/KICKOFF_M1.md`를 순서대로 실행.
+
+## 8. 게임 뷰어 (보드 툴바)
+게임 뷰어 작업 시 `game-viewer-handoff/CLAUDE.md` · `KICKOFF_M1.md` · `FORM_DESIGN.md`를 함께 읽을 것.
+- 코드: `src/game-viewer/`(자기완결 모듈), 진입 페이지 `game-viewer.html`(Vite 멀티페이지 엔트리), 보드 임베드는 툴바 뷰어 패널의 **놀이 만들기** 프리셋(iframe `/game-viewer.html`).
+- **게임 플레이 화면 안쪽은 Milray Park 미적용**(아이 대면 파스텔) — `src/game-viewer/theme.ts` 토큰 사용. 슬라이드 콘텐츠와 동일한 면제 대상. 단, 게임을 감싸는 **보드 카드 프레임·툴바·프롬프트바(교사용)는 Milray 유지**.
+- 핵심 결정: 런타임 코드 생성 ❌ → **템플릿 + GameSpec(JSON) 단일 계약**. M1 = counting·silhouette(OpenMoji-only, 이미지 생성 0), 음성=Web Speech 스텁(CLOVA는 M2).

@@ -139,8 +139,24 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   useEffect(() => {
     const el = inputRef.current;
     if (!el || statusInline) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
+    const fit = () => {
+      el.style.height = 'auto';
+      // 전환(폭 애니메이션) 중 오측정이 박혀도 화면을 덮지 않게 42vh로 클램프.
+      const maxPx = Math.round(window.innerHeight * 0.42);
+      el.style.height = `${Math.min(el.scrollHeight, maxPx)}px`;
+    };
+    fit();
+    // 펼침/접힘 전환 중에는 폭이 좁아 높이가 잘못 측정되므로, 폭이 확정되면 재측정해 교정.
+    const host = el.parentElement;
+    const onEnd = (e: TransitionEvent) => {
+      if (e.propertyName === 'max-width') fit();
+    };
+    host?.addEventListener('transitionend', onEnd as EventListener);
+    window.addEventListener('resize', fit);
+    return () => {
+      host?.removeEventListener('transitionend', onEnd as EventListener);
+      window.removeEventListener('resize', fit);
+    };
   }, [draft, statusInline, collapsed, videoCompose]);
 
   // + 버튼 → 파일 선택 → 첨부(이미지: data URL · 텍스트 문서: 내용 읽기).
@@ -903,6 +919,14 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
           <p className="pointer-events-none mt-t2 px-t4 text-center text-xs leading-snug text-fg-muted">
             AI가 생성한 내용은 부정확할 수 있어요. 아동 관찰·평가는 근거(사진·메모)를 확인하세요.
           </p>
+        )}
+
+        {/* 보드 등에서도 AI 채팅과 같은 높이로 바·글로우를 띄우기 위한 빈 자리.
+            안내문(면책 텍스트)은 넣지 않고, 동일한 한 줄 박스만 예약한다. */}
+        {docked && !onChatPage && !collapsed && (
+          <div aria-hidden className="pointer-events-none mt-t2 px-t4 text-xs leading-snug" role="presentation">
+            &nbsp;
+          </div>
         )}
       </div>
     </div>

@@ -13,11 +13,12 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      // 멀티 페이지 — 메인 앱(index.html)과 슬라이드 뷰어(slides-viewer.html, 보드
-      // 카드 iframe이 same-origin으로 임베드). 입력을 지정하면 메인도 함께 명시해야 한다.
+      // 멀티 페이지 — 메인 앱(index.html) + 보드 카드 iframe이 same-origin으로 임베드하는
+      // 뷰어들(슬라이드·게임). 입력을 지정하면 메인도 함께 명시해야 한다.
       input: {
         main: path.resolve(__dirname, 'index.html'),
         slides: path.resolve(__dirname, 'slides-viewer.html'),
+        game: path.resolve(__dirname, 'game-viewer.html'),
       },
       output: {
         // Split big libraries into stable, separately-cached vendor chunks so no
