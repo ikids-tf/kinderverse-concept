@@ -182,12 +182,16 @@ export interface SourceLink {
   domain: string;
   /** 페이지 대표 이미지(og:image). 있으면 파비콘 대신 썸네일로 보여준다. */
   thumb?: string;
+  /** iframe 임베드 가능(X-Frame-Options/CSP 통과)? true일 때만 웹뷰어로 연다. */
+  embeddable?: boolean;
 }
 export interface SourceThumb {
   thumb: string; // image URL (free image site)
   url: string; // source/landing page (clickable)
   title: string;
   source: string; // e.g. flickr / wikimedia
+  /** iframe 임베드 가능? true일 때만 웹뷰어로 연다(아니면 새 탭). */
+  embeddable?: boolean;
 }
 export function spawnSourceCard(
   frameId: string,
@@ -1120,6 +1124,46 @@ export function spawnVideoPlayer(nearId?: string): string {
     data: { embed: '/video-player.html', title: '동영상 플레이어' },
   });
   recordSpawnedNodes([id], '동영상 뷰어 추가');
+  return id;
+}
+
+/** 웹 자료 뷰어를 깐다 — 외부 웹페이지를 iframe(web-viewer.html)으로 카드 안에 띄운다.
+    카드 옆(near) 또는 화면 중앙에 생성한 뒤 포커스 + 가장 가까운 빈자리로 슬라이드(겹침 방지).
+    ※ 사이트가 iframe을 막으면 뷰어가 '새 탭에서 열기'를 안내한다. */
+export function spawnWebViewer(url: string, title?: string, nearId?: string): string {
+  const b = useBoardStore.getState();
+  const W = 760;
+  const H = 560;
+  const GAP = 40;
+  const near = nearId ? b.nodes[nearId] : undefined;
+  let x: number;
+  let y: number;
+  if (near) {
+    const nb = worldBox(near);
+    x = Math.round(nb.x + nb.w + GAP);
+    y = Math.round(nb.y);
+  } else {
+    const c = viewportCenterBoardPoint();
+    x = Math.round(c.x - W / 2);
+    y = Math.round(c.y - H / 2);
+  }
+  const params = new URLSearchParams({ src: url });
+  if (title) params.set('title', title);
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id,
+    type: 'sticky',
+    x,
+    y,
+    w: W,
+    h: H,
+    autoH: false,
+    text: '웹 뷰어',
+    data: { embed: `/web-viewer.html?${params.toString()}`, title: title || '웹 자료', webUrl: url },
+  });
+  recordSpawnedNodes([id], '웹 뷰어 추가');
+  useBoardStore.getState().focusNode(id);
+  slideFrameToEmpty(id); // 다른 요소와 겹치지 않게 가장 가까운 오른쪽 빈자리로
   return id;
 }
 

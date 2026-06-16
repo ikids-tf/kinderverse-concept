@@ -7,7 +7,7 @@ import { showToast } from '@/lib/toast';
 import { SHAPE_PATHS } from '@/lib/shapes';
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { editTextCmd, captureNodes, pushRedesign, deleteNodesCmd } from '@/board/commands';
-import { runWorkflowStep, type RunnerData, type StepKind } from '@/board/workflow';
+import { runWorkflowStep, spawnWebViewer, type RunnerData, type StepKind } from '@/board/workflow';
 import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren } from '@/board/frames';
 import { alignFrameCmd } from '@/board/align';
 import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
@@ -1472,6 +1472,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             links={srcLinks}
             thumbs={Array.isArray(node.data?.thumbs) ? (node.data.thumbs as SourceThumbData[]) : undefined}
             summary={node.data?.summary as string | undefined}
+            nodeId={node.id}
           />
         ) : editing ? (
           <textarea
@@ -2153,14 +2154,17 @@ interface SourceLinkData {
   url: string;
   domain: string;
   thumb?: string;
+  /** 서버 unfurl이 확인한 iframe 임베드 가능 여부. true일 때만 웹뷰어로 연다. */
+  embeddable?: boolean;
 }
 interface SourceThumbData {
   thumb: string;
   url: string;
   title: string;
   source: string;
+  embeddable?: boolean;
 }
-function SourceLinks({ links, thumbs, summary }: { links: SourceLinkData[]; thumbs?: SourceThumbData[]; summary?: string }) {
+function SourceLinks({ links, thumbs, summary, nodeId }: { links: SourceLinkData[]; thumbs?: SourceThumbData[]; summary?: string; nodeId: string }) {
   return (
     <div className="flex flex-col gap-t2">
       <span className="inline-flex items-center gap-t1 text-overline text-fg-2">
@@ -2173,10 +2177,11 @@ function SourceLinks({ links, thumbs, summary }: { links: SourceLinkData[]; thum
             <a
               key={i}
               href={t.url}
-              target="_blank"
+              target={t.embeddable ? undefined : '_blank'}
               rel="noreferrer noopener"
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
+              // 임베드 가능 → 웹뷰어 / 불가 → 막지 않고 새 탭으로 바로 연결
+              onClick={(e) => { e.stopPropagation(); if (t.embeddable) { e.preventDefault(); spawnWebViewer(t.url, t.title || t.source, nodeId); } }}
               title={t.title}
               className="group relative block overflow-hidden rounded-md border border-border bg-surface"
             >
@@ -2200,11 +2205,11 @@ function SourceLinks({ links, thumbs, summary }: { links: SourceLinkData[]; thum
           <a
             key={i}
             href={l.url}
-            target="_blank"
+            target={l.embeddable ? undefined : '_blank'}
             rel="noreferrer noopener"
-            // stop the board from starting a drag/selection so the click navigates
+            // 임베드 가능한 링크만 좌클릭=웹뷰어(이동 안 함). 불가하면 막지 않고 새 탭으로 바로 연결.
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); if (l.embeddable) { e.preventDefault(); spawnWebViewer(l.url, l.title || l.domain, nodeId); } }}
             title={l.url}
             className="group flex items-center gap-t2 rounded-md border border-border bg-surface px-t2 py-t1 no-underline transition-colors duration-150 ease-soft hover:border-accent"
           >

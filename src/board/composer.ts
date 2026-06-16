@@ -1217,6 +1217,8 @@ async function buildWebSource(topic: string): Promise<{ summary: string; links: 
       url: finalUrl,
       domain: isRedirect ? (s.title || '').slice(0, 40) : host,
       ...(u?.thumb ? { thumb: u.thumb } : {}),
+      // 서버 unfurl이 X-Frame-Options/CSP로 확인한 임베드 가능 여부만 신뢰(없으면 false).
+      embeddable: u?.embeddable === true,
     };
   });
 
@@ -1224,7 +1226,7 @@ async function buildWebSource(topic: string): Promise<{ summary: string; links: 
   // image sites (Openverse) only when no link yielded a usable preview.
   const linkThumbs: SourceThumb[] = realLinks
     .filter((l) => l.thumb)
-    .map((l) => ({ thumb: l.thumb as string, url: l.url, title: l.title, source: l.domain }));
+    .map((l) => ({ thumb: l.thumb as string, url: l.url, title: l.title, source: l.domain, embeddable: l.embeddable }));
   const thumbs = linkThumbs.length ? linkThumbs : await fetchFreeImages(imgQuery || topic);
 
   // Curated search shortcuts — always relevant, open the topic search directly.
@@ -1307,7 +1309,7 @@ function spawnSourceUnderViewer(viewerId: string, summary: string, links: Source
 
 /** 프롬프트바 웹링크 추천 → 선택한 링크들을 한 장의 웹 자료 카드로 뷰포트 중앙에 배치. */
 export function placeWebLinksOnBoard(
-  links: Array<{ title: string; url: string; domain: string; thumb?: string }>,
+  links: Array<{ title: string; url: string; domain: string; thumb?: string; embeddable?: boolean }>,
 ): string | null {
   if (links.length === 0) return null;
   const b = useBoardStore.getState();
@@ -1316,12 +1318,12 @@ export function placeWebLinksOnBoard(
   const id = newId('sticky');
   const thumbs: SourceThumb[] = links
     .filter((l) => l.thumb)
-    .map((l) => ({ thumb: l.thumb as string, url: l.url, title: l.title, source: l.domain }));
+    .map((l) => ({ thumb: l.thumb as string, url: l.url, title: l.title, source: l.domain, embeddable: l.embeddable }));
   b.addNodeRaw({
     id, type: 'sticky', x: Math.round(c.x - W / 2), y: Math.round(c.y - 120), w: W, h: 240, autoH: true, color: 'surface-2',
     data: {
       role: 'source',
-      links: links.map((l) => ({ title: l.title, url: l.url, domain: l.domain, ...(l.thumb ? { thumb: l.thumb } : {}) })),
+      links: links.map((l) => ({ title: l.title, url: l.url, domain: l.domain, ...(l.thumb ? { thumb: l.thumb } : {}), embeddable: l.embeddable === true })),
       ...(thumbs.length ? { thumbs } : {}),
       summary: '보관함에서 가져온 웹 자료입니다.',
     },
@@ -1333,11 +1335,11 @@ export function placeWebLinksOnBoard(
 
 /** 링크 미리보기 — 서버 언퍼를 엔드포인트(/api/unfurl)로 리다이렉트를 따라가
     실제 URL·제목·og:image를 받아온다. 실패하면 null(파비콘 폴백). */
-async function unfurlLink(url: string): Promise<{ url: string; thumb?: string; title?: string } | null> {
+async function unfurlLink(url: string): Promise<{ url: string; thumb?: string; title?: string; embeddable?: boolean } | null> {
   try {
     const r = await fetch(`/api/unfurl?url=${encodeURIComponent(url)}`);
-    const j = (await r.json()) as { ok?: boolean; url?: string; thumb?: string; title?: string };
-    return j?.ok ? { url: j.url || url, thumb: j.thumb, title: j.title } : null;
+    const j = (await r.json()) as { ok?: boolean; url?: string; thumb?: string; title?: string; embeddable?: boolean };
+    return j?.ok ? { url: j.url || url, thumb: j.thumb, title: j.title, embeddable: j.embeddable } : null;
   } catch {
     return null;
   }

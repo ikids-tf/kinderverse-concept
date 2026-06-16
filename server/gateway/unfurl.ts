@@ -14,6 +14,24 @@ export interface UnfurlResult {
   thumb?: string;
   /** og:title or <title>. */
   title?: string;
+  /** Can a cross-origin page (our board) frame this URL? Read from the page's
+     X-Frame-Options / CSP frame-ancestors. undefined = unknown (treat as no). */
+  embeddable?: boolean;
+}
+
+/** Can WE (a cross-origin page) put this response in an <iframe>? Conservative:
+   true only when neither X-Frame-Options nor CSP frame-ancestors restricts us.
+   DENY/SAMEORIGIN/ALLOW-FROM → no. frame-ancestors that isn't a bare '*' → no. */
+function frameEmbeddable(res: Response): boolean {
+  const xfo = (res.headers.get('x-frame-options') || '').toLowerCase();
+  if (xfo.includes('deny') || xfo.includes('sameorigin') || xfo.includes('allow-from')) return false;
+  const csp = (res.headers.get('content-security-policy') || '').toLowerCase();
+  const m = csp.match(/frame-ancestors([^;]*)/);
+  if (m) {
+    const tokens = m[1].trim().split(/\s+/).filter(Boolean);
+    if (!tokens.includes('*')) return false; // 'none'/'self'/특정 출처 → 우리는 못 박음
+  }
+  return true;
 }
 
 const UA =
@@ -89,11 +107,12 @@ export async function unfurlLink(rawUrl: string): Promise<UnfurlResult> {
       } catch {
         /* oEmbed 실패 — id 기반 썸네일 유지 */
       }
-      return { url: finalUrl, thumb, title };
+      // YouTube watch 페이지는 X-Frame-Options SAMEORIGIN — 웹뷰어로 못 박음(전용 뷰어 사용).
+      return { url: finalUrl, thumb, title, embeddable: false };
     }
 
     const ct = res.headers.get('content-type') ?? '';
-    if (!res.ok || !ct.includes('text/html')) return { url: finalUrl };
+    if (!res.ok || !ct.includes('text/html')) return { url: finalUrl, embeddable: res.ok && frameEmbeddable(res) };
     // og tags live in <head>; cap the read so a huge page can't stall us.
     const html = (await res.text()).slice(0, 250_000);
     let thumb = metaContent(html, 'og:image') || metaContent(html, 'twitter:image') || metaContent(html, 'image');
@@ -106,7 +125,7 @@ export async function unfurlLink(rawUrl: string): Promise<UnfurlResult> {
     }
     const titleRaw = metaContent(html, 'og:title') ?? html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1];
     const title = titleRaw ? decodeEntities(titleRaw).trim().slice(0, 80) : undefined;
-    return { url: finalUrl, thumb, title };
+    return { url: finalUrl, thumb, title, embeddable: frameEmbeddable(res) };
   } catch {
     return { url: rawUrl };
   } finally {

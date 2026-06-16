@@ -13,6 +13,8 @@ export interface WebLink {
   domain: string;
   /** 대표 이미지 썸네일(검색 시 받은 주제 이미지). 없으면 UI가 파비콘으로 폴백. */
   thumb?: string;
+  /** iframe 임베드 가능(서버 unfurl 확인)? true일 때만 보드에서 웹뷰어로 연다. */
+  embeddable?: boolean;
   createdAt: number;
 }
 
@@ -31,7 +33,7 @@ async function load(): Promise<Record<string, WebLink[]>> {
 /** 웹 검색으로 찾은 링크들을 키워드 태그로 저장(URL 중복 제거, 태그당 최근 N개 유지). */
 export async function saveWebLinks(
   keyword: string,
-  links: Array<{ title: string; url: string; domain: string; thumb?: string }>,
+  links: Array<{ title: string; url: string; domain: string; thumb?: string; embeddable?: boolean }>,
 ): Promise<void> {
   const kw = keyword.trim();
   if (!kw || links.length === 0) return;
@@ -48,6 +50,7 @@ export async function saveWebLinks(
       url: l.url,
       domain: l.domain || '',
       ...(l.thumb ? { thumb: l.thumb } : {}),
+      ...(l.embeddable ? { embeddable: true } : {}),
       createdAt: Date.now(),
     });
   }
