@@ -24,7 +24,27 @@ const CATEGORIES = Object.keys(CONTENT_SETS) as CategoryId[];
 const RELATIONS = Object.keys(RELATION_SETS) as RelationId[];
 const TEMPLATES: TemplateId[] = ["counting", "silhouette", "emotion", "matching"];
 
-function systemPrompt(): string {
+const MEANING: Record<TemplateId, string> = {
+  counting: "개수 세기",
+  silhouette: "검은 실루엣 보고 맞추기",
+  emotion: "표정·감정 맞추기",
+  matching: "어울리는 것 줄로 잇기",
+};
+
+function systemPrompt(lock?: TemplateId): string {
+  // 폼 미세조정 — 템플릿은 이미 정해졌으니 파라미터만 고른다.
+  if (lock) {
+    const lines = [
+      `이 놀이는 '${lock}'(${MEANING[lock]}) 템플릿으로 이미 정해졌다. 교사의 추가 요청을 반영해 '파라미터만' 고른다(템플릿은 바꾸지 않는다).`,
+      "설명·코드펜스 없이 아래 JSON 한 개만 출력한다:",
+      '{"category":"<카테고리>","relation":"<관계>","emotionSet":"core|all","ageRange":"3-5|5-7","title":"<짧은 한국어 제목>"}',
+    ];
+    if (lock === "counting" || lock === "silhouette") lines.push(`- category (하나만): ${CATEGORIES.join(", ")}. 목록에 없으면 가장 비슷한 것.`);
+    if (lock === "matching") lines.push(`- relation (하나만): ${RELATIONS.join(", ")}.`);
+    if (lock === "emotion") lines.push("- emotionSet: core(기쁨·슬픔·화남) 또는 all(5가지).");
+    lines.push("- ageRange는 생략 가능(기존 유지). title은 요청을 반영한 짧은 제목. 해당 없는 필드는 생략.");
+    return lines.join("\n");
+  }
   return [
     "너는 유아(3~7세) 놀이 생성기의 라우터다. 교사의 한국어 요청에 가장 알맞은 놀이 템플릿과 파라미터를 고른다.",
     "설명·코드펜스 없이 아래 JSON 한 개만 출력한다:",
@@ -79,11 +99,47 @@ function toRoute(raw: RawOut): LlmRouteResult | null {
   return { templateId: tid, values, matched: true, title, source: "llm" };
 }
 
-/** 프롬프트 → 라우팅. 게이트웨이 LLM(task=router, low tier) → 검증. 실패 시 키워드 폴백. */
-export async function routePromptLLM(prompt: string): Promise<LlmRouteResult> {
-  const keyword = (): LlmRouteResult => ({ ...routePrompt(prompt), source: "keyword" });
+/** 폼 미세조정 — 템플릿은 고정(lock), 폼 값(base) 위에 LLM 파라미터만 덮는다. */
+function lockRoute(
+  lock: TemplateId,
+  base: Record<string, string | number | boolean>,
+  raw: RawOut,
+): LlmRouteResult {
+  const values: Record<string, string | number | boolean> = { ...base };
+  if (lock === "matching") {
+    const rel = str(raw.relation) as RelationId;
+    if (RELATIONS.includes(rel)) values.relation = rel;
+  } else if (lock === "emotion") {
+    const es = str(raw.emotionSet);
+    if (es === "all" || es === "core") values.emotionSet = es;
+  } else {
+    let cat = str(raw.category) as CategoryId;
+    if (CATEGORIES.includes(cat)) {
+      if (lock === "silhouette" && cat === "job") cat = "animal";
+      values.category = cat;
+    }
+  }
+  const title = str(raw.title).slice(0, 40) || undefined;
+  return { templateId: lock, values, matched: true, title, source: "llm" };
+}
+
+/**
+ * 프롬프트 → 라우팅. 게이트웨이 LLM(task=router, low tier) → 검증. 실패 시 폴백.
+ * opts.lockTemplate: 폼에서 이미 고른 템플릿을 고정(미세조정 경로) — 파라미터/제목만 LLM이 다듬고
+ * opts.baseValues(폼 선택값) 위에 덮는다. 폴백 시 폼 선택값 그대로(자유 텍스트 무시).
+ */
+export async function routePromptLLM(
+  prompt: string,
+  opts?: { lockTemplate?: TemplateId; baseValues?: Record<string, string | number | boolean> },
+): Promise<LlmRouteResult> {
+  const lock = opts?.lockTemplate;
+  const base = opts?.baseValues ?? {};
   const text = prompt.trim();
-  if (!text) return keyword();
+  const fallback = (): LlmRouteResult =>
+    lock
+      ? { templateId: lock, values: { ...base }, matched: false, source: "keyword" }
+      : { ...routePrompt(prompt), source: "keyword" };
+  if (!text) return fallback();
   try {
     const res = await fetch("/api/ai/run", {
       method: "POST",
@@ -93,16 +149,17 @@ export async function routePromptLLM(prompt: string): Promise<LlmRouteResult> {
         tier: "low",
         provider: "auto",
         responseFormat: "json",
-        system: systemPrompt(),
+        system: systemPrompt(lock),
         messages: [{ role: "user", content: text }],
         maxTokens: 220,
       }),
     });
     const data = (await res.json()) as { ok?: boolean; text?: string };
-    if (!data?.ok || typeof data.text !== "string") return keyword();
+    if (!data?.ok || typeof data.text !== "string") return fallback();
     const raw = JSON.parse(extractJson(data.text)) as RawOut;
-    return toRoute(raw) ?? keyword();
+    const route = lock ? lockRoute(lock, base, raw) : toRoute(raw);
+    return route ?? fallback();
   } catch {
-    return keyword();
+    return fallback();
   }
 }

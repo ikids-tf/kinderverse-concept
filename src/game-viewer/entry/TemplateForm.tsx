@@ -9,6 +9,7 @@ import { motion } from "motion/react";
 import type { AgeRange, GameSpec, TemplateId } from "../schema/gameSpec";
 import { AGE_DEFAULTS, TEMPLATE_FORMS, type AgeDefault, type FieldValue } from "../generate/templateForms";
 import { buildSpecFromForm } from "../generate/buildSpecFromForm";
+import { routePromptLLM } from "../generate/llmRouter";
 import { palette, radius, shadow } from "../theme";
 import { Segmented } from "./formControls";
 import { PillButton } from "../engine/GameShell";
@@ -31,6 +32,8 @@ export function TemplateForm({
 }) {
   const def = TEMPLATE_FORMS[templateId];
   const [values, setValues] = useState<Record<string, FieldValue>>(() => initialValues(templateId));
+  const [tune, setTune] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const setField = (id: string, value: FieldValue) => {
     setValues((prev) => {
@@ -49,9 +52,23 @@ export function TemplateForm({
     });
   };
 
-  const start = () => {
-    const spec = buildSpecFromForm({ templateId, values });
-    onStart(spec);
+  const start = async () => {
+    if (busy) return;
+    const text = tune.trim();
+    if (!text) {
+      onStart(buildSpecFromForm({ templateId, values }));
+      return;
+    }
+    // 자유 프롬프트 미세조정 — 템플릿은 고정, LLM이 파라미터·제목만 다듬는다(실패 시 폼 선택 그대로).
+    setBusy(true);
+    try {
+      const route = await routePromptLLM(text, { lockTemplate: templateId, baseValues: values });
+      const spec = buildSpecFromForm({ templateId, values: route.values });
+      if (route.title) spec.title = route.title;
+      onStart(spec);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -78,25 +95,29 @@ export function TemplateForm({
 
       {/* (옵션) 자유 프롬프트 — M1 비활성 placeholder */}
       {def.supportsOptionalPrompt && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, opacity: 0.7 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: palette.textSoft }}>(옵션) 특별히 바꾸고 싶은 게 있나요?</div>
           <input
-            disabled
-            placeholder="우리 반 텃밭 채소들로 — 곧 지원돼요"
+            value={tune}
+            onChange={(e) => setTune(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void start(); }}
+            disabled={busy}
+            placeholder="예: 우리 반 텃밭 채소들로 · 동물원 동물로 (비우면 위 선택대로)"
             style={{
               padding: "14px 18px",
               borderRadius: radius.button,
-              border: `2px dashed ${palette.lavender}`,
-              background: "rgba(255,255,255,0.5)",
+              border: `2px solid ${palette.lavender}`,
+              background: palette.outline,
               fontSize: 16,
               color: palette.textOnPastel,
+              outline: "none",
             }}
           />
         </div>
       )}
 
       <div style={{ display: "flex", justifyContent: "center", marginTop: 4 }}>
-        <PillButton tone="primary" onClick={start}>게임 시작 ▶</PillButton>
+        <PillButton tone="primary" onClick={start}>{busy ? "만드는 중…" : "게임 시작 ▶"}</PillButton>
       </div>
     </div>
   );
