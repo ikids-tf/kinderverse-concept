@@ -499,6 +499,18 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       try { bound?.removeEventListener('click', onClick, true); } catch { /* noop */ }
     };
   }, [isGameViewer]);
+
+  // 보드 프롬프트바 → 이 게임 뷰어 카드로 게임 생성 전달(prompt.ts가 kv:game-create 디스패치).
+  useEffect(() => {
+    if (!isGameViewer) return;
+    const onCreate = (e: Event) => {
+      const d = (e as CustomEvent).detail as { nodeId?: string; prompt?: string } | null;
+      if (d?.nodeId !== node.id || !d.prompt) return;
+      embedFrameRef.current?.contentWindow?.postMessage({ type: 'kv-game-create', prompt: d.prompt }, '*');
+    };
+    window.addEventListener('kv:game-create', onCreate);
+    return () => window.removeEventListener('kv:game-create', onCreate);
+  }, [isGameViewer, node.id]);
   // 유튜브 검색 결과 카드의 ▶ → 이 뷰어(iframe)의 loadSrc로 바로 재생.
   // kv:yt-propose — 다른 요소와 선이 연결되면 뷰어 안에 "영상을 찾아 연결할까요?"
   // 확인 카드를 띄운다(확인 → 뷰어가 직접 검색해 재생).

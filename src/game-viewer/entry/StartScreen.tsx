@@ -7,10 +7,11 @@
  * 레이아웃은 flex 컬럼 — 헤더/탭은 위에 고정, 본문이 남는 높이를 채운다(만들기 페이지의
  * 하단 프롬프트바가 화면 하단에 핀되도록).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import type { GameSpec, TemplateId } from "../schema/gameSpec";
 import { EXAMPLE_COUNTING, EXAMPLE_SILHOUETTE } from "../schema/examples";
+import { generateGameSpec } from "../generate/generateGameSpec";
 import { palette, radius, shadow } from "../theme";
 import { GameViewer } from "../engine/GameViewer";
 import { useFullscreen } from "../engine/useFullscreen";
@@ -27,6 +28,28 @@ type View =
 export function StartScreen({ onExit }: { onExit?: () => void }) {
   const [view, setView] = useState<View>({ kind: "gallery" });
   const { isFs, toggle: toggleFs } = useFullscreen();
+
+  // 하단바 하이브리드 — 전체화면(?fs)·단독(부모 없음)은 자체 바, 임베드 소형 카드는 보드 프롬프트바.
+  const embedded = typeof window !== "undefined" && window.parent !== window;
+  const fsMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("fs");
+  const ownBar = !embedded || fsMode;
+  const [creating, setCreating] = useState(false);
+
+  // 보드 프롬프트바 → kv-game-create{prompt} → 여기서 생성·플레이(임베드 소형 카드 제어).
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data as { type?: string; prompt?: string } | null;
+      if (d?.type === "kv-game-create" && typeof d.prompt === "string" && d.prompt.trim()) {
+        setCreating(true);
+        generateGameSpec(d.prompt.trim())
+          .then(({ spec }) => setView({ kind: "play", spec }))
+          .catch(() => {})
+          .finally(() => setCreating(false));
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
 
   const tab: "template" | "make" = view.kind === "make" ? "make" : "template";
   const home = () => setView(tab === "make" ? { kind: "make" } : { kind: "gallery" });
@@ -75,7 +98,7 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
 
       {/* 본문 */}
       {view.kind === "make" ? (
-        <MakeGamePage onStart={(spec) => setView({ kind: "play", spec })} />
+        <MakeGamePage onStart={(spec) => setView({ kind: "play", spec })} showBar={ownBar} />
       ) : (
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
           <div style={{ maxWidth: 760, margin: "0 auto", padding: "20px 22px 40px", display: "flex", flexDirection: "column", gap: 22 }}>
@@ -97,6 +120,12 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
               <DemoButton onClick={() => setView({ kind: "play", spec: EXAMPLE_SILHOUETTE })}>✈️ 그림자 맞추기</DemoButton>
             </div>
           </div>
+        </div>
+      )}
+
+      {creating && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 60, display: "grid", placeItems: "center", background: "rgba(255,249,242,0.82)" }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: palette.textSoft }}>놀이를 만드는 중…</div>
         </div>
       )}
     </div>

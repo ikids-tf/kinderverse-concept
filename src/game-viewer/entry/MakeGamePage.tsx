@@ -15,8 +15,7 @@ import type { GameSpec, TemplateId } from "../schema/gameSpec";
 import { TEMPLATE_FORMS } from "../generate/templateForms";
 import { CONTENT_SETS, type CategoryId } from "../generate/contentSets";
 import { buildSpecFromForm, buildCountingFromImages, type PickedImage } from "../generate/buildSpecFromForm";
-import { routePromptLLM } from "../generate/llmRouter";
-import { generateContentLLM, type GenTemplate } from "../generate/generateContent";
+import { generateGameSpec } from "../generate/generateGameSpec";
 import { Sprite } from "../assets/Sprite";
 import { palette, radius, shadow } from "../theme";
 import { PillButton } from "../engine/GameShell";
@@ -31,7 +30,7 @@ const RECOMMENDED: PickedImage[] = (["animal", "fruit", "vehicle", "food"] as Ca
 
 const keyOf = (im: PickedImage) => im.ref ?? im.url ?? "";
 
-export function MakeGamePage({ onStart }: { onStart: (spec: GameSpec) => void }) {
+export function MakeGamePage({ onStart, showBar = true }: { onStart: (spec: GameSpec) => void; showBar?: boolean }) {
   const [genre, setGenre] = useState<TemplateId>("counting");
   const [picked, setPicked] = useState<PickedImage[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -62,16 +61,8 @@ export function MakeGamePage({ onStart }: { onStart: (spec: GameSpec) => void })
       if (picked.length > 0) {
         spec = buildCountingFromImages(picked, { ageRange: "3-5" }); // 고른 그림 → 세기
       } else if (prompt.trim()) {
-        const p = prompt.trim();
-        // 임의 소재 — LLM이 emoji로 콘텐츠 생성(건물↔직업 등). 실패 시 큐레이션으로 폴백.
-        const gen = genre === "emotion" ? null : await generateContentLLM(p, genre as GenTemplate);
-        if (gen) {
-          spec = gen;
-        } else {
-          const route = await routePromptLLM(p, { lockTemplate: genre, baseValues: { ageRange: "3-5" } });
-          spec = buildSpecFromForm({ templateId: route.templateId, values: route.values });
-          if (route.title) spec.title = route.title;
-        }
+        // 임의 소재 콘텐츠 생성(건물↔직업 등) → 실패 시 큐레이션. 선택 장르를 우선.
+        spec = (await generateGameSpec(prompt.trim(), genre)).spec;
       } else {
         spec = buildSpecFromForm({ templateId: genre, values: { ageRange: "3-5" } });
       }
@@ -208,7 +199,7 @@ export function MakeGamePage({ onStart }: { onStart: (spec: GameSpec) => void })
         </div>
       </div>
 
-      {/* ③ 하단 프롬프트바 (전체화면/단독에서 이 페이지의 입력) */}
+      {/* ③ 하단 프롬프트바 — 전체화면/단독은 자체 입력바, 임베드 소형 카드는 보드 프롬프트바로 입력(여긴 안내+만들기만) */}
       <div style={{ flexShrink: 0, borderTop: `1px solid ${palette.bgSky}`, background: palette.bgCream, padding: "12px 22px 14px" }}>
         <div
           style={{
@@ -223,14 +214,20 @@ export function MakeGamePage({ onStart }: { onStart: (spec: GameSpec) => void })
             boxShadow: shadow.soft,
           }}
         >
-          <input
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void generate(); }}
-            disabled={busy}
-            placeholder={picked.length > 0 ? "고른 그림으로 만들어요 — '만들기'를 눌러요" : "예) 동물원 동물 세기 · 우리 반 텃밭 채소들로"}
-            style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 17, padding: "8px 14px", color: palette.textSoft }}
-          />
+          {showBar ? (
+            <input
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void generate(); }}
+              disabled={busy}
+              placeholder={picked.length > 0 ? "고른 그림으로 만들어요 — '만들기'를 눌러요" : "예) 동물원 동물 세기 · 우리 반 텃밭 채소들로"}
+              style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 17, padding: "8px 14px", color: palette.textSoft }}
+            />
+          ) : (
+            <span style={{ flex: 1, padding: "8px 14px", fontSize: 14, color: palette.textOnPastel, lineHeight: 1.4 }}>
+              아래 <b>보드 입력창</b>에 적어 만들거나, 위에서 그림·종류를 골라 ‘만들기’를 눌러요 (크게 보려면 ⛶).
+            </span>
+          )}
           <PillButton tone="primary" onClick={generate}>{makeLabel}</PillButton>
         </div>
       </div>

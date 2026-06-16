@@ -116,6 +116,13 @@ export function handleBoardPrompt(text: string): boolean {
   // 엉뚱한 카드를 만들던 문제 방지(근본 원인은 PromptBar IME-Enter, 여기선 이중 안전장치).
   if (/^(줘|줴|주|주세요|줄래|주라|다오|요|해)$/u.test(text.trim())) return true;
 
+  // 게임 뷰어 카드가 단독 선택돼 있으면 — 보드 프롬프트를 그 카드의 게임 생성으로 보낸다.
+  // (게임뷰어 하단바 하이브리드: 임베드 소형 카드는 보드 프롬프트바로 제어. NodeView가 iframe에 전달)
+  if (sel.length === 1 && typeof sel[0].data?.embed === 'string' && sel[0].data.embed.includes('game-viewer')) {
+    window.dispatchEvent(new CustomEvent('kv:game-create', { detail: { nodeId: sel[0].id, prompt: text } }));
+    return true;
+  }
+
   // 주제 없는 "요소 N개 추가" → 빈 툴바 요소를 가로로 배치(AI 생성 안 함).
   // 선택 유무와 무관하게 가장 먼저 처리 — "이미지 카드 3개 추가해줘"는 항상 빈 카드.
   const prim = parseEmptyPrimitiveRequest(text);
