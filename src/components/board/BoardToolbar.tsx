@@ -529,7 +529,7 @@ export function BoardToolbar() {
       // 툴바 호버 → 프롬프트바를 또렷하게(body 클래스로 CSS가 바 투명도를 올린다).
       onPointerEnter={() => document.body.classList.add('kv-toolbar-hover')}
       onPointerLeave={() => document.body.classList.remove('kv-toolbar-hover')}
-      className="pointer-events-auto absolute left-t3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-md backdrop-blur">
+      className="pointer-events-auto absolute left-t3 top-1/2 z-50 flex -translate-y-1/2 flex-col items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-md backdrop-blur">
       <button
         title="선택"
         className="flex h-10 w-10 items-center justify-center rounded-pill bg-surface-3 text-fg"
@@ -558,8 +558,8 @@ export function BoardToolbar() {
 
           {/* 스타일 프리셋 플라이아웃 — pl이 호버 브리지 역할(마우스가 건너가도 유지) */}
           {fly === t.id && (
-            <div className="absolute left-full top-0 z-30 pl-t2">
-              <div className="w-56 rounded-lg border border-border bg-surface p-t2 shadow-lg">
+            <div className="absolute left-full top-1/2 z-30 -translate-y-1/2 pl-t2">
+              <div className="w-56 max-h-[85vh] overflow-y-auto rounded-lg border border-border bg-surface p-t2 shadow-lg">
                 <p className="px-t2 pb-t1 text-overline text-fg-muted">{PRESET_PANELS[t.id].title}</p>
                 {PRESET_PANELS[t.id].caption && (
                   <p className="px-t2 pb-t2 text-xs leading-snug text-fg-2">{PRESET_PANELS[t.id].caption}</p>
