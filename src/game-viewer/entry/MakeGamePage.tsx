@@ -14,9 +14,10 @@ import { motion } from "motion/react";
 import type { GameSpec, TemplateId } from "../schema/gameSpec";
 import { TEMPLATE_FORMS } from "../generate/templateForms";
 import { CONTENT_SETS, type CategoryId } from "../generate/contentSets";
-import { buildSpecFromForm, buildCountingFromImages, type PickedImage } from "../generate/buildSpecFromForm";
+import { buildSpecFromForm, buildCountingFromImages, buildSilhouetteFromImages, type PickedImage } from "../generate/buildSpecFromForm";
 import { generateGameSpec } from "../generate/generateGameSpec";
 import { generateImageAsset, STYLE_LABEL, STYLES, type ImgStyle } from "../generate/imageAsset";
+import { removeBg } from "../generate/removeBg";
 import { Sprite } from "../assets/Sprite";
 import { palette, radius, shadow } from "../theme";
 import { PillButton } from "../engine/GameShell";
@@ -50,7 +51,22 @@ export function MakeGamePage({
   const [genSubject, setGenSubject] = useState("");
   const [genStyle, setGenStyle] = useState<ImgStyle>("clean");
   const [genBusy, setGenBusy] = useState(false);
+  const [cutting, setCutting] = useState<Record<string, boolean>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 배경 제거(누끼) — 업로드/생성 그림을 투명 배경으로. 실루엣에 또렷, 세기/줄잇기도 깔끔.
+  const cutBg = async (im: PickedImage) => {
+    if (im.kind !== "upload" || !im.url) return;
+    const k = keyOf(im);
+    if (cutting[k]) return;
+    setCutting((c) => ({ ...c, [k]: true }));
+    try {
+      const cut = await removeBg(im.url);
+      if (cut) setPicked((p) => p.map((x) => (keyOf(x) === k ? { ...x, url: cut } : x)));
+    } finally {
+      setCutting((c) => { const n = { ...c }; delete n[k]; return n; });
+    }
+  };
 
   const aiGenerate = async () => {
     const s = genSubject.trim();
@@ -96,7 +112,11 @@ export function MakeGamePage({
     try {
       let spec: GameSpec;
       if (picked.length > 0) {
-        spec = buildCountingFromImages(picked, { ageRange: "3-5" }); // 고른 그림 → 세기
+        // 고른 그림 → 장르가 그림자 맞추기면 실루엣(2장 이상), 그 외엔 세기.
+        spec =
+          genre === "silhouette" && picked.length >= 2
+            ? buildSilhouetteFromImages(picked, { ageRange: "3-5" })
+            : buildCountingFromImages(picked, { ageRange: "3-5" });
       } else if (prompt.trim()) {
         // 임의 소재 콘텐츠 생성(건물↔직업 등) → 실패 시 큐레이션. 선택 장르를 우선.
         spec = (await generateGameSpec(prompt.trim(), genre)).spec;
@@ -256,11 +276,22 @@ export function MakeGamePage({
                     >
                       ✕
                     </button>
+                    {im.kind === "upload" && (
+                      <button
+                        type="button"
+                        onClick={() => cutBg(im)}
+                        aria-label="배경 지우기"
+                        title="배경 지우기 (누끼)"
+                        style={{ position: "absolute", bottom: -6, left: -6, height: 22, padding: "0 7px", borderRadius: 999, border: "none", background: palette.mint, color: palette.textOnPastel, fontSize: 12, fontWeight: 700, cursor: "pointer", lineHeight: "22px" }}
+                      >
+                        {cutting[keyOf(im)] ? "…" : "✂️"}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
               <div style={{ fontSize: 13, color: palette.textOnPastel, opacity: 0.85, marginTop: 8 }}>
-                고른 그림으로 <b>세기 놀이</b>를 만들어요. (실루엣·줄잇기용 가공은 곧 추가돼요)
+                고른 그림으로 <b>세기</b>를, ‘그림자 맞추기’ 종류를 고르면 <b>실루엣</b>을 만들어요. ✂️로 배경을 지우면 실루엣이 또렷해요.
               </div>
             </Section>
           )}

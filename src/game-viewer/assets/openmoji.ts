@@ -39,12 +39,10 @@ export function refWithoutVS(ref: string): string {
   return stripped;
 }
 
-/** 실루엣 div 스타일 — SVG를 mask로 입히고 단색으로 채운다. 부모가 크기를 준다. */
-export function silhouetteMaskStyle(
-  ref: string,
-  color: string,
-): CSSProperties {
-  const url = `url("${openmojiUrl(ref)}")`;
+/** 임의 이미지 URL을 mask로 입혀 단색 실루엣 div 스타일. 누낀(투명 배경) 이미지면 또렷한 실루엣.
+   교사 업로드/생성 이미지(배경제거 후)도 같은 방식으로 실루엣이 된다. 부모가 크기를 준다. */
+export function maskStyleFromUrl(imageUrl: string, color: string): CSSProperties {
+  const url = `url("${imageUrl}")`;
   return {
     backgroundColor: color,
     WebkitMaskImage: url,
@@ -59,6 +57,11 @@ export function silhouetteMaskStyle(
     width: "100%",
     height: "100%",
   };
+}
+
+/** 실루엣 div 스타일 — OpenMoji SVG를 mask로 입히고 단색으로 채운다. */
+export function silhouetteMaskStyle(ref: string, color: string): CSSProperties {
+  return maskStyleFromUrl(openmojiUrl(ref), color);
 }
 
 /** 컬러 이미지 스타일 — object-fit으로 비율 유지, 부모가 크기를 준다. */

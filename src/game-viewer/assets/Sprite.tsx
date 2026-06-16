@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from "react";
 import type { GameAsset, GameSpec } from "../schema/gameSpec";
-import { colorImgStyle, openmojiUrl, refWithoutVS, silhouetteMaskStyle } from "./openmoji";
+import { colorImgStyle, maskStyleFromUrl, openmojiUrl, refWithoutVS, silhouetteMaskStyle } from "./openmoji";
 
 /** spec.assets 에서 id로 에셋을 찾는다(없으면 undefined — 호출부에서 방어). */
 export function findAsset(spec: GameSpec, id: string): GameAsset | undefined {
@@ -73,13 +73,13 @@ export function AssetSprite({
   if (asset.source === "openmoji") {
     return <Sprite refCode={asset.ref} label={asset.label} mode={mode} color={color} />;
   }
-  // teacher/generated — 처리된 이미지 URL을 직접 사용.
-  const url =
-    asset.source === "teacher"
-      ? mode === "silhouette"
-        ? asset.silhouetteUrl ?? asset.processedUrl
-        : asset.processedUrl
-      : asset.url;
-  if (!url) return <div role="img" aria-label={asset.label} style={{ width: "100%", height: "100%" }} />;
-  return <img src={url} alt={asset.label} draggable={false} style={colorImgStyle} />;
+  // teacher/generated — 처리된 이미지 URL. 실루엣은 누낀 이미지를 CSS 마스크로 단색화.
+  const colorUrl = asset.source === "teacher" ? asset.processedUrl : asset.url;
+  const silUrl = asset.source === "teacher" ? asset.silhouetteUrl ?? asset.processedUrl : asset.url;
+  if (mode === "silhouette") {
+    if (!silUrl) return <div role="img" aria-label={asset.label} style={{ width: "100%", height: "100%" }} />;
+    return <div role="img" aria-label={asset.label} style={maskStyleFromUrl(silUrl, color ?? "#5A5A66")} />;
+  }
+  if (!colorUrl) return <div role="img" aria-label={asset.label} style={{ width: "100%", height: "100%" }} />;
+  return <img src={colorUrl} alt={asset.label} draggable={false} style={colorImgStyle} />;
 }

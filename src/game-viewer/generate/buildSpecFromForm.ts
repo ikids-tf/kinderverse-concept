@@ -167,6 +167,47 @@ export function buildCountingFromImages(
   };
 }
 
+/** 고른 그림으로 '그림자 맞추기' 게임. 업로드(배경제거 누끼 권장)는 teacher 에셋의 silhouetteUrl로
+   CSS 마스크 실루엣, 추천은 openmoji. 각 그림이 정답인 라운드 + 나머지에서 보기 샘플. (≥2장 권장) */
+export function buildSilhouetteFromImages(
+  images: PickedImage[],
+  values: Record<string, FieldValue>,
+): SilhouetteGame {
+  const rng = Math.random;
+  const age = str<AgeRange>(values.ageRange, "3-5");
+  const ad = AGE_DEFAULTS[age];
+  const valid = images.filter((im) => (im.kind === "openmoji" && im.ref) || (im.kind === "upload" && im.url));
+  const optionCount = Math.min(num(values.optionCount, ad.optionCount), Math.max(2, valid.length));
+
+  const assets: GameAsset[] = valid.map((im, i) => {
+    const id = `sil-${i}`;
+    if (im.kind === "openmoji" && im.ref) {
+      return { id, source: "openmoji", ref: im.ref, label: im.label, alt: im.label };
+    }
+    return { id, source: "teacher", uploadId: id, processedUrl: im.url, silhouetteUrl: im.url, status: "ready", label: im.label, alt: im.label };
+  });
+  const ids = assets.map((a) => a.id);
+
+  const rounds: SilhouetteRound[] = ids.map((answerId) => {
+    const distractors = sampleN(ids.filter((x) => x !== answerId), optionCount - 1, rng);
+    return { answerAssetId: answerId, optionAssetIds: shuffle([answerId, ...distractors], rng) };
+  });
+
+  return {
+    schemaVersion: 1,
+    id: `silhouette-mine-${Date.now()}`,
+    templateId: "silhouette",
+    title: "내가 고른 그림자 맞추기",
+    instruction: { text: "그림자를 보고 무엇인지 맞춰 볼까요?" },
+    ageRange: age,
+    theme: "animal",
+    ttsLocale: "ko-KR",
+    assets,
+    rounds,
+    rewards: defaultRewards(rng),
+  };
+}
+
 /* ───────────────────────── 템플릿별 빌더 ───────────────────────── */
 
 function buildCounting(values: Record<string, FieldValue>, rng: () => number): CountingGame {
