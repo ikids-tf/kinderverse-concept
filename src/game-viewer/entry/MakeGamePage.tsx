@@ -16,6 +16,7 @@ import { TEMPLATE_FORMS } from "../generate/templateForms";
 import { CONTENT_SETS, type CategoryId } from "../generate/contentSets";
 import { buildSpecFromForm, buildCountingFromImages, type PickedImage } from "../generate/buildSpecFromForm";
 import { generateGameSpec } from "../generate/generateGameSpec";
+import { generateImageAsset, STYLE_LABEL, STYLES, type ImgStyle } from "../generate/imageAsset";
 import { Sprite } from "../assets/Sprite";
 import { palette, radius, shadow } from "../theme";
 import { PillButton } from "../engine/GameShell";
@@ -35,7 +36,25 @@ export function MakeGamePage({ onStart, showBar = true }: { onStart: (spec: Game
   const [picked, setPicked] = useState<PickedImage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  const [genSubject, setGenSubject] = useState("");
+  const [genStyle, setGenStyle] = useState<ImgStyle>("clean");
+  const [genBusy, setGenBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const aiGenerate = async () => {
+    const s = genSubject.trim();
+    if (!s || genBusy) return;
+    setGenBusy(true);
+    try {
+      const url = await generateImageAsset(s, genStyle); // 유료 — 버튼 클릭 시에만
+      if (url) {
+        setPicked((p) => [...p, { kind: "upload", url, label: s.slice(0, 20) }]);
+        setGenSubject("");
+      }
+    } finally {
+      setGenBusy(false);
+    }
+  };
 
   const isPicked = (im: PickedImage) => picked.some((x) => keyOf(x) === keyOf(im));
   const togglePick = (im: PickedImage) =>
@@ -166,6 +185,37 @@ export function MakeGamePage({ onStart, showBar = true }: { onStart: (spec: Game
                   </motion.button>
                 );
               })}
+            </div>
+          </Section>
+
+          {/* ③ AI로 그림 만들기 — 유료, 버튼 누를 때만 1회 생성 */}
+          <Section title="③ AI로 그림 만들기 (선택)">
+            <input
+              value={genSubject}
+              onChange={(e) => setGenSubject(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void aiGenerate(); }}
+              disabled={genBusy}
+              placeholder="무엇을 그릴까요? 예) 공룡, 우리 반 마스코트"
+              style={{ width: "100%", maxWidth: 420, padding: "12px 16px", borderRadius: radius.button, border: `2px solid ${palette.lavender}`, background: palette.outline, fontSize: 15, color: palette.textSoft, outline: "none" }}
+            />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {STYLES.map((st) => {
+                const on = genStyle === st;
+                return (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setGenStyle(st)}
+                    style={{ padding: "8px 14px", borderRadius: radius.pill, border: on ? `2px solid ${palette.coral}` : "2px solid transparent", background: on ? "rgba(255,181,167,0.25)" : palette.outline, boxShadow: shadow.soft, fontSize: 14, fontWeight: 700, color: palette.textSoft, cursor: "pointer" }}
+                  >
+                    {STYLE_LABEL[st]}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <PillButton tone="soft" onClick={aiGenerate}>{genBusy ? "그림 만드는 중… (~20초)" : "✨ 그림 만들기"}</PillButton>
+              <span style={{ fontSize: 12, color: palette.textOnPastel, opacity: 0.85 }}>AI가 그려 ‘내 재료’에 담아요 · 만들 때마다 비용이 들어요</span>
             </div>
           </Section>
 
