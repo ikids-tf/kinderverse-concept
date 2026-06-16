@@ -20,10 +20,20 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   color: #5a5a66;
+  /* 빈 곳/헤더 드래그(카드 이동 등)로 텍스트가 선택되지 않게 — 게임 UI엔 선택할 텍스트가 없다. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .kv-game-root * {
   box-sizing: border-box;
+}
+
+/* 입력 필드만 선택 허용(프롬프트로 시작 등). */
+.kv-game-root input,
+.kv-game-root textarea {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .kv-game-root button {

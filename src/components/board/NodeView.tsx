@@ -222,6 +222,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 재생이 양립하게 한다(버튼만 조작, 나머지는 드래그). iframe이 kv-video-playing으로
   // 상태를 알려 주면 아이콘을 맞추고, 클릭은 kvTogglePlay로 프록시한다.
   const isVideoPlayer = embedStr.includes('video-player');
+  // 게임 뷰어(game-viewer.html) — 헤더에 ⛶·탭이 있어 일반 뷰어보다 상단 클리어런스가 더 필요하다.
+  const isGameViewer = embedStr.includes('game-viewer');
   const [videoPlaying, setVideoPlaying] = useState(false);
   const [videoReady, setVideoReady] = useState<boolean>(typeof node.data?.videoAssetId === 'string');
   const [viewerMode, setViewerMode] = useState<string>(
@@ -467,6 +469,36 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [embedInteract, selected]);
+
+  // 게임 뷰어 풀스크린 — iframe 안 ⛶ 클릭을 보드가 가로채 'CSS 인앱 맥시마이즈'(fsOpen 포털)로
+  // 띄운다. 네이티브 Fullscreen API는 임베드/프리뷰 등 일부 환경에서 requestFullscreen 프라미스가
+  // 영영 안 끝나(행) 화면이 안 바뀐다 — body 레벨 position:fixed 포털은 어디서나 동작한다.
+  // 같은-출처라 캡처 단계 리스너로 React 핸들러보다 먼저 가로채 ⛶ 클릭만 포털로 돌린다.
+  useEffect(() => {
+    if (!isGameViewer) return;
+    const ifr = embedFrameRef.current;
+    if (!ifr) return;
+    const onClick = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (!t?.closest?.('button[aria-label*="전체 화면"]')) return;
+      e.stopPropagation();
+      (e as Event & { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.();
+      setFsOpen(true);
+    };
+    let bound: Document | null = null;
+    const attach = () => {
+      try {
+        const d = ifr.contentDocument;
+        if (d && d !== bound) { d.addEventListener('click', onClick, true); bound = d; }
+      } catch { /* 같은-출처라 사실상 안 일어남 */ }
+    };
+    attach();
+    ifr.addEventListener('load', attach);
+    return () => {
+      ifr.removeEventListener('load', attach);
+      try { bound?.removeEventListener('click', onClick, true); } catch { /* noop */ }
+    };
+  }, [isGameViewer]);
   // 유튜브 검색 결과 카드의 ▶ → 이 뷰어(iframe)의 loadSrc로 바로 재생.
   // kv:yt-propose — 다른 요소와 선이 연결되면 뷰어 안에 "영상을 찾아 연결할까요?"
   // 확인 카드를 띄운다(확인 → 뷰어가 직접 검색해 재생).
@@ -1228,7 +1260,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 cursor: 'grab',
                 // 동영상 플레이어는 상단 액션(저장·전체화면, ~58px)을 통째로 비워 클릭이
                 // 드래그 레이어에 가리지 않게 한다(유튜브 헤더는 ~52px).
-                top: selected || embedHover ? (isVideoPlayer ? 64 : 52) : 0,
+                // 게임 뷰어는 헤더(⛶·탭)를 '항상' 비운다 — 호버 타이밍에 의존하지 않게(클릭이
+                // 드래그 레이어에 가려 풀스크린이 안 되던 문제). 그 외엔 선택/호버 시에만 비운다.
+                top: isGameViewer ? 72 : selected || embedHover ? (isVideoPlayer ? 64 : 52) : 0,
                 bottom: isVideoPlayer && (selected || embedHover) ? 100 : 0,
                 // 뷰어 팝업(볼륨·다운로드 메뉴)이 열려 있으면 손잡이를 통과시켜(none) 팝업이
                 // 클릭/호버를 받게 한다 — 팝업이 클리어런스 밖(중앙 띠)까지 뻗어도 닿는다.
