@@ -139,9 +139,18 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   useEffect(() => {
     const el = inputRef.current;
     if (!el || statusInline) return;
+    // 접힘 상태에선 textarea 폭이 0(max-w-0)이라 scrollHeight가 여러 줄로 폭주 → 높이가 42vh로
+    // 튀어 접힌 바가 세로로 커진다. 접혔을 땐 자동높이를 끄고 CSS 기본 높이로 되돌린다.
+    if (collapsed) {
+      el.style.height = '';
+      return;
+    }
     const fit = () => {
+      // 펼침 전환 중엔 textarea 폭이 아직 0~좁아 scrollHeight가 여러 줄로 폭주(세로로 튐) →
+      // 폭이 충분히 확정됐을 때만 측정한다. 전환 완료(transitionend)에 다시 fit이 불려 최종 높이를 잡는다.
+      if (el.clientWidth < 60) return;
       el.style.height = 'auto';
-      // 전환(폭 애니메이션) 중 오측정이 박혀도 화면을 덮지 않게 42vh로 클램프.
+      // 너무 긴 입력은 화면을 덮지 않게 42vh로 클램프.
       const maxPx = Math.round(window.innerHeight * 0.42);
       el.style.height = `${Math.min(el.scrollHeight, maxPx)}px`;
     };
@@ -530,7 +539,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   // view-transition-name on the form (kv-pbar-vt).
   return (
     <div className={wrapperClass} style={wrapperStyle}>
-      <div className={`pointer-events-auto relative ${collapsed ? 'w-auto' : 'w-full max-w-3xl'}`}>
+      {/* 접힘 = 좁은 박스를 가로 중앙에(이전처럼). 박스를 클릭 통과시키고 아이콘만 클릭 가능. */}
+      <div className={`relative ${collapsed ? 'w-auto pointer-events-none' : 'w-full max-w-3xl pointer-events-auto'}`}>
         {favRender && !collapsed && <FavoriteCardRail closing={favClosing} />}
 
         {/* 보관함 추천 — 입력 텍스트와 태그/주제가 맞는 저장 자료. 클릭 = 복수 선택,
@@ -765,10 +775,10 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
         <div className={`kv-pbar-glow ${!collapsed && boardSelectionCount > 0 ? 'kv-pbar-glow-on' : ''}`}>
         <form
           onSubmit={onSubmit}
-          className={`kv-pbar-vt relative z-10 mx-auto flex w-full items-end overflow-hidden rounded-2xl border backdrop-blur transition-all duration-300 ease-soft ${
+          className={`kv-pbar-vt relative z-10 mx-auto flex w-full items-end overflow-hidden rounded-2xl border py-t4 transition-all duration-300 ease-soft ${
             collapsed
-              ? 'max-w-[3.25rem] gap-0 border-transparent bg-transparent p-0 shadow-none'
-              : `max-w-3xl gap-t2 kv-pbar-glass px-t2 py-t4 pl-t3 shadow-lg ${
+              ? 'max-w-[3.25rem] gap-0 border-transparent bg-transparent shadow-none'
+              : `max-w-3xl gap-t2 px-t2 pl-t3 kv-pbar-glass backdrop-blur shadow-lg ${
                   streaming ? 'kv-pbar-streaming' : boardSelectionCount > 0 ? 'kv-pbar-selected' : 'border-border'
                 }`
           }`}
@@ -779,7 +789,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             aria-label={collapsed ? '프롬프트바 펼치기' : 'AI 채팅으로 이동'}
             aria-current={!collapsed && onChatPage ? 'page' : undefined}
             onClick={onMessageIcon}
-            className={`flex shrink-0 items-center justify-center rounded-pill transition-all duration-300 ease-soft ${
+            className={`pointer-events-auto flex shrink-0 items-center justify-center rounded-pill transition-all duration-300 ease-soft ${
               collapsed
                 ? 'h-12 w-12 bg-accent text-on-accent shadow-pop hover:scale-105'
                 : `h-10 w-10 hover:bg-surface-3 ${onChatPage ? 'text-accent' : 'text-fg-2'}`
@@ -922,8 +932,9 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
         )}
 
         {/* 보드 등에서도 AI 채팅과 같은 높이로 바·글로우를 띄우기 위한 빈 자리.
-            안내문(면책 텍스트)은 넣지 않고, 동일한 한 줄 박스만 예약한다. */}
-        {docked && !onChatPage && !collapsed && (
+            안내문(면책 텍스트)은 넣지 않고, 동일한 한 줄 박스만 예약한다.
+            접힘 상태에서도 같은 자리를 예약해 아이콘 세로 위치가 펼침과 동일하게 유지된다. */}
+        {docked && !onChatPage && (
           <div aria-hidden className="pointer-events-none mt-t2 px-t4 text-xs leading-snug" role="presentation">
             &nbsp;
           </div>
