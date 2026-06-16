@@ -4,7 +4,7 @@ import { Icon } from '@/lib/icons';
 import { AI_CHAT_PATH } from '@/lib/nav';
 import { useUIStore } from '@/store/uiStore';
 import { useRouterStore } from '@/store/routerStore';
-import { useBoardStore } from '@/store/boardStore';
+import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import type { ImageAsset } from '@/board/assets';
 import type { WebLink } from '@/board/webLinks';
 import { FavoriteCardRail } from './FavoriteCardRail';
@@ -82,6 +82,35 @@ function libCloseMs(count: number, reduced: boolean, boxCount = 1): number {
 /** + 업로드 첨부 — 이미지(데이터 URL) 또는 텍스트 문서(내용). 전송 시 보드에 카드로
     올린 뒤 선택해, 입력한 프롬프트가 그 자료에 대한 생성/명령으로 작동한다. */
 type PromptAttachment = { id: string; kind: 'image' | 'text'; name: string; dataUrl?: string; text?: string };
+
+/** 단독 선택된 카드 유형에 맞춘 프롬프트바 플레이스홀더(예: 게임뷰어 → "무슨 게임을 만들까요?").
+   못 잡으면 null → 일반 선택 안내로 폴백. */
+function selectionPlaceholder(node: BoardNode | undefined): string | null {
+  if (!node) return null;
+  const embed = typeof node.data?.embed === 'string' ? node.data.embed : '';
+  if (embed) {
+    if (embed.includes('game-viewer')) return '무슨 게임을 만들까요?';
+    if (embed.includes('video-player')) return '어떤 동영상을 만들까요?';
+    if (embed.includes('youtube-viewer')) return '어떤 영상을 찾아 볼까요?';
+    if (embed.includes('glb-viewer')) return '어떤 3D 모델을 보여줄까요?';
+    if (embed.includes('web-viewer')) return '어떤 웹 자료를 띄울까요?';
+    if (embed.includes('magic-viewer')) {
+      const m = node.data?.viewerMode;
+      if (m === '3d') return '어떤 3D 모델을 보여줄까요?';
+      if (m === 'video') return '어떤 동영상을 만들까요?';
+      if (m === 'youtube') return '어떤 영상을 찾아 볼까요?';
+      return '무엇을 담을까요? (영상·3D·유튜브)';
+    }
+    return '이 뷰어에 무엇을 담을까요?';
+  }
+  if (node.data?.doc) return '문서에 무엇을 쓸까요?';
+  if (node.data?.role === 'source') return '어떤 자료를 더 찾아 줄까요?';
+  if (node.type === 'image' || node.src) return '이 이미지를 어떻게 바꿀까요?';
+  if (node.type === 'text') return '무슨 글을 쓸까요?';
+  if (node.type === 'frame') return '이 안에 무엇을 만들까요?';
+  if (node.type === 'sticky') return '메모에 무엇을 적을까요?';
+  return null;
+}
 
 export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline' }) {
   const navigate = useNavigate();
@@ -349,6 +378,10 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     }
     const p = location.pathname;
     if (p.startsWith('/board')) {
+      if (boardSelectionCount === 1) {
+        const ph = selectionPlaceholder(useBoardStore.getState().nodes[boardSelection[0]]);
+        if (ph) return ph;
+      }
       return boardSelectionCount > 0
         ? `선택한 ${boardSelectionCount}개에 명령 — 이미지·메모·카드 생성/수정`
         : '보드에 무엇을 만들까요? 카드를 선택하면 그 대상에 명령해요';
