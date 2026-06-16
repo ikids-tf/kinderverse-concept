@@ -194,7 +194,16 @@ interface BoardState {
 
 const ZOOM_MIN = 0.2;
 const ZOOM_MAX = 3;
-const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+// NaN/Infinity 차단: zoom 계산이 한 번이라도 NaN이 되면 transform=scale(NaN)으로
+// 보드 전체가 사라진다(복구 불가). 비유한값은 1로 떨어뜨려 절대 전파되지 않게 한다.
+const clampZoom = (z: number) => (Number.isFinite(z) ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) : 1);
+const finite = (n: number, fallback: number) => (Number.isFinite(n) ? n : fallback);
+/** 뷰포트를 항상 유한값으로 — pan은 0, zoom은 1로 폴백. 모든 뷰포트 쓰기의 안전망. */
+const safeViewport = (v: Viewport): Viewport => ({
+  zoom: clampZoom(v.zoom),
+  panX: finite(v.panX, 0),
+  panY: finite(v.panY, 0),
+});
 
 export const useBoardStore = create<BoardState>((set, get) => ({
   nodes: {},
@@ -289,10 +298,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       return { selection: vis ? s.order.filter((id) => vis.has(id)) : [...s.order] };
     }),
 
-  setViewport: (v) => set((s) => ({ viewport: { ...s.viewport, ...v } })),
+  setViewport: (v) => set((s) => ({ viewport: safeViewport({ ...s.viewport, ...v }) })),
   zoomBy: (factor, cx, cy) =>
     set((s) => {
-      const { zoom, panX, panY } = s.viewport;
+      // 현재 뷰포트가 이미 오염돼 있어도(NaN) 여기서 정상값으로 회복시킨다.
+      const { zoom, panX, panY } = safeViewport(s.viewport);
       const next = clampZoom(zoom * factor);
       if (cx === undefined || cy === undefined) {
         return { viewport: { zoom: next, panX, panY } };
@@ -300,16 +310,18 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       // keep the point under (cx,cy) stationary while zooming
       const k = next / zoom;
       return {
-        viewport: { zoom: next, panX: cx - (cx - panX) * k, panY: cy - (cy - panY) * k },
+        viewport: safeViewport({ zoom: next, panX: cx - (cx - panX) * k, panY: cy - (cy - panY) * k }),
       };
     }),
   resetView: () => set({ viewport: { zoom: 1, panX: 0, panY: 0 } }),
   fit: () => {
     const s = get();
+    // 노드/레인 박스에 NaN 좌표가 하나라도 끼면 Math.min/max가 전부 NaN이 돼
+    // zoom=NaN으로 보드가 사라진다 → 유한한 박스만 사용한다.
     const items = [
       ...Object.values(s.nodes).map(worldBox),
       ...Object.values(s.lanes).map((l) => ({ x: l.x, y: l.y, w: laneWidth(l), h: 320 })),
-    ];
+    ].filter((b) => Number.isFinite(b.x) && Number.isFinite(b.y) && Number.isFinite(b.w) && Number.isFinite(b.h));
     if (items.length === 0) {
       set({ viewport: { zoom: 1, panX: 0, panY: 0 } });
       return;
@@ -323,11 +335,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const vh = window.innerHeight - 200;
     const zoom = clampZoom(Math.min(vw / (maxX - minX + pad * 2), vh / (maxY - minY + pad * 2), 1));
     set({
-      viewport: {
+      viewport: safeViewport({
         zoom,
         panX: -minX * zoom + pad,
         panY: -minY * zoom + pad,
-      },
+      }),
     });
   },
   focusNode: (id, maxZoom = 2) => {
@@ -366,11 +378,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const targetX = pr ? pr.left + pr.width / 2 : cr.left + cr.width / 2;
     const targetY = cr.top + padTop + availH / 2;
     set({
-      viewport: {
+      viewport: safeViewport({
         zoom,
         panX: targetX - cr.left - ncx * zoom,
         panY: targetY - cr.top - ncy * zoom,
-      },
+      }),
     });
   },
   centerNodeActualSize: (id) => {
@@ -392,7 +404,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     // 가로는 프롬프트바 중앙, 세로는 캔버스 영역(상단~프롬프트바) 중앙.
     const targetX = pr ? pr.left + pr.width / 2 : cr.left + cr.width / 2;
     const targetY = cr.top + padTop + (bottomY - (cr.top + padTop)) / 2;
-    set({ viewport: { zoom: 1, panX: targetX - cr.left - ncx, panY: targetY - cr.top - ncy } });
+    set({ viewport: safeViewport({ zoom: 1, panX: targetX - cr.left - ncx, panY: targetY - cr.top - ncy }) });
   },
   focusBounds: (ids, maxZoom = 2) => {
     const s = get();
@@ -427,7 +439,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const targetX = pr ? pr.left + pr.width / 2 : cr.left + cr.width / 2;
     const targetY = cr.top + padTop + availH / 2;
     set({
-      viewport: { zoom, panX: targetX - cr.left - cx * zoom, panY: targetY - cr.top - cy * zoom },
+      viewport: safeViewport({ zoom, panX: targetX - cr.left - cx * zoom, panY: targetY - cr.top - cy * zoom }),
     });
   },
   /* 수업 모드. 연결된 요소가 선택돼 있으면: 그 연결망만 남기고 전부 숨기고,
@@ -530,11 +542,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const zoom = clampZoom(
         Math.min(vw / (maxX - minX + pad * 2), vh / (maxY - minY + pad * 2), 1.4),
       );
-      return {
+      return safeViewport({
         zoom,
         panX: (vw + 180 - (maxX - minX) * zoom) / 2 - minX * zoom - 90,
         panY: -minY * zoom + Math.max(pad, (vh + 200 - (maxY - minY) * zoom) / 2 - 100),
-      };
+      });
     };
     // 모션 묶음 — 가로 정렬로 흐트러뜨리지 않고 '연결된 형태 그대로' 보여준다
     // (선·출발·도착의 상대 배치가 곧 수업 내용이므로 위치는 건드리지 않는다).
@@ -592,7 +604,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       order: snap.order,
       lanes: snap.lanes,
       laneOrder: snap.laneOrder,
-      viewport: snap.viewport,
+      viewport: safeViewport(snap.viewport),
       links: snap.links ?? [],
       classroom: null,
       classroomMode: false,

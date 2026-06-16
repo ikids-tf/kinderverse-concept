@@ -78,6 +78,14 @@ export function BoardCanvas() {
   const laneOrder = useBoardStore((s) => s.laneOrder);
   const selection = useBoardStore((s) => s.selection);
   const viewport = useBoardStore((s) => s.viewport);
+  // 안전망: 어떤 경로로든 뷰포트가 NaN/Infinity가 되면 transform=scale(NaN)으로
+  // 보드 전체가 사라져 복구가 안 된다. 비유한값을 감지하면 즉시 화면맞춤으로 회복.
+  useEffect(() => {
+    const { zoom, panX, panY } = viewport;
+    if (!Number.isFinite(zoom) || !Number.isFinite(panX) || !Number.isFinite(panY)) {
+      useBoardStore.getState().fit();
+    }
+  }, [viewport]);
   const generating = useBoardStore((s) => s.generating);
   const links = useBoardStore((s) => s.links);
   const classroom = useBoardStore((s) => s.classroom);
