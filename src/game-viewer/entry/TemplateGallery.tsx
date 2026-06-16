@@ -9,6 +9,9 @@ import { TEMPLATE_FORMS } from "../generate/templateForms";
 import { palette, radius, shadow, spring } from "../theme";
 import { OmojiIcon } from "./formControls";
 
+/** 출시 완료된 마일스톤 — 이 목록 밖(M3+)만 "준비중" 뱃지를 단다. */
+const SHIPPED_MILESTONES = ["M1", "M2"];
+
 export function TemplateGallery({ onPick }: { onPick: (id: TemplateId) => void }) {
   const defs = Object.values(TEMPLATE_FORMS);
   return (
@@ -22,7 +25,7 @@ export function TemplateGallery({ onPick }: { onPick: (id: TemplateId) => void }
         }}
       >
         {defs.map((def, i) => {
-          const soon = def.milestone === "M2";
+          const soon = !SHIPPED_MILESTONES.includes(def.milestone);
           return (
             <motion.button
               key={def.templateId}
