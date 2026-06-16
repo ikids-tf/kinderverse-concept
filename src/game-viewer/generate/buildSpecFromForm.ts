@@ -16,6 +16,7 @@ import {
   type Emotion,
   type EmotionGame,
   type EmotionRound,
+  type GameAsset,
   type GameSpec,
   type MatchingGame,
   type MatchingRound,
@@ -110,6 +111,60 @@ function dedupeAssets(assets: OpenmojiAsset[]): OpenmojiAsset[] {
   const m = new Map<string, OpenmojiAsset>();
   for (const a of assets) if (!m.has(a.id)) m.set(a.id, a);
   return [...m.values()];
+}
+
+/* ───────────────────────── 이미지 기반 빌더 (나만의 게임 만들기) ───────────────────────── */
+
+/** 교사가 고른 재료 — 추천(OpenMoji ref) 또는 업로드(이미지 URL/dataURL). */
+export interface PickedImage {
+  kind: "openmoji" | "upload";
+  /** kind=openmoji 일 때 OpenMoji hexcode. */
+  ref?: string;
+  /** kind=upload 일 때 이미지 URL(dataURL 등). */
+  url?: string;
+  label: string;
+}
+
+/** 고른 이미지들로 '세기' 게임을 만든다. 각 이미지가 한 라운드(그 그림을 몇 개인지 세기).
+   업로드 이미지는 teacher 에셋(가공 전 원본 — 배경제거 등 정규화는 M3), 추천은 openmoji 에셋. */
+export function buildCountingFromImages(
+  images: PickedImage[],
+  values: Record<string, FieldValue>,
+): CountingGame {
+  const rng = Math.random;
+  const age = str<AgeRange>(values.ageRange, "3-5");
+  const ad = AGE_DEFAULTS[age];
+  const minCount = age === "3-5" ? 1 : 2;
+  const maxCount = Math.max(2, ad.maxCount);
+
+  const assets: GameAsset[] = [];
+  const rounds: CountingRound[] = [];
+  images.forEach((im, i) => {
+    const id = `pick-${i}`;
+    if (im.kind === "openmoji" && im.ref) {
+      assets.push({ id, source: "openmoji", ref: im.ref, label: im.label, alt: im.label });
+    } else if (im.kind === "upload" && im.url) {
+      assets.push({ id, source: "teacher", uploadId: id, processedUrl: im.url, status: "ready", label: im.label, alt: im.label });
+    } else {
+      return;
+    }
+    const count = randInt(minCount, maxCount, rng);
+    rounds.push({ itemAssetId: id, count, options: makeCountOptions(count, ad.optionCount, rng), scatter: "random" });
+  });
+
+  return {
+    schemaVersion: 1,
+    id: `counting-mine-${Date.now()}`,
+    templateId: "counting",
+    title: "내가 고른 그림 세기",
+    instruction: { text: "그림이 몇 개인지 세어 볼까요?" },
+    ageRange: age,
+    theme: "animal",
+    ttsLocale: "ko-KR",
+    assets,
+    rounds,
+    rewards: defaultRewards(rng),
+  };
 }
 
 /* ───────────────────────── 템플릿별 빌더 ───────────────────────── */
