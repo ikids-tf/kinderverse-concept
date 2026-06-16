@@ -692,21 +692,48 @@ export function BoardCanvas() {
       const zoom = useBoardStore.getState().viewport.zoom;
       const dx = (e.clientX - st.startX) / zoom;
       const dy = (e.clientY - st.startY) / zoom;
-      moveNodesCmd(st.dragIds, dx, dy);
-      rebindFrameMembership(st.dragIds); // re-parent cards dragged onto/off a frame
-      // 연결 카드만 끌었으면 모션 라인의 '출발점'도 같은 변위로 따라간다
-      // (도착점은 카드 중심에서 파생되므로 저절로 따라온다).
-      const b2 = useBoardStore.getState();
-      b2.setDragging(null);
-      for (const n of Object.values(b2.nodes)) {
-        if (n.type !== 'motion' || st.dragIds.includes(n.id)) continue;
-        const sId = n.data?.aStart as string | undefined;
-        const p = n.data?.p1 as { x: number; y: number } | undefined;
-        if (sId && p && st.dragIds.includes(sId)) {
-          b2.updateNodeRaw(n.id, { data: { ...n.data, p1: { x: p.x + dx, y: p.y + dy } } });
-          normalizeMotionNode(n.id);
+      // 이미지 카드 한 장을 게임 뷰어 카드 위로 드롭 → 그 그림을 게임 재료로 넘기고 이동은 취소(제자리로).
+      let consumed = false;
+      if (st.dragIds.length === 1) {
+        const b0 = useBoardStore.getState();
+        const img = b0.nodes[st.dragIds[0]];
+        if (img && img.type === 'image' && img.src) {
+          const cx = img.x + dx + img.w / 2;
+          const cy = img.y + dy + img.h / 2;
+          const gv = Object.values(b0.nodes).find(
+            (n) =>
+              n.id !== img.id &&
+              typeof n.data?.embed === 'string' &&
+              n.data.embed.includes('game-viewer') &&
+              cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h,
+          );
+          if (gv) {
+            window.dispatchEvent(
+              new CustomEvent('kv:game-add-image', {
+                detail: { nodeId: gv.id, src: img.src, label: (img.data?.label as string) || '내 그림' },
+              }),
+            );
+            consumed = true; // 이동 커밋 스킵 → setDrag(null)로 이미지 제자리 복귀
+          }
         }
       }
+      if (!consumed) {
+        moveNodesCmd(st.dragIds, dx, dy);
+        rebindFrameMembership(st.dragIds); // re-parent cards dragged onto/off a frame
+        // 연결 카드만 끌었으면 모션 라인의 '출발점'도 같은 변위로 따라간다
+        // (도착점은 카드 중심에서 파생되므로 저절로 따라온다).
+        const b2 = useBoardStore.getState();
+        for (const n of Object.values(b2.nodes)) {
+          if (n.type !== 'motion' || st.dragIds.includes(n.id)) continue;
+          const sId = n.data?.aStart as string | undefined;
+          const p = n.data?.p1 as { x: number; y: number } | undefined;
+          if (sId && p && st.dragIds.includes(sId)) {
+            b2.updateNodeRaw(n.id, { data: { ...n.data, p1: { x: p.x + dx, y: p.y + dy } } });
+            normalizeMotionNode(n.id);
+          }
+        }
+      }
+      useBoardStore.getState().setDragging(null);
       setDrag(null);
       setDragIds([]);
     } else if (st.mode === 'box') {

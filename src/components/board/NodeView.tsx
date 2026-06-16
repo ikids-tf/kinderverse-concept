@@ -508,8 +508,18 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       if (d?.nodeId !== node.id || !d.prompt) return;
       embedFrameRef.current?.contentWindow?.postMessage({ type: 'kv-game-create', prompt: d.prompt }, '*');
     };
+    // 보드 이미지를 이 게임 뷰어 카드로 드롭(BoardCanvas가 kv:game-add-image 디스패치) → iframe에 전달.
+    const onAddImage = (e: Event) => {
+      const d = (e as CustomEvent).detail as { nodeId?: string; src?: string; label?: string } | null;
+      if (d?.nodeId !== node.id || !d.src) return;
+      embedFrameRef.current?.contentWindow?.postMessage({ type: 'kv-game-add-image', src: d.src, label: d.label || '내 그림' }, '*');
+    };
     window.addEventListener('kv:game-create', onCreate);
-    return () => window.removeEventListener('kv:game-create', onCreate);
+    window.addEventListener('kv:game-add-image', onAddImage);
+    return () => {
+      window.removeEventListener('kv:game-create', onCreate);
+      window.removeEventListener('kv:game-add-image', onAddImage);
+    };
   }, [isGameViewer, node.id]);
   // 유튜브 검색 결과 카드의 ▶ → 이 뷰어(iframe)의 loadSrc로 바로 재생.
   // kv:yt-propose — 다른 요소와 선이 연결되면 뷰어 안에 "영상을 찾아 연결할까요?"

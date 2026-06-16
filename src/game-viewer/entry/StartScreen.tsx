@@ -12,6 +12,7 @@ import { motion } from "motion/react";
 import type { GameSpec, TemplateId } from "../schema/gameSpec";
 import { EXAMPLE_COUNTING, EXAMPLE_SILHOUETTE } from "../schema/examples";
 import { generateGameSpec } from "../generate/generateGameSpec";
+import type { PickedImage } from "../generate/buildSpecFromForm";
 import { palette, radius, shadow } from "../theme";
 import { GameViewer } from "../engine/GameViewer";
 import { useFullscreen } from "../engine/useFullscreen";
@@ -34,17 +35,22 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
   const fsMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("fs");
   const ownBar = !embedded || fsMode;
   const [creating, setCreating] = useState(false);
+  const [feedImage, setFeedImage] = useState<PickedImage | null>(null);
 
-  // 보드 프롬프트바 → kv-game-create{prompt} → 여기서 생성·플레이(임베드 소형 카드 제어).
+  // 보드 → iframe 메시지: 프롬프트로 게임 생성(kv-game-create) / 보드 이미지를 재료로 넣기(kv-game-add-image).
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      const d = e.data as { type?: string; prompt?: string } | null;
+      const d = e.data as { type?: string; prompt?: string; src?: string; label?: string } | null;
       if (d?.type === "kv-game-create" && typeof d.prompt === "string" && d.prompt.trim()) {
         setCreating(true);
         generateGameSpec(d.prompt.trim())
           .then(({ spec }) => setView({ kind: "play", spec }))
           .catch(() => {})
           .finally(() => setCreating(false));
+      } else if (d?.type === "kv-game-add-image" && typeof d.src === "string") {
+        // 보드 이미지 드롭 → '나만의 게임 만들기'로 전환하고 그 그림을 재료로 담는다.
+        setFeedImage({ kind: "upload", url: d.src, label: (d.label || "내 그림").slice(0, 20) });
+        setView({ kind: "make" });
       }
     };
     window.addEventListener("message", onMsg);
@@ -98,7 +104,7 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
 
       {/* 본문 */}
       {view.kind === "make" ? (
-        <MakeGamePage onStart={(spec) => setView({ kind: "play", spec })} showBar={ownBar} />
+        <MakeGamePage onStart={(spec) => setView({ kind: "play", spec })} showBar={ownBar} feedImage={feedImage} onFedImage={() => setFeedImage(null)} />
       ) : (
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
           <div style={{ maxWidth: 760, margin: "0 auto", padding: "20px 22px 40px", display: "flex", flexDirection: "column", gap: 22 }}>

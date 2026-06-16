@@ -9,7 +9,7 @@
  *
  * v1 범위: 골격(장르·업로드·추천·하단바). 스타일 이미지 생성·배경제거·보드 드래그는 다음 단계.
  */
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
 import type { GameSpec, TemplateId } from "../schema/gameSpec";
 import { TEMPLATE_FORMS } from "../generate/templateForms";
@@ -31,7 +31,18 @@ const RECOMMENDED: PickedImage[] = (["animal", "fruit", "vehicle", "food"] as Ca
 
 const keyOf = (im: PickedImage) => im.ref ?? im.url ?? "";
 
-export function MakeGamePage({ onStart, showBar = true }: { onStart: (spec: GameSpec) => void; showBar?: boolean }) {
+export function MakeGamePage({
+  onStart,
+  showBar = true,
+  feedImage = null,
+  onFedImage,
+}: {
+  onStart: (spec: GameSpec) => void;
+  showBar?: boolean;
+  /** 보드에서 드래그해 넣은 이미지(재료로 추가). */
+  feedImage?: PickedImage | null;
+  onFedImage?: () => void;
+}) {
   const [genre, setGenre] = useState<TemplateId>("counting");
   const [picked, setPicked] = useState<PickedImage[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -55,6 +66,13 @@ export function MakeGamePage({ onStart, showBar = true }: { onStart: (spec: Game
       setGenBusy(false);
     }
   };
+
+  // 보드에서 드래그해 들어온 이미지를 재료에 추가(중복 방지) 후 부모에 알림(클리어).
+  useEffect(() => {
+    if (!feedImage) return;
+    setPicked((p) => (p.some((x) => keyOf(x) === keyOf(feedImage)) ? p : [...p, feedImage]));
+    onFedImage?.();
+  }, [feedImage, onFedImage]);
 
   const isPicked = (im: PickedImage) => picked.some((x) => keyOf(x) === keyOf(im));
   const togglePick = (im: PickedImage) =>
