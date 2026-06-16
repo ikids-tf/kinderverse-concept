@@ -16,6 +16,7 @@ import { TEMPLATE_FORMS } from "../generate/templateForms";
 import { CONTENT_SETS, type CategoryId } from "../generate/contentSets";
 import { buildSpecFromForm, buildCountingFromImages, type PickedImage } from "../generate/buildSpecFromForm";
 import { routePromptLLM } from "../generate/llmRouter";
+import { generateContentLLM, type GenTemplate } from "../generate/generateContent";
 import { Sprite } from "../assets/Sprite";
 import { palette, radius, shadow } from "../theme";
 import { PillButton } from "../engine/GameShell";
@@ -59,11 +60,18 @@ export function MakeGamePage({ onStart }: { onStart: (spec: GameSpec) => void })
     try {
       let spec: GameSpec;
       if (picked.length > 0) {
-        spec = buildCountingFromImages(picked, { ageRange: "3-5" }); // v1: 고른 그림 → 세기
+        spec = buildCountingFromImages(picked, { ageRange: "3-5" }); // 고른 그림 → 세기
       } else if (prompt.trim()) {
-        const route = await routePromptLLM(prompt.trim(), { lockTemplate: genre, baseValues: { ageRange: "3-5" } });
-        spec = buildSpecFromForm({ templateId: route.templateId, values: route.values });
-        if (route.title) spec.title = route.title;
+        const p = prompt.trim();
+        // 임의 소재 — LLM이 emoji로 콘텐츠 생성(건물↔직업 등). 실패 시 큐레이션으로 폴백.
+        const gen = genre === "emotion" ? null : await generateContentLLM(p, genre as GenTemplate);
+        if (gen) {
+          spec = gen;
+        } else {
+          const route = await routePromptLLM(p, { lockTemplate: genre, baseValues: { ageRange: "3-5" } });
+          spec = buildSpecFromForm({ templateId: route.templateId, values: route.values });
+          if (route.title) spec.title = route.title;
+        }
       } else {
         spec = buildSpecFromForm({ templateId: genre, values: { ageRange: "3-5" } });
       }

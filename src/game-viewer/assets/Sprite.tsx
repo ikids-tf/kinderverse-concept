@@ -3,9 +3,9 @@
  * 부모가 크기를 정한다(템플릿이 motion.div 로 감싸 애니메이션). 읽기 의존 0 —
  * 라벨은 aria-label/alt 로만(시각). 로드 실패 시 조용히 빈 칸(게임 흐름 유지).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { GameAsset, GameSpec } from "../schema/gameSpec";
-import { colorImgStyle, openmojiUrl, silhouetteMaskStyle } from "./openmoji";
+import { colorImgStyle, openmojiUrl, refWithoutVS, silhouetteMaskStyle } from "./openmoji";
 
 /** spec.assets 에서 id로 에셋을 찾는다(없으면 undefined — 호출부에서 방어). */
 export function findAsset(spec: GameSpec, id: string): GameAsset | undefined {
@@ -24,26 +24,37 @@ interface SpriteProps {
 }
 
 export function Sprite({ refCode, label, mode = "color", color = "#5A5A66" }: SpriteProps) {
-  const [failed, setFailed] = useState(false);
+  // 0=원본 ref, 1=FE0F 제거 폴백, 2=실패(빈 칸). refCode 바뀌면 0으로 리셋.
+  const [stage, setStage] = useState<0 | 1 | 2>(0);
+  useEffect(() => setStage(0), [refCode]);
 
   if (mode === "silhouette") {
     return <div role="img" aria-label={label} style={silhouetteMaskStyle(refCode, color)} />;
   }
 
-  if (failed) {
+  if (stage === 2) {
     // 폴백: 로드 실패해도 자리는 지킨다(레이아웃 안 깨지게).
     return <div aria-label={label} role="img" style={{ width: "100%", height: "100%" }} />;
   }
 
+  const src = stage === 0 ? openmojiUrl(refCode) : openmojiUrl(refWithoutVS(refCode));
   return (
     <img
-      src={openmojiUrl(refCode)}
+      src={src}
       alt={label}
       draggable={false}
       style={colorImgStyle}
-      onError={() => setFailed(true)}
+      onError={() => {
+        // 1차 실패 → FE0F 뺀 파일명으로 재시도(있으면), 그래도 실패면 빈 칸.
+        setStage((s) => (s === 0 && refWithoutVS(refCode) !== normalizeRefSafe(refCode) ? 1 : 2));
+      }}
     />
   );
+}
+
+/** refWithoutVS 비교용 — 정규화된 원본(대문자/하이픈)과 동일한지 보려고. */
+function normalizeRefSafe(ref: string): string {
+  return ref.trim().toUpperCase().replace(/U\+/g, "").replace(/\s+/g, "-");
 }
 
 /**

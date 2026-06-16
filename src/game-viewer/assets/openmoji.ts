@@ -27,6 +27,18 @@ export function openmojiUrl(ref: string): string {
   return `${CDN_BASE}/${normalizeRef(ref)}.svg`;
 }
 
+/** emoji 문자 → OpenMoji 파일명(ref). 모든 코드포인트를 대문자 hex로 하이픈 결합
+   (ZWJ 200D·변이선택자 FE0F 포함). LLM이 만든 임의 emoji 콘텐츠를 OpenMoji로 렌더할 때. */
+export function emojiToRef(emoji: string): string {
+  return [...emoji].map((c) => (c.codePointAt(0) ?? 0).toString(16).toUpperCase()).join("-");
+}
+
+/** 변이선택자(FE0F) 제거한 ref — 일부 OpenMoji 파일은 FE0F 없이 저장돼, 1차 실패 시 폴백용. */
+export function refWithoutVS(ref: string): string {
+  const stripped = normalizeRef(ref).split("-").filter((h) => h !== "FE0F").join("-");
+  return stripped;
+}
+
 /** 실루엣 div 스타일 — SVG를 mask로 입히고 단색으로 채운다. 부모가 크기를 준다. */
 export function silhouetteMaskStyle(
   ref: string,
