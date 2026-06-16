@@ -6,9 +6,12 @@ import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImag
 // 의도 어휘는 단일 출처(intent-lexicon) — 로컬 정규식은 '그려' 등이 빠져 어긋났었다(P0-1).
 import { IMAGE_RE, coreTopic } from '@/ai/intent-lexicon';
 import { findAsset, saveAsset } from './assets';
+import { removeBackground, type AssetKind } from '@/shared/background-removal';
+import { makeThumb, THUMB_MAX_W } from './imageLod';
+import { showToast } from '@/lib/toast';
 import { saveWebLinks } from './webLinks';
 import { fitFrameToChildren, frameSubtree } from './frames';
-import { recordSpawnedNodes } from './commands';
+import { recordSpawnedNodes, replaceImageCmd, addImageNodeCmd } from './commands';
 import { worldBox } from './geometry';
 import { linkedComponent } from './links';
 import type { RegistryPayload } from '@/ui-registry/contracts';
@@ -1529,6 +1532,80 @@ export async function regenImageCard(nodeId: string, prompt: string): Promise<vo
       useBoardStore.getState().setGenerating('⚠️ 이미지 수정에 실패했어요 — 원본 그림을 유지해요');
       await new Promise((r) => setTimeout(r, 2400)); // 안내가 읽힐 시간
     }
+  } finally {
+    useBoardStore.getState().endGen();
+  }
+}
+
+/**
+ * 이미지 노드의 배경을 제거(누끼)해 투명 PNG로 만들고 갤러리(보관함)에 저장한다. 보드 전역
+ * 공용 엔진(@/shared/background-removal — 온디바이스 BiRefNet/MIT, WebGPU+워커)을 호출한다.
+ * 프롬프트바·인라인 버튼이 모두 이 함수 하나를 거친다(로직 중복 없음).
+ * - mode 'replace'(기본): 그 자리 교체(되돌리기 가능 — replaceImageCmd). 레이아웃 보존.
+ * - mode 'newNode': 원본은 두고 옆에 누끼 결과를 새 노드로.
+ * - assetKind: 엔진 안전 티어 분기에 사용(child-photo·unknown은 무조건 온디바이스).
+ * - 첫 호출은 모델 다운로드로 더 걸려 진행 상태를 보여준다. 실패 시 원본 유지.
+ */
+export async function removeBgFromNode(
+  nodeId: string,
+  opts: { mode?: 'replace' | 'newNode'; assetKind?: AssetKind } = {},
+): Promise<void> {
+  const mode = opts.mode ?? 'replace';
+  const assetKind: AssetKind = opts.assetKind ?? 'unknown';
+  const b = useBoardStore.getState();
+  const orig = b.nodes[nodeId];
+  if (!orig || orig.type !== 'image' || !orig.src) {
+    showToast('배경을 제거할 이미지를 먼저 선택해 주세요', 'error');
+    return;
+  }
+  const src = orig.src;
+  const caption = (orig.text ?? '').trim() || String(orig.data?.title ?? '').trim() || '이미지';
+  b.beginGen();
+  b.setGenerating('✂️ 배경을 지우고 있어요… (처음 한 번은 조금 걸려요)');
+  b.updateNodeRaw(nodeId, { loading: true });
+  try {
+    const result = await removeBackground(src, { assetKind });
+    const png = result.dataUrl;
+    const fresh = useBoardStore.getState().nodes[nodeId];
+    if (!fresh) return; // 기다리는 동안 카드가 지워짐
+    // 표시용 썸네일을 투명 PNG로 직접 굽는다(알파 보존; 비동기 ensureThumb의 흰배경 합성·레이스 회피).
+    let thumb: string | null = null;
+    try {
+      thumb = await makeThumb(png, THUMB_MAX_W, true);
+    } catch {
+      thumb = null;
+    }
+    const nextData = { ...(fresh.data ?? {}), thumb: thumb ?? '', bgRemoved: true };
+
+    if (mode === 'newNode') {
+      const id = newId('image');
+      addImageNodeCmd(
+        {
+          id,
+          type: 'image',
+          x: fresh.x + 28,
+          y: fresh.y + 28,
+          w: fresh.w,
+          h: fresh.h,
+          scale: fresh.scale,
+          src: png,
+          text: `${caption} (배경제거)`,
+          data: { ...nextData, role: 'image' },
+        } as BoardNode,
+        '배경 제거',
+      );
+    } else {
+      replaceImageCmd(nodeId, png, nextData, '배경 제거'); // 그 자리 교체 + ⌘Z 복원
+    }
+
+    // 갤러리(보관함)에 저장 — kind 'image'(갤러리에 노출), 캡션에 (배경제거) 표기.
+    await saveAsset(`${caption} (배경제거)`, 'image', png, caption);
+    useBoardStore.getState().setGenerating('✅ 배경을 지웠어요 — 갤러리에 저장했어요');
+    await new Promise((r) => setTimeout(r, 1600));
+  } catch {
+    useBoardStore.getState().updateNodeRaw(nodeId, { loading: false }); // 원본 유지
+    useBoardStore.getState().setGenerating('⚠️ 배경 제거에 실패했어요 — 원본을 유지해요');
+    await new Promise((r) => setTimeout(r, 2400));
   } finally {
     useBoardStore.getState().endGen();
   }

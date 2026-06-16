@@ -1,5 +1,5 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
 import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior } from './composer';
@@ -17,6 +17,7 @@ import {
   VIDEO_RE,
   DESIGN_CMD_RE,
   DECORATE_RE,
+  BG_REMOVE_RE,
   type ContentIntent,
   type VesselMatch,
 } from '@/ai/intent-lexicon';
@@ -120,6 +121,13 @@ export function handleBoardPrompt(text: string): boolean {
   // (게임뷰어 하단바 하이브리드: 임베드 소형 카드는 보드 프롬프트바로 제어. NodeView가 iframe에 전달)
   if (sel.length === 1 && typeof sel[0].data?.embed === 'string' && sel[0].data.embed.includes('game-viewer')) {
     window.dispatchEvent(new CustomEvent('kv:game-create', { detail: { nodeId: sel[0].id, prompt: text } }));
+    return true;
+  }
+
+  // 배경 제거(누끼) 의도 — 대상 이미지가 선택돼 있지 않으면 생성으로 새지 않게 다정히 안내.
+  // (선택된 이미지가 있으면 아래 전용 분기에서 공용 엔진으로 처리.)
+  if (BG_REMOVE_RE.test(text) && !sel.some((n) => n.type === 'image' && n.src)) {
+    showToast('배경을 지울 이미지를 먼저 선택해 주세요', 'error');
     return true;
   }
 
@@ -288,6 +296,15 @@ export function handleBoardPrompt(text: string): boolean {
       return true;
     }
     // 사용할 내용이 없으면 아래 일반 처리로 폴백
+  }
+
+  // 이미지 선택 + "배경 제거/누끼/투명 배경" → 공용 엔진으로 누끼 → 갤러리 저장.
+  // 일반 이미지 재생성(applyContentIntent)보다 먼저 — "배경"이 스타일 지시로 새는 것 방지.
+  // 선택에 이미지가 하나라도 있으면 그 이미지들에 적용(혼합 선택도 허용).
+  const bgTargets = sel.filter((n) => n.type === 'image' && n.src);
+  if (bgTargets.length > 0 && BG_REMOVE_RE.test(text)) {
+    bgTargets.forEach((n) => void removeBgFromNode(n.id));
+    return true;
   }
 
   const fast = contentIntentFast(text);

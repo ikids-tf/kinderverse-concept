@@ -46,7 +46,15 @@ function downscale(fullUrl: string): Promise<string> {
         const ctx = cv.getContext('2d');
         if (!ctx) return resolve(fullUrl);
         ctx.drawImage(img, 0, 0, cv.width, cv.height);
-        resolve(cv.toDataURL('image/jpeg', QUALITY));
+        // 투명 영역이 있으면(누끼 PNG 등) JPEG로 구우면 검게 합성되므로 알파를 보존한 PNG로.
+        let hasAlpha = false;
+        try {
+          const corners = [[0, 0], [cv.width - 1, 0], [0, cv.height - 1], [cv.width - 1, cv.height - 1]];
+          hasAlpha = corners.some(([x, y]) => ctx.getImageData(x, y, 1, 1).data[3] < 250);
+        } catch {
+          hasAlpha = false; // cross-origin 등으로 픽셀을 못 읽으면 JPEG 폴백
+        }
+        resolve(hasAlpha ? cv.toDataURL('image/png') : cv.toDataURL('image/jpeg', QUALITY));
       } catch {
         resolve(fullUrl);
       }

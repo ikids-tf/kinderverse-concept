@@ -7,7 +7,7 @@ import { showToast } from '@/lib/toast';
 import { SHAPE_PATHS } from '@/lib/shapes';
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { editTextCmd, captureNodes, pushRedesign, deleteNodesCmd } from '@/board/commands';
-import { runWorkflowStep, spawnWebViewer, type RunnerData, type StepKind } from '@/board/workflow';
+import { runWorkflowStep, spawnWebViewer, removeBgFromNode, type RunnerData, type StepKind } from '@/board/workflow';
 import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren } from '@/board/frames';
 import { alignFrameCmd } from '@/board/align';
 import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
@@ -1086,24 +1086,40 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               </svg>
             </button>
           )}
-          {/* 호버 시 — 다운로드 + 풀스크린(동영상 카드와 동일). 생성/보관 이미지에만. */}
+          {/* 인라인 액션 — 배경 제거 + 다운로드 + 풀스크린. 호버(데스크탑) 또는 선택(터치) 시 표시.
+              버튼은 터치 타깃을 위해 h-9 w-9(36px). 생성/보관 이미지에만. */}
           {node.src && !lod && !node.loading && !presenting && typeof node.data?.ytId !== 'string' && (
-            <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity duration-150 ease-soft group-hover/card:opacity-100">
+            <div
+              className={`absolute right-1 top-1 flex gap-1 transition-opacity duration-150 ease-soft group-hover/card:opacity-100 ${
+                selected ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); void removeBgFromNode(node.id, { assetKind: 'unknown' }); }}
+                title="배경 제거 (누끼)"
+                aria-label="배경 제거"
+                className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:bg-accent hover:text-on-accent"
+              >
+                <Icon name="scissors" size={15} />
+              </button>
               <button
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); downloadImage(node.src!, imgTitle(node.text)); }}
                 title="다운로드"
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+                aria-label="다운로드"
+                className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
               >
-                <Icon name="download" size={13} />
+                <Icon name="download" size={14} />
               </button>
               <button
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); setImgFs(true); }}
                 title="크게 보기 (풀스크린)"
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+                aria-label="크게 보기"
+                className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
               >
-                <Icon name="present" size={13} />
+                <Icon name="present" size={14} />
               </button>
             </div>
           )}

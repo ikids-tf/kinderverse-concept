@@ -510,6 +510,40 @@ export function editTextCmd(id: string, before: string, after: string) {
   });
 }
 
+/** 완성된 이미지 노드(누끼 결과 등)를 통째로 추가(되돌리기 가능). */
+export function addImageNodeCmd(node: BoardNode, label = '배경 제거 결과'): string {
+  history().execute({
+    id: newId('cmd'),
+    label,
+    do: () => {
+      board().addNodeRaw(node);
+      board().setSelection([node.id]);
+    },
+    undo: () => board().removeNodeRaw(node.id),
+  });
+  return node.id;
+}
+
+/** 이미지 노드의 src+data를 통째로 교체(되돌리기 가능) — 배경제거 등 제자리 변환용.
+    원본 src/data를 보관해 ⌘/Ctrl+Z 한 번으로 원본 복구. */
+export function replaceImageCmd(
+  id: string,
+  nextSrc: string,
+  nextData: BoardNode['data'],
+  label = '배경 제거',
+) {
+  const n = board().nodes[id];
+  if (!n) return;
+  const beforeSrc = n.src;
+  const beforeData = n.data;
+  history().execute({
+    id: newId('cmd'),
+    label,
+    do: () => board().updateNodeRaw(id, { src: nextSrc, data: nextData, loading: false }),
+    undo: () => board().updateNodeRaw(id, { src: beforeSrc, data: beforeData, loading: false }),
+  });
+}
+
 /** Record nodes the composer/chips already spawned (raw) as ONE undoable step.
    The spawn helpers add nodes immediately (placeInFrame needs them present for
    collision checks), so we push an already-applied command: undo removes the

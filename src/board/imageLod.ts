@@ -25,8 +25,10 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/** 원본 data URI → ≤maxW 썸네일 data URI. 원본이 이미 작으면 null(원본 그대로 표시). */
-export async function makeThumb(src: string, maxW = THUMB_MAX_W): Promise<string | null> {
+/** 원본 data URI → ≤maxW 썸네일 data URI. 원본이 이미 작으면 null(원본 그대로 표시).
+    transparent=true(배경제거 누끼)면 흰 배경 합성 없이 알파를 보존한 PNG로 굽는다 —
+    JPEG로 구우면 투명부가 흰색으로 채워져 "배경이 안 지워진 것"처럼 보이던 문제 방지. */
+export async function makeThumb(src: string, maxW = THUMB_MAX_W, transparent = false): Promise<string | null> {
   const img = await loadImage(src);
   const w = img.naturalWidth || img.width;
   const h = img.naturalHeight || img.height;
@@ -37,10 +39,12 @@ export async function makeThumb(src: string, maxW = THUMB_MAX_W): Promise<string
   cv.height = Math.max(1, Math.round(h * scale));
   const ctx = cv.getContext('2d');
   if (!ctx) return null;
-  ctx.fillStyle = '#fff'; // JPEG는 알파가 없으므로 투명부를 흰색으로
-  ctx.fillRect(0, 0, cv.width, cv.height);
+  if (!transparent) {
+    ctx.fillStyle = '#fff'; // JPEG는 알파가 없으므로 투명부를 흰색으로
+    ctx.fillRect(0, 0, cv.width, cv.height);
+  }
   ctx.drawImage(img, 0, 0, cv.width, cv.height);
-  return cv.toDataURL('image/jpeg', THUMB_QUALITY);
+  return transparent ? cv.toDataURL('image/png') : cv.toDataURL('image/jpeg', THUMB_QUALITY);
 }
 
 /* 진행 중/완료(생성 불필요 포함) 추적 — 같은 노드에 중복 작업 방지. 결과는
@@ -54,14 +58,18 @@ async function run(nodeId: string): Promise<void> {
   try {
     const cur = useBoardStore.getState().nodes[nodeId];
     if (!cur || cur.type !== 'image' || !cur.src || cur.data?.thumb !== undefined) return;
+    const srcAtStart = cur.src;
+    const transparent = cur.data?.bgRemoved === true; // 누끼 이미지는 알파 보존 PNG 썸네일
     let thumb: string | null = null;
     try {
-      thumb = await makeThumb(cur.src);
+      thumb = await makeThumb(cur.src, THUMB_MAX_W, transparent);
     } catch {
       thumb = null; // 디코드 실패 → 원본 표시로 폴백
     }
     const fresh = useBoardStore.getState().nodes[nodeId];
     if (!fresh) return; // 삭제됨
+    // src가 바뀌었거나(배경제거 등) 그 사이 썸네일이 채워졌으면 — 낡은 썸네일로 덮지 않는다.
+    if (fresh.src !== srcAtStart || fresh.data?.thumb !== undefined) return;
     useBoardStore.getState().updateNodeRaw(nodeId, { data: { ...(fresh.data ?? {}), thumb: thumb ?? '' } });
   } finally {
     running--;

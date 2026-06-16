@@ -308,6 +308,10 @@ export const DESIGN_CMD_RE =
 export const DECORATE_RE =
   /꾸며|꾸미|예쁘게|예쁘|이쁘|소식지|부모|학부모|공유|장식|디자인|이미지 ?(넣|추가|삽입)/;
 
+/** 이미지 선택 + "배경 제거/누끼/투명 배경" → 배경 지운 투명 PNG로 변환 + 갤러리 저장. */
+export const BG_REMOVE_RE =
+  /누끼|배경\s*(을|를)?\s*(제거|지우|지워|없애|빼|날려|날리|투명|따)|투명\s*(배경|하게|으로|png)|배경\s*투명|뒷?배경\s*(제거|삭제)/i;
+
 /* ── mock 라우터용 매핑(P0-3) ─────────────────────────────────────────────── */
 
 export const INTENT_TO_ROUTE: Record<ContentIntent, { route: 'plan' | 'record' | 'studio' | 'writing' | 'mindmap'; mode?: 'observation' | 'story' }> = {
