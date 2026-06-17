@@ -15,7 +15,7 @@ import { temporal } from "zundo";
 import {
   parseInteractiveDoc,
 } from "../schema/parse";
-import type { ContentBinding, InteractiveDoc } from "../schema/interactiveDoc";
+import type { ContentBinding, InteractiveDoc, InteractiveDocInput } from "../schema/interactiveDoc";
 import { FIXTURES, type ExampleKey } from "./fixtures";
 import { answerEmoji } from "./content";
 
@@ -99,6 +99,7 @@ export interface GameStore {
   selectedNodeId: string | null;
 
   loadExample: (key: ExampleKey) => void;
+  loadDoc: (input: InteractiveDocInput, key?: ExampleKey | null) => void;
   start: () => void;
   tap: (slotId: string) => void;
   matchTap: (side: Side, slotId: string) => void;
@@ -273,6 +274,40 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
   return emptyRound();
 }
 
+/** doc 로드 시 새로 세팅할 상태(loadExample/loadDoc 공용). */
+function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameStore> {
+  return {
+    doc,
+    exampleKey: key,
+    phase: "start",
+    roundIdx: 0,
+    totalRounds: doc.interaction.rounds.length,
+    score: 0,
+    maxScore: maxScoreOf(doc),
+    busy: false,
+    banner: null,
+    showNext: false,
+    ttsEnabled: doc.settings.tts.enabled,
+    cueSlotId: null,
+    cueContent: null,
+    cueReactSeq: 0,
+    tapOptions: [],
+    reveal: null,
+    matchLeft: [],
+    matchRight: [],
+    matchPick: null,
+    matched: 0,
+    binaryAnswer: null,
+    binaryStatus: { yes: "idle", no: "idle" },
+    flipCards: [],
+    flipPick: null,
+    flipMatched: 0,
+    sfx: null,
+    mode: "play",
+    selectedNodeId: null,
+  };
+}
+
 export const useGame = create<GameStore>()(temporal((set, get) => {
   const bump = (s: Omit<Sfx, "seq">) =>
     set((st) => ({ sfx: { seq: (st.sfx?.seq ?? 0) + 1, ...s } }));
@@ -353,37 +388,12 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
 
     loadExample: (key) => {
       clearTimers();
-      const doc = parseInteractiveDoc(FIXTURES[key].input);
-      set({
-        doc,
-        exampleKey: key,
-        phase: "start",
-        roundIdx: 0,
-        totalRounds: doc.interaction.rounds.length,
-        score: 0,
-        maxScore: maxScoreOf(doc),
-        busy: false,
-        banner: null,
-        showNext: false,
-        ttsEnabled: doc.settings.tts.enabled,
-        cueSlotId: null,
-        cueContent: null,
-        cueReactSeq: 0,
-        tapOptions: [],
-        reveal: null,
-        matchLeft: [],
-        matchRight: [],
-        matchPick: null,
-        matched: 0,
-        binaryAnswer: null,
-        binaryStatus: { yes: "idle", no: "idle" },
-        flipCards: [],
-        flipPick: null,
-        flipMatched: 0,
-        sfx: null,
-        mode: "play",
-        selectedNodeId: null,
-      });
+      set(freshState(parseInteractiveDoc(FIXTURES[key].input), key));
+    },
+
+    loadDoc: (input, key = null) => {
+      clearTimers();
+      set(freshState(parseInteractiveDoc(input), key));
     },
 
     start: () => {

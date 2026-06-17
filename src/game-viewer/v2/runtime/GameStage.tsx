@@ -14,6 +14,7 @@ import { BinaryChoice } from "./interactions/BinaryChoice";
 import { FlipMemory } from "./interactions/FlipMemory";
 import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
+import { PromptEntry } from "../entry/PromptEntry";
 import { StageSizeContext, type StageSize } from "./stageSize";
 import { DIFF_LABEL, MOOD_LABEL } from "./content";
 import { FIXTURES, FIXTURE_KEYS, type ExampleKey } from "./fixtures";
@@ -257,6 +258,8 @@ export function GameStage() {
             )}
           </div>
         </div>
+
+        {mode === "play" && <PromptEntry />}
 
         <p className="note">
           이 화면은 <code>InteractiveDoc</code> 하나로 플레이됩니다 — 게임 코드를 새로 짠 게 아니라
