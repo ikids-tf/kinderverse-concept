@@ -11,7 +11,7 @@ import { extractJson } from "@/ai/json";
 import { CATEGORIES, type Category } from "./contentSets";
 import type { Archetype, Intent } from "./resolver";
 
-const ARCHETYPES: readonly string[] = ["tap-the-right-one", "match-pair", "flip-memory", "binary-choice"];
+const ARCHETYPES: readonly string[] = ["tap-the-right-one", "match-pair", "flip-memory", "binary-choice", "connect"];
 
 function mapCategory(name: string): Category | null {
   const n = name.trim();
@@ -40,7 +40,7 @@ export async function llmParseIntent(prompt: string): Promise<Intent | null> {
           content:
             `요청: "${prompt}"\n` +
             `카테고리(key): ${cats}\n` +
-            "게임유형: tap-the-right-one(이름 맞추기) · match-pair(짝 맞추기) · flip-memory(카드 뒤집기) · binary-choice(OX 퀴즈)\n" +
+            "게임유형: tap-the-right-one(이름 맞추기) · match-pair(짝 맞추기) · flip-memory(카드 뒤집기) · binary-choice(OX 퀴즈) · connect(관계 잇기)\n" +
             'JSON만: { "category": "<key>", "archetype": "<게임유형 또는 빈문자열>" }',
         },
       ],

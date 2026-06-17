@@ -8,7 +8,7 @@
 import type { InteractiveDocInput } from "../schema/interactiveDoc";
 import { CATEGORIES, findCategory, type Category, type Item } from "./contentSets";
 
-export type Archetype = "tap-the-right-one" | "match-pair" | "flip-memory" | "binary-choice";
+export type Archetype = "tap-the-right-one" | "match-pair" | "flip-memory" | "binary-choice" | "connect";
 
 export interface Intent {
   category: Category;
@@ -38,7 +38,8 @@ export function parseIntent(prompt: string): Intent | null {
   if (!cat) return null;
   let archetype: Archetype | undefined;
   if (/ox|오엑스|맞을까|틀릴|참\s*거짓|일까요|맞나요/i.test(prompt)) archetype = "binary-choice";
-  else if (/짝|매칭|연결|이어/.test(prompt)) archetype = "match-pair";
+  else if (/관계|연결|이어|이을|이으|어울리/.test(prompt)) archetype = "connect";
+  else if (/짝|매칭|같은/.test(prompt)) archetype = "match-pair";
   else if (/뒤집|기억|메모리|카드/.test(prompt)) archetype = "flip-memory";
   else if (/맞추|이름|누구|뭐/.test(prompt)) archetype = "tap-the-right-one";
   return { category: cat, archetype };
@@ -203,11 +204,34 @@ function assembleBinary(cat: Category, _useImages: boolean, k: Knobs): Interacti
   };
 }
 
+/** 관계 잇기 — 큐레이션 관계 쌍을 좌(순서)·우(셔플 런타임)로. match-pair와 같은 메커니즘. */
+function assembleConnect(cat: Category, _useImages: boolean, k: Knobs): InteractiveDocInput {
+  const n = Math.min(PAIR_COUNT[k.difficulty], cat.relations.length);
+  const { left, right } = pairSlots(n);
+  const links = shuffle(cat.relations).slice(0, n).map((p) => ({
+    left: { type: "emoji" as const, emoji: p.left.emoji },
+    right: { type: "emoji" as const, emoji: p.right.emoji },
+  }));
+  return {
+    meta: { id: `gen_connect_${cat.key}`, title: `${cat.label} 관계 잇기`, archetype: "connect", createdFrom: "prompt" },
+    settings: { difficulty: k.difficulty, length: 1, mood: k.mood, optionCount: n },
+    stage: { nodes: [...left, ...right] },
+    interaction: {
+      kind: "connect",
+      leftSlotIds: left.map((s) => s.id),
+      rightSlotIds: right.map((s) => s.id),
+      rounds: [{ links }],
+    },
+    rewards: { confetti: "full" },
+  };
+}
+
 const ASSEMBLERS: Record<Archetype, (cat: Category, useImages: boolean, k: Knobs) => InteractiveDocInput> = {
   "tap-the-right-one": assembleTap,
   "match-pair": assembleMatch,
   "flip-memory": assembleFlip,
   "binary-choice": assembleBinary,
+  "connect": assembleConnect,
 };
 
 /** 카테고리에 어울리는 추천 카드(교사 언어). 의도에 명시된 아키타입이 1순위.
@@ -221,6 +245,7 @@ export function recommend(intent: Intent, opts: RecommendOpts = {}): Recommendat
     { archetype: "match-pair", title: `${cat.label} 짝 맞추기`, emoji: "🔗" },
     { archetype: "flip-memory", title: `${cat.label} 카드 뒤집기`, emoji: "🃏" },
     { archetype: "binary-choice", title: `${cat.label} OX 퀴즈`, emoji: "⭕" },
+    { archetype: "connect", title: `${cat.label} 관계 잇기`, emoji: "🧩" },
   ];
   const ordered = intent.archetype
     ? [...base.filter((b) => b.archetype === intent.archetype), ...base.filter((b) => b.archetype !== intent.archetype)]
