@@ -30,6 +30,17 @@ export function RiveActor({ node }: { node: RiveSceneNode }) {
       : null,
   );
 
+  // DEV: 로드된 .riv의 상태머신·입력 이름을 콘솔에 찍어, 어떤 에셋이든 contract에 매핑하기 쉽게.
+  useEffect(() => {
+    if (!rive || !import.meta.env.DEV) return;
+    try {
+      const sms = rive.stateMachineNames ?? [];
+      const info = sms.map((sm) => ({ sm, inputs: (rive.stateMachineInputs(sm) ?? []).map((i) => i.name) }));
+      // eslint-disable-next-line no-console
+      console.info("[RiveActor] loaded", node.src, "→", JSON.stringify(info));
+    } catch { /* noop */ }
+  }, [rive, node.src]);
+
   useEffect(() => {
     if (!rive || !effect || effect.kind !== "responsive-state") return;
     const eff = effect;

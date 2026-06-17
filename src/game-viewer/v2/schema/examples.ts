@@ -131,13 +131,15 @@ export const revealAndCollectExample: InteractiveDocInput = {
   rewards: { confetti: "full" },
 };
 
-/* 4) 감정 맞추고 반응 → 표정 변화 (responsive-state + rive) */
+/* 4) 감정 맞추고 반응 → 캐릭터 변형 (responsive-state + rive).
+   실연동: 무료 커뮤니티 Rive 캐릭터(로그인 곰, JcToon 원작 — public/rive/teddy.riv,
+   상태머신 "Login Machine", 트리거 trigSuccess/trigFail)를 연결. 정답→곰 환호, 오답→곰 슬픔. */
 export const responsiveStateExample: InteractiveDocInput = {
-  meta: { id: "ex_emotion", title: "친구 마음 알아주기", archetype: "tap-the-right-one", createdFrom: "prompt" },
+  meta: { id: "ex_emotion", title: "곰 친구 마음 알기", archetype: "tap-the-right-one", createdFrom: "prompt" },
   settings: { difficulty: "senior", length: 1, optionCount: 3 },
   stage: {
     nodes: [
-      { id: "friend", type: "rive", role: "actor", src: "friend.riv", stateMachine: "emotion", transform: { x: 0.5, y: 0.35, w: 0.5, h: 0.5 } },
+      { id: "friend", type: "rive", role: "actor", src: "/rive/teddy.riv", stateMachine: "LoginState", transform: { x: 0.5, y: 0.35, w: 0.5, h: 0.5 } },
       { id: "opt0", type: "slot", role: "option", transform: { x: 0.2, y: 0.82, w: 0.22, h: 0.16 } },
       { id: "opt1", type: "slot", role: "option", transform: { x: 0.5, y: 0.82, w: 0.22, h: 0.16 } },
       { id: "opt2", type: "slot", role: "option", transform: { x: 0.8, y: 0.82, w: 0.22, h: 0.16 } },
@@ -149,7 +151,7 @@ export const responsiveStateExample: InteractiveDocInput = {
     optionSlotIds: ["opt0", "opt1", "opt2"],
     rounds: [
       {
-        cue: { type: "text", text: "친구가 슬퍼요. 어떻게 해줄까요?" },
+        cue: { type: "text", text: "곰 친구를 어떻게 대해줄까요?" },
         options: [
           { content: { type: "emoji", emoji: "🤗" }, correct: true },
           { content: { type: "emoji", emoji: "😠" } },
@@ -162,10 +164,10 @@ export const responsiveStateExample: InteractiveDocInput = {
     {
       kind: "responsive-state",
       actorNodeId: "friend",
-      stateMachine: "emotion",
+      stateMachine: "LoginState",
       inputs: {
-        correct: { name: "comfort", value: "trigger" },
-        wrong: { name: "confused", value: "trigger" },
+        correct: { name: "success", value: "trigger" },
+        wrong: { name: "fail", value: "trigger" },
       },
       goalState: "happy",
     },

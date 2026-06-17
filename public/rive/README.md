@@ -40,19 +40,24 @@ InteractiveDoc 쪽 값 ↔ `.riv` 안 이름이 그대로 매칭됩니다:
 
 ---
 
-## 지금 대기 중인 에셋 — `friend.riv` (감정 게임 `😊 마음 알기`)
+## ✅ 현재 연결된 에셋 — `teddy.riv` (감정 게임 `😊 마음 알기`, 작동 중)
 
-픽스처 `responsiveStateExample`(`src/game-viewer/v2/schema/examples.ts`)이 기대하는 스펙:
+데모로 **무료 커뮤니티 Rive 캐릭터(로그인 곰)** 를 받아 연결했습니다 — 라이브 검증 완료(선택→곰 표정 변화). 픽스처 `responsiveStateExample`(`src/game-viewer/v2/schema/examples.ts`)의 실제 매핑:
 
 | 항목 | 값 |
 |---|---|
-| 파일 | `public/rive/friend.riv` |
-| 상태머신 | **`emotion`** |
-| 상태(예) | `sad`(초기 — 친구가 슬픔) → `comforted` → `happy` |
-| 입력 `comfort` | **Trigger** — 발사 시 `happy`로 전이 (정답: 안아주기·손수건) |
-| 입력 `confused` | **Trigger** — 갸웃/혼란 (오답) |
+| 파일 | `public/rive/teddy.riv` (49KB) |
+| 상태머신 | **`LoginState`** |
+| 입력 `success` | **Trigger** — 정답 시 발사(곰 환호) |
+| 입력 `fail` | **Trigger** — 오답 시 발사(곰 반응) |
+| (그 외 입력) | `Check`(bool), `Look`(number), `hands_up` — 미사용 |
 
-이 이름들로 `.riv`를 만들어 여기에 넣은 뒤, `examples.ts`의 `friend` 노드 `src`를 `"friend.riv"` → **`"/rive/friend.riv"`** 로 한 줄 바꾸면 바로 동작합니다.
+> 출처/라이선스: 로그인 곰은 JcToon의 유명 Rive 커뮤니티 에셋(여러 튜토리얼에서 재사용). 여기엔 `JaySitaram/flutter_rive_login` 레포의 `teddy_login_screen.riv`를 받아 넣었습니다. **데모용** — 상업 배포 시 원작 라이선스를 확인하거나 다른 에셋으로 교체하세요.
+
+### 다른 캐릭터로 교체하려면
+1. 새 `.riv`를 `public/rive/`에 넣는다.
+2. 그 파일의 상태머신·입력 이름을 확인 — 게임을 열면 **콘솔에 `[RiveActor] loaded <src> → [{sm, inputs:[...]}]`** 가 찍힙니다(RiveActor의 DEV 헬퍼). 또는 Rive 에디터에서 확인.
+3. `examples.ts`의 `friend` 노드 `src`/`stateMachine` + responsive-state `inputs.correct.name`/`wrong.name`을 그 이름들로 바꾼다. 끝.
 
 ---
 
