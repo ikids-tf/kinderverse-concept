@@ -15,6 +15,8 @@ import { FlipMemory } from "./interactions/FlipMemory";
 import { OrderSequence } from "./interactions/OrderSequence";
 import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
+import { MaterialsLayer } from "./MaterialsLayer";
+import { useMaterials } from "./materials";
 import { PromptEntry } from "../entry/PromptEntry";
 import { StageSizeContext, type StageSize } from "./stageSize";
 import { DIFF_LABEL, MOOD_LABEL } from "./content";
@@ -47,6 +49,9 @@ const NURI_LABEL: Record<string, string> = {
   physical: "신체운동",
 };
 
+/* 자료 메뉴 빠른 스티커 팔레트. */
+const MAT_EMOJIS = ["⭐", "❤️", "👍", "🎈", "🌈", "🍎", "🐶", "🌟", "✅", "🎵", "🌸", "🚗"];
+
 export function GameStage() {
   const doc = useGame((s) => s.doc);
   const exampleKey = useGame((s) => s.exampleKey);
@@ -76,8 +81,23 @@ export function GameStage() {
   // 풀스크린(게임만) + 교사 크롬 가시성(보드가 카드 비포커스 시 숨김) + 카테고리 메뉴 펼침.
   const { isFs, toggle: toggleFs } = useFullscreen();
   const chromeVisible = useChromeVisible();
-  const [openMenu, setOpenMenu] = useState<"play" | "set" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"play" | "set" | "mat" | null>(null);
   const showToolbar = !isFs && chromeVisible;
+
+  // 자료(요소) — 게임 위에 즉흥으로 올리는 스티커·글자·그림.
+  const addMaterial = useMaterials((s) => s.add);
+  const [matText, setMatText] = useState("");
+  const onUploadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") addMaterial("image", reader.result);
+      setOpenMenu(null);
+    };
+    reader.readAsDataURL(file);
+  };
 
   // 에디터 undo/redo (zundo temporal). 게임/모드 전환 시 히스토리 초기화(세션 단위).
   const canUndo = useStore(useGame.temporal, (s) => s.pastStates.length > 0);
@@ -194,6 +214,51 @@ export function GameStage() {
                 )}
               </div>
 
+              {/* 자료 — 게임 위에 즉흥으로 올리는 스티커·글자·그림(확장 활동) */}
+              <div className="kv-menu-wrap">
+                <button
+                  type="button"
+                  className={`kv-menu-btn${openMenu === "mat" ? " on" : ""}`}
+                  aria-haspopup="menu"
+                  aria-expanded={openMenu === "mat"}
+                  onClick={() => setOpenMenu(openMenu === "mat" ? null : "mat")}
+                >
+                  ➕ 자료
+                </button>
+                {openMenu === "mat" && (
+                  <div className="kv-menu kv-menu-mat" role="menu">
+                    <div className="kv-menu-label">스티커</div>
+                    <div className="kv-emoji-row">
+                      {MAT_EMOJIS.map((em) => (
+                        <button key={em} type="button" className="kv-emoji-btn" aria-label={`스티커 ${em}`} onClick={() => addMaterial("emoji", em)}>
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="kv-menu-label">글자</div>
+                    <form
+                      className="kv-mat-textform"
+                      onSubmit={(ev) => {
+                        ev.preventDefault();
+                        const v = matText.trim();
+                        if (v) {
+                          addMaterial("text", v);
+                          setMatText("");
+                        }
+                      }}
+                    >
+                      <input value={matText} onChange={(e) => setMatText(e.target.value)} placeholder="글자 입력" aria-label="글자 자료 입력" />
+                      <button type="submit">추가</button>
+                    </form>
+                    <div className="kv-menu-label">그림</div>
+                    <label className="kv-mat-upload">
+                      📁 그림 올리기
+                      <input type="file" accept="image/*" onChange={onUploadImage} hidden />
+                    </label>
+                  </div>
+                )}
+              </div>
+
               <div className="kv-toolbar-spacer" />
 
               {/* 아이콘 클러스터 — 소리 / 편집 / 풀스크린 */}
@@ -290,6 +355,9 @@ export function GameStage() {
                 )}
               </>
             )}
+
+            {/* 자료 레이어 — 교사가 올린 스티커·글자·그림(게임 위, 즉흥 확장 활동) */}
+            {doc && mode === "play" && <MaterialsLayer />}
 
             <div className={`banner${banner ? " show " + (banner.ok ? "ok" : "no") : ""}`}>
               <span aria-hidden>{banner?.ok ? "🎉" : "💪"}</span>

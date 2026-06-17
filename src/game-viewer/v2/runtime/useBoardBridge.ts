@@ -11,6 +11,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { recommendFromPromptAI } from "../resolver/resolver";
 import { useGame } from "./useGame";
+import { useMaterials } from "./materials";
 
 /** iframe(보드 카드) 안에서 실행 중인지 — 단독 탭이면 false. */
 export const isEmbedded = typeof window !== "undefined" && window.parent !== window;
@@ -56,9 +57,8 @@ export function useBoardBridge(): void {
       if (d.type === "kv-game-create" && typeof d.prompt === "string") {
         void generateFromPrompt(d.prompt);
       } else if (d.type === "kv-game-add-image" && typeof d.src === "string") {
-        // 2단계(레인-캔버스): 드롭한 보드 이미지를 자료 노드로 배치. 1단계는 보류.
-        // eslint-disable-next-line no-console
-        console.info("[game-viewer] kv-game-add-image 수신(2단계 배치 예정):", d.label ?? "");
+        // 보드에서 드롭한 이미지를 게임 위 '자료'로 올린다(교사 즉흥 활동).
+        useMaterials.getState().add("image", d.src);
       }
     };
     window.addEventListener("message", onMessage);
