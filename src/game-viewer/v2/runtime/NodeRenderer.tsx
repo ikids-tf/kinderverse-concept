@@ -14,6 +14,7 @@ import { useStageSize } from "./stageSize";
 import { registerNode } from "./nodeRegistry";
 import { useGame } from "./useGame";
 import { useAssetUrl } from "./assetStore";
+import { RiveActor } from "./RiveActor";
 import { transformStyle } from "./layout";
 import type { MoodKey } from "../theme";
 
@@ -126,6 +127,15 @@ export function NodeRenderer({
         <div className="node-inner jua" style={{ color: "var(--ink)", fontWeight: 700 }}>
           {node.text}
         </div>
+      </Positioned>
+    );
+  }
+
+  // 반응하는 캐릭터(Rive) — 선택이 표정/상태를 실제로 바꾼다(PRD §9). 에셋 없으면 플레이스홀더.
+  if (node.type === "rive") {
+    return (
+      <Positioned t={node.transform} registerId={node.id}>
+        <RiveActor node={node} />
       </Positioned>
     );
   }

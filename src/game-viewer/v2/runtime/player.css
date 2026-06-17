@@ -118,6 +118,14 @@
 }
 .kv-v2 .kv-mat-upload:hover { border-color: var(--coral); color: var(--ink); }
 
+/* ── 반응하는 캐릭터(Rive, PRD §9) — .riv 에셋 없으면 graceful 플레이스홀더 ── */
+.kv-v2 .kv-rive-actor { position: relative; width: 100%; height: 100%; display: grid; place-items: center; }
+.kv-v2 .kv-rive-canvas { width: 100%; height: 100%; }
+.kv-v2 .kv-rive-placeholder {
+  position: absolute; inset: 0; display: grid; place-items: center; line-height: 1;
+  font-size: clamp(44px, 13vmin, 112px); filter: opacity(.9);
+}
+
 /* ── 상태 줄 ── */
 .kv-v2 .statusbar { display: flex; align-items: center; justify-content: space-between; margin: 4px 2px 12px; }
 .kv-v2 .round-txt { font-size: 14px; font-weight: 700; color: var(--ink-soft); }

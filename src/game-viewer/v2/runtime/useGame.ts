@@ -19,6 +19,7 @@ import type { ContentBinding, InteractiveDoc, InteractiveDocInput } from "../sch
 import { FIXTURES, type ExampleKey } from "./fixtures";
 import { answerEmoji } from "./content";
 import { primeImages } from "./assetStore";
+import { emitActor } from "./riveBus";
 
 export type Phase = "start" | "playing" | "extend" | "finished";
 export type OptStatus = "idle" | "correct" | "wrong" | "picked" | "locked";
@@ -348,6 +349,12 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
   const bump = (s: Omit<Sfx, "seq">) =>
     set((st) => ({ sfx: { seq: (st.sfx?.seq ?? 0) + 1, ...s } }));
 
+  // responsive-state(PRD §9): 판정 결과를 Rive 액터로 흘려보낸다(선택 → 캐릭터 변형).
+  const fireActor = (outcome: "correct" | "wrong") => {
+    const eff = get().doc?.effects.find((e) => e.kind === "responsive-state");
+    if (eff && eff.kind === "responsive-state") emitActor({ actorNodeId: eff.actorNodeId, outcome });
+  };
+
   /** 라운드 진입 — 뷰 슬라이스 세팅 + 질문 읽어주기 예약. */
   const enterRound = (idx: number) => {
     const doc = get().doc;
@@ -458,6 +465,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
             o.slotId === slotId ? { ...o, status: "correct" } : o,
           ),
         });
+        fireActor("correct"); // 반응 캐릭터: 위로/행복 전이
         if (st.reveal) {
           // 흙에서 쑥 뽑히는 연출 → 약간의 텀을 두고 정답 마무리.
           set({ reveal: { ...st.reveal, active: true } });
@@ -477,6 +485,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
             o.slotId === slotId ? { ...o, status: "wrong" } : o,
           ),
         });
+        fireActor("wrong"); // 반응 캐릭터: 갸웃(부드러운 격려)
         bump({ kind: "say", text: "다시 해볼까요?" });
         later(() => {
           set((s) => ({
