@@ -10,6 +10,7 @@ import "./runtime/player.css";
 import { theme, cssVars } from "./theme";
 import { useGame } from "./runtime/useGame";
 import { useGameEffects } from "./runtime/useGameEffects";
+import { useBoardBridge } from "./runtime/useBoardBridge";
 import { GameStage } from "./runtime/GameStage";
 
 /** theme.ts 토큰 → 무대 컨테이너 CSS 변수(STEP 2). cssVars()에 없는 그림자·폰트만 보강. */
@@ -32,6 +33,7 @@ const rootStyle = {
 export function App() {
   const loadExample = useGame((s) => s.loadExample);
   useGameEffects();
+  useBoardBridge(); // 보드 메인 프롬프트바 → 게임 생성 + 교사 크롬 가시성(임베드 시)
   useEffect(() => {
     loadExample("animal");
   }, [loadExample]);
