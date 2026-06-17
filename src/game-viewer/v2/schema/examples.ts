@@ -51,32 +51,37 @@ export const tapTheRightOneExample: InteractiveDocInput = {
   rewards: { confetti: "full" },
 };
 
-/* 2) 유사 개념 짝 맞추기 (소방서=소방관 …) — match-pair */
+/* 2) 그림자 ↔ 실물 짝 맞추기 — match-pair (왼쪽=실루엣 그림자, 오른쪽=진짜 모습) */
 export const matchPairExample: InteractiveDocInput = {
-  meta: { id: "ex_concept_match", title: "관련 있는 친구 찾기", archetype: "match-pair", createdFrom: "prompt" },
+  meta: { id: "ex_shadow_match", title: "그림자와 친구 짝 맞추기", archetype: "match-pair", createdFrom: "prompt" },
   settings: { length: 1, optionCount: 3 },
   stage: {
+    background: { colorRole: "pastel.sky" },
     nodes: [
-      { id: "L0", type: "slot", role: "slot", transform: { x: 0.25, y: 0.3, w: 0.3, h: 0.18 } },
-      { id: "L1", type: "slot", role: "slot", transform: { x: 0.25, y: 0.55, w: 0.3, h: 0.18 } },
-      { id: "R0", type: "slot", role: "slot", transform: { x: 0.75, y: 0.3, w: 0.3, h: 0.18 } },
-      { id: "R1", type: "slot", role: "slot", transform: { x: 0.75, y: 0.55, w: 0.3, h: 0.18 } },
+      { id: "L0", type: "slot", role: "slot", transform: { x: 0.25, y: 0.26, w: 0.28, h: 0.18 } },
+      { id: "L1", type: "slot", role: "slot", transform: { x: 0.25, y: 0.52, w: 0.28, h: 0.18 } },
+      { id: "L2", type: "slot", role: "slot", transform: { x: 0.25, y: 0.78, w: 0.28, h: 0.18 } },
+      { id: "R0", type: "slot", role: "slot", transform: { x: 0.75, y: 0.26, w: 0.28, h: 0.18 } },
+      { id: "R1", type: "slot", role: "slot", transform: { x: 0.75, y: 0.52, w: 0.28, h: 0.18 } },
+      { id: "R2", type: "slot", role: "slot", transform: { x: 0.75, y: 0.78, w: 0.28, h: 0.18 } },
     ],
   },
   interaction: {
     kind: "match-pair",
-    leftSlotIds: ["L0", "L1"],
-    rightSlotIds: ["R0", "R1"],
+    leftSlotIds: ["L0", "L1", "L2"],
+    rightSlotIds: ["R0", "R1", "R2"],
     rounds: [
       {
+        // 왼쪽 = 검은 그림자(asset variant="silhouette"), 오른쪽 = 진짜 모습(emoji)
         pairs: [
-          { left: { type: "emoji", emoji: "🚒" }, right: { type: "text", text: "소방관" } },
-          { left: { type: "emoji", emoji: "🍎" }, right: { type: "text", text: "사과나무" } },
+          { left: { type: "asset", asset: { assetId: "asset_rabbit", variant: "silhouette" } }, right: { type: "emoji", emoji: "🐰" } },
+          { left: { type: "asset", asset: { assetId: "asset_elephant", variant: "silhouette" } }, right: { type: "emoji", emoji: "🐘" } },
+          { left: { type: "asset", asset: { assetId: "asset_giraffe", variant: "silhouette" } }, right: { type: "emoji", emoji: "🦒" } },
         ],
       },
     ],
   },
-  rewards: {},
+  rewards: { confetti: "full" },
 };
 
 /* 3) 텃밭 뽑기 (reveal-and-collect = tap-the-right-one + reveal 효과) */
@@ -121,7 +126,7 @@ export const revealAndCollectExample: InteractiveDocInput = {
     },
   ],
   extend: [
-    { type: "name-create", prompts: ["이 채소로 무슨 요리를 만들 수 있을까요?"], nuri: ["nature-inquiry", "communication"], laneX: 1.1 },
+    { type: "name-create", prompts: ["이 채소로 무슨 요리를 할 수 있을까요?"], nuri: ["nature-inquiry", "communication"], laneX: 1.1 },
   ],
   rewards: { confetti: "full" },
 };

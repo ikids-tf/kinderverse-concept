@@ -20,7 +20,7 @@ import { FIXTURES, type ExampleKey } from "./fixtures";
 import { answerEmoji } from "./content";
 import { primeImages } from "./assetStore";
 
-export type Phase = "start" | "playing" | "finished";
+export type Phase = "start" | "playing" | "extend" | "finished";
 export type OptStatus = "idle" | "correct" | "wrong" | "picked" | "locked";
 export type Side = "L" | "R";
 
@@ -76,6 +76,9 @@ export interface GameStore {
   showNext: boolean;
   ttsEnabled: boolean;
 
+  // 확장활동(extend) — 게임 클리어 후 끊김없이 이어지는 교사 진행 단계(레인 오른쪽)
+  extendIdx: number;
+
   // tap-the-right-one
   cueSlotId: string | null;
   cueContent: ContentBinding | null;
@@ -119,6 +122,8 @@ export interface GameStore {
   orderTap: (slotId: string) => void;
   next: () => void;
   finish: () => void;
+  enterExtend: (idx: number) => void;
+  nextExtend: () => void;
   restart: () => void;
   toggleTts: () => void;
   setMode: (mode: "play" | "edit") => void;
@@ -316,6 +321,7 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
     banner: null,
     showNext: false,
     ttsEnabled: doc.settings.tts.enabled,
+    extendIdx: 0,
     cueSlotId: null,
     cueContent: null,
     cueReactSeq: 0,
@@ -400,6 +406,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     banner: null,
     showNext: false,
     ttsEnabled: true,
+    extendIdx: 0,
     cueSlotId: null,
     cueContent: null,
     cueReactSeq: 0,
@@ -653,8 +660,39 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     },
 
     finish: () => {
-      set({ phase: "finished", busy: true, showNext: false, banner: null });
+      const doc = get().doc;
+      set({ busy: true, showNext: false, banner: null });
       bump({ kind: "say", text: "참 잘했어요!" });
+      // 끊김없이 확장활동으로 이어진다(게임=도입, 확장=본체). 확장 없으면 종료.
+      if (doc && doc.extend.length > 0) {
+        later(() => get().enterExtend(0), 1400);
+      } else {
+        set({ phase: "finished" });
+      }
+    },
+
+    enterExtend: (idx) => {
+      const doc = get().doc;
+      if (!doc || idx < 0 || idx >= doc.extend.length) {
+        set({ phase: "finished", busy: false });
+        return;
+      }
+      set({ phase: "extend", extendIdx: idx, busy: false, banner: null });
+      // 진입 시 첫 질문을 읽어준다(교사 진행형 — 화면은 카드, 음성은 TTS).
+      const act = doc.extend[idx];
+      const line = act.prompts[0];
+      if (act.tts !== false && line) later(() => bump({ kind: "say", text: line }), 450);
+    },
+
+    nextExtend: () => {
+      const { doc, extendIdx } = get();
+      if (!doc) return;
+      if (extendIdx + 1 >= doc.extend.length) {
+        set({ phase: "finished" });
+        bump({ kind: "say", text: "참 잘했어요!" });
+      } else {
+        get().enterExtend(extendIdx + 1);
+      }
     },
 
     restart: () => {
@@ -674,6 +712,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       set({
         mode,
         phase: "start",
+        extendIdx: 0,
         busy: false,
         banner: null,
         showNext: false,
