@@ -58,8 +58,9 @@
 현재 마일스톤: **M1**(디자인 토큰 · 셸 · LNB · 프롬프트바). 단계별 지시는 `docs/KICKOFF_M1.md`를 순서대로 실행.
 
 ## 8. 게임 뷰어 (보드 툴바)
-게임 뷰어 작업 시 `game-viewer-handoff/CLAUDE.md` · `KICKOFF_M1.md` · `FORM_DESIGN.md`를 함께 읽을 것.
-- 코드: `src/game-viewer/`(자기완결 모듈), 진입 페이지 `game-viewer.html`(Vite 멀티페이지 엔트리), 보드 임베드는 툴바 뷰어 패널의 **놀이 만들기** 프리셋(iframe `/game-viewer.html`).
-- **게임 플레이 화면 안쪽은 Milray Park 미적용**(아이 대면 파스텔) — `src/game-viewer/theme.ts` 토큰 사용. 슬라이드 콘텐츠와 동일한 면제 대상. 단, 게임을 감싸는 **보드 카드 프레임·툴바·프롬프트바(교사용)는 Milray 유지**.
-- 핵심 결정: 런타임 코드 생성 ❌ → **템플릿 + GameSpec(JSON) 단일 계약**. M1 = counting·silhouette(OpenMoji-only, 이미지 생성 0), 음성=Web Speech 스텁(CLOVA는 M2).
-- **재구축(v2, 진행 중)**: 게임 뷰어를 **InteractiveDoc 모델**로 재구축 중. 새 계약 = `src/game-viewer/v2/schema/interactiveDoc.ts`, 런타임 = `src/game-viewer/v2/runtime/`. 작업 시 `m0-handoff/CLAUDE.md`·`PRD_TWO_LAYER_DESIGN.md`·`KICKOFF_M0.md`를 함께 읽을 것. 엔트리(`/game-viewer.html`)·보드 임베드 계약은 **불변**, `viewer/main.tsx`만 v2 App 마운트로 스위치(롤백 가능). 옛 `src/game-viewer/schema`(GameSpec)는 M0~M1 안정화 후 제거. 배경제거는 `@/shared/background-removal`(BiRefNet/RMBG, MIT)만 — **`@imgly`(AGPL) 금지**.
+게임 뷰어 작업 시 `m0-handoff/CLAUDE.md` · `PRD_TWO_LAYER_DESIGN.md` · `KICKOFF_M0.md`를 함께 읽을 것.
+- 코드: **`src/game-viewer/v2/`(자기완결 모듈)** + 공용 엔트리 `viewer/main.tsx`. 진입 페이지 `game-viewer.html`(Vite 멀티페이지 엔트리). 보드 임베드는 툴바 뷰어 패널의 **놀이 만들기** 프리셋(iframe `/game-viewer.html`). 엔트리·보드 임베드 계약 **불변(7곳)**.
+- **게임 플레이 화면 안쪽은 Milray Park 미적용**(아이 대면 파스텔) — `src/game-viewer/v2/theme.ts` 토큰 사용. 슬라이드 콘텐츠와 동일한 면제 대상. 단, 게임을 감싸는 **보드 카드 프레임·툴바·프롬프트바(교사용)는 Milray 유지**.
+- 핵심 결정: 런타임 코드 생성 ❌ → **단일 계약 `src/game-viewer/v2/schema/interactiveDoc.ts`**(InteractiveDoc). 생성·편집·런타임 모두 이 문서만 의존(`parseInteractiveDoc` 검증). 인터랙션 6종(tap·match·connect·reveal·binary·flip·order) + 고급 편집(EditLayer) + 리졸버(프롬프트→추천카드) 구현됨.
+- Provider(교체 가능): 이미지=나노바나나(`@/ai/client` `task:'image'`) → 누끼=`@/shared/background-removal`(BiRefNet/RMBG, MIT) → 객체분할=`@/shared/segment`(SAM). 음성=CLOVA Voice(`task:'tts'`, 키 없으면 브라우저 TTS 폴백). **`@imgly`(AGPL) 금지.** child-photo/video는 외부 API 미전송(`assertNotChildMedia`).
+- 옛 v1 GameSpec 게임뷰어(`src/game-viewer/{schema,engine,entry,templates,assets,generate}` + `theme.ts`)는 **제거됨**(v2가 대체, git 이력 보존).
