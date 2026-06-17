@@ -17,6 +17,7 @@
  */
 
 import { RmbgCutoutProvider } from "./cutoutAdapter";
+import { NanoBananaImageProvider } from "./nanoBanana";
 
 /* ════════════ 공통 타입 ════════════ */
 
@@ -238,7 +239,9 @@ export class ClovaTtsProvider implements TtsProvider {
 /* ──────────────── 팩토리 (앱이 env → config 주입) ──────────────── */
 
 export function createImageProvider(): ImageProvider {
-  return new PlaceholderImageProvider(); // TODO(M2): NanoBananaImageProvider
+  // 나노바나나(Gemini) 실구현. 키 없으면 게이트웨이가 플레이스홀더 이미지를 돌려준다.
+  // PlaceholderImageProvider는 네트워크 0 stub으로 남겨둠(테스트/오프라인).
+  return new NanoBananaImageProvider();
 }
 export function createCutoutProvider(): CutoutProvider {
   // 🔴 공용 온디바이스 엔진(@/shared/background-removal, BiRefNet/RMBG, MIT) 어댑터로 라우팅.

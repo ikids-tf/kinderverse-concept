@@ -192,6 +192,18 @@
   white-space: nowrap;
 }
 .kv-v2 .prompt-bar button:focus-visible { outline: 4px solid rgba(255,158,125,.5); outline-offset: 2px; }
+.kv-v2 .img-toggle {
+  font: inherit; font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap;
+  border: 2px solid #EBDFD2; background: var(--card); color: var(--ink-soft); padding: 10px 14px; border-radius: 999px; box-shadow: var(--shadow-sm);
+}
+.kv-v2 .img-toggle.on { background: var(--coral); color: #fff; border-color: var(--coral); }
+.kv-v2 .knob-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+.kv-v2 .knob { display: flex; align-items: center; gap: 6px; }
+.kv-v2 .knob-label { font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+.kv-v2 .knob-opts { display: flex; border: 2px solid #EBDFD2; border-radius: 999px; overflow: hidden; background: var(--card); }
+.kv-v2 .knob-opt { font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; border: none; background: transparent; color: var(--ink-soft); padding: 6px 12px; }
+.kv-v2 .knob-opt.on { background: var(--coral); color: #fff; }
+.kv-v2 .knob-opt:focus-visible { outline: 3px solid rgba(255,158,125,.5); outline-offset: -3px; }
 .kv-v2 .rec-cards { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .kv-v2 .rec-card {
   position: relative; flex: 1 1 200px; min-width: 180px; font: inherit; cursor: pointer; text-align: left;

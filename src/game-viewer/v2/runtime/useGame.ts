@@ -18,6 +18,7 @@ import {
 import type { ContentBinding, InteractiveDoc, InteractiveDocInput } from "../schema/interactiveDoc";
 import { FIXTURES, type ExampleKey } from "./fixtures";
 import { answerEmoji } from "./content";
+import { primeImages } from "./assetStore";
 
 export type Phase = "start" | "playing" | "finished";
 export type OptStatus = "idle" | "correct" | "wrong" | "picked" | "locked";
@@ -393,7 +394,10 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
 
     loadDoc: (input, key = null) => {
       clearTimers();
-      set(freshState(parseInteractiveDoc(input), key));
+      const doc = parseInteractiveDoc(input);
+      set(freshState(doc, key));
+      // 생성 이미지가 필요한 asset 콘텐츠가 있으면 비동기 시작(시드는 이미 이모지로 즉시 플레이).
+      primeImages(doc);
     },
 
     start: () => {

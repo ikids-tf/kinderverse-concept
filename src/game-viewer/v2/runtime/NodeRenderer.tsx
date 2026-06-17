@@ -13,6 +13,7 @@ import { entrance, idle, reaction } from "./presets";
 import { useStageSize } from "./stageSize";
 import { registerNode } from "./nodeRegistry";
 import { useGame } from "./useGame";
+import { useAssetUrl } from "./assetStore";
 import { transformStyle } from "./layout";
 import type { MoodKey } from "../theme";
 
@@ -47,8 +48,11 @@ export function VisualBox({ visual, t }: { visual: Visual; t: Transform }) {
   // partial-cue: silhouette = 단색 그림자, crop = 확대해 일부만(.photo가 overflow:hidden로 클립).
   const silhouette = visual.variant === "silhouette";
   const cropped = visual.variant === "crop";
-  if (visual.imageUrl) {
-    return <img src={visual.imageUrl} alt="" style={silhouette ? { filter: "brightness(0)" } : undefined} />;
+  // 생성 이미지가 준비되면 이모지 시드에서 스왑(assetKey 기준).
+  const genUrl = useAssetUrl(visual.assetKey);
+  const imageUrl = visual.imageUrl ?? genUrl;
+  if (imageUrl) {
+    return <img src={imageUrl} alt="" style={silhouette ? { filter: "brightness(0)" } : undefined} />;
   }
   if (visual.emoji) {
     const base = Math.min(nodeW, nodeH) * 0.62;

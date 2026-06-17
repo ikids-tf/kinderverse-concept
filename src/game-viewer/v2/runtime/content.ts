@@ -7,6 +7,7 @@
  *    `imageUrl` 분기가 그 자리(seam)다. 지금은 url이 없어 이모지로 폴백한다.
  */
 import type { ContentBinding } from "../schema/interactiveDoc";
+import { CATEGORIES } from "../resolver/contentSets";
 
 /** 한 노드에 무엇을 그릴지 — emoji/text/imageUrl 중 하나 + 표현 variant(partial-cue). */
 export interface Visual {
@@ -15,7 +16,14 @@ export interface Visual {
   imageUrl?: string;
   /** AssetRef.variant — silhouette(그림자)·crop(확대 일부)·leaf-crop 등 partial-cue 단서. */
   variant?: string;
+  /** 생성 이미지 캐시 키(라벨). assetStore에 ready url 있으면 이모지 대신 이미지로 스왑. */
+  assetKey?: string;
 }
+
+/** 라벨 → 이모지 폴백(생성 전/실패 시 시드). contentSets에서 역인덱싱. */
+const LABEL_EMOJI: Record<string, string> = Object.fromEntries(
+  CATEGORIES.flatMap((c) => c.items.map((it) => [it.label, it.emoji])),
+);
 
 /* 프로토 한정: assetId → 이모지 (실 이미지 파이프라인 전까지). */
 const ASSET_EMOJI: Record<string, string> = {
@@ -45,9 +53,12 @@ export const MOOD_LABEL: Record<string, string> = {
 export function resolveVisual(c: ContentBinding): Visual {
   if (c.type === "emoji") return { emoji: c.emoji };
   if (c.type === "text") return { text: c.text };
-  // type === "asset"
-  // TODO: asset.url(보드 공유 에셋/생성+누끼)이 생기면 { imageUrl } 로 교체.
-  return { emoji: ASSET_EMOJI[c.asset.assetId] ?? "🖼️", variant: c.asset.variant };
+  // type === "asset" — 생성 이미지가 준비되면 VisualBox가 assetKey로 스왑, 그 전엔 이모지 시드.
+  return {
+    emoji: ASSET_EMOJI[c.asset.assetId] ?? LABEL_EMOJI[c.asset.assetId] ?? "🖼️",
+    variant: c.asset.variant,
+    assetKey: c.asset.assetId,
+  };
 }
 
 /** 정답 텍스트로 reveal hidden 노드에 보일 이모지를 고른다(프로토). */

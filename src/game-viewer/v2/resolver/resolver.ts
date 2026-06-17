@@ -43,88 +43,145 @@ export function parseIntent(prompt: string): Intent | null {
   return { category: cat, archetype };
 }
 
+/* ───────────────────────── 노브(교사 설정) → 기술 파라미터 (PRD §5) ───────────────────────── */
+
+export interface Knobs {
+  difficulty: "baby" | "toddler" | "senior"; // 보기 수·짝 수
+  length: "short" | "normal" | "long"; // 라운드 수(tap)
+  mood: "calm" | "lively" | "punchy"; // 모션·보상 강도
+}
+export const DEFAULT_KNOBS: Knobs = { difficulty: "toddler", length: "normal", mood: "lively" };
+
+const OPTION_COUNT = { baby: 2, toddler: 3, senior: 4 } as const; // 난이도 → 보기 수
+const TAP_ROUNDS = { short: 2, normal: 3, long: 5 } as const; // 분량 → 라운드 수
+const PAIR_COUNT = { baby: 2, toddler: 3, senior: 4 } as const; // 난이도 → 짝/카드 수
+
+export interface RecommendOpts {
+  useImages?: boolean;
+  knobs?: Knobs;
+}
+
+/* ───────────────────────── 동적 슬롯 레이아웃(보기·짝·카드 수에 맞춰) ───────────────────────── */
+
+type SlotInput = { id: string; type: "slot"; role: "option" | "slot"; transform: { x: number; y: number; w: number; h: number } };
+
+function optionSlots(n: number): SlotInput[] {
+  const w = Math.min(0.26, 0.92 / n);
+  return Array.from({ length: n }, (_, i) => ({
+    id: `opt${i}`, type: "slot", role: "option", transform: { x: (i + 1) / (n + 1), y: 0.82, w, h: 0.18 },
+  }));
+}
+function pairSlots(n: number): { left: SlotInput[]; right: SlotInput[] } {
+  const h = Math.min(0.18, 0.7 / n);
+  const yOf = (i: number) => (n === 1 ? 0.5 : 0.26 + (i * 0.6) / (n - 1));
+  const col = (side: "L" | "R", x: number): SlotInput[] =>
+    Array.from({ length: n }, (_, i) => ({ id: `${side}${i}`, type: "slot", role: "slot", transform: { x, y: yOf(i), w: 0.3, h } }));
+  return { left: col("L", 0.26), right: col("R", 0.74) };
+}
+function cardSlots(count: number): SlotInput[] {
+  const cols = count <= 4 ? 2 : count <= 6 ? 3 : 4;
+  const rows = Math.ceil(count / cols);
+  const w = Math.min(0.26, 0.92 / cols);
+  const h = Math.min(0.34, 0.84 / rows);
+  return Array.from({ length: count }, (_, i) => {
+    const r = Math.floor(i / cols), c = i % cols;
+    return { id: `c${i}`, type: "slot", role: "slot", transform: { x: (c + 1) / (cols + 1), y: (r + 1) / (rows + 1), w, h } };
+  });
+}
+
 /* ───────────────────────── 아키타입별 결정론 조립 ───────────────────────── */
 
-function assembleTap(cat: Category): InteractiveDocInput {
-  const picks = shuffle(cat.items).slice(0, 3);
-  const rounds = picks.map((it: Item) => {
-    const distractors = shuffle(cat.items.filter((x) => x.label !== it.label)).slice(0, 2);
+function itemContent(it: Item, useImages: boolean) {
+  return useImages
+    ? { type: "asset" as const, asset: { assetId: it.label } } // assetKey=라벨 → assetStore가 생성·스왑
+    : { type: "emoji" as const, emoji: it.emoji };
+}
+
+/** 카테고리에서 n개를 뽑되, 모자라면 셔플해 순환(빈 라운드 금지). */
+function pickN(items: readonly Item[], n: number): Item[] {
+  const out: Item[] = [];
+  let pool: Item[] = [];
+  while (out.length < n) {
+    if (pool.length === 0) pool = shuffle(items);
+    const next = pool.pop();
+    if (next) out.push(next);
+  }
+  return out;
+}
+
+function assembleTap(cat: Category, useImages: boolean, k: Knobs): InteractiveDocInput {
+  const optionCount = OPTION_COUNT[k.difficulty];
+  const roundCount = TAP_ROUNDS[k.length];
+  const slots = optionSlots(optionCount);
+  const rounds = pickN(cat.items, roundCount).map((it) => {
+    const distractors = shuffle(cat.items.filter((x) => x.label !== it.label)).slice(0, optionCount - 1);
     const options = shuffle([
       { content: { type: "text" as const, text: it.label }, correct: true },
       ...distractors.map((d) => ({ content: { type: "text" as const, text: d.label } })),
     ]);
-    return { cue: { type: "emoji" as const, emoji: it.emoji }, options };
+    return { cue: itemContent(it, useImages), options };
   });
   return {
     meta: { id: `gen_tap_${cat.key}`, title: `${cat.label} 이름 맞추기`, archetype: "tap-the-right-one", createdFrom: "prompt" },
-    settings: { difficulty: "toddler", length: rounds.length, mood: "lively", optionCount: 3 },
+    settings: { difficulty: k.difficulty, length: roundCount, mood: k.mood, optionCount },
     stage: {
       background: { colorRole: "pastel.cream" },
       nodes: [
         { id: "cue", type: "image", role: "cue", transform: { x: 0.5, y: 0.3, w: 0.46, h: 0.46 }, animation: { entrance: "pop", idle: "breathe" } },
-        { id: "opt0", type: "slot", role: "option", transform: { x: 0.2, y: 0.82, w: 0.24, h: 0.18 } },
-        { id: "opt1", type: "slot", role: "option", transform: { x: 0.5, y: 0.82, w: 0.24, h: 0.18 } },
-        { id: "opt2", type: "slot", role: "option", transform: { x: 0.8, y: 0.82, w: 0.24, h: 0.18 } },
+        ...slots,
       ],
     },
-    interaction: { kind: "tap-the-right-one", cueSlotId: "cue", optionSlotIds: ["opt0", "opt1", "opt2"], rounds },
+    interaction: { kind: "tap-the-right-one", cueSlotId: "cue", optionSlotIds: slots.map((s) => s.id), rounds },
     rewards: { confetti: "full" },
   };
 }
 
-function assembleMatch(cat: Category): InteractiveDocInput {
-  const picks = shuffle(cat.items).slice(0, 3);
-  const pairs = picks.map((it: Item) => ({
-    left: { type: "emoji" as const, emoji: it.emoji },
+function assembleMatch(cat: Category, useImages: boolean, k: Knobs): InteractiveDocInput {
+  const n = PAIR_COUNT[k.difficulty];
+  const { left, right } = pairSlots(n);
+  const pairs = shuffle(cat.items).slice(0, n).map((it) => ({
+    left: itemContent(it, useImages),
     right: { type: "text" as const, text: it.label },
   }));
   return {
     meta: { id: `gen_match_${cat.key}`, title: `${cat.label} 짝 맞추기`, archetype: "match-pair", createdFrom: "prompt" },
-    settings: { difficulty: "toddler", length: 1, mood: "lively", optionCount: 3 },
-    stage: {
-      nodes: [
-        { id: "L0", type: "slot", role: "slot", transform: { x: 0.26, y: 0.26, w: 0.3, h: 0.18 } },
-        { id: "L1", type: "slot", role: "slot", transform: { x: 0.26, y: 0.54, w: 0.3, h: 0.18 } },
-        { id: "L2", type: "slot", role: "slot", transform: { x: 0.26, y: 0.82, w: 0.3, h: 0.16 } },
-        { id: "R0", type: "slot", role: "slot", transform: { x: 0.74, y: 0.26, w: 0.3, h: 0.18 } },
-        { id: "R1", type: "slot", role: "slot", transform: { x: 0.74, y: 0.54, w: 0.3, h: 0.18 } },
-        { id: "R2", type: "slot", role: "slot", transform: { x: 0.74, y: 0.82, w: 0.3, h: 0.16 } },
-      ],
+    settings: { difficulty: k.difficulty, length: 1, mood: k.mood, optionCount: n },
+    stage: { nodes: [...left, ...right] },
+    interaction: {
+      kind: "match-pair",
+      leftSlotIds: left.map((s) => s.id),
+      rightSlotIds: right.map((s) => s.id),
+      rounds: [{ pairs }],
     },
-    interaction: { kind: "match-pair", leftSlotIds: ["L0", "L1", "L2"], rightSlotIds: ["R0", "R1", "R2"], rounds: [{ pairs }] },
     rewards: { confetti: "full" },
   };
 }
 
-function assembleFlip(cat: Category): InteractiveDocInput {
-  const faces = shuffle(cat.items).slice(0, 3).map((it: Item) => ({ type: "emoji" as const, emoji: it.emoji }));
+function assembleFlip(cat: Category, useImages: boolean, k: Knobs): InteractiveDocInput {
+  const n = PAIR_COUNT[k.difficulty];
+  const faces = shuffle(cat.items).slice(0, n).map((it) => itemContent(it, useImages));
+  const cards = cardSlots(n * 2);
   return {
     meta: { id: `gen_flip_${cat.key}`, title: `${cat.label} 카드 뒤집기`, archetype: "flip-memory", createdFrom: "prompt" },
-    settings: { difficulty: "toddler", length: 1, mood: "punchy" },
-    stage: {
-      nodes: [
-        { id: "c0", type: "slot", role: "slot", transform: { x: 0.25, y: 0.32, w: 0.24, h: 0.32 } },
-        { id: "c1", type: "slot", role: "slot", transform: { x: 0.5, y: 0.32, w: 0.24, h: 0.32 } },
-        { id: "c2", type: "slot", role: "slot", transform: { x: 0.75, y: 0.32, w: 0.24, h: 0.32 } },
-        { id: "c3", type: "slot", role: "slot", transform: { x: 0.25, y: 0.72, w: 0.24, h: 0.32 } },
-        { id: "c4", type: "slot", role: "slot", transform: { x: 0.5, y: 0.72, w: 0.24, h: 0.32 } },
-        { id: "c5", type: "slot", role: "slot", transform: { x: 0.75, y: 0.72, w: 0.24, h: 0.32 } },
-      ],
-    },
-    interaction: { kind: "flip-memory", cardSlotIds: ["c0", "c1", "c2", "c3", "c4", "c5"], rounds: [{ faces }] },
+    settings: { difficulty: k.difficulty, length: 1, mood: k.mood },
+    stage: { nodes: cards },
+    interaction: { kind: "flip-memory", cardSlotIds: cards.map((s) => s.id), rounds: [{ faces }] },
     rewards: { confetti: "full" },
   };
 }
 
-const ASSEMBLERS: Record<Archetype, (cat: Category) => InteractiveDocInput> = {
+const ASSEMBLERS: Record<Archetype, (cat: Category, useImages: boolean, k: Knobs) => InteractiveDocInput> = {
   "tap-the-right-one": assembleTap,
   "match-pair": assembleMatch,
   "flip-memory": assembleFlip,
 };
 
-/** 카테고리에 어울리는 추천 카드(교사 언어). 의도에 명시된 아키타입이 1순위. */
-export function recommend(intent: Intent): Recommendation[] {
+/** 카테고리에 어울리는 추천 카드(교사 언어). 의도에 명시된 아키타입이 1순위.
+    opts.knobs(난이도·분량·분위기)와 opts.useImages가 조립에 반영된다. */
+export function recommend(intent: Intent, opts: RecommendOpts = {}): Recommendation[] {
   const cat = intent.category;
+  const useImages = opts.useImages ?? false;
+  const knobs = opts.knobs ?? DEFAULT_KNOBS;
   const base: Array<{ archetype: Archetype; title: string; emoji: string }> = [
     { archetype: "tap-the-right-one", title: `${cat.label} 이름 맞추기`, emoji: "🔎" },
     { archetype: "match-pair", title: `${cat.label} 짝 맞추기`, emoji: "🔗" },
@@ -135,19 +192,19 @@ export function recommend(intent: Intent): Recommendation[] {
     : base;
   return ordered.map((b) => ({
     ...b,
-    build: () => ({ title: b.title, input: ASSEMBLERS[b.archetype](cat) }),
+    build: () => ({ title: b.title, input: ASSEMBLERS[b.archetype](cat, useImages, knobs) }),
   }));
 }
 
 /** 프롬프트 → 추천 목록(결정론). 카테고리 못 찾으면 첫 카테고리로 폴백(빈 결과 금지). */
-export function recommendFromPrompt(prompt: string): Recommendation[] {
+export function recommendFromPrompt(prompt: string, opts: RecommendOpts = {}): Recommendation[] {
   const intent = parseIntent(prompt) ?? { category: CATEGORIES[0] };
-  return recommend(intent);
+  return recommend(intent, opts);
 }
 
 /** 프롬프트 → 추천(LLM 우선, 실패/키없음 시 결정론 폴백). 자유 표현까지 이해. */
-export async function recommendFromPromptAI(prompt: string): Promise<Recommendation[]> {
+export async function recommendFromPromptAI(prompt: string, opts: RecommendOpts = {}): Promise<Recommendation[]> {
   const { llmParseIntent } = await import("./llmIntent");
   const intent = (await llmParseIntent(prompt)) ?? parseIntent(prompt) ?? { category: CATEGORIES[0] };
-  return recommend(intent);
+  return recommend(intent, opts);
 }
