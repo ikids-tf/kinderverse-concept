@@ -6,7 +6,7 @@ import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImag
 // 의도 어휘는 단일 출처(intent-lexicon) — 로컬 정규식은 '그려' 등이 빠져 어긋났었다(P0-1).
 import { IMAGE_RE, coreTopic } from '@/ai/intent-lexicon';
 import { findAsset, saveAsset } from './assets';
-import { removeBackground, type AssetKind } from '@/shared/background-removal';
+import { removeBackground, cleanupBackground, type AssetKind } from '@/shared/background-removal';
 import { makeThumb, THUMB_MAX_W } from './imageLod';
 import { showToast } from '@/lib/toast';
 import { saveWebLinks } from './webLinks';
@@ -1560,12 +1560,23 @@ export async function removeBgFromNode(
   }
   const src = orig.src;
   const caption = (orig.text ?? '').trim() || String(orig.data?.title ?? '').trim() || '이미지';
+  // 이미 배경제거된 이미지를 또 제거하면 = "잔여 노이즈 불만족" → 모델을 다시 돌리지 않고
+  // (재실행은 잘린 점을 다시 잡아 더 지저분해진다) 알파만 정리(despeckle)한다. 단계마다 강하게.
+  const alreadyRemoved = orig.data?.bgRemoved === true;
+  const cleanupLevel = alreadyRemoved ? (Number(orig.data?.bgLevel) || 1) : 0; // 0=첫 제거(모델)
+  const level = cleanupLevel + 1;
   b.beginGen();
-  b.setGenerating('✂️ 배경을 지우고 있어요… (처음 한 번은 조금 걸려요)');
+  b.setGenerating(
+    cleanupLevel > 0
+      ? `✂️ 잔여 점·헤일로를 정리하고 있어요… (${cleanupLevel}단계)`
+      : '✂️ 배경을 지우고 있어요… (처음 한 번은 조금 걸려요)',
+  );
   b.updateNodeRaw(nodeId, { loading: true });
   try {
-    const result = await removeBackground(src, { assetKind });
-    const png = result.dataUrl;
+    // 첫 제거 = 모델(누끼) / 재실행 = 모델 없이 알파 노이즈 정리(빠르고 깨끗).
+    const png = cleanupLevel > 0
+      ? (await cleanupBackground(src, { level: cleanupLevel })).dataUrl
+      : (await removeBackground(src, { assetKind })).dataUrl;
     const fresh = useBoardStore.getState().nodes[nodeId];
     if (!fresh) return; // 기다리는 동안 카드가 지워짐
     // 표시용 썸네일을 투명 PNG로 직접 굽는다(알파 보존; 비동기 ensureThumb의 흰배경 합성·레이스 회피).
@@ -1575,7 +1586,7 @@ export async function removeBgFromNode(
     } catch {
       thumb = null;
     }
-    const nextData = { ...(fresh.data ?? {}), thumb: thumb ?? '', bgRemoved: true };
+    const nextData = { ...(fresh.data ?? {}), thumb: thumb ?? '', bgRemoved: true, bgLevel: level };
 
     if (mode === 'newNode') {
       const id = newId('image');
@@ -1598,9 +1609,13 @@ export async function removeBgFromNode(
       replaceImageCmd(nodeId, png, nextData, '배경 제거'); // 그 자리 교체 + ⌘Z 복원
     }
 
-    // 갤러리(보관함)에 저장 — kind 'image'(갤러리에 노출), 캡션에 (배경제거) 표기.
-    await saveAsset(`${caption} (배경제거)`, 'image', png, caption);
-    useBoardStore.getState().setGenerating('✅ 배경을 지웠어요 — 갤러리에 저장했어요');
+    // 첫 제거만 갤러리(보관함)에 저장 — 재실행(정리)은 중복 저장하지 않는다.
+    if (cleanupLevel === 0) await saveAsset(`${caption} (배경제거)`, 'image', png, caption);
+    useBoardStore.getState().setGenerating(
+      cleanupLevel > 0
+        ? `✅ 잔여 점을 정리했어요 (${cleanupLevel}단계) — 더 남았으면 한 번 더 누르세요`
+        : '✅ 배경을 지웠어요 — 갤러리에 저장했어요 (점이 남았으면 한 번 더 누르세요)',
+    );
     await new Promise((r) => setTimeout(r, 1600));
   } catch {
     useBoardStore.getState().updateNodeRaw(nodeId, { loading: false }); // 원본 유지

@@ -174,6 +174,8 @@ interface BoardState {
   focusNode: (id: string, maxZoom?: number) => void;
   /** 노드를 100%(zoom 1) 실제 크기로 화면(프롬프트바 위 영역) 중앙에 둔다 — 더블클릭. */
   centerNodeActualSize: (id: string) => void;
+  /** 월드 좌표 한 점을 화면(프롬프트바 위 영역) 중앙에 두고 주어진 배율로 설정한다 — 빈 화면 클릭 확대/축소. */
+  centerWorldPoint: (wx: number, wy: number, zoom: number) => void;
   /** 여러 노드의 합집합 박스를 화면에 풀로 맞춘다(모션 묶음 그룹 쇼 등). */
   focusBounds: (ids: string[], maxZoom?: number) => void;
   toggleClassroomMode: () => void;
@@ -405,6 +407,23 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const targetX = pr ? pr.left + pr.width / 2 : cr.left + cr.width / 2;
     const targetY = cr.top + padTop + (bottomY - (cr.top + padTop)) / 2;
     set({ viewport: safeViewport({ zoom: 1, panX: targetX - cr.left - ncx, panY: targetY - cr.top - ncy }) });
+  },
+  centerWorldPoint: (wx, wy, zoom) => {
+    // 빈 화면 클릭/더블클릭에서 쓴다. 클릭한 월드 좌표(wx,wy)를 화면의 '중앙'(가로=프롬프트바
+    // 중심, 세로=캔버스 영역 중앙)에 두고 zoom을 적용한다. centerNodeActualSize와 동일 기준.
+    const doc = typeof document !== 'undefined' ? document : null;
+    const canvas = doc?.querySelector('[data-kv-canvas]') as HTMLElement | null;
+    const cr = canvas
+      ? canvas.getBoundingClientRect()
+      : ({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } as DOMRect);
+    const pbar = doc?.querySelector('.kv-pbar-vt') as HTMLElement | null;
+    const pr = pbar ? pbar.getBoundingClientRect() : undefined;
+    const padTop = 24;
+    const bottomY = pr ? pr.top - 16 : cr.top + cr.height - 140;
+    const z = clampZoom(zoom);
+    const targetX = pr ? pr.left + pr.width / 2 : cr.left + cr.width / 2;
+    const targetY = cr.top + padTop + (bottomY - (cr.top + padTop)) / 2;
+    set({ viewport: safeViewport({ zoom: z, panX: targetX - cr.left - wx * z, panY: targetY - cr.top - wy * z }) });
   },
   focusBounds: (ids, maxZoom = 2) => {
     const s = get();

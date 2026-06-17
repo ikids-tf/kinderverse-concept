@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon } from '@/lib/icons';
 import { useBoardsStore } from '@/store/boardsStore';
 import { KIND_LABEL, type BoardKind } from '@/board/seed';
+import { addImageFilesToBoard, viewportCenterWorld } from '@/board/upload';
 
 /* 보드 전환 + 보드 추가 (PRD §4.2). 상단 중앙 플로팅 탭바. */
 
@@ -14,6 +15,16 @@ export function BoardSwitcher() {
   const createBoard = useBoardsStore((s) => s.createBoard);
   const removeBoard = useBoardsStore((s) => s.removeBoard);
   const [menuOpen, setMenuOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function onPickUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ''; // 같은 파일 다시 선택 가능
+    if (files.length) {
+      const c = viewportCenterWorld(); // 현재 보이는 화면 중앙에 배치
+      void addImageFilesToBoard(files, c.x, c.y);
+    }
+  }
 
   return (
     <div className="pointer-events-auto absolute left-1/2 top-t3 z-20 flex -translate-x-1/2 items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-md backdrop-blur">
@@ -75,6 +86,27 @@ export function BoardSwitcher() {
             </div>
           )}
         </div>
+
+      {/* 이미지 업로드 — 보드 추가 버튼 오른쪽. 클릭하면 파일 선택 → 화면 중앙에 카드로 추가
+          (드래그&드롭과 동일 처리: 즉시 표시 + 백그라운드 영구화·갤러리 저장·썸네일). */}
+      <div className="shrink-0">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={onPickUpload}
+          className="hidden"
+        />
+        <button
+          onClick={() => fileRef.current?.click()}
+          aria-label="이미지 업로드"
+          title="이미지 업로드 — 보드에 추가"
+          className="flex h-7 w-7 items-center justify-center rounded-pill text-fg-2 hover:bg-surface-2"
+        >
+          <Icon name="download" size={16} className="rotate-180" />
+        </button>
+      </div>
     </div>
   );
 }

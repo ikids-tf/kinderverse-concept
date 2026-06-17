@@ -145,7 +145,7 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
   });
 
   const [playing, setPlaying] = useState(false);
-  const [done, setDone] = useState(false);
+  const [, setDone] = useState(false); // done 표시는 호버 컨트롤로 이전 — 값은 미사용, setter만 유지
 
   // 경유지(중간) 연결 요소 — 재생 중이 아닐 때는 항상 그 웨이포인트(곡선 ⅓·⅔) 위에
   // 머문다. 곡선을 다듬거나 도착 카드가 움직이면 경유지도 따라 위치를 갱신한다.
@@ -1087,15 +1087,16 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
           수업 재생 화면(presenting)에서는 아래 하단 중앙 고정 바가 대신한다. */}
       {!wpOpen && !presenting && !!startNode && (
       <div
-        className="pointer-events-auto absolute flex items-center gap-t3 whitespace-nowrap"
-        // width: max-content — absolute 요소도 컨테이너 오른쪽까지 남은 공간으로
-        // 줄어들어 컨트롤이 세로로 꺾일 수 있다. 항상 콘텐츠 폭(한 줄) 유지.
-        style={{ ...fade, left: mid.x, top: mid.y + 38, width: 'max-content', transform: 'translateX(-50%)' }}
+        className="group pointer-events-auto absolute"
+        // 플레이 버튼만 라인 중점(mid) 아래에 단독 가운데정렬해 항상 보이고(라인 위 점들을
+        // 가리지 않게), 나머지 컨트롤은 플레이에 마우스를 올리면 그 아래로 펼쳐진다.
+        // 이전: 한 줄을 mid 기준 가운데정렬 → 플레이가 줄 왼쪽 끝이라 출발 원과 겹쳤다.
+        style={{ ...fade, left: mid.x, top: mid.y + 30, transform: 'translateX(-50%)' }}
         onPointerDown={(e) => e.stopPropagation()}
         {...holdBind}
       >
         <button
-          title={playing ? '일시정지' : loop ? '재생 (왕복 반복)' : '재생 — 선을 따라 이동'}
+          title={playing ? '일시정지' : loop ? '재생 (왕복 반복) — 올리면 설정이 펼쳐져요' : '재생 — 선을 따라 이동 · 올리면 설정이 펼쳐져요'}
           onClick={(e) => {
             e.stopPropagation();
             play();
@@ -1112,7 +1113,17 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
             </svg>
           )}
         </button>
-        {(done || playing || presenting || !!startNode) && (
+
+        {/* 플레이 호버 시 펼쳐지는 보조 컨트롤(처음으로·속도·왕복·방향·앞) — 플레이 바로 아래로
+            '세로 스택' 드롭다운. 가로로 늘어놓으면 짧은 라인에선 줄이 넓어 왼쪽 출발 원을 덮어,
+            세로로 쌓아 폭을 좁힌다(출발/도착과 가로로 겹치지 않음).
+            invisible로 접어 두어 숨김 상태에선 라인 위 점들의 클릭/호버를 가로채지 않는다.
+            pt-t4가 플레이와 칩 사이를 메워(호버 영역 연속) 내려오는 동안 닫히지 않는다. */}
+        <div
+          className="absolute left-1/2 top-full flex flex-col -translate-x-1/2 items-center gap-t2 pt-t4 opacity-0 invisible translate-y-1 transition-all duration-200 ease-soft group-hover:visible group-hover:translate-y-0 group-hover:opacity-100"
+          style={{ width: 'max-content' }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <button
             title="처음 위치로"
             onClick={(e) => {
@@ -1123,83 +1134,82 @@ export function MotionPathNode({ node, selected, left, top, presenting, onPointe
           >
             <Icon name="history" size={44} />
           </button>
-        )}
-        {!presenting && (
-          <>
-            {/* 속도 칩 — 평소엔 "속도 0.70×"로 접혀 있고, 호버하면 슬라이더가 펼쳐진다. */}
-            <label
-              title="속도 — 마우스를 올리면 슬라이더가 펼쳐져요 (오른쪽일수록 빨라요, 재생 중에도 바로 적용)"
-              className={`${chip} group cursor-default`}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              속도
-              <input
-                type="range"
-                min={SPEED_MIN}
-                max={SPEED_MAX}
-                step={0.05}
-                value={speedX}
-                onChange={(e) => setData({ speedX: Number(e.target.value) })}
-                // 접힌 상태에선 -ml-t3가 flex gap 하나를 상쇄해 "속도 0.70×"가 자연스럽게 붙는다.
-                className="kv-range-lg w-0 -ml-t3 opacity-0 transition-all duration-200 ease-soft group-hover:w-80 group-hover:ml-0 group-hover:opacity-100"
-              />
-              <span className="tabular-nums">{speedX < 1 ? speedX.toFixed(2) : speedX.toFixed(1)}×</span>
-            </label>
+          {/* 속도 칩 — 평소엔 "속도 0.35×"로 접혀 있고, 이 칩에 마우스를 올리면 슬라이더가
+              펼쳐진다. 세로 스택이라 펼쳐져도 칩 폭만 가운데 기준으로 대칭으로 커질 뿐
+              다른 버튼은 움직이지 않는다(가로 줄에서 생기던 흔들림·사라짐 없음).
+              명명 그룹 group/spd 로 바깥 플레이 호버 그룹과 분리. */}
+          <label
+            title="속도 — 마우스를 올리면 슬라이더가 펼쳐져요 (오른쪽일수록 빨라요, 재생 중에도 바로 적용)"
+            className={`${chip} group/spd cursor-default`}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            속도
+            <input
+              type="range"
+              min={SPEED_MIN}
+              max={SPEED_MAX}
+              step={0.05}
+              value={speedX}
+              onChange={(e) => setData({ speedX: Number(e.target.value) })}
+              // 접힘: w-0·opacity-0 + -ml-t3로 "속도 0.35×"가 붙어 보이고, 칩 호버 시 w-48로 펼침.
+              className="kv-range-lg w-0 -ml-t3 opacity-0 transition-all duration-200 ease-soft group-hover/spd:w-48 group-hover/spd:ml-0 group-hover/spd:opacity-100"
+            />
+            <span className="tabular-nums">{speedX < 1 ? speedX.toFixed(2) : speedX.toFixed(1)}×</span>
+          </label>
+          <button
+            title="왕복 반복 켜기/끄기"
+            onClick={(e) => {
+              e.stopPropagation();
+              setData({ loop: !loop });
+            }}
+            className={`${chip} ${loop ? 'border-accent text-accent' : ''}`}
+          >
+            왕복
+          </button>
+          <button
+            title={FLIP_TITLE[flipMode]}
+            onClick={(e) => {
+              e.stopPropagation();
+              setData({ flip: NEXT_FLIP[flipMode] });
+            }}
+            className={`${chip} ${flipMode !== 'none' ? 'border-accent text-accent' : ''}`}
+          >
+            {FLIP_LABEL[flipMode]}
+          </button>
+          {/* 3D 뷰어의 '앞' 기준 — 모델이 뒷걸음질하면 클릭 한 번으로 앞뒤 반전 */}
+          {startNode && String(startNode.data?.embed ?? '').includes('glb-viewer') && flipMode !== 'none' && (
             <button
-              title="왕복 반복 켜기/끄기"
+              title="모델이 뒷걸음질하면 클릭 — 앞뒤를 뒤집어요 (재생 중에도 바로 적용)"
               onClick={(e) => {
                 e.stopPropagation();
-                setData({ loop: !loop });
+                const st = useBoardStore.getState();
+                const mv = aStart ? st.nodes[aStart] : undefined;
+                if (!mv) return;
+                st.updateNodeRaw(mv.id, { data: { ...(mv.data ?? {}), headingFlip: !mv.data?.headingFlip } });
               }}
-              className={`${chip} ${loop ? 'border-accent text-accent' : ''}`}
+              className={`${chip} ${startNode.data?.headingFlip ? 'border-accent text-accent' : ''}`}
             >
-              왕복
+              앞 반전
             </button>
+          )}
+          {/* 그림의 '앞' 기준 — 자동 분석값 표시 + 클릭으로 직접 보정 */}
+          {startNode?.type === 'image' && flipMode !== 'none' && (
             <button
-              title={FLIP_TITLE[flipMode]}
+              title="그림의 앞 방향 기준 — 연결할 때 자동 분석돼요. 뒤집힘이 반대면 클릭해서 바꾸세요"
               onClick={(e) => {
                 e.stopPropagation();
-                setData({ flip: NEXT_FLIP[flipMode] });
+                const st = useBoardStore.getState();
+                const mv = aStart ? st.nodes[aStart] : undefined;
+                if (!mv) return;
+                const next: Facing = (mv.data?.facing as Facing) === 'left' ? 'right' : 'left';
+                st.updateNodeRaw(mv.id, { data: { ...(mv.data ?? {}), facing: next } });
               }}
-              className={`${chip} ${flipMode !== 'none' ? 'border-accent text-accent' : ''}`}
+              className={chip}
             >
-              {FLIP_LABEL[flipMode]}
+              앞{(startNode.data?.facing as Facing) === 'left' ? '←' : '→'}
             </button>
-            {/* 3D 뷰어의 '앞' 기준 — 모델이 뒷걸음질하면 클릭 한 번으로 앞뒤 반전 */}
-            {startNode && String(startNode.data?.embed ?? '').includes('glb-viewer') && flipMode !== 'none' && (
-              <button
-                title="모델이 뒷걸음질하면 클릭 — 앞뒤를 뒤집어요 (재생 중에도 바로 적용)"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const st = useBoardStore.getState();
-                  const mv = aStart ? st.nodes[aStart] : undefined;
-                  if (!mv) return;
-                  st.updateNodeRaw(mv.id, { data: { ...(mv.data ?? {}), headingFlip: !mv.data?.headingFlip } });
-                }}
-                className={`${chip} ${startNode.data?.headingFlip ? 'border-accent text-accent' : ''}`}
-              >
-                앞 반전
-              </button>
-            )}
-            {/* 그림의 '앞' 기준 — 자동 분석값 표시 + 클릭으로 직접 보정 */}
-            {startNode?.type === 'image' && flipMode !== 'none' && (
-              <button
-                title="그림의 앞 방향 기준 — 연결할 때 자동 분석돼요. 뒤집힘이 반대면 클릭해서 바꾸세요"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const st = useBoardStore.getState();
-                  const mv = aStart ? st.nodes[aStart] : undefined;
-                  if (!mv) return;
-                  const next: Facing = (mv.data?.facing as Facing) === 'left' ? 'right' : 'left';
-                  st.updateNodeRaw(mv.id, { data: { ...(mv.data ?? {}), facing: next } });
-                }}
-                className={chip}
-              >
-                앞{(startNode.data?.facing as Facing) === 'left' ? '←' : '→'}
-              </button>
-            )}
-          </>
-        )}
+          )}
+        </div>
       </div>
       )}
 

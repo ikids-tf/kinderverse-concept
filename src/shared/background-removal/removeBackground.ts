@@ -3,9 +3,10 @@
  * 이 함수만 부른다(로직 중복 금지). 입력을 일반화·≤1024px 다운스케일해 워커로 보내고,
  * 안전 티어 분기를 한 곳에서 강제한다.
  *
- * 🔴 LICENSE TODO(상용 출시 전 점검): 온디바이스 = BiRefNet(onnx-community, MIT) — 상용 가능.
- *   RMBG-1.4(BRIA)·@imgly(AGPL)는 비상업/카피레프트 → 채택 금지. 서버 미세경계 티어
- *   (BiRefNet-HR/BEN2 등) 추가 시 해당 모델·가중치·호스팅 라이선스를 재점검할 것.
+ * 백엔드는 **WASM + q8 단일 경로**(worker.ts 참고 — WebGPU는 storage-buffer 한계·OOM으로 제거).
+ *
+ * 🔴 LICENSE(상용 출시 전 반드시 교체): 현재 모델 = briaai/RMBG-1.4 (BRIA, 비상업) — 사용자
+ *   승인 하 프로토타입 채택. 상업 출시 시 MIT/Apache 대안으로 교체할 것(worker.ts MODEL_ID).
  */
 import type { AssetKind, RBInput, RemoveBgOptions, RemoveBgResult, Tier, WorkerResponse } from './types';
 
@@ -101,7 +102,7 @@ function blobToDataUrl(b: Blob): Promise<string> {
 
 /**
  * 배경 제거 — 투명 PNG(blob+dataUrl) 반환. 모든 진입점(프롬프트바/인라인 버튼/게임뷰어)이 호출.
- * 현재 SERVER_ENABLED=false라 모든 소재가 온디바이스 처리된다.
+ * 백엔드는 WASM+q8 단일 경로. 현재 SERVER_ENABLED=false라 모든 소재가 온디바이스 처리된다.
  */
 export async function removeBackground(input: RBInput, opts: RemoveBgOptions): Promise<RemoveBgResult> {
   const tier = pickTier(opts.assetKind, opts.allowServerTier);
@@ -134,4 +135,151 @@ export async function removeBackground(input: RBInput, opts: RemoveBgOptions): P
 
   const dataUrl = await blobToDataUrl(out.blob);
   return { blob: out.blob, dataUrl, width: out.width, height: out.height, tier };
+}
+
+/* ── 잔여 노이즈 정리(despeckle) — 모델 없이 알파만 다듬는다 ───────────────
+   이미 누끼된 이미지를 '다시 배경제거' 할 때 사용한다. 모델을 재실행하면 잘린 점을
+   다시 전경으로 잡고, 대비 스트레치는 희미한 점을 키워 오히려 지저분해진다. 대신
+   (1) 알파 하한 임계(키우지 않고 그 이하만 0) (2) 작은 연결요소(speckle) 제거
+   (3) 가장자리 침식 을 단계적으로 적용해 흩어진 점·헤일로만 정확히 깎는다. */
+export async function cleanupBackground(
+  input: RBInput,
+  opts: { level?: number; keepMainOnly?: boolean } = {},
+): Promise<{ dataUrl: string; removed: number }> {
+  const level = Math.max(1, Math.floor(opts.level ?? 1));
+  const keepMainOnly = opts.keepMainOnly ?? false;
+  const bmp = await normalizeToBitmap(input);
+  const scale = Math.min(1, MAX_EDGE / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('no 2d context');
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(bmp, 0, 0, w, h);
+  bmp.close?.();
+  const img = ctx.getImageData(0, 0, w, h);
+  const data = img.data;
+  const N = w * h;
+  let removed = 0;
+
+  // 4연결 라벨링 헬퍼(mask: 1=전경) — 컴포넌트 크기 배열과 label을 채운다.
+  const stack = new Int32Array(N);
+  const labelOf = (mask: Uint8Array, label: Int32Array): number[] => {
+    label.fill(0);
+    const sizes: number[] = [0];
+    let cur = 0;
+    for (let s = 0; s < N; s++) {
+      if (mask[s] !== 1 || label[s] !== 0) continue;
+      cur++;
+      sizes[cur] = 0;
+      let sp = 0;
+      stack[sp++] = s;
+      label[s] = cur;
+      while (sp > 0) {
+        const p = stack[--sp];
+        sizes[cur]++;
+        const x = p % w;
+        const y = (p / w) | 0;
+        if (x > 0 && mask[p - 1] === 1 && label[p - 1] === 0) { label[p - 1] = cur; stack[sp++] = p - 1; }
+        if (x < w - 1 && mask[p + 1] === 1 && label[p + 1] === 0) { label[p + 1] = cur; stack[sp++] = p + 1; }
+        if (y > 0 && mask[p - w] === 1 && label[p - w] === 0) { label[p - w] = cur; stack[sp++] = p - w; }
+        if (y < h - 1 && mask[p + w] === 1 && label[p + w] === 0) { label[p + w] = cur; stack[sp++] = p + w; }
+      }
+    }
+    return sizes;
+  };
+  // 1px 침식/팽창(4-이웃).
+  const erode1 = (src: Uint8Array): Uint8Array => {
+    const o = new Uint8Array(N);
+    for (let p = 0; p < N; p++) {
+      if (!src[p]) continue;
+      const x = p % w, y = (p / w) | 0;
+      if (x > 0 && !src[p - 1]) continue;
+      if (x < w - 1 && !src[p + 1]) continue;
+      if (y > 0 && !src[p - w]) continue;
+      if (y < h - 1 && !src[p + w]) continue;
+      o[p] = 1;
+    }
+    return o;
+  };
+  const dilate1 = (src: Uint8Array): Uint8Array => {
+    const o = new Uint8Array(N);
+    for (let p = 0; p < N; p++) {
+      if (src[p]) { o[p] = 1; continue; }
+      const x = p % w, y = (p / w) | 0;
+      if ((x > 0 && src[p - 1]) || (x < w - 1 && src[p + 1]) || (y > 0 && src[p - w]) || (y < h - 1 && src[p + w])) o[p] = 1;
+    }
+    return o;
+  };
+
+  const label = new Int32Array(N);
+
+  if (keepMainOnly) {
+    // ── 주 피사체만 남기기(누끼 노이즈 자동 정리) ──────────────────────────
+    // 복잡한 배경의 매트는 피사체가 가는 '다리'로 배경 노이즈와 연결돼 있어 단순 라벨링으론
+    // 못 끊는다. 모폴로지 오프닝(침식→가장 큰 덩어리→팽창)으로 다리를 끊고 주 피사체만 복원한다.
+    const FLOOR = Math.round(0.30 * 255); // 희미한 노이즈·연결다리 제거(피사체 외곽은 보존)
+    const E = 3; // 침식/팽창 횟수(다리 두께 < 2E면 끊김)
+    const orig = new Uint8Array(N);
+    for (let i = 0; i < N; i++) {
+      const a = data[i * 4 + 3];
+      if (a > FLOOR) orig[i] = 1;
+      else if (a > 0) { data[i * 4 + 3] = 0; removed++; }
+    }
+    let er = orig;
+    for (let k = 0; k < E; k++) er = erode1(er);
+    const sizes = labelOf(er, label);
+    let maxC = 0, maxS = 0;
+    for (let c = 1; c < sizes.length; c++) if (sizes[c] > maxS) { maxS = sizes[c]; maxC = c; }
+    let core = new Uint8Array(N);
+    if (maxC > 0) for (let p = 0; p < N; p++) core[p] = label[p] === maxC ? 1 : 0;
+    for (let k = 0; k < E; k++) core = dilate1(core);
+    // 복원한 주 피사체(원래 실루엣 내부) 밖은 모두 투명화.
+    for (let p = 0; p < N; p++) {
+      if (!(core[p] && orig[p]) && data[p * 4 + 3] !== 0) { data[p * 4 + 3] = 0; removed++; }
+    }
+  } else {
+    // ── 기본(정리 버튼) ── 알파 하한 + 작은 섬 제거 + level별 가장자리 침식 ──
+    const floor = Math.round(Math.min(0.5, 0.1 * level) * 255);
+    const mask = new Uint8Array(N);
+    for (let i = 0; i < N; i++) {
+      const a = data[i * 4 + 3];
+      if (a > floor) mask[i] = 1;
+      else if (a > 0) { data[i * 4 + 3] = 0; removed++; }
+    }
+    const minIsland = Math.max(16, Math.round(N * Math.min(0.012, 0.0018 * level)));
+    const sizes = labelOf(mask, label);
+    for (let p = 0; p < N; p++) {
+      if (mask[p] === 1 && sizes[label[p]] < minIsland) { mask[p] = 0; data[p * 4 + 3] = 0; removed++; }
+    }
+    const erodePx = level >= 3 ? 2 : level >= 2 ? 1 : 0;
+    for (let k = 0; k < erodePx; k++) {
+      const prev = mask.slice();
+      for (let p = 0; p < N; p++) {
+        if (prev[p] !== 1) continue;
+        const x = p % w, y = (p / w) | 0;
+        const edge =
+          (x > 0 && prev[p - 1] === 0) ||
+          (x < w - 1 && prev[p + 1] === 0) ||
+          (y > 0 && prev[p - w] === 0) ||
+          (y < h - 1 && prev[p + w] === 0);
+        if (edge) { mask[p] = 0; data[p * 4 + 3] = 0; removed++; }
+      }
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  const dataUrl = await new Promise<string>((res, rej) =>
+    canvas.toBlob((b) => {
+      if (!b) return rej(new Error('toBlob 실패'));
+      const r = new FileReader();
+      r.onload = () => res(String(r.result));
+      r.onerror = () => rej(new Error('read 실패'));
+      r.readAsDataURL(b);
+    }, 'image/png'),
+  );
+  return { dataUrl, removed };
 }
