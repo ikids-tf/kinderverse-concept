@@ -13,21 +13,10 @@ import { entrance, idle, reaction } from "./presets";
 import { useStageSize } from "./stageSize";
 import { registerNode } from "./nodeRegistry";
 import { useGame } from "./useGame";
+import { transformStyle } from "./layout";
 import type { MoodKey } from "../theme";
 
 type Transform = SceneNode["transform"];
-
-function transformStyle(t: Transform): CSSProperties {
-  return {
-    left: `${t.x * 100}%`,
-    top: `${t.y * 100}%`,
-    width: `${t.w * 100}%`,
-    height: `${t.h * 100}%`,
-    zIndex: t.z,
-    opacity: t.opacity,
-    transform: `translate(-50%,-50%)${t.rotation ? ` rotate(${t.rotation}deg)` : ""}`,
-  };
-}
 
 /** 위치 잡힌 컨테이너(.node). registerId가 있으면 confetti 원점용으로 등록. */
 export function Positioned(props: {
@@ -55,10 +44,18 @@ export function VisualBox({ visual, t }: { visual: Visual; t: Transform }) {
   const { w: sw, h: sh } = useStageSize();
   const nodeW = t.w * sw;
   const nodeH = t.h * sh;
-  if (visual.imageUrl) return <img src={visual.imageUrl} alt="" />;
+  // partial-cue: silhouette = 단색 그림자, crop = 확대해 일부만(.photo가 overflow:hidden로 클립).
+  const silhouette = visual.variant === "silhouette";
+  const cropped = visual.variant === "crop";
+  if (visual.imageUrl) {
+    return <img src={visual.imageUrl} alt="" style={silhouette ? { filter: "brightness(0)" } : undefined} />;
+  }
   if (visual.emoji) {
-    const size = Math.max(20, Math.min(nodeW, nodeH) * 0.62);
-    return <div className="emoji" style={{ fontSize: size }}>{visual.emoji}</div>;
+    const base = Math.min(nodeW, nodeH) * 0.62;
+    const size = Math.max(20, cropped ? base * 1.7 : base);
+    const style: CSSProperties = { fontSize: size };
+    if (silhouette) style.filter = "brightness(0)"; // 컬러 이모지를 검은 실루엣으로
+    return <div className="emoji" style={style}>{visual.emoji}</div>;
   }
   const size = Math.max(16, Math.min(nodeH * 0.5, nodeW * 0.34));
   return <div className="emoji jua" style={{ fontSize: size, color: "var(--ink)" }}>{visual.text}</div>;

@@ -12,6 +12,7 @@ import { MatchPair } from "./interactions/MatchPair";
 import { BinaryChoice } from "./interactions/BinaryChoice";
 import { FlipMemory } from "./interactions/FlipMemory";
 import { RevealEffect } from "./effects/RevealEffect";
+import { EditLayer } from "./editor/EditLayer";
 import { StageSizeContext, type StageSize } from "./stageSize";
 import { DIFF_LABEL, MOOD_LABEL } from "./content";
 import { FIXTURES, FIXTURE_KEYS, type ExampleKey } from "./fixtures";
@@ -44,6 +45,8 @@ export function GameStage() {
   const next = useGame((s) => s.next);
   const restart = useGame((s) => s.restart);
   const toggleTts = useGame((s) => s.toggleTts);
+  const mode = useGame((s) => s.mode);
+  const setMode = useGame((s) => s.setMode);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<StageSize>({ w: 0, h: 0 });
@@ -127,6 +130,16 @@ export function GameStage() {
             >
               {ttsEnabled ? "🔊" : "🔇"}
             </button>
+            <button
+              type="button"
+              className={`icon-btn${mode === "edit" ? " on" : ""}`}
+              title="고급 편집 / 플레이"
+              aria-label="고급 편집 / 플레이"
+              aria-pressed={mode === "edit"}
+              onClick={() => setMode(mode === "edit" ? "play" : "edit")}
+            >
+              {mode === "edit" ? "▶" : "✏️"}
+            </button>
           </div>
         </div>
 
@@ -148,27 +161,30 @@ export function GameStage() {
             <div className="blob a" />
             <div className="blob b" />
 
-            {doc &&
-              unclaimed.map((node) => (
-                <NodeRenderer
-                  key={node.id}
-                  node={node}
-                  binding={node.id === cueSlotId ? cueContent : undefined}
-                  reactSeq={node.id === cueSlotId ? cueReactSeq : undefined}
-                />
-              ))}
+            {doc && mode === "edit" && <EditLayer />}
 
-            {doc && hasReveal && <RevealEffect />}
-            {doc &&
-              (kind === "match-pair" || kind === "connect" ? (
-                <MatchPair />
-              ) : kind === "binary-choice" ? (
-                <BinaryChoice />
-              ) : kind === "flip-memory" ? (
-                <FlipMemory />
-              ) : (
-                <TapTheRightOne />
-              ))}
+            {doc && mode === "play" && (
+              <>
+                {unclaimed.map((node) => (
+                  <NodeRenderer
+                    key={node.id}
+                    node={node}
+                    binding={node.id === cueSlotId ? cueContent : undefined}
+                    reactSeq={node.id === cueSlotId ? cueReactSeq : undefined}
+                  />
+                ))}
+                {hasReveal && <RevealEffect />}
+                {kind === "match-pair" || kind === "connect" ? (
+                  <MatchPair />
+                ) : kind === "binary-choice" ? (
+                  <BinaryChoice />
+                ) : kind === "flip-memory" ? (
+                  <FlipMemory />
+                ) : (
+                  <TapTheRightOne />
+                )}
+              </>
+            )}
 
             <div className={`banner${banner ? " show " + (banner.ok ? "ok" : "no") : ""}`}>
               <span aria-hidden>{banner?.ok ? "🎉" : "💪"}</span>
@@ -179,8 +195,8 @@ export function GameStage() {
               다음 <span aria-hidden>→</span>
             </button>
 
-            {/* 시작 오버레이 */}
-            <div className={`overlay${phase !== "start" ? " hide" : ""}`}>
+            {/* 시작 오버레이 (편집 모드에선 숨김) */}
+            <div className={`overlay${phase !== "start" || mode === "edit" ? " hide" : ""}`}>
               <div className="finish-emoji" aria-hidden>🐾</div>
               <h2 className="jua">{doc?.meta.title ?? "게임을 시작해요"}</h2>
               <p>{doc ? START_DESC[doc.meta.archetype] ?? "시작해볼까요?" : ""}</p>
@@ -201,6 +217,12 @@ export function GameStage() {
               </p>
               <button type="button" className="big-btn" onClick={restart}>↺ 다시 하기</button>
             </div>
+
+            {mode === "edit" && (
+              <div className="edit-hint" aria-hidden>
+                ✏️ 끌어서 이동 · 모서리로 크기 · 방향키 미세이동
+              </div>
+            )}
           </div>
         </div>
 

@@ -92,8 +92,48 @@ const flipMemoryExample: InteractiveDocInput = {
   rewards: { confetti: "full" },
 };
 
+/* partial-cue — 그림자(실루엣)만 보고 누군지 맞추기. cue asset의 variant="silhouette". */
+const silhouetteExample: InteractiveDocInput = {
+  meta: { id: "ex_silhouette", title: "그림자로 누군지 맞추기", archetype: "tap-the-right-one", createdFrom: "prompt" },
+  settings: { difficulty: "toddler", length: 2, mood: "lively", optionCount: 3 },
+  stage: {
+    background: { colorRole: "pastel.sky" },
+    nodes: [
+      { id: "cue", type: "image", role: "cue", transform: { x: 0.5, y: 0.3, w: 0.44, h: 0.44 }, animation: { entrance: "pop", idle: "breathe" } },
+      { id: "opt0", type: "slot", role: "option", transform: { x: 0.2, y: 0.82, w: 0.24, h: 0.18 } },
+      { id: "opt1", type: "slot", role: "option", transform: { x: 0.5, y: 0.82, w: 0.24, h: 0.18 } },
+      { id: "opt2", type: "slot", role: "option", transform: { x: 0.8, y: 0.82, w: 0.24, h: 0.18 } },
+    ],
+  },
+  interaction: {
+    kind: "tap-the-right-one",
+    cueSlotId: "cue",
+    optionSlotIds: ["opt0", "opt1", "opt2"],
+    rounds: [
+      {
+        cue: { type: "asset", asset: { assetId: "asset_rabbit", variant: "silhouette" } },
+        options: [
+          { content: { type: "text", text: "토끼" }, correct: true },
+          { content: { type: "text", text: "코끼리" } },
+          { content: { type: "text", text: "펭귄" } },
+        ],
+      },
+      {
+        cue: { type: "asset", asset: { assetId: "asset_giraffe", variant: "silhouette" } },
+        options: [
+          { content: { type: "text", text: "강아지" } },
+          { content: { type: "text", text: "기린" }, correct: true },
+          { content: { type: "text", text: "고양이" } },
+        ],
+      },
+    ],
+  },
+  rewards: { confetti: "full" },
+};
+
 export const FIXTURES: Record<string, { label: string; input: InteractiveDocInput }> = {
   animal: { label: "🐘 동물 맞추기", input: tapTheRightOneExample },
+  silhouette: { label: "🌑 그림자 맞추기", input: silhouetteExample },
   match: { label: "🔗 짝 맞추기", input: matchPairExample },
   garden: { label: "🌱 텃밭 뽑기", input: revealAndCollectExample },
   ox: { label: "⭕ OX 퀴즈", input: binaryChoiceExample },

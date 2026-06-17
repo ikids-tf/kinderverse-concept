@@ -93,6 +93,10 @@ export interface GameStore {
   // effects bus
   sfx: Sfx | null;
 
+  // 직접 에디터(M1, "고급" 뒤) — 레이아웃 편집(노드 transform)
+  mode: "play" | "edit";
+  selectedNodeId: string | null;
+
   loadExample: (key: ExampleKey) => void;
   start: () => void;
   tap: (slotId: string) => void;
@@ -103,6 +107,9 @@ export interface GameStore {
   finish: () => void;
   restart: () => void;
   toggleTts: () => void;
+  setMode: (mode: "play" | "edit") => void;
+  selectNode: (id: string | null) => void;
+  patchNodeTransform: (id: string, patch: Partial<{ x: number; y: number; w: number; h: number }>) => void;
 }
 
 /* ── 타이머 관리 (라운드 시퀀싱) ── */
@@ -340,6 +347,8 @@ export const useGame = create<GameStore>((set, get) => {
     flipPick: null,
     flipMatched: 0,
     sfx: null,
+    mode: "play",
+    selectedNodeId: null,
 
     loadExample: (key) => {
       clearTimers();
@@ -371,6 +380,8 @@ export const useGame = create<GameStore>((set, get) => {
         flipPick: null,
         flipMatched: 0,
         sfx: null,
+        mode: "play",
+        selectedNodeId: null,
       });
     },
 
@@ -570,6 +581,55 @@ export const useGame = create<GameStore>((set, get) => {
     toggleTts: () => {
       const next = !get().ttsEnabled;
       set({ ttsEnabled: next });
+    },
+
+    setMode: (mode) => {
+      clearTimers();
+      const doc = get().doc;
+      // 편집↔플레이 전환 시 진행 상태를 초기화하고 시작 오버레이로(편집된 doc 그대로 사용).
+      set({
+        mode,
+        phase: "start",
+        busy: false,
+        banner: null,
+        showNext: false,
+        selectedNodeId: null,
+        roundIdx: 0,
+        score: 0,
+        maxScore: doc ? maxScoreOf(doc) : 0,
+        cueSlotId: null,
+        cueContent: null,
+        tapOptions: [],
+        reveal: null,
+        matchLeft: [],
+        matchRight: [],
+        matchPick: null,
+        matched: 0,
+        binaryAnswer: null,
+        binaryStatus: { yes: "idle", no: "idle" },
+        flipCards: [],
+        flipPick: null,
+        flipMatched: 0,
+      });
+    },
+
+    selectNode: (id) => set({ selectedNodeId: id }),
+
+    patchNodeTransform: (id, patch) => {
+      const doc = get().doc;
+      if (!doc) return;
+      const c01 = (v: number) => Math.max(0, Math.min(1, v));
+      const cwh = (v: number) => Math.max(0.05, Math.min(1, v));
+      const nodes = doc.stage.nodes.map((n) => {
+        if (n.id !== id) return n;
+        const tr = { ...n.transform };
+        if (patch.x !== undefined) tr.x = c01(patch.x);
+        if (patch.y !== undefined) tr.y = c01(patch.y);
+        if (patch.w !== undefined) tr.w = cwh(patch.w);
+        if (patch.h !== undefined) tr.h = cwh(patch.h);
+        return { ...n, transform: tr };
+      });
+      set({ doc: { ...doc, stage: { ...doc.stage, nodes } } });
     },
   };
 });

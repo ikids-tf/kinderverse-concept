@@ -8,11 +8,13 @@
  */
 import type { ContentBinding } from "../schema/interactiveDoc";
 
-/** 한 노드에 무엇을 그릴지 — 셋 중 하나가 채워진다. */
+/** 한 노드에 무엇을 그릴지 — emoji/text/imageUrl 중 하나 + 표현 variant(partial-cue). */
 export interface Visual {
   emoji?: string;
   text?: string;
   imageUrl?: string;
+  /** AssetRef.variant — silhouette(그림자)·crop(확대 일부)·leaf-crop 등 partial-cue 단서. */
+  variant?: string;
 }
 
 /* 프로토 한정: assetId → 이모지 (실 이미지 파이프라인 전까지). */
@@ -20,6 +22,9 @@ const ASSET_EMOJI: Record<string, string> = {
   asset_elephant: "🐘",
   asset_cat: "🐱",
   asset_carrot_leaf: "🌿",
+  asset_rabbit: "🐰",
+  asset_penguin: "🐧",
+  asset_giraffe: "🦒",
 };
 
 /* 프로토 한정: 정답/보기 텍스트 → 이모지 (reveal의 hidden 노드 등에 사용). */
@@ -42,7 +47,7 @@ export function resolveVisual(c: ContentBinding): Visual {
   if (c.type === "text") return { text: c.text };
   // type === "asset"
   // TODO: asset.url(보드 공유 에셋/생성+누끼)이 생기면 { imageUrl } 로 교체.
-  return { emoji: ASSET_EMOJI[c.asset.assetId] ?? "🖼️" };
+  return { emoji: ASSET_EMOJI[c.asset.assetId] ?? "🖼️", variant: c.asset.variant };
 }
 
 /** 정답 텍스트로 reveal hidden 노드에 보일 이모지를 고른다(프로토). */
