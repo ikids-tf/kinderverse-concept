@@ -373,6 +373,8 @@ clip-path 원형 reveal · origin scale+fade 250~320ms · 관성 팬 · `prefers
 
 > **(구현 확장)** 생성 중 게시 버튼 호버 시 **■ '생성 중단'** 전환(§16.4-5), 입력 연동 **보관함 자산 스트립**(다중 선택→배치, §16.6), 보드 선택 칩("N개 선택") 등이 추가되었다.
 
+> **(구현 확장 2026-06)** ① 입력 텍스트가 차면 스크롤 대신 **바가 위로 자동 확장**(긴 프롬프트도 한눈에). ② **+ 버튼 = 이미지/텍스트 문서 업로드** 후 그와 연관된 생성 요청(이미지=보드에 배치, 텍스트=메모 카드로 변환 후 프롬프트 적용). ③ **바 또는 좌측 보드 툴바 호버 시 바 불투명도 상승**(명시성 확보, 완전 불투명은 아님 — 평소 살짝 비치는 글래스). ④ **자료 선택 시 코랄 테두리 + 하단 간접광**(블루-에메랄드, 밝기 호흡 애니메이션, 코랄 라인에 정렬·가로 중앙 70%·좌우 자연 페이드). ※ 간접광 색은 코랄+골드 단일 악센트 원칙(§10.1)의 **사용자 요청 예외**로, 되돌리기 쉽게 `--kv-glow-blue/--kv-glow-emerald` CSS 변수로 격리했다.
+
 > ⚙️ **개발 지침**: 위 프롬프트바 동작(메시지 아이콘→AI채팅 이동 / 둥근 토글→바 접기·펼치기 / 별↔전송 토글 / 별→즐겨찾기 카드→페이지 이동)은 **새로 구현하지 말고 `localhost:5173` 프로젝트의 기존 프롬프트바 컴포넌트 코드를 기준 구현체로 가져와 그대로 적용**한다. 정식 서비스에서는 이 컴포넌트를 공용 셸 컴포넌트로 승격해 전 페이지에서 재사용한다.
 
 ---
@@ -437,7 +439,7 @@ calendar_events(tenant_id, date, type, linked_artifact)
 
 ## 16. ★ 구현 반영 명세 — PRD 이후 추가된 기능·정책 (프로토타입 v2)
 
-> M0 킥오프 이후 프로토타입 빌드에서 **PRD 본문에 없던 채로 추가·구체화된 기능과 정책**을 코드 분석으로 추출해 명세로 끌어올린 장(2026-06-12 빌드 기준, **2026-06 AI 동영상 생성 §16.19 추가**). 정식 서비스 이관 시 이 장의 동작을 **기준 계약(동작 명세)**으로 취급한다.
+> M0 킥오프 이후 프로토타입 빌드에서 **PRD 본문에 없던 채로 추가·구체화된 기능과 정책**을 코드 분석으로 추출해 명세로 끌어올린 장(2026-06-12 빌드 기준, **2026-06 AI 동영상 생성 §16.19 추가**, **2026-06-17 갱신: 자체 슬라이드 엔진 §16.20·게임뷰어+공용 배경제거 엔진+웹뷰어 §16.21 신규 절, 모션 양방향 연결·뷰어 더블클릭 포커스·갤러리 썸네일/지연마운트·프롬프트바 강화 반영**). 정식 서비스 이관 시 이 장의 동작을 **기준 계약(동작 명세)**으로 취급한다.
 > 근거 코드: `src/board/*` · `src/components/board/*` · `src/components/PromptBar.tsx` · `src/ai/*` · `server/gateway/*` · `src/store/*` · `src/pages/*` · `src/ui-registry/*`.
 
 ### 16.0 PRD 대비 변경·확정 요약 (델타 맵)
@@ -455,12 +457,18 @@ calendar_events(tenant_id, date, type, linked_artifact)
 | §4.6 미디어 | **매직 뷰어** 추가 — 유튜브·동영상·3D를 담는 내용에 따라 한 카드가 변신(§16.10). 향후 인터랙티브 콘텐츠는 모드 1개 추가로 수용 |
 | §16.3 프레임 | **프레임 정렬 버튼**(페이지형 행·열 정돈, 헤더 인식) 추가 + 동반 이동에서 **모션 라인 제외** + 복사 깊은 수집(§16.3) |
 | §16.10/§16.18 영상 | **전용 영상 생성 구현**(Gemini Veo) — 텍스트/이미지/계획→비디오를 동영상 뷰어에서 재생(§16.19). '프로바이더 미연동' 갭 해소. 비동기 start/poll 2단계(서버가 mp4 다운로드, 키 비노출), 과금 확인 게이트·중복 가드 |
+| §4.6 미디어 → 슬라이드 | **자체 슬라이드 엔진 추가(§16.20)** — §16.8 보드 카드 슬라이드쇼와 별개의 덱 빌더. DeckSpec(JSON)·11레이아웃·7테마·Recharts 차트·PDF/PPTX 내보내기·전문 편집기. 슬라이드 콘텐츠는 Milray 토큰 면제(`--s-*` 테마, CLAUDE.md 2026-06-14 예외) |
+| §4.6 미디어 → 게임 | **게임뷰어 + 공용 배경제거 엔진 + 웹뷰어 추가(§16.21)** — "나만의 게임 만들기"(템플릿+GameSpec 단일 계약, counting/silhouette/emotion/matching) + 보드·게임뷰어 공유 배경제거(BiRefNet MIT, 온디바이스) + 임베드 링크 웹뷰어. 게임 플레이 화면은 Milray 면제(파스텔 `theme.ts`, CLAUDE.md §8) |
+| §16.9 모션 | 출발/도착뿐 아니라 **중간 웨이포인트(⅓·⅔)도 카드 연결(양방향)** + `follow` 유휴 거동(지연 추적) 추가 |
+| §16.1/§16.10 뷰어 | **뷰어(슬라이드·영상·3D·유튜브) 더블클릭 = 화면 중앙 포커스**(이전 '조작 모드 진입'에서 변경), iframe 임베드는 `kv-embed-dblclick` postMessage로 부모에 전달 |
+| §16.12/§16.17 갤러리 | 풀해상도 base64 일괄 렌더 대신 **썸네일 캐시(`gallery-thumbs:v1`) + IntersectionObserver 지연마운트**로 마이보드→갤러리 전환 가속 |
+| §10.4 프롬프트바 | **자동 높이 확장**(스크롤 제거)·**+ 업로드(이미지/텍스트 → 관련 생성)**·**호버 시 불투명도 상승**·**자료 선택 시 코랄 테두리+하단 간접광**(블루-에메랄드, 사용자 요청 예외·CSS 변수 격리) 추가 |
 
 ### 16.1 보드 내비게이션 (트랙패드 우선 입력 체계)
 - **휠/두 손가락 스크롤 = 팬**(내추럴 스크롤). 단, 스크롤이 필요한 문서/프레임 위에서는 카드 내용 스크롤 우선.
 - **핀치(Ctrl/⌘+휠) = 커서 중심 줌** — 지수 감속 매핑, Safari `gesturestart/gesturechange` 별도 지원.
 - **미들 마우스 버튼 = 팬 전용**(카드 드래그로 오인 금지) · **Space+드래그 = 팬**.
-- **더블클릭 내비**: 빈 배경=전체 맞춤(Fit) / 프레임 내부 빈 곳=그 프레임 포커스 / 카드=포커스 줌(프롬프트바 기준 중앙 정렬).
+- **더블클릭 내비**: 빈 배경=전체 맞춤(Fit) / 프레임 내부 빈 곳=그 프레임 포커스 / 카드=포커스 줌(프롬프트바 기준 중앙 정렬). **슬라이드·영상·3D·유튜브 뷰어 카드도 더블클릭=화면 중앙 포커스**(iframe은 포인터 경계를 못 넘으므로 `kv-embed-dblclick` postMessage로 부모에 전달, §16.10).
 - **뷰포트 컬링 + 이미지 LOD**: 화면 밖 노드 렌더 제외(50% 마진), 줌 0.3 미만에서 이미지 카드는 플레이스홀더+제목으로 강등. 표시용 썸네일 최대 400px, 동시 디코드 4개 큐 제한(원본 dataURI는 보존).
 - **카메라 애니메이션**: ease-out cubic 200~420ms(거리 비례), 토큰 기반 취소(`cancelPanAnimation`) — 생성 카메라와의 경합 방지.
 
@@ -529,6 +537,8 @@ calendar_events(tenant_id, date, type, linked_artifact)
 - **웨이포인트 효과**(★ 4지점 — 출발 t=0·⅓·⅔·도착 t=1, 점 클릭 패널, **외부 클릭 시 닫힘**, 효과 걸린 점엔 점선 링 배지): 구간 속도(0.2~2×, 근처에서 점차 적용·회복) · 점프(포물선 240px) · 말풍선 텍스트.
 - 도착 시 충돌 카드 바운스 + 하트 파티클. 발표 중에는 경로선 옅게·컨트롤 숨김(하단 중앙 고정 바로 대체), 유휴 2초 시 자동 숨김(100px 이상 이동 시 재표시).
 - GLB 3D 뷰어 연결 시 카메라 헤딩 회전·점프·말풍선 연동. **모션 연결로 뷰어가 프레젠테이션 상태여도 편집 중이면 뷰어 이동·풀스크린 컨트롤은 그대로 노출**(실제 수업 발표 중에만 숨김).
+- **양방향 카드 연결(2026-06)**: 요소→모션 지점(a방향)뿐 아니라 **중간 조절점(⅓·⅔=`aMid1`/`aMid2`)도 카드 위로 드래그해 연결**(b방향) — 연결 시 점 둘레에 링 표시, 연결된 점에서 다시 끌어내면 분리. 슬롯 부착은 `attachMotionSlotCmd(node.id, slot, target.id)`(1 undo). 출발/도착(`aStart`/`aEnd`)과 합쳐 4슬롯 모두 양방향.
+- **`follow` 유휴 거동**: 연결 요소에 idle='follow'를 주면 무버를 약 420ms 지연으로 뒤따르는 트레일을 그린다(히스토리 버퍼 기반) — "둘이 함께 가는" 연출.
 
 ### 16.10 미디어 뷰어 — ★ 매직 뷰어(통합) & 유튜브 추천
 - **★ 매직 뷰어(`magic-viewer.html`)**: 유튜브·동영상·3D를 **하나로 다루는 단일 뷰어**(향후 인터랙티브 콘텐츠는 모드 1개 추가로 수용). 담는 내용을 인식해 변신:
@@ -537,7 +547,8 @@ calendar_events(tenant_id, date, type, linked_artifact)
   - **모드 인지 카드 UI**(`NodeView`): 3D 모드 = 맨몸(투명) + 하단 가로 이동 바 + 모델 클릭 시 전체 UI; 그 외 모드 = 전면 드래그 손잡이 + 우하단 '조작/이동' 토글. **모드·현재 내용(viewerMode/viewerSrc)을 `data`에 영속화 → 새로고침 후 복원**(blob 업로드는 휘발성이라 제외).
 - **뷰어 공통 인터랙션 계약**(매직·유튜브·동영상·3D 공유 — `kvSetChrome`/`kvSetPresent`/`loadSrc`/`proposeSearch`/`kv-embed-click`/`kv-embed-drag`/`?fs`):
   - **UI 자동 숨김**: 평소 화면만, **호버/선택 시 입력 줄(크롬) 노출**. 3D는 클릭 시 전체 UI + 커서 이탈 2초 후 페이드.
-  - **이동**: 일반 뷰어=화면 전체가 드래그 손잡이(클릭 한 번 선택+드래그, 더블클릭/'조작'으로 UI 조작 모드 전환·Esc 복귀). 3D=하단 가로 둥근 바(본문은 카메라 회전이라). 헤더·푸터 **빈 곳 드래그도 카드 이동**(버튼·입력 제외, screen 좌표 전달, 1 undo).
+  - **이동**: 일반 뷰어=화면 전체가 드래그 손잡이(클릭 한 번 선택+드래그). 3D=하단 가로 둥근 바(본문은 카메라 회전이라). 헤더·푸터 **빈 곳 드래그도 카드 이동**(버튼·입력 제외, screen 좌표 전달, 1 undo).
+  - **더블클릭=화면 중앙 포커스(2026-06)**: 뷰어 더블클릭은 그 카드를 화면 중앙으로 포커스(`focusNode`) — 이전엔 곧장 조작 모드로 들어가 혼란스러웠다. UI 조작 모드는 **우하단 '조작' 토글**로 진입(Esc 복귀). iframe은 포인터 이벤트를 삼켜 더블클릭이 부모로 전파되지 않으므로, 임베드 문서가 `kv-embed-dblclick` postMessage를 부모에 보내 부모가 **선택+포커스**한다(`public/glb-viewer.html` 등 각 뷰어 HTML에 dblclick 리스너 추가).
   - **풀스크린**: 우상단 ⛶ → **body 레벨 포털 오버레이**(캔버스 변형을 벗어나 화면 전체, 다른 요소 가림·클릭 차단). `?fs` 모드에서 헤더·푸터·종료 ✕는 **마우스 1.5초 무동작 시 페이드아웃**, 움직이면 페이드인. Esc·✕(`kv-fs-exit`)로 닫음. (혼란 주던 per-engine 전체화면 버튼은 제거 — 보드 오버레이로 일원화.)
   - **동영상 플레이어 조작**(§16.19): 드래그 레이어 위(z-30) **재생/정지 버튼**으로 이동과 재생을 양립(버튼만 조작, 나머지 영역 드래그). 헤더·하단 컨트롤 바는 **absolute 오버레이**라 호버 시 나타나도 영상이 밀려 튀지 않고, 컨트롤 바는 호버/선택 시에만 노출(호버 중 상단 52px·하단 56px를 비워 ⛶·슬라이더·음소거·반복 조작 가능).
   - **삭제**: 임베드 iframe이 키 포커스를 가져가도, 선택된 뷰어의 iframe 문서에 단 리스너가 Delete/Backspace를 보드 삭제로 전달.
@@ -566,6 +577,8 @@ calendar_events(tenant_id, date, type, linked_artifact)
 | 폴더(저장 번들) | IndexedDB | `kv:folder:v1` | 600ms 디바운스 |
 | 보관함 이미지 | IndexedDB | `image-assets:v1` | 태그당 3장, 보드와 독립 수명 |
 | 생성 동영상(mp4) | IndexedDB | `video-asset:v1:<id>` | data URI 보관(id별 키). 스냅샷엔 `node.data.videoAssetId`만 — 대용량 data URI를 `viewerSrc`에 넣지 않아 비대화 방지, 새로고침 시 복원(§16.19) |
+| 갤러리 썸네일 | IndexedDB | `gallery-thumbs:v1` | 384px JPEG(품질 0.72) 다운스케일, 디바운스 저장 — 그리드 표시용 경량 캐시(원본 dataURI는 보존, §16.17) |
+| 슬라이드 이미지 | IndexedDB | `slide-image:v1:*` | 슬라이드 블록/배경 이미지(`assetId` 참조). 보드와 동일 DB(`kv-board`), 동일출처 공유(§16.20) |
 | 수업 기록 | localStorage + 서버 파일DB | `kv:lessons:v1` / `.kv-data/lessons.json` | 50건/200건, 로컬 우선 |
 | 학습 신호·선호 | localStorage | `learning-storage` | **로컬 한정 = 공용 학습 금지 정책(§12) 부합** |
 - 복원 시 위생화: 진행 중이던 `loading` 플래그 제거(무한 스피너 방지). 구버전 단일 blob → IDB 1회 마이그레이션 후 구키 삭제.
@@ -596,11 +609,13 @@ calendar_events(tenant_id, date, type, linked_artifact)
 - **캘린더**: 일/주/월 3뷰 + 일정 등록 모달(시간 범위·카테고리 색상).
 - **우리반**: §4.4 명세 구현(출결 3상태·하원시간·투약 목록·특이사항) + **사진 사용 동의 토글**(미동의=파이프라인 제외 라벨) + 영구 삭제 L3 확인 게이트.
 - **AI 채팅**: §4.5 명세 구현 — 대화는 라우터 턴 뷰(라우팅 결과 + record/plan/studio/writing Tier1 결과 인라인 렌더, 대화 답변은 SSE 스트리밍).
-- **갤러리**: 카테고리 필터·검색·그리드(masonry)/목록 토글·뷰어 모달·프롬프트 기반 AI 수집 배너(휴리스틱).
+- **갤러리**: 카테고리 필터·검색·그리드(masonry)/목록 토글·뷰어 모달·프롬프트 기반 AI 수집 배너(휴리스틱). **성능(2026-06)**: 풀해상도 base64를 일괄 렌더하던 진입 지연을 해소 — 그리드는 **썸네일 캐시**(`getThumb`, 384px, `gallery-thumbs:v1`)를 쓰고, **IntersectionObserver 지연마운트**(rootMargin 500px, 화면 근처만 실제 마운트), 진입 전환은 `startTransition`으로 양보. 원본은 뷰어 모달에서만 로드.
 
 ### 16.18 미구현·이관 대기 (정식 서비스 갭)
 - Supabase 연동(현재 로컬 저장소·파일DB — 데이터 계약은 §11 유지) · **사진 분류 실시간 API 연동**(§5.1 Tier2 분류·기억 엔진) · 실제 아동 사진 파이프라인(현재 AI 개념 이미지만) · 멀티 테넌트 인증 · 갤러리 실데이터 · 화이트 모드(헌장대로 미착수 유지).
 - **영상 생성 프로바이더 다양화**: 현재 Gemini **Veo 단일**(§16.19 구현 완료). Runway·Pika 등 대체 프로바이더, 활동별 다중 생성(현재 비용 통제로 연결당 1개), 더 긴 클립은 추후. · **인터랙티브 콘텐츠**(매직 뷰어 모드 추가 예정).
+- **게임뷰어(§16.21) 갭**: 교사 이미지 파이프라인 M3(인라인 슬롯 교체·업로드 안전 분류기·기관 보관함)는 일부 진행 — 안전 분류기·기관 격리 저장은 이관 대기. 스타터 라이브러리 ~50개 사전 생성, OpenMoji 미보유 소재의 생성 폴백, 다국어 TTS(`ttsLocale` ko/ja/en)는 추후. emotion 템플릿의 Rive 자산·CLOVA TTS는 M2 범위.
+- **공용 배경제거 서버 티어 미배포**: 현재 `SERVER_ENABLED=false` → 모든 소재가 온디바이스(BiRefNet MIT) 처리. 비민감 소재(generated/object)용 서버 미세경계 티어(BiRefNet-HR/BEN2 등)는 모델·가중치·호스팅 라이선스 재점검 후 추가 예정(§16.21).
 
 ### 16.19 ★ AI 동영상 생성 — 텍스트/이미지→비디오 (Gemini Veo)
 §16.10 동영상 뷰어를 산출 대상으로 하는 **전용 영상 생성**(이전 §16.18 '프로바이더 미연동' 갭 해소, 2026-06 추가). 교사가 (a) 텍스트 프롬프트, (b) 이미지 카드, (c) 놀이계획/텍스트 카드에서 짧은 **활동 개념 영상**을 만들어 동영상 뷰어에서 바로 재생한다.
@@ -613,6 +628,31 @@ calendar_events(tenant_id, date, type, linked_artifact)
 - **영속화·복원**: 생성 mp4(data URI)는 **`video-asset:v1:<id>` IndexedDB**에 id별 키로 보관하고 스냅샷엔 `node.data.videoAssetId`만 둔다(대용량 data URI를 `viewerSrc`에 넣지 않아 스냅샷 비대화 방지). 새로고침 시 `videoAssetId`로 IDB에서 받아 뷰어에 `loadSrc` 복원.
 - **동영상 뷰어 조작**(`video-player.html`·`NodeView`): ① 드래그 레이어 위(z-30) **재생/정지 버튼** — 이동과 재생 양립(버튼만 조작, 나머지 드래그). iframe `kvTogglePlay` 프록시 + `kv-video-playing` 상태로 아이콘 동기화. ② 헤더·하단 컨트롤 바를 **absolute 오버레이**로 전환 → 호버 시 나타나도 영상이 밀려 튀지 않고(레이아웃 고정), 컨트롤 바는 **호버/선택 시에만** 표시. 호버 중 드래그 레이어가 상단 52px·하단 56px를 비워 헤더(⛶)·슬라이더·음소거·반복을 바로 조작.
 - **거버넌스**: 정책 `video` 추가 — 생성=L1·과금 확인 게이트 / 공유=L2 / 아동 미생성. EvalPage 체크리스트에 노출.
+
+### 16.20 ★ 자체 슬라이드 엔진 — 텍스트 → 발표 덱 (2026-06 신규)
+§16.8 '수업 모드·슬라이드쇼'(보드 카드를 순번 라벨 순서로 한 장씩 투사)와 **완전히 별개**인, 보드에 임베드되는 **자체 발표 덱 빌더**. 슬라이드 뷰어 카드(iframe `/slides?id=`)에서 한 줄 프롬프트로 전문 덱을 생성·편집·내보낸다. 근거 코드: `src/features/slides/**`, `src/board/slides.ts`.
+- **데이터 모델**(`schema/deckspec.ts` + `deckspec.schema.json`): `DeckSpec{category, theme, ratio:'16:9', ageBand, title, slides[]}` · `Slide{layout, blocks[], eyebrow/eyebrowPos/eyebrowStyle, accentRole, speakerNote}` · `Block = TextBlock | BulletsBlock | ImageBlock | ChartBlock`(판별 유니온) · `BlockStyle{fontPx, fontFam serif|sans, bold, color, align}` · `BlockPos{xPct,yPct,wPct,hPct,rot}`(캔버스 % 기반·중심 회전).
+- **AI 생성**(`agent/generate.ts`, `generateSlidesForViewer`): **2티어** — 라우터(Haiku: {category, ageBand, lengthHint}) → 에이전트(Sonnet, 관리용은 Haiku)가 DeckSpec JSON 산출(JSON only). 카테고리 가이드 3종 — `lesson`(기본 8장, 아이 대면·큰 글씨·따뜻한 일러스트) / `parent`(10장, 신뢰감·차트·통계) / `admin`(6장, 구조적·아이콘만). **2단계 로드 토스트**(구성 → 이미지 묘화), 검증 실패 시 1회 재시도, 최종 실패 시 최소 덱 폴백. 이미지 채우기 3병렬.
+- **레이아웃 11종**(`engine/layouts.tsx`): title · section-divider · big-text · big-stat · two-column · image-feature · bullets · hero-image · photo-grid · quote · chart.
+- **테마 7종**(`engine/themes.css`, `--s-*` 변수): warm · ivory · midnight · slate · sage · bloom · mono. **슬라이드 콘텐츠 한정**으로 다양한 전문 색/폰트 허용(앱 크롬·툴바·레일은 Milray 토큰 유지) — CLAUDE.md 2026-06-14 예외. `slide.accentRole='gold'`는 `--s-accent-2`로.
+- **블록 편집**(`engine/BlockEditorOverlay.tsx`·`BlockToolbar.tsx`·`MultiSelectOverlay.tsx`): 바운딩 박스(이동·6핸들 리사이즈·중심 회전 15/45/90° 스냅), 스타일 툴바(폰트 serif/sans·크기 ±·볼드·정렬·테마 색 5종), **자유 위치(드래그)**, 다중 선택 그룹 이동. **포지션 프리즈**(`freezeSlide`: 한 블록을 옮기면 리플로를 막기 위해 전 블록을 절대좌표로 고정 — eyebrow도 `eyebrowPos`로 동시 고정). 단축키: Undo/Redo · Delete · Ctrl+A · 화살표 넛지(±1%/Shift ±5%) · Esc.
+- **이미지**(`engine/SlideImage.tsx`·`viewer/ImagePicker.tsx`): 블록(hero/inline/background/icon)·배경 이미지, **3소스**(AI 생성·보관함·업로드) → IndexedDB `slide-image:v1:*`(보드와 동일 DB) assetId 참조. 배경은 dim 스크림으로 텍스트 가독 확보.
+- **차트**(`engine/SlideChart.tsx`): **Recharts** bar/line/pie/radar, 데이터 자동 정규화(라벨키·다중 시리즈 감지), 테마 팔레트 캐시, 에러 바운더리 폴백(📊).
+- **내보내기**(`viewer/exportDeck.tsx`): off-screen 렌더 → `html-to-image`(toPng, 1280×720·pixelRatio 2) → **PDF(jsPDF)** 또는 **PPTX(pptxgenjs)**. 전 과정 브라우저 내 처리(외부 업로드 없음).
+- **편집기/뷰어 UX**(`viewer/SlidesViewerApp.tsx`): 상단 툴바(레이아웃·테마·배경·내보내기) + 스테이지(16:9 스케일) + 하단 썸네일 레일(드래그 재정렬). 발표 모드(유휴 1.6s 페이드), **풀스크린** — 임베드는 부모 오버레이(`kv-embed-fullscreen`) / 단독 페이지는 네이티브 Fullscreen API + '← 보드' 복귀. 보드 계약: `loadDeck`/`kvSetChrome`/`kvSetPresent`/`kv-video-title`(덱 제목→카드 헤더)/`kv-embed-drag`. 텍스트 덱은 localStorage(`kv-deck-<id>`) 영속.
+- **최근 수정**(`b79bab7`): eyebrow 리플로 제거(`eyebrowPos` 필드 + 합성 오버레이) · 회전 핸들을 가리던 스타일 툴바 재배치 · 단독 풀스크린 및 '← 보드' 복귀.
+
+### 16.21 ★ 게임뷰어 · 공용 배경제거 엔진 · 웹뷰어 (2026-06 신규)
+보드 툴바에서 부르는 신규 산출물 3종. **상세 명세는 별도 핸드오프 문서 `game-viewer-handoff/PRD.md`(+`CLAUDE.md`/`KICKOFF_M1.md`/`FORM_DESIGN.md`)에 있으며, 본 절은 메인 PRD 차원의 요약**이다.
+- **게임뷰어 — "나만의 게임 만들기"**(`src/game-viewer/**`, 진입 `game-viewer.html` = Vite 멀티페이지 엔트리, 보드 임베드는 툴바 뷰어 패널 **'놀이 만들기'** 프리셋 iframe): 교사가 프롬프트 또는 폼으로 아이용 인터랙티브 게임을 즉시 만들어 보드에서 플레이/수업 모드 투사.
+  - **핵심 결정 — 런타임 코드 생성 금지**: 모든 입구가 **템플릿 + `GameSpec`(JSON) 단일 계약**(`schema/gameSpec.ts`, 판별 유니온 `templateId`)으로 수렴. 엔진은 입구를 모른다.
+  - **3 입구**: ① 템플릿 갤러리 + **간단 폼**(`buildSpecFromForm` — LLM 없이 결정적 조립, `contentSets.ts` 큐레이션 셋) ② 프롬프트(Router → 생성 에이전트, `llmRouter.ts`) ③ 예시에서 변형(M3).
+  - **템플릿**: counting(숫자 세기)·silhouette(실루엣)= M1(OpenMoji-only, 이미지 생성 0) / emotion(Rive 감정 공감)·matching(Konva 선잇기)= M2. 에셋 추상화 `GameAsset.source = openmoji | teacher | generated`(템플릿은 출처 모름). 음성=Web Speech 스텁(CLOVA는 M2+).
+  - **속도**: 흔한 케이스에 코드·이미지를 만들지 않음 — 에셋 로컬(OpenMoji)·TTS/게임 캐시·프로그레시브 렌더(목표 라이브러리 경로 <1초).
+  - **디자인 예외(CLAUDE.md §8)**: **게임 플레이 화면(아이 대면)은 Milray 미적용** — 파스텔/큐트 토큰(`src/game-viewer/theme.ts`). 단 게임을 감싸는 **보드 카드 프레임·툴바·교사용 프롬프트바는 Milray 유지**. 슬라이드 콘텐츠와 동일한 면제 범주.
+  - **안전·적합성**: 큐레이션 에셋으로 부적절 이미지 구조적 차단 · 음성+시각 완결(읽기 0) · 큰 터치 타깃 · 긍정 피드백만 · 연령 보정. 교사 업로드 이미지는 안전 분류기 통과 필수(M3), 아이 사진은 **온디바이스 처리 우선**(§12 정합).
+- **공용 배경제거 엔진**(`src/shared/background-removal/**`): **보드(프롬프트바·인라인 버튼)와 게임뷰어(교사 에셋)가 단일 진입점(`removeBackground`)을 공유** — "두 진입점, 한 엔진". 온디바이스 **BiRefNet(onnx-community, MIT)** Web Worker(transformers.js), 입력 일반화(File/Blob/Img/URL)·≤1024px 다운스케일·워밍업. **안전 티어 엔진 내부 강제**(`pickTier`): `child-photo`·`unknown` → 무조건 온디바이스(외부 전송 절대 금지), `generated`·`object` → `allowServerTier` + 서버 가동 시에만 서버(현재 `SERVER_ENABLED=false`라 사실상 항상 온디바이스). **라이선스**: @imgly(AGPL)·RMBG-1.4(BRIA 비상업)는 채택 금지, MIT BiRefNet로 일원화(`src/lib/removeBg.ts`는 기존 시그니처 호환 셸). §12 아동데이터 온디바이스·외부전송 최소화 원칙과 정합.
+- **웹뷰어**(`public/web-viewer.html`): 임베드 가능한 링크만 보드 안에서 뷰어로, 막힌 링크는 새 탭으로. 독립 HTML이라 Milray 토큰 값을 CSS 변수로 **복제**(임의 색 추가 없음 — 헌장 준수).
 
 ---
 
