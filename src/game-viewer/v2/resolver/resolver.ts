@@ -8,7 +8,7 @@
 import type { InteractiveDocInput } from "../schema/interactiveDoc";
 import { CATEGORIES, findCategory, type Category, type Item } from "./contentSets";
 
-export type Archetype = "tap-the-right-one" | "match-pair" | "flip-memory";
+export type Archetype = "tap-the-right-one" | "match-pair" | "flip-memory" | "binary-choice";
 
 export interface Intent {
   category: Category;
@@ -37,7 +37,8 @@ export function parseIntent(prompt: string): Intent | null {
   const cat = findCategory(prompt);
   if (!cat) return null;
   let archetype: Archetype | undefined;
-  if (/짝|매칭|연결|이어/.test(prompt)) archetype = "match-pair";
+  if (/ox|오엑스|맞을까|틀릴|참\s*거짓|일까요|맞나요/i.test(prompt)) archetype = "binary-choice";
+  else if (/짝|매칭|연결|이어/.test(prompt)) archetype = "match-pair";
   else if (/뒤집|기억|메모리|카드/.test(prompt)) archetype = "flip-memory";
   else if (/맞추|이름|누구|뭐/.test(prompt)) archetype = "tap-the-right-one";
   return { category: cat, archetype };
@@ -170,10 +171,43 @@ function assembleFlip(cat: Category, useImages: boolean, k: Knobs): InteractiveD
   };
 }
 
+/** 한글 조사 은/는 선택(받침 유무). OX 진술을 자연스럽게. */
+function josa(word: string): string {
+  const c = word.charCodeAt(word.length - 1);
+  if (c < 0xac00 || c > 0xd7a3) return "는"; // 한글 음절이 아니면 기본
+  return (c - 0xac00) % 28 === 0 ? "는" : "은";
+}
+
+/** OX 퀴즈 — 같은 카테고리(참) vs 다른 카테고리(거짓) 진술을 번갈아. 결정론, 새 콘텐츠 0. */
+function assembleBinary(cat: Category, _useImages: boolean, k: Knobs): InteractiveDocInput {
+  const roundCount = TAP_ROUNDS[k.length];
+  const others = CATEGORIES.filter((c) => c.key !== cat.key);
+  const truePool = shuffle(cat.items);
+  const rounds = Array.from({ length: roundCount }, (_, i) => {
+    const isTrue = i % 2 === 0;
+    const it = isTrue ? truePool[i % truePool.length] : shuffle(shuffle(others)[0].items)[0];
+    return {
+      prompt: { type: "text" as const, text: `${it.emoji} ${it.label}${josa(it.label)} ${cat.label}이에요` },
+      answer: isTrue,
+    };
+  });
+  return {
+    meta: { id: `gen_ox_${cat.key}`, title: `${cat.label} OX 퀴즈`, archetype: "binary-choice", createdFrom: "prompt" },
+    settings: { difficulty: k.difficulty, length: roundCount, mood: k.mood },
+    stage: {
+      background: { colorRole: "pastel.cream" },
+      nodes: [{ id: "prompt", type: "slot", role: "cue", transform: { x: 0.5, y: 0.34, w: 0.8, h: 0.34 } }],
+    },
+    interaction: { kind: "binary-choice", promptSlotId: "prompt", rounds },
+    rewards: { confetti: "light" },
+  };
+}
+
 const ASSEMBLERS: Record<Archetype, (cat: Category, useImages: boolean, k: Knobs) => InteractiveDocInput> = {
   "tap-the-right-one": assembleTap,
   "match-pair": assembleMatch,
   "flip-memory": assembleFlip,
+  "binary-choice": assembleBinary,
 };
 
 /** 카테고리에 어울리는 추천 카드(교사 언어). 의도에 명시된 아키타입이 1순위.
@@ -186,11 +220,13 @@ export function recommend(intent: Intent, opts: RecommendOpts = {}): Recommendat
     { archetype: "tap-the-right-one", title: `${cat.label} 이름 맞추기`, emoji: "🔎" },
     { archetype: "match-pair", title: `${cat.label} 짝 맞추기`, emoji: "🔗" },
     { archetype: "flip-memory", title: `${cat.label} 카드 뒤집기`, emoji: "🃏" },
+    { archetype: "binary-choice", title: `${cat.label} OX 퀴즈`, emoji: "⭕" },
   ];
   const ordered = intent.archetype
     ? [...base.filter((b) => b.archetype === intent.archetype), ...base.filter((b) => b.archetype !== intent.archetype)]
     : base;
-  return ordered.map((b) => ({
+  // 카드는 3장 유지(요청 아키타입이 1순위로 앞에 옴).
+  return ordered.slice(0, 3).map((b) => ({
     ...b,
     build: () => ({ title: b.title, input: ASSEMBLERS[b.archetype](cat, useImages, knobs) }),
   }));
