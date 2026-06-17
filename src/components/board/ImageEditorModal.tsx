@@ -6,6 +6,7 @@ import { removeBackground, cleanupBackground } from '@/shared/background-removal
 import { prepareSegment, segmentAt } from '@/shared/segment/segment';
 import { saveAsset } from '@/board/assets';
 import { showToast } from '@/lib/toast';
+import { useZoomModal, type OriginRect } from './useZoomModal';
 
 /* 이미지 편집 모달 — 보드 이미지 카드의 ✏️ '편집' 버튼이 연다.
    기능: ① 배경 제거(누끼, 공용 엔진) ② 요소 지우기(이미지 안 요소를 클릭 → 같은 색
@@ -202,7 +203,9 @@ function surroundingMostlyTransparent(work: HTMLCanvasElement, mask: Uint8Array,
   return tot > 0 && trans / tot > 0.6;
 }
 
-export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose: () => void }) {
+export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; onClose: () => void; origin?: OriginRect | null }) {
+  // 카드 위치에서 커지며 열리고 닫을 때 그 위치로 작아진다 + 배경 조작 차단.
+  const { requestClose, onContentTransitionEnd, contentStyle, backdropStyle } = useZoomModal(origin, onClose);
   const viewRef = useRef<HTMLCanvasElement | null>(null); // 화면 표시용
   const workRef = useRef<HTMLCanvasElement | null>(null); // 풀해상도 작업 캔버스
   const undoRef = useRef<ImageData[]>([]);
@@ -287,7 +290,7 @@ export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose:
   // Esc 닫기
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') requestClose();
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
     };
     window.addEventListener('keydown', onKey);
@@ -456,7 +459,7 @@ export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose:
       delete (data as Record<string, unknown>).bgLevel; // 편집본은 정리 단계 초기화
       replaceImageCmd(nodeId, url, data, '이미지 편집');
       void saveAsset(`${caption} (편집)`, 'image', url, caption);
-      onClose();
+      requestClose();
     } finally {
       setBusy(null);
     }
@@ -468,11 +471,20 @@ export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose:
     `${btn} ${active ? 'border-accent bg-accent text-on-accent' : 'border-border bg-surface text-fg-2 hover:border-accent hover:text-accent'}`;
 
   return (
-    <div
-      onClick={onClose}
-      style={{ position: 'fixed', inset: 0, zIndex: 120 }}
-      className="flex flex-col bg-fg/80 backdrop-blur-sm"
-    >
+    <div style={{ position: 'fixed', inset: 0, zIndex: 120 }}>
+      {/* 배경 — 페이드 인/아웃 + 클릭 닫기(배경 조작은 useZoomModal이 차단) */}
+      <div
+        onClick={requestClose}
+        className="absolute inset-0 bg-fg/80 backdrop-blur-sm"
+        style={backdropStyle}
+      />
+      {/* 본문 — 카드 위치에서 커지고/작아진다 */}
+      <div
+        onClick={requestClose}
+        onTransitionEnd={onContentTransitionEnd}
+        className="absolute inset-0 flex flex-col"
+        style={contentStyle}
+      >
       {/* 상단 바 */}
       <div
         onClick={(e) => e.stopPropagation()}
@@ -508,7 +520,7 @@ export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose:
         <button className={`${btn} border-none bg-accent text-on-accent hover:bg-accent-hover`} onClick={() => void onApply()} disabled={!ready || !!busy}>
           적용
         </button>
-        <button className={`${btn} border-border bg-surface text-fg-2 hover:text-fg`} onClick={onClose} title="닫기 (Esc)">
+        <button className={`${btn} border-border bg-surface text-fg-2 hover:text-fg`} onClick={requestClose} title="닫기 (Esc)">
           닫기
         </button>
       </div>
@@ -559,6 +571,7 @@ export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose:
           ? 'AI 객체 지우기: 지우려는 객체를 클릭하면 AI가 그 객체만 지우고 자리를 주변 배경으로 자연스럽게 메웁니다 (처음 한 번은 모델 준비로 잠시 걸려요) · ⌘Z 되돌리기'
           : '색 기반: 클릭한 곳과 같은 색 연결 영역을 투명하게 지웁니다 · 허용범위로 덜/더 지우기 · ⌘Z 되돌리기'}
       </p>
+      </div>
     </div>
   );
 }

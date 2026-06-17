@@ -89,6 +89,7 @@ function selectionPlaceholder(node: BoardNode | undefined): string | null {
   if (!node) return null;
   const embed = typeof node.data?.embed === 'string' ? node.data.embed : '';
   if (embed) {
+    if (embed.includes('slides-viewer')) return '어떤 슬라이드를 만들까요? (주제·대상·장수)';
     if (embed.includes('game-viewer')) return '무슨 게임을 만들까요?';
     if (embed.includes('video-player')) return '어떤 동영상을 만들까요?';
     if (embed.includes('youtube-viewer')) return '어떤 영상을 찾아 볼까요?';

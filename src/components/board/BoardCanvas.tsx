@@ -17,6 +17,7 @@ import { NodeView } from './NodeView';
 import { normalizeMotionNode } from '@/board/motionGeometry';
 import { LaneView } from './LaneView';
 import { ImageEditorModal } from './ImageEditorModal';
+import type { OriginRect } from './useZoomModal';
 
 // Memoized node — on pan/zoom the viewport changes but each node's props (node,
 // selected, dx, dy, onPointerDown) don't, so memo skips re-rendering every card.
@@ -74,8 +75,6 @@ interface Box {
 
 export function BoardCanvas() {
   const ref = useRef<HTMLDivElement>(null);
-  // 빈 화면 단일 클릭 확대(100%) 예약 타이머 — 더블클릭(축소 20%)이 뒤따르면 취소한다.
-  const clickZoomTimer = useRef<number | undefined>(undefined);
   const nodes = useBoardStore((s) => s.nodes);
   const order = useBoardStore((s) => s.order);
   const lanes = useBoardStore((s) => s.lanes);
@@ -386,12 +385,12 @@ export function BoardCanvas() {
   const [genConfirm, setGenConfirm] = useState<{ count: number; run: () => void } | null>(null);
   // 빈 동영상 뷰어 생성 직후 "무엇을 할까요?"(영상 생성 / 자료 연결) 질문 팝오버.
   const [viewerAsk, setViewerAsk] = useState<{ viewerId: string } | null>(null);
-  // 이미지 편집 모달 — 카드의 ✏️ 버튼이 'kv:edit-image' 이벤트로 연다.
-  const [editImageId, setEditImageId] = useState<string | null>(null);
+  // 이미지 편집 모달 — 카드의 ✏️ 버튼이 'kv:edit-image' 이벤트로 연다(카드 위치에서 커지게 origin 전달).
+  const [editImage, setEditImage] = useState<{ id: string; origin?: OriginRect | null } | null>(null);
   useEffect(() => {
     const h = (e: Event) => {
-      const id = (e as CustomEvent).detail?.nodeId;
-      if (typeof id === 'string') setEditImageId(id);
+      const d = (e as CustomEvent).detail ?? {};
+      if (typeof d.nodeId === 'string') setEditImage({ id: d.nodeId, origin: d.origin ?? null });
     };
     window.addEventListener('kv:edit-image', h);
     return () => window.removeEventListener('kv:edit-image', h);
@@ -777,18 +776,7 @@ export function BoardCanvas() {
         .map((n) => n.id);
       if (hits.length || !e.shiftKey) b.setSelection(hits);
       setBox(null);
-      // 배경 '클릭'(드래그 아님) → 클릭 지점을 화면 중앙으로 100% 확대.
-      // (프레임 안 빈 공간을 클릭해도 동작. 카드는 자체적으로 전파를 멈춰 여기 오지 않는다.)
-      // 더블클릭이면 onBackgroundDoubleClick이 이 타이머를 취소하고 축소(20%)로 대체한다.
-      const movedPx = Math.hypot(cur.x - st.boxStartWorld.x, cur.y - st.boxStartWorld.y) * b.viewport.zoom;
-      if (movedPx < 5) {
-        const wx = st.boxStartWorld.x;
-        const wy = st.boxStartWorld.y;
-        window.clearTimeout(clickZoomTimer.current);
-        clickZoomTimer.current = window.setTimeout(() => {
-          useBoardStore.getState().centerWorldPoint(wx, wy, 1);
-        }, 280);
-      }
+      // 단일 클릭은 선택 해제만 — 화면 이동/줌 없음(사용자 요청). 확대/축소는 '더블클릭'만.
     }
     st.mode = 'idle';
     unlockTextSelection();
@@ -889,8 +877,6 @@ export function BoardCanvas() {
   }
 
   function onBackgroundDoubleClick(e: React.MouseEvent) {
-    // 보류 중인 단일 클릭 확대(100%)를 취소 — 더블클릭은 축소(20%)로 대체한다.
-    window.clearTimeout(clickZoomTimer.current);
     // 프레임 내부 더블클릭 → 그 프레임에 포커스(이전과 동일). 카드는 자체 dblclick이 전파를 멈춘다.
     const w = toWorld(e.clientX, e.clientY);
     const fid = frameOfPoint(w.x, w.y);
@@ -1543,8 +1529,8 @@ export function BoardCanvas() {
           </div>
         </div>
       )}
-      {editImageId && createPortal(
-        <ImageEditorModal nodeId={editImageId} onClose={() => setEditImageId(null)} />,
+      {editImage && createPortal(
+        <ImageEditorModal nodeId={editImage.id} origin={editImage.origin} onClose={() => setEditImage(null)} />,
         // React 루트(#root) 안으로 포털해야 onClick(이벤트 위임)이 동작한다. body로 포털하면
         // 루트 밖이라 React 합성 이벤트가 잡히지 않는다. #root는 transform이 없어 fixed도 정상.
         document.getElementById('root') ?? document.body,

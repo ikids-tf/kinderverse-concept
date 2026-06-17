@@ -10,7 +10,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import type { GameSpec, TemplateId } from "../schema/gameSpec";
-import { EXAMPLE_COUNTING, EXAMPLE_SILHOUETTE } from "../schema/examples";
 import { generateGameSpec } from "../generate/generateGameSpec";
 import type { PickedImage } from "../generate/buildSpecFromForm";
 import { palette, radius, shadow } from "../theme";
@@ -19,15 +18,17 @@ import { useFullscreen } from "../engine/useFullscreen";
 import { TemplateGallery } from "./TemplateGallery";
 import { TemplateForm } from "./TemplateForm";
 import { MakeGamePage } from "./MakeGamePage";
+import { HomeGallery } from "./HomeGallery";
 
 type View =
+  | { kind: "home" }
   | { kind: "gallery" }
   | { kind: "form"; templateId: TemplateId }
   | { kind: "make" }
   | { kind: "play"; spec: GameSpec };
 
 export function StartScreen({ onExit }: { onExit?: () => void }) {
-  const [view, setView] = useState<View>({ kind: "gallery" });
+  const [view, setView] = useState<View>({ kind: "home" });
   const { isFs, toggle: toggleFs } = useFullscreen();
 
   // 하단바 하이브리드 — 전체화면(?fs)·단독(부모 없음)은 자체 바, 임베드 소형 카드는 보드 프롬프트바.
@@ -57,11 +58,10 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
     return () => window.removeEventListener("message", onMsg);
   }, []);
 
-  const tab: "template" | "make" = view.kind === "make" ? "make" : "template";
-  const home = () => setView(tab === "make" ? { kind: "make" } : { kind: "gallery" });
+  const goHome = () => setView({ kind: "home" });
 
   if (view.kind === "play") {
-    return <GameViewer spec={view.spec} onExit={home} />;
+    return <GameViewer spec={view.spec} onExit={goHome} />;
   }
 
   return (
@@ -70,10 +70,15 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
       <div style={{ flexShrink: 0 }}>
         <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 22px 0", display: "flex", flexDirection: "column", gap: 18 }}>
           <header style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              type="button"
+              onClick={goHome}
+              title="첫 화면으로"
+              style={{ display: "flex", alignItems: "center", gap: 10, border: "none", background: "transparent", cursor: "pointer", padding: 0 }}
+            >
               <span style={{ fontSize: 30 }}>🎈</span>
               <span style={{ fontSize: 24, fontWeight: 900, color: palette.textSoft }}>놀이 만들기</span>
-            </div>
+            </button>
             <div style={{ flex: 1 }} />
             <motion.button
               type="button"
@@ -98,7 +103,11 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
             )}
           </header>
 
-          <Tabs tab={tab} onTab={(t) => setView(t === "make" ? { kind: "make" } : { kind: "gallery" })} />
+          <NavButtons
+            active={view.kind === "make" ? "make" : view.kind === "gallery" || view.kind === "form" ? "templates" : "home"}
+            onTemplates={() => setView({ kind: "gallery" })}
+            onMake={() => setView({ kind: "make" })}
+          />
         </div>
       </div>
 
@@ -108,6 +117,12 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
       ) : (
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
           <div style={{ maxWidth: 760, margin: "0 auto", padding: "20px 22px 40px", display: "flex", flexDirection: "column", gap: 22 }}>
+            {view.kind === "home" && (
+              <HomeGallery
+                onPick={(templateId) => setView({ kind: "form", templateId })}
+                onPlay={(spec) => setView({ kind: "play", spec })}
+              />
+            )}
             {view.kind === "gallery" && (
               <TemplateGallery onPick={(templateId) => setView({ kind: "form", templateId })} />
             )}
@@ -118,13 +133,6 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
                 onStart={(spec) => setView({ kind: "play", spec })}
               />
             )}
-
-            {/* 개발/데모 — 바로 해보기 */}
-            <div style={{ marginTop: 8, paddingTop: 16, borderTop: `1px dashed ${palette.lavender}`, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-              <span style={{ fontSize: 13, color: palette.textOnPastel, opacity: 0.8 }}>바로 해보기:</span>
-              <DemoButton onClick={() => setView({ kind: "play", spec: EXAMPLE_COUNTING })}>🦁 동물 세기</DemoButton>
-              <DemoButton onClick={() => setView({ kind: "play", spec: EXAMPLE_SILHOUETTE })}>✈️ 그림자 맞추기</DemoButton>
-            </div>
           </div>
         </div>
       )}
@@ -138,46 +146,36 @@ export function StartScreen({ onExit }: { onExit?: () => void }) {
   );
 }
 
-function Tabs({ tab, onTab }: { tab: "template" | "make"; onTab: (t: "template" | "make") => void }) {
-  const item = (id: "template" | "make", label: string) => {
-    const on = tab === id;
-    return (
-      <button
-        type="button"
-        onClick={() => onTab(id)}
-        style={{
-          flex: 1,
-          padding: "12px 16px",
-          borderRadius: radius.pill,
-          border: "none",
-          background: on ? palette.coral : "transparent",
-          color: on ? palette.textOnPastel : palette.textSoft,
-          fontSize: 16,
-          fontWeight: 800,
-          cursor: "pointer",
-        }}
-      >
-        {label}
-      </button>
-    );
-  };
+/** 상단 네비게이션 — 탭이 아니라 '버튼'. 클릭하면 해당 페이지로 이동(현재 페이지면 강조). */
+function NavButtons({
+  active,
+  onTemplates,
+  onMake,
+}: {
+  active: "home" | "templates" | "make";
+  onTemplates: () => void;
+  onMake: () => void;
+}) {
+  const btn = (on: boolean): React.CSSProperties => ({
+    flex: 1,
+    padding: "12px 16px",
+    borderRadius: radius.pill,
+    border: on ? "none" : `1.5px solid ${palette.outline}`,
+    background: on ? palette.coral : "rgba(255,255,255,0.6)",
+    color: on ? palette.textOnPastel : palette.textSoft,
+    fontSize: 16,
+    fontWeight: 800,
+    cursor: "pointer",
+    boxShadow: shadow.soft,
+  });
   return (
-    <div style={{ display: "flex", gap: 6, padding: 6, background: "rgba(255,255,255,0.6)", borderRadius: radius.pill, boxShadow: shadow.soft }}>
-      {item("template", "템플릿에서 시작")}
-      {item("make", "나만의 게임 만들기")}
+    <div style={{ display: "flex", gap: 10 }}>
+      <motion.button type="button" onClick={onTemplates} whileTap={{ scale: 0.97 }} style={btn(active === "templates")}>
+        템플릿
+      </motion.button>
+      <motion.button type="button" onClick={onMake} whileTap={{ scale: 0.97 }} style={btn(active === "make")}>
+        나만의 게임 만들기
+      </motion.button>
     </div>
-  );
-}
-
-function DemoButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
-  return (
-    <motion.button
-      type="button"
-      onClick={onClick}
-      whileTap={{ scale: 0.95 }}
-      style={{ padding: "8px 14px", borderRadius: radius.pill, border: "none", background: palette.outline, boxShadow: shadow.soft, fontSize: 14, fontWeight: 700, color: palette.textSoft, cursor: "pointer" }}
-    >
-      {children}
-    </motion.button>
   );
 }

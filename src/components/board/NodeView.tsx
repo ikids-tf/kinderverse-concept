@@ -17,6 +17,9 @@ import { WorksheetSheet } from '@/ui-registry/worksheet-sheet';
 import { downloadWorksheetA4, printWorksheetA4 } from '@/ui-registry/worksheet-a4';
 import { separateImageLayers } from '@/ai/layers';
 import { ensureThumb } from '@/board/imageLod';
+import { ImageFullscreen } from './ImageFullscreen';
+import { ZoomOverlay, type ZoomOverlayHandle } from './ZoomOverlay';
+import type { OriginRect } from './useZoomModal';
 import { getVideoAsset, saveVideoAsset } from '@/board/videoAssets';
 import { saveAsset } from '@/board/assets';
 import { isEditableTarget } from '@/hooks/useKeyboardShortcuts';
@@ -195,18 +198,46 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 풀스크린 — body 레벨 포털 오버레이로 화면 전체를 덮는다(캔버스 변형 밖이라
   // 확실히 꽉 차고, 보드의 다른 요소를 가려 클릭·선택을 차단). Esc·✕로 닫는다.
   const [fsOpen, setFsOpen] = useState(false);
-  // 이미지 카드 풀스크린 — 원본(node.src)을 화면 전체에 크게 본다(뷰어 오버레이와 별개).
-  const [imgFs, setImgFs] = useState(false);
+  // 풀스크린이 '그 카드 위치'에서 커지도록 origin(카드 화면 사각형)을 기억한다.
+  const [fsOrigin, setFsOrigin] = useState<OriginRect | null>(null);
+  const fsOverlayRef = useRef<ZoomOverlayHandle | null>(null);
+  // 문서 카드 '크게 보기'(풀스크린) — null=닫힘 / OriginRect=열림(그 카드 위치에서 커진다).
+  const [docFs, setDocFs] = useState<OriginRect | null>(null);
+  const docFsRef = useRef<ZoomOverlayHandle | null>(null);
+  // 문서 편집 창(마크다운) · 동영상 편집 창(제목) — 카드 위치에서 커지는 편집 오버레이.
+  const [docEdit, setDocEdit] = useState<OriginRect | null>(null);
+  const docEditRef = useRef<ZoomOverlayHandle | null>(null);
+  const [vidEdit, setVidEdit] = useState<OriginRect | null>(null);
+  const vidEditRef = useRef<ZoomOverlayHandle | null>(null);
+  const [fieldDraft, setFieldDraft] = useState(''); // 편집 창 입력값(한 번에 하나만 열림)
   useEffect(() => {
-    if (!imgFs) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setImgFs(false); };
+    const open = docFs || docEdit || vidEdit;
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      (docFsRef.current ?? docEditRef.current ?? vidEditRef.current)?.close();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [imgFs]);
+  }, [docFs, docEdit, vidEdit]);
+  // 이미지 카드 풀스크린 — 원본(node.src)을 화면 전체에 크게 본다(뷰어 오버레이와 별개).
+  // null=닫힘 / OriginRect=열림(그 카드 위치에서 커지며 열린다). Esc·애니메이션은 ImageFullscreen이 처리.
+  const [imgFs, setImgFs] = useState<OriginRect | null>(null);
   const hide3dTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const embedFrameRef = useRef<HTMLIFrameElement>(null);
   const fsFrameRef = useRef<HTMLIFrameElement>(null); // 풀스크린 오버레이 iframe(영상 로드용)
   const fsVideoSrcRef = useRef<string | null>(null); // 동영상 풀스크린 시 넘겨받은 현재 src(파일 재생용)
+  // 풀스크린 열기 — 카드(또는 뷰어 iframe)의 화면 위치를 origin으로 잡아 그 자리에서 커지게 한다.
+  const openFs = (el?: Element | null) => {
+    const r = (el ?? embedFrameRef.current)?.getBoundingClientRect();
+    setFsOrigin(r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null);
+    setFsOpen(true);
+  };
+  // 풀스크린 닫기 — 오버레이가 떠 있으면 애니메이션 닫기, 아니면 즉시.
+  const closeFs = () => {
+    if (fsOverlayRef.current) fsOverlayRef.current.close();
+    else setFsOpen(false);
+  };
   // 헤더/푸터 빈 곳 드래그(kv-embed-drag)로 카드 이동 — 시작 스냅샷·기준 좌표.
   const embedDragRef = useRef<{ snap: ReturnType<typeof captureNodes>; sx: number; sy: number; x: number; y: number } | null>(null);
   /** 모션 라인 연결 여부 미러 — 아래 message 리스너가 최신값을 읽는다(아래에서 계산). */
@@ -276,7 +307,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       if (d?.type === 'kv-embed-fullscreen') {
         const fd = e.data as { type?: string; src?: string } | null;
         fsVideoSrcRef.current = typeof fd?.src === 'string' ? fd.src : null;
-        setFsOpen(true);
+        openFs();
         return;
       }
       if (d?.type === 'kv-embed-present') {
@@ -423,9 +454,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 풀스크린 오버레이 — Esc 또는 오버레이 안 ✕(kv-fs-exit)로 닫는다.
   useEffect(() => {
     if (!fsOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFsOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeFs(); };
     const onMsg = (e: MessageEvent) => {
-      if ((e.data as { type?: string } | null)?.type === 'kv-fs-exit') setFsOpen(false);
+      if ((e.data as { type?: string } | null)?.type === 'kv-fs-exit') closeFs();
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('message', onMsg);
@@ -483,7 +514,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       if (!t?.closest?.('button[aria-label*="전체 화면"]')) return;
       e.stopPropagation();
       (e as Event & { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.();
-      setFsOpen(true);
+      openFs();
     };
     let bound: Document | null = null;
     const attach = () => {
@@ -1099,7 +1130,13 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             >
               <button
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('kv:edit-image', { detail: { nodeId: node.id } })); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const card = (e.currentTarget as HTMLElement).closest('.group\\/card');
+                  const r = card?.getBoundingClientRect();
+                  const origin = r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
+                  window.dispatchEvent(new CustomEvent('kv:edit-image', { detail: { nodeId: node.id, origin } }));
+                }}
                 title="이미지 편집 (배경 제거·요소 지우기·다운로드)"
                 aria-label="이미지 편집"
                 className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:bg-accent hover:text-on-accent"
@@ -1117,7 +1154,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               </button>
               <button
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => { e.stopPropagation(); setImgFs(true); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const card = (e.currentTarget as HTMLElement).closest('.group\\/card');
+                  const r = card?.getBoundingClientRect();
+                  setImgFs(r ? { x: r.left, y: r.top, w: r.width, h: r.height } : { x: 0, y: 0, w: 0, h: 0 });
+                }}
                 title="크게 보기 (풀스크린)"
                 aria-label="크게 보기"
                 className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
@@ -1158,31 +1200,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         {node.locked && <LockBadge />}
         {/* 모션 연결 카드 — 클릭(선택)하면 카드 위 고정 크기 툴바(동작 + 반경·속도) */}
         {idlePickerVisible && <IdlePicker node={node} />}
-        {/* 풀스크린 — body 레벨 포털로 화면 전체를 덮어 원본 이미지를 크게(아이들에게 보여주기). */}
+        {/* 풀스크린 — 카드 위치에서 커지며 열리고 닫을 때 그 위치로 작아진다(ImageFullscreen). */}
         {imgFs && node.src && createPortal(
-          <div
-            onClick={() => setImgFs(false)}
-            onPointerDown={(e) => e.stopPropagation()}
-            style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(20,19,17,.82)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}
-          >
-            <img src={node.src} alt={node.text ?? ''} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,.4)' }} />
-            <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 8 }}>
-              <button
-                onClick={(e) => { e.stopPropagation(); downloadImage(node.src!, imgTitle(node.text)); }}
-                title="다운로드"
-                style={{ width: 40, height: 40, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,.92)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
-              >
-                <Icon name="download" size={18} />
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); setImgFs(false); }}
-                title="닫기 (Esc)"
-                style={{ width: 40, height: 40, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,.92)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
-              >
-                <Icon name="x" size={18} />
-              </button>
-            </div>
-          </div>,
+          <ImageFullscreen src={node.src} caption={imgTitle(node.text)} origin={imgFs} onClose={() => setImgFs(null)} />,
           document.body,
         )}
       </div>
@@ -1268,13 +1288,80 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           {(is3d || (isMagicViewer && viewerMode !== 'empty')) && !presenting && (embedHover || show3dUi) && (
             <button
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setFsOpen(true); }}
+              onClick={(e) => { e.stopPropagation(); openFs((e.currentTarget as HTMLElement).closest('.group\\/card')); }}
               title="전체 화면으로 보기"
               className="absolute right-t2 top-t2 z-20 inline-flex h-9 w-9 items-center justify-center rounded-pill border border-border bg-surface/95 text-fg-2 shadow-md backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
               style={{ pointerEvents: 'auto', cursor: 'pointer' }}
             >
               <span aria-hidden className="text-base leading-none">⛶</span>
             </button>
+          )}
+          {/* 동영상 카드 — 호버 시 좌상단 편집 버튼. 클릭하면 그 카드 위치에서 커지는
+              편집 창(제목)이 열린다. */}
+          {isVideoViewer && !presenting && !embedPresent && (embedHover || selected) && (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = (e.currentTarget as HTMLElement).closest('.group\\/card')?.getBoundingClientRect();
+                setFieldDraft(typeof node.data?.title === 'string' ? (node.data.title as string) : (node.text ?? ''));
+                setVidEdit(r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null);
+              }}
+              title="동영상 편집 (제목)"
+              aria-label="동영상 편집"
+              className="absolute left-t2 top-t2 z-20 inline-flex h-9 w-9 items-center justify-center rounded-pill border border-border bg-surface/95 text-fg-2 shadow-md backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
+              style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+            >
+              <Icon name="edit" size={15} />
+            </button>
+          )}
+          {vidEdit && createPortal(
+            <ZoomOverlay ref={vidEditRef} origin={vidEdit} onClose={() => setVidEdit(null)} zIndex={120} backdropClassName="bg-fg/80 backdrop-blur-sm">
+              {(closeVid) => (
+                <div className="absolute inset-0 flex items-center justify-center p-8" onClick={closeVid}>
+                  <div onClick={(e) => e.stopPropagation()} className="flex w-full max-w-md flex-col gap-t3 rounded-lg border border-border bg-surface p-t6 shadow-2xl">
+                    <span className="font-display text-base font-semibold text-fg">동영상 편집</span>
+                    <label className="text-xs font-medium text-fg-2">제목</label>
+                    <input
+                      autoFocus
+                      value={fieldDraft}
+                      onChange={(e) => setFieldDraft(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') {
+                          const cur = useBoardStore.getState().nodes[node.id];
+                          useBoardStore.getState().updateNodeRaw(node.id, { data: { ...(cur?.data ?? {}), title: fieldDraft.trim() } });
+                          closeVid();
+                        }
+                      }}
+                      placeholder="동영상 제목"
+                      className="rounded-pill border border-border bg-surface-2 px-t4 py-t2 text-sm text-fg focus:border-accent focus:outline-none"
+                    />
+                    <div className="flex justify-end gap-t2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const cur = useBoardStore.getState().nodes[node.id];
+                          useBoardStore.getState().updateNodeRaw(node.id, { data: { ...(cur?.data ?? {}), title: fieldDraft.trim() } });
+                          closeVid();
+                        }}
+                        className="inline-flex items-center rounded-pill bg-accent px-t4 py-t2 text-sm font-semibold text-on-accent shadow-sm hover:bg-accent-hover"
+                      >
+                        저장
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); closeVid(); }}
+                        className="inline-flex items-center rounded-pill border border-border bg-surface px-t4 py-t2 text-sm font-medium text-fg-2 hover:text-fg"
+                      >
+                        닫기
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </ZoomOverlay>,
+            document.body,
           )}
           {/* 일반 뷰어 — '이동 모드'에서는 화면 전체가 드래그 손잡이(투명 레이어).
               선택돼 있어도 손잡이가 남아 언제든 끌어 옮길 수 있다. 더블클릭하면
@@ -1375,7 +1462,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             불가하다. 같은 src로 새 iframe을 띄우고 컨트롤(애니메이션)을 켜 둔다. */}
         {fsOpen &&
           createPortal(
-            <div className="fixed inset-0 bg-bg" style={{ zIndex: 9999, pointerEvents: 'auto' }}>
+            <ZoomOverlay
+              ref={fsOverlayRef}
+              origin={fsOrigin}
+              onClose={() => { setFsOpen(false); setFsOrigin(null); }}
+              zIndex={9999}
+              backdropClassName="bg-bg"
+            >
+              {(closeOverlay) => (
+              <div className="absolute inset-0" style={{ pointerEvents: 'auto' }}>
               {/* 풀스크린 모드(?fs)의 뷰어가 UI·1.5초 idle 페이드·종료(✕)를 직접
                   처리하고, ✕는 kv-fs-exit 메시지로 닫기를 알린다. 매직·영상 뷰어는 현재
                   내용(viewerSrc)을 &src=로 넘겨 같은 화면을 이어서 보여 준다(blob 제외). */}
@@ -1413,14 +1508,16 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                   없는 다른 뷰어를 위해서만 둔다. */}
               {!isVideoPlayer && (
                 <button
-                  onClick={() => setFsOpen(false)}
+                  onClick={closeOverlay}
                   title="전체 화면 닫기 (Esc)"
                   className="absolute right-t5 top-t5 z-10 inline-flex h-11 w-11 items-center justify-center rounded-pill border border-border bg-surface/90 text-fg-2 shadow-lg backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
                 >
                   <Icon name="x" size={20} />
                 </button>
               )}
-            </div>,
+              </div>
+              )}
+            </ZoomOverlay>,
             document.body,
           )}
        </>
@@ -1698,6 +1795,117 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         <StickerDecos items={decorations} />
         {/* 우상단 라운드 코너 드래그 핸들 — 일반 메모(포스트잇·노트)만 */}
         {selected && !editing && !isDoc && !srcLinks && !isIdea && !node.locked && <RadiusHandle node={node} />}
+        {/* 문서 카드 — 호버 시 우상단 [편집][크게 보기]. 이미지와 동일하게 그 카드 위치에서
+            커지고 닫을 때 작아지는 창으로 열린다(ZoomOverlay). */}
+        {isDoc && !editing && !node.locked && (
+          <div
+            className="absolute right-t2 top-t2 z-10 flex gap-1 opacity-0 transition-opacity duration-150 ease-soft group-hover:opacity-100"
+            style={{ pointerEvents: 'auto' }}
+          >
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = cardRef.current?.getBoundingClientRect();
+                setFieldDraft(node.text ?? '');
+                setDocEdit(r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null);
+              }}
+              title="문서 편집"
+              aria-label="문서 편집"
+              className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:bg-accent hover:text-on-accent"
+            >
+              <Icon name="edit" size={15} />
+            </button>
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = cardRef.current?.getBoundingClientRect();
+                setDocFs(r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null);
+              }}
+              title="크게 보기 (풀스크린)"
+              aria-label="크게 보기"
+              className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+            >
+              <Icon name="present" size={14} />
+            </button>
+          </div>
+        )}
+        {docEdit && createPortal(
+          <ZoomOverlay ref={docEditRef} origin={docEdit} onClose={() => setDocEdit(null)} zIndex={120} backdropClassName="bg-fg/80 backdrop-blur-sm">
+            {(closeEdit) => (
+              <div className="absolute inset-0 flex items-center justify-center p-8" onClick={closeEdit}>
+                <div onClick={(e) => e.stopPropagation()} className="flex max-h-[88vh] w-full max-w-3xl flex-col gap-t3 rounded-lg border border-border bg-surface p-t6 shadow-2xl">
+                  <div className="flex items-center justify-between gap-t4">
+                    <span className="font-display text-base font-semibold text-fg">문서 편집</span>
+                    <div className="flex gap-t2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); editTextCmd(node.id, node.text ?? '', fieldDraft); closeEdit(); }}
+                        className="inline-flex items-center rounded-pill bg-accent px-t4 py-t2 text-sm font-semibold text-on-accent shadow-sm hover:bg-accent-hover"
+                      >
+                        저장
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); closeEdit(); }}
+                        className="inline-flex items-center rounded-pill border border-border bg-surface px-t4 py-t2 text-sm font-medium text-fg-2 hover:text-fg"
+                      >
+                        닫기
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    autoFocus
+                    value={fieldDraft}
+                    onChange={(e) => setFieldDraft(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    className="min-h-0 flex-1 resize-none rounded-md border border-border bg-surface-2 p-t4 font-mono text-sm leading-relaxed text-fg focus:border-accent focus:outline-none"
+                    style={{ minHeight: 360 }}
+                  />
+                </div>
+              </div>
+            )}
+          </ZoomOverlay>,
+          document.body,
+        )}
+        {docFs && createPortal(
+          <ZoomOverlay
+            ref={docFsRef}
+            origin={docFs}
+            onClose={() => setDocFs(null)}
+            zIndex={120}
+            backdropClassName="bg-fg/80 backdrop-blur-sm"
+          >
+            {(closeDoc) => (
+              <div className="absolute inset-0 flex items-center justify-center p-8" onClick={closeDoc}>
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="kv-doc-md max-h-[88vh] w-full max-w-3xl overflow-auto rounded-lg border border-border bg-surface p-t8 text-base leading-relaxed text-fg shadow-2xl"
+                >
+                  {heroImage && (
+                    <img src={heroImage} alt="" draggable={false} className={`mb-t4 block w-full rounded-md border border-border ${heroContain ? 'bg-white object-contain' : 'object-cover'}`} style={heroContain ? { maxHeight: 720 } : { maxHeight: 140 }} />
+                  )}
+                  <Markdown remarkPlugins={[remarkGfm]}>{node.text || ''}</Markdown>
+                  {docImages.length > 0 && (
+                    <div className="mt-t4 grid grid-cols-2 gap-t3">
+                      {docImages.map((src, i) => (
+                        <img key={i} src={src} alt="" draggable={false} className="block w-full rounded-md border border-border object-cover" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); closeDoc(); }}
+                  title="닫기 (Esc)"
+                  className="absolute right-t5 top-t5 inline-flex h-11 w-11 items-center justify-center rounded-pill border border-border bg-surface/90 text-fg-2 shadow-lg backdrop-blur-sm hover:border-accent hover:bg-accent hover:text-on-accent"
+                >
+                  <Icon name="x" size={20} />
+                </button>
+              </div>
+            )}
+          </ZoomOverlay>,
+          document.body,
+        )}
         {/* 문서 카드 — 선택 시 바운딩박스 하단 툴바: (좌)저장·좋아요  (우)편집 */}
         {isDoc && selected && !editing && !node.locked && (
           <div
