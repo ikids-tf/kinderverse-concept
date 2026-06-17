@@ -7,7 +7,7 @@
  */
 import { callGateway } from "@/ai/client";
 import type { ImageProvider, ImageAsset } from "./providers";
-import { assertNotChildPhoto } from "./providers";
+import { assertNotChildMedia } from "./providers";
 
 const GAME_ITEM_STYLE =
   "밝고 둥근 파스텔 유아 그림책 일러스트, 단 하나의 오브젝트만, 균일한 흰 배경, " +
@@ -30,7 +30,7 @@ export class NanoBananaImageProvider implements ImageProvider {
   }
 
   async editVariant(asset: ImageAsset, instruction: string): Promise<ImageAsset> {
-    assertNotChildPhoto(asset); // 🔴 외부 전송 전 가드(child-photo 금지)
+    assertNotChildMedia(asset); // 🔴 외부 전송 전 가드(child-photo/child-video 금지)
     const res = await callGateway({
       task: "image",
       provider: "auto",

@@ -38,4 +38,5 @@ React 18 + Vite + TS + Tailwind. 애니 **Motion 12(설치됨)** + **Rive(`@rive
 
 ## M0 범위
 - **포함**: `src/game-viewer/v2/` 런타임 플레이어(React), 인터랙션 2종(`tap-the-right-one`·`match-pair`) + 효과 `reveal`, `theme.ts` 파스텔, Motion 프리셋 라이브러리, 보상 오케스트레이터, Provider 4계약 + M0 stub, `main.tsx` v2 스위치, 픽스처 직접 투입.
+- 🔴 **스키마는 이미 전 부품 카탈로그(인터랙션 11종) + extend + 가로 레인 + video 까지 반영·검증됨** — M0는 그중 **tap/match/reveal 런타임만** 구현한다. 스키마 재작성 금지(필요 시 ADDITIVE만).
 - **제외(후속)**: Resolver/추천카드/프롬프트(M2), Rive `responsive-state`(M2~M3), 스타일락 실생성(M3), 직접 에디터(M1), realtime-arcade(격리·후순위), 옛 GameSpec 제거(M0 후).

@@ -22,7 +22,8 @@
 
 ## 이미 끝난 것 (M0 토대, 전부 검증됨)
 
-- ✅ **InteractiveDoc 스키마** — **zod 4.4.3**에서 타입 통과 + 픽스처 4/4 파싱 + 잘못된 문서 3종 거부.
+- ✅ **InteractiveDoc 스키마 (전 부품 카탈로그 반영·검증됨)** — 인터랙션 11종(tap·match·binary·connect·flip·combine·categorize·order-sequence·find-it·sequence-tap·pattern-next) + 효과 3종(reveal·responsive-state·goal-state) + **확장활동(extend, 가로 레인)** + **video 노드/콘텐츠 + child-video 가드**. zod 4.4.3에서 **타입 통과 + 픽스처 10/10 + 잘못된 문서 4종 거부.**
+  - ⚠️ 스키마는 런타임보다 앞서 자란다 — **M0 런타임은 그중 tap·match + reveal 만 구현**(나머지는 후속, 미구현 kind는 graceful default).
 - ✅ **theme.ts / providers.ts** — strict + DOM + noUnused 타입 통과. (Provider 4계약 + M0 stub + child-photo 가드 + TTS 캐싱 골격.)
 - ✅ **런타임 레퍼런스** — 3개 픽스처 실제 플레이(동물·짝·텃밭 뽑기). "스키마 → 플레이" 증명.
 

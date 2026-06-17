@@ -21,7 +21,7 @@ import { NanoBananaImageProvider } from "./nanoBanana";
 
 /* ════════════ 공통 타입 ════════════ */
 
-export type AssetKind = "child-photo" | "uploaded" | "generated" | "curated";
+export type AssetKind = "child-photo" | "child-video" | "uploaded" | "generated" | "curated";
 
 export interface ImageAsset {
   assetId: string;
@@ -30,16 +30,22 @@ export interface ImageAsset {
   kind: AssetKind;
 }
 
-/** 🔴 child-photo 외부 전송 금지 가드. 외부 이미지 API 호출 직전 반드시 통과시킨다. */
-export class ChildPhotoToExternalError extends Error {
+/** 🔴 child-photo/child-video 외부 전송 금지 가드. 외부 API 호출 직전 반드시 통과. */
+export class ChildMediaToExternalError extends Error {
   constructor() {
-    super("child-photo 는 외부 이미지 API로 전송할 수 없습니다.");
-    this.name = "ChildPhotoToExternalError";
+    super("child-photo/child-video 는 외부 API로 전송할 수 없습니다.");
+    this.name = "ChildMediaToExternalError";
   }
 }
-export function assertNotChildPhoto(asset: { kind: AssetKind }): void {
-  if (asset.kind === "child-photo") throw new ChildPhotoToExternalError();
+export function assertNotChildMedia(asset: { kind: AssetKind }): void {
+  if (asset.kind === "child-photo" || asset.kind === "child-video") {
+    throw new ChildMediaToExternalError();
+  }
 }
+/** @deprecated assertNotChildMedia 사용 (child-video 포함). */
+export const assertNotChildPhoto = assertNotChildMedia;
+/** @deprecated ChildMediaToExternalError 사용. */
+export const ChildPhotoToExternalError = ChildMediaToExternalError;
 
 /* ════════════ ImageProvider (현재 구현: 나노바나나 / Gemini) ════════════ */
 

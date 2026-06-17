@@ -23,7 +23,7 @@ export const SCHEMA_VERSION = "0.1.0" as const;
 export const NodeId = z.string().min(1);
 
 export const Transform = z.object({
-  x: z.number().min(0).max(1),
+  x: z.number().min(0), // 가로 레인: 1 초과 가능(play 오른쪽으로 확장). y/w/h 는 0..1.
   y: z.number().min(0).max(1),
   w: z.number().min(0).max(1),
   h: z.number().min(0).max(1),
@@ -61,10 +61,15 @@ export const CutoutState = z.enum(["none", "pending", "ready"]);
 export const AssetVariant = z.enum([
   "full", "cutout", "silhouette", "leaf-crop", "crop",
 ]);
+/** 에셋 출처. 🔴 child-photo/child-video 는 외부 API 미전송(providers 가드). */
+export const AssetKind = z.enum([
+  "child-photo", "child-video", "uploaded", "generated", "curated",
+]);
 
 /** 보드와 공유되는 에셋 참조(Supabase Storage 동일 객체) + 비동기 컷아웃 상태. */
 export const AssetRef = z.object({
   assetId: z.string().min(1),
+  kind: AssetKind.default("uploaded"),
   variant: AssetVariant.default("full"),
   cutout: CutoutState.default("none"),
   styleLock: z.boolean().default(false),
@@ -85,6 +90,7 @@ export const ContentBinding = z.discriminatedUnion("type", [
   z.object({ type: z.literal("asset"), asset: AssetRef }),
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("emoji"), emoji: z.string() }),
+  z.object({ type: z.literal("video"), asset: AssetRef }),
 ]);
 
 /* ───────────────────────── 장면 노드 ───────────────────────── */
@@ -129,10 +135,19 @@ export const GroupNode = NodeBase.extend({
   type: z.literal("group"),
   children: z.array(NodeId),
 });
+export const VideoNode = NodeBase.extend({
+  type: z.literal("video"),
+  asset: AssetRef,
+  poster: z.string().optional(),
+  autoplay: z.boolean().default(false),
+  loop: z.boolean().default(false),
+  muted: z.boolean().default(true),          // 음성 우선: 기본 음소거
+  controls: z.enum(["none", "tap"]).default("tap"),
+});
 
 export const SceneNode = z.discriminatedUnion("type", [
   ImageNode, TextNode, ShapeNode, StickerNode,
-  SlotNode, ZoneNode, RiveNode, GroupNode,
+  SlotNode, ZoneNode, RiveNode, GroupNode, VideoNode,
 ]);
 
 /* ──────────────── 인터랙션 (정확히 1개, 타입드 라운드 소유) ──────────────── */
@@ -218,8 +233,72 @@ export const Combine = z.object({
     .min(1),
 });
 
+/** 분류 — 아이템을 알맞은 버킷으로. */
+export const Categorize = z.object({
+  kind: z.literal("categorize"),
+  itemSlotIds: z.array(NodeId).min(1),
+  bucketSlotIds: z.array(NodeId).min(2),
+  rounds: z
+    .array(
+      z.object({
+        buckets: z.array(ContentBinding).min(2),
+        items: z
+          .array(z.object({ content: ContentBinding, bucket: z.number().int().min(0) }))
+          .min(1),
+      })
+    )
+    .min(1),
+});
+
+/** 순서 정렬 — 셔플된 카드를 올바른 순서로(steps 가 정답 순서). */
+export const OrderSequence = z.object({
+  kind: z.literal("order-sequence"),
+  slotIds: z.array(NodeId).min(2),
+  rounds: z.array(z.object({ steps: z.array(ContentBinding).min(2) })).min(1),
+});
+
+/** 숨은그림/장면 탐색 — cue 를 장면 속 정답 zone 에서 찾기. */
+export const FindIt = z.object({
+  kind: z.literal("find-it"),
+  sceneNodeId: NodeId,
+  rounds: z
+    .array(
+      z.object({
+        finds: z.array(z.object({ cue: ContentBinding, targetZoneId: NodeId })).min(1),
+      })
+    )
+    .min(1),
+});
+
+/** 순서 터치 — 순서대로 터치해 진행/세기(캐릭터 연출용). */
+export const SequenceTap = z.object({
+  kind: z.literal("sequence-tap"),
+  actorNodeId: NodeId.optional(),
+  stepSlotIds: z.array(NodeId).optional(),
+  rounds: z
+    .array(
+      z.object({
+        steps: z
+          .array(z.object({ content: ContentBinding, count: z.number().int().min(1).default(1) }))
+          .min(1),
+      })
+    )
+    .min(1),
+});
+
+/** 패턴 잇기 — 수열 일부 제시 → 다음 항 고르기. */
+export const PatternNext = z.object({
+  kind: z.literal("pattern-next"),
+  sequenceSlotIds: z.array(NodeId).min(1),
+  optionSlotIds: z.array(NodeId).min(2),
+  rounds: z
+    .array(z.object({ sequence: z.array(ContentBinding).min(1), options: z.array(Option).min(2) }))
+    .min(1),
+});
+
 export const Interaction = z.discriminatedUnion("kind", [
   TapTheRightOne, MatchPair, BinaryChoice, Connect, FlipMemory, Combine,
+  Categorize, OrderSequence, FindIt, SequenceTap, PatternNext,
 ]);
 
 /* ──────────────── 효과 (조합 가능, 라운드 미소유) ──────────────── */
@@ -263,6 +342,26 @@ export const Effect = z.discriminatedUnion("kind", [
   RevealEffect, ResponsiveStateEffect, GoalStateEffect,
 ]);
 
+/* ──────────────── 확장활동 (게임=도입, 확장=본체) ──────────────── */
+
+/** 누리과정 영역 태그 — 카피 불가능한 교육 메타데이터. */
+export const NuriArea = z.enum([
+  "communication", "nature-inquiry", "social", "art", "physical",
+]);
+
+/**
+ * 확장활동 — 게임 클리어 후 같은 가로 레인의 '오른쪽'에서 진행(교사 진행형).
+ * 채점 아님. 별도 페이지가 아니라 레인 위 다음 구간.
+ */
+export const ExtendActivity = z.object({
+  type: z.enum(["discuss", "story", "name-create", "connect-apply", "move-express"]),
+  prompts: z.array(z.string()).min(1), // 교사 진행 질문/지시 (아이 눈높이, TTS로도 읽힘)
+  tts: z.boolean().default(true),
+  nuri: z.array(NuriArea).optional(),
+  laneX: z.number().min(0).optional(), // play 오른쪽 레인 시작 x(>1 권장). 카메라가 여기로 팬.
+  // DEFERRED: response?: "none"|"draw"|"voice"|"choice" — 아이 응답 수집(후속, 프라이버시)
+});
+
 /* ──────────────── 설정(해소된 노브) · 보상 ──────────────── */
 
 export const Settings = z.object({
@@ -296,6 +395,7 @@ export const Stage = z.object({
   background: z
     .union([ContentBinding, z.object({ colorRole: z.string() })])
     .optional(),
+  laneWidth: z.number().min(1).default(1), // 가로 레인 폭(1=한 화면, >1=오른쪽으로 확장)
   nodes: z.array(SceneNode).min(1),
 });
 
@@ -318,6 +418,7 @@ export const InteractiveDoc = z
     stage: Stage,
     interaction: Interaction,
     effects: z.array(Effect).default([]),
+    extend: z.array(ExtendActivity).default([]), // play 다음, 같은 레인 오른쪽 (0..N)
     rewards: Rewards, // 필수: '{}' 로 주면 내부 기본값이 채워짐
   })
   .superRefine((doc, ctx) => {
@@ -341,6 +442,9 @@ export const InteractiveDoc = z
         });
       }
     };
+    const zoneIds = new Set(
+      doc.stage.nodes.filter((n) => n.type === "zone").map((n) => n.id)
+    );
 
     // 2) 인터랙션이 참조하는 슬롯 존재 + 라운드 정합성
     const it = doc.interaction;
@@ -366,6 +470,50 @@ export const InteractiveDoc = z
     } else if (it.kind === "combine") {
       it.ingredientSlotIds.forEach((id) => need(id, "interaction.ingredientSlotIds"));
       need(it.resultSlotId, "interaction.resultSlotId");
+    } else if (it.kind === "categorize") {
+      it.itemSlotIds.forEach((id) => need(id, "interaction.itemSlotIds"));
+      it.bucketSlotIds.forEach((id) => need(id, "interaction.bucketSlotIds"));
+      it.rounds.forEach((r, i) =>
+        r.items.forEach((item, j) => {
+          if (item.bucket >= r.buckets.length) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `round ${i} item ${j}: bucket 인덱스(${item.bucket})가 buckets 범위 밖`,
+              path: ["interaction", "rounds", i, "items", j],
+            });
+          }
+        })
+      );
+    } else if (it.kind === "order-sequence") {
+      it.slotIds.forEach((id) => need(id, "interaction.slotIds"));
+    } else if (it.kind === "find-it") {
+      need(it.sceneNodeId, "interaction.sceneNodeId");
+      it.rounds.forEach((r, i) =>
+        r.finds.forEach((f, j) => {
+          need(f.targetZoneId, `interaction.rounds[${i}].finds[${j}].targetZoneId`);
+          if (ids.has(f.targetZoneId) && !zoneIds.has(f.targetZoneId)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `find-it targetZoneId 는 'zone' 노드여야 함: ${f.targetZoneId}`,
+            });
+          }
+        })
+      );
+    } else if (it.kind === "sequence-tap") {
+      if (it.actorNodeId) need(it.actorNodeId, "interaction.actorNodeId");
+      if (it.stepSlotIds) it.stepSlotIds.forEach((id) => need(id, "interaction.stepSlotIds"));
+    } else if (it.kind === "pattern-next") {
+      it.sequenceSlotIds.forEach((id) => need(id, "interaction.sequenceSlotIds"));
+      it.optionSlotIds.forEach((id) => need(id, "interaction.optionSlotIds"));
+      it.rounds.forEach((r, i) => {
+        if (!r.options.some((o) => o.correct)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `round ${i}: 정답 옵션이 없음`,
+            path: ["interaction", "rounds", i],
+          });
+        }
+      });
     }
 
     // 3) 효과가 참조하는 노드 존재 + responsive-state는 rive 노드여야 함
@@ -394,6 +542,9 @@ export const InteractiveDoc = z
 
 export type InteractiveDoc = z.infer<typeof InteractiveDoc>;
 export type InteractiveDocInput = z.input<typeof InteractiveDoc>;
+export type ExtendActivity = z.infer<typeof ExtendActivity>;
+export type NuriArea = z.infer<typeof NuriArea>;
+export type AssetKind = z.infer<typeof AssetKind>;
 export type SceneNode = z.infer<typeof SceneNode>;
 export type Interaction = z.infer<typeof Interaction>;
 export type Effect = z.infer<typeof Effect>;

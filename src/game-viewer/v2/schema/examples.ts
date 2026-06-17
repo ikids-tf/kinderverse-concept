@@ -45,6 +45,9 @@ export const tapTheRightOneExample: InteractiveDocInput = {
       },
     ],
   },
+  extend: [
+    { type: "discuss", prompts: ["이 동물은 어디에 살까요?", "무엇을 먹을까요?"], nuri: ["nature-inquiry", "communication"], laneX: 1.1 },
+  ],
   rewards: { confetti: "full" },
 };
 
@@ -117,6 +120,9 @@ export const revealAndCollectExample: InteractiveDocInput = {
       dust: true,
     },
   ],
+  extend: [
+    { type: "name-create", prompts: ["이 채소로 무슨 요리를 만들 수 있을까요?"], nuri: ["nature-inquiry", "communication"], laneX: 1.1 },
+  ],
   rewards: { confetti: "full" },
 };
 
@@ -159,5 +165,105 @@ export const responsiveStateExample: InteractiveDocInput = {
       goalState: "happy",
     },
   ],
+  rewards: { confetti: "light" },
+};
+
+/* ════════ 카탈로그 확장 부품 픽스처 (categorize / order-sequence / find-it / sequence-tap / pattern-next / video) ════════ */
+
+/* 색깔 분류 — categorize */
+export const categorizeExample: InteractiveDocInput = {
+  meta: { id: "ex_color_sort", title: "색깔 분류 미션", archetype: "categorize", createdFrom: "prompt" },
+  settings: { difficulty: "toddler", length: 1, optionCount: 2 },
+  stage: { nodes: [
+    { id: "b0", type: "slot", role: "slot", transform: { x: .3, y: .25, w: .3, h: .2 } },
+    { id: "b1", type: "slot", role: "slot", transform: { x: .7, y: .25, w: .3, h: .2 } },
+    { id: "i0", type: "slot", role: "slot", transform: { x: .25, y: .75, w: .18, h: .18 } },
+    { id: "i1", type: "slot", role: "slot", transform: { x: .5, y: .75, w: .18, h: .18 } },
+    { id: "i2", type: "slot", role: "slot", transform: { x: .75, y: .75, w: .18, h: .18 } },
+  ] },
+  interaction: { kind: "categorize", itemSlotIds: ["i0", "i1", "i2"], bucketSlotIds: ["b0", "b1"],
+    rounds: [{ buckets: [{ type: "text", text: "빨강" }, { type: "text", text: "파랑" }],
+      items: [{ content: { type: "emoji", emoji: "🍎" }, bucket: 0 }, { content: { type: "emoji", emoji: "🫐" }, bucket: 1 }, { content: { type: "emoji", emoji: "🍓" }, bucket: 0 }] }] },
+  rewards: {},
+};
+
+/* 자라는 순서 — order-sequence (+ discuss 확장) */
+export const orderSequenceExample: InteractiveDocInput = {
+  meta: { id: "ex_grow_order", title: "자라는 순서 맞추기", archetype: "order-sequence", createdFrom: "prompt" },
+  settings: { length: 1 },
+  stage: { nodes: [
+    { id: "s0", type: "slot", transform: { x: .2, y: .5, w: .18, h: .3 } },
+    { id: "s1", type: "slot", transform: { x: .4, y: .5, w: .18, h: .3 } },
+    { id: "s2", type: "slot", transform: { x: .6, y: .5, w: .18, h: .3 } },
+    { id: "s3", type: "slot", transform: { x: .8, y: .5, w: .18, h: .3 } },
+  ] },
+  interaction: { kind: "order-sequence", slotIds: ["s0", "s1", "s2", "s3"],
+    rounds: [{ steps: [{ type: "emoji", emoji: "🌰" }, { type: "emoji", emoji: "🌱" }, { type: "emoji", emoji: "🌷" }, { type: "emoji", emoji: "🍎" }] }] },
+  extend: [{ type: "discuss", prompts: ["왜 이 순서라고 생각했어요?"], nuri: ["nature-inquiry", "communication"], laneX: 1.1 }],
+  rewards: {},
+};
+
+/* 교실에서 찾기 — find-it (zone 노드 사용) */
+export const findItExample: InteractiveDocInput = {
+  meta: { id: "ex_find_classroom", title: "교실에서 찾아요", archetype: "find-it", createdFrom: "prompt" },
+  settings: { length: 1 },
+  stage: { nodes: [
+    { id: "scene", type: "image", role: "decoration", transform: { x: .5, y: .45, w: 1, h: .8 } },
+    { id: "z_hat", type: "zone", transform: { x: .3, y: .4, w: .15, h: .15 } },
+    { id: "z_ball", type: "zone", transform: { x: .7, y: .6, w: .15, h: .15 } },
+  ] },
+  interaction: { kind: "find-it", sceneNodeId: "scene",
+    rounds: [{ finds: [{ cue: { type: "text", text: "빨간 모자" }, targetZoneId: "z_hat" }] }] },
+  rewards: {},
+};
+
+/* 개구리 점프 세기 — sequence-tap (+ move-express 확장) */
+export const sequenceTapExample: InteractiveDocInput = {
+  meta: { id: "ex_frog_jump", title: "개구리 점프 세기", archetype: "sequence-tap", createdFrom: "prompt" },
+  settings: { difficulty: "toddler", length: 1 },
+  stage: { nodes: [
+    { id: "frog", type: "rive", role: "actor", src: "frog.riv", stateMachine: "jump", transform: { x: .5, y: .3, w: .3, h: .3 } },
+    { id: "p0", type: "slot", transform: { x: .25, y: .75, w: .15, h: .15 } },
+    { id: "p1", type: "slot", transform: { x: .5, y: .75, w: .15, h: .15 } },
+    { id: "p2", type: "slot", transform: { x: .75, y: .75, w: .15, h: .15 } },
+  ] },
+  interaction: { kind: "sequence-tap", actorNodeId: "frog", stepSlotIds: ["p0", "p1", "p2"],
+    rounds: [{ steps: [{ content: { type: "emoji", emoji: "🪷" } }, { content: { type: "emoji", emoji: "🪷" } }, { content: { type: "emoji", emoji: "🪷" } }] }] },
+  extend: [{ type: "move-express", prompts: ["개구리처럼 세 번 점프해볼까요?"], nuri: ["physical"], laneX: 1.1 }],
+  rewards: {},
+};
+
+/* 패턴 잇기 — pattern-next */
+export const patternNextExample: InteractiveDocInput = {
+  meta: { id: "ex_pattern", title: "다음에 올 친구는?", archetype: "pattern-next", createdFrom: "prompt" },
+  settings: { length: 1, optionCount: 3 },
+  stage: { nodes: [
+    { id: "q0", type: "slot", transform: { x: .15, y: .35, w: .15, h: .18 } },
+    { id: "q1", type: "slot", transform: { x: .33, y: .35, w: .15, h: .18 } },
+    { id: "q2", type: "slot", transform: { x: .51, y: .35, w: .15, h: .18 } },
+    { id: "q3", type: "slot", transform: { x: .69, y: .35, w: .15, h: .18 } },
+    { id: "o0", type: "slot", role: "option", transform: { x: .25, y: .78, w: .18, h: .16 } },
+    { id: "o1", type: "slot", role: "option", transform: { x: .5, y: .78, w: .18, h: .16 } },
+    { id: "o2", type: "slot", role: "option", transform: { x: .75, y: .78, w: .18, h: .16 } },
+  ] },
+  interaction: { kind: "pattern-next", sequenceSlotIds: ["q0", "q1", "q2", "q3"], optionSlotIds: ["o0", "o1", "o2"],
+    rounds: [{ sequence: [{ type: "emoji", emoji: "🔴" }, { type: "emoji", emoji: "🔵" }, { type: "emoji", emoji: "🔴" }, { type: "emoji", emoji: "🔵" }],
+      options: [{ content: { type: "emoji", emoji: "🔴" }, correct: true }, { content: { type: "emoji", emoji: "🟡" } }, { content: { type: "emoji", emoji: "🔺" } }] }] },
+  rewards: {},
+};
+
+/* 영상 보고 맞추기 — video 노드 + video ContentBinding */
+export const videoCueExample: InteractiveDocInput = {
+  meta: { id: "ex_video_cue", title: "영상 보고 맞추기", archetype: "tap-the-right-one", createdFrom: "prompt" },
+  settings: { length: 1, optionCount: 3 },
+  stage: { nodes: [
+    { id: "clip", type: "video", role: "cue", asset: { assetId: "clip_caterpillar", kind: "curated" }, muted: true, autoplay: true, loop: true, transform: { x: .5, y: .32, w: .6, h: .42 } },
+    { id: "opt0", type: "slot", role: "option", transform: { x: .2, y: .8, w: .22, h: .16 } },
+    { id: "opt1", type: "slot", role: "option", transform: { x: .5, y: .8, w: .22, h: .16 } },
+    { id: "opt2", type: "slot", role: "option", transform: { x: .8, y: .8, w: .22, h: .16 } },
+  ] },
+  interaction: { kind: "tap-the-right-one", cueSlotId: "clip", optionSlotIds: ["opt0", "opt1", "opt2"],
+    rounds: [{ cue: { type: "video", asset: { assetId: "clip_caterpillar", kind: "curated" } },
+      options: [{ content: { type: "text", text: "애벌레" }, correct: true }, { content: { type: "text", text: "나비" } }, { content: { type: "text", text: "개미" } }] }] },
   rewards: { confetti: "light" },
 };
