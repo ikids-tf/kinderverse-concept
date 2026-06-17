@@ -10,7 +10,8 @@ import { SamModel, AutoProcessor, RawImage, Tensor, env } from '@huggingface/tra
 
 env.allowLocalModels = false;
 try {
-  env.backends.onnx.wasm.numThreads = Math.min((navigator as Navigator).hardwareConcurrency || 4, 8);
+  const wasm = env.backends?.onnx?.wasm;
+  if (wasm) wasm.numThreads = Math.min((navigator as Navigator).hardwareConcurrency || 4, 8);
 } catch {
   /* 무시 */
 }

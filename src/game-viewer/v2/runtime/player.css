@@ -1,0 +1,157 @@
+/* player.css — 게임 뷰어 런타임 구조 스타일.
+   🔴 색·라운드·그림자·스프링 토큰은 App 루트에 주입된 CSS 변수(theme.ts cssVars)를 소비만 한다.
+   여기엔 토큰 하드코딩 없음(레퍼런스 프로토 스타일을 변수 소비형으로 옮김).
+   애니메이션(등장/반응/뽑힘)은 CSS가 아니라 Motion이 담당 — 여기선 hover/focus 트랜지션만. */
+
+.kv-v2 { min-width: 320px; -webkit-font-smoothing: antialiased; }
+.kv-v2 *, .kv-v2 *::before, .kv-v2 *::after { box-sizing: border-box; }
+.kv-v2 .jua { font-family: var(--font-display, "Jua", sans-serif); }
+.kv-v2 .wrap { max-width: 860px; margin: 0 auto; padding: 18px 16px 40px; }
+
+/* ── 교사 크롬 ── */
+.kv-v2 .chrome { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.kv-v2 .switcher { display: flex; gap: 8px; flex-wrap: wrap; }
+.kv-v2 .pill {
+  font: inherit; font-weight: 700; cursor: pointer; border: 2px solid #F0E4D8;
+  background: var(--card); color: var(--ink-soft); padding: 9px 15px; border-radius: 999px;
+  box-shadow: var(--shadow-sm); transition: transform .18s var(--spring), color .18s, border-color .18s, background .18s;
+}
+.kv-v2 .pill:hover { transform: translateY(-2px); }
+.kv-v2 .pill[aria-pressed="true"] { color: #fff; background: var(--coral); border-color: var(--coral); }
+.kv-v2 .pill:focus-visible { outline: 4px solid rgba(255,158,125,.5); outline-offset: 2px; }
+
+.kv-v2 .knobs { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+.kv-v2 .chip {
+  font-size: 12px; font-weight: 700; color: var(--ink-soft);
+  background: var(--card); border: 2px solid #F0E4D8; border-radius: 999px; padding: 6px 11px; box-shadow: var(--shadow-sm);
+}
+.kv-v2 .chip b { color: var(--ink); }
+.kv-v2 .icon-btn {
+  width: 40px; height: 40px; border-radius: 50%; border: 2px solid #F0E4D8; background: var(--card);
+  cursor: pointer; font-size: 18px; box-shadow: var(--shadow-sm); line-height: 1;
+}
+.kv-v2 .icon-btn:focus-visible { outline: 4px solid rgba(255,158,125,.5); outline-offset: 2px; }
+
+/* ── 상태 줄 ── */
+.kv-v2 .statusbar { display: flex; align-items: center; justify-content: space-between; margin: 4px 2px 12px; }
+.kv-v2 .round-txt { font-size: 14px; font-weight: 700; color: var(--ink-soft); }
+.kv-v2 .round-txt b { color: var(--coral); font-size: 17px; }
+.kv-v2 .stars { display: flex; gap: 5px; }
+.kv-v2 .star { font-size: 22px; filter: grayscale(1) opacity(.32); transition: filter .35s, transform .35s var(--spring); }
+.kv-v2 .star.on { filter: none; transform: scale(1.12); }
+
+/* ── 무대 ── */
+.kv-v2 .stage-frame {
+  position: relative; border-radius: var(--r-lg); padding: 8px;
+  background:
+    radial-gradient(120% 90% at 12% 8%, var(--bg-peach), transparent 60%),
+    radial-gradient(110% 90% at 92% 12%, var(--bg-sky), transparent 58%),
+    radial-gradient(120% 100% at 50% 110%, var(--bg-mint), transparent 60%),
+    var(--card);
+  box-shadow: var(--shadow); border: 6px solid #fff; overflow: hidden;
+}
+.kv-v2 .stage { position: relative; width: 100%; aspect-ratio: 4/3; border-radius: var(--r-md); overflow: hidden; }
+.kv-v2 .blob { position: absolute; border-radius: 50%; opacity: .5; pointer-events: none; }
+.kv-v2 .blob.a { width: 42%; height: 42%; background: var(--butter); top: -12%; left: -8%; }
+.kv-v2 .blob.b { width: 34%; height: 34%; background: var(--mint); bottom: -10%; right: -6%; opacity: .42; }
+
+.kv-v2 .node { position: absolute; display: flex; align-items: center; justify-content: center; }
+.kv-v2 .node-inner { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.kv-v2 .photo {
+  width: 100%; height: 100%; border-radius: var(--r-md);
+  background: linear-gradient(180deg, #FFFDF9, #FBF1E6);
+  box-shadow: inset 0 0 0 5px #fff, var(--shadow-sm);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.kv-v2 .photo img { width: 100%; height: 100%; object-fit: contain; }
+.kv-v2 .emoji { line-height: 1; user-select: none; }
+.kv-v2 .soil {
+  width: 100%; height: 100%; border-radius: 26px 26px 18px 18px;
+  background: linear-gradient(180deg, var(--soil), var(--soil-dk));
+  box-shadow: inset 0 6px 0 rgba(255,255,255,.18), var(--shadow-sm); position: relative;
+}
+.kv-v2 .soil::before {
+  content: ""; position: absolute; inset: 8px 14px auto 14px; height: 8px; border-radius: 6px;
+  background: repeating-linear-gradient(90deg, rgba(255,255,255,.25) 0 10px, transparent 10px 22px);
+}
+
+/* 보기 버튼 */
+.kv-v2 .opt {
+  width: 100%; height: 100%; font: inherit; cursor: pointer; border: 3px solid #EBDFD2; background: var(--card);
+  border-radius: var(--r-md); box-shadow: var(--shadow-sm); display: flex; align-items: center; justify-content: center;
+  gap: 6px; color: var(--ink); transition: border-color .16s, background .16s;
+}
+.kv-v2 .opt .otxt { font-family: var(--font-display, "Jua", sans-serif); }
+.kv-v2 .opt:hover:not(:disabled) { border-color: var(--coral); }
+.kv-v2 .opt:focus-visible { outline: 4px solid rgba(255,158,125,.55); outline-offset: 3px; }
+.kv-v2 .opt:disabled { cursor: default; }
+.kv-v2 .opt.correct { background: var(--ok-bg); border-color: var(--ok-bd); color: var(--ok-ink); }
+.kv-v2 .opt.wrong { background: var(--no-bg); border-color: var(--no-bd); color: var(--no-ink); }
+.kv-v2 .opt.picked { border-color: var(--sky); background: #EAF3FD; }
+.kv-v2 .opt.locked { background: var(--ok-bg); border-color: var(--ok-bd); color: var(--ok-ink); }
+
+/* flip-memory 카드 (3D 플립) */
+.kv-v2 .flip-card {
+  position: relative; width: 100%; height: 100%; padding: 0; border: none; background: none;
+  cursor: pointer; transform-style: preserve-3d;
+}
+.kv-v2 .flip-card:disabled { cursor: default; }
+.kv-v2 .flip-card:focus-visible { outline: 4px solid rgba(255,158,125,.55); outline-offset: 3px; border-radius: var(--r-md); }
+.kv-v2 .flip-face {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--r-md); box-shadow: var(--shadow-sm); -webkit-backface-visibility: hidden; backface-visibility: hidden;
+}
+.kv-v2 .flip-face.back {
+  background: linear-gradient(160deg, var(--sky), var(--lilac)); border: 3px solid #fff;
+  font-size: 2.2rem; color: #fff;
+}
+.kv-v2 .flip-face.front { background: var(--card); border: 3px solid var(--mint); transform: rotateY(180deg); }
+.kv-v2 .flip-card.locked .flip-face.front { background: var(--ok-bg); border-color: var(--ok-bd); }
+
+/* 피드백 배너 */
+.kv-v2 .banner {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%) translateY(-16px);
+  opacity: 0; pointer-events: none; background: #fff; border-radius: 999px; padding: 9px 20px; box-shadow: var(--shadow);
+  font-family: var(--font-display, "Jua", sans-serif); font-size: 18px; display: flex; align-items: center; gap: 8px; z-index: 40;
+  transition: opacity .25s, transform .25s var(--spring);
+}
+.kv-v2 .banner.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.kv-v2 .banner.ok { color: var(--ok-ink); }
+.kv-v2 .banner.no { color: var(--no-ink); }
+
+/* 다음 버튼 */
+.kv-v2 .next {
+  position: absolute; right: 14px; bottom: 14px; font: inherit; font-family: var(--font-display, "Jua", sans-serif); font-size: 17px;
+  cursor: pointer; border: none; background: var(--coral); color: #fff; padding: 12px 22px; border-radius: 999px;
+  box-shadow: 0 10px 22px rgba(255,158,125,.45); opacity: 0; pointer-events: none; transform: translateY(8px); z-index: 40;
+  transition: opacity .25s, transform .25s var(--spring);
+}
+.kv-v2 .next.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+.kv-v2 .next:focus-visible { outline: 4px solid rgba(255,158,125,.55); outline-offset: 3px; }
+
+/* 시작 / 완료 오버레이 */
+.kv-v2 .overlay {
+  position: absolute; inset: 0; background: rgba(255,247,240,.86); backdrop-filter: blur(3px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 20px;
+  transition: opacity .3s; z-index: 50;
+}
+.kv-v2 .overlay.hide { opacity: 0; pointer-events: none; }
+.kv-v2 .overlay h2 { font-family: var(--font-display, "Jua", sans-serif); font-size: clamp(22px, 5vw, 30px); margin: 0; color: var(--ink); }
+.kv-v2 .overlay p { margin: 0; color: var(--ink-soft); font-weight: 700; max-width: 380px; }
+.kv-v2 .big-btn {
+  font: inherit; font-family: var(--font-display, "Jua", sans-serif); font-size: 20px; cursor: pointer; border: none; color: #fff;
+  background: var(--coral); padding: 14px 30px; border-radius: 999px; box-shadow: 0 12px 26px rgba(255,158,125,.45);
+  transition: transform .18s var(--spring);
+}
+.kv-v2 .big-btn:hover { transform: translateY(-2px) scale(1.02); }
+.kv-v2 .big-btn:focus-visible { outline: 4px solid rgba(255,158,125,.55); outline-offset: 3px; }
+.kv-v2 .finish-emoji { font-size: 60px; }
+.kv-v2 .finish-stars { display: flex; gap: 8px; }
+.kv-v2 .finish-stars .star { font-size: 34px; }
+
+.kv-v2 .note { margin-top: 16px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.6; text-align: center; }
+.kv-v2 .note code { background: #F4EADF; padding: 1px 6px; border-radius: 6px; font-size: 11.5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kv-v2 * { transition-duration: .01ms !important; }
+}

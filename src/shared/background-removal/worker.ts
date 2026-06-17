@@ -24,7 +24,8 @@ import type { WorkerRequest, WorkerResponse } from './types';
 env.allowLocalModels = false;
 // 멀티스레드 WASM — cross-origin isolated 환경에서만 실제로 켜진다(아니면 1스레드로 폴백).
 try {
-  env.backends.onnx.wasm.numThreads = Math.min((navigator as Navigator).hardwareConcurrency || 4, 8);
+  const wasm = env.backends?.onnx?.wasm;
+  if (wasm) wasm.numThreads = Math.min((navigator as Navigator).hardwareConcurrency || 4, 8);
 } catch {
   /* 일부 환경에서 설정 불가 — 무시(기본값 사용) */
 }

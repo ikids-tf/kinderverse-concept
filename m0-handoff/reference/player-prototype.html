@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>킨더버스 게임 뷰어 — 런타임 플레이어 프로토타입</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jua&family=Gaegu:wght@700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/canvas-confetti/1.9.3/confetti.browser.min.js"></script>
+<style>
+  /* ── 게임 뷰어 전용 파스텔 테마 (Milray Park 미적용) ── */
+  :root{
+    --bg:#FFF7F0; --bg-peach:#FDE9DD; --bg-mint:#E2F3EC; --bg-sky:#E5F0FC;
+    --ink:#574B3E; --ink-soft:#8C7E6E;
+    --card:#FFFFFF;
+    --coral:#FF9E7D; --mint:#8FD9C3; --sky:#9BC9F2; --butter:#FFD98A; --lilac:#CDBBE8;
+    --ok-bg:#CFEFD9; --ok-bd:#86CFA0; --ok-ink:#3E7A57;
+    --no-bg:#FBD9D3; --no-bd:#F0A89E; --no-ink:#9A4E45;
+    --soil:#B98A5E; --soil-dk:#9C6E45;
+    --r-lg:30px; --r-md:22px; --r-sm:16px;
+    --shadow:0 14px 34px rgba(120,92,60,.16);
+    --shadow-sm:0 6px 16px rgba(120,92,60,.13);
+    --spring:cubic-bezier(.34,1.56,.64,1);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{
+    font-family:"Pretendard",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    color:var(--ink); background:var(--bg); min-width:320px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .jua{font-family:"Jua",sans-serif;}
+  .wrap{max-width:860px; margin:0 auto; padding:18px 16px 40px;}
+
+  /* ── 교사 크롬 (상단) ── */
+  .chrome{display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  .switcher{display:flex; gap:8px; flex-wrap:wrap;}
+  .pill{
+    font:inherit; font-weight:700; cursor:pointer; border:2px solid #F0E4D8;
+    background:var(--card); color:var(--ink-soft); padding:9px 15px; border-radius:999px;
+    box-shadow:var(--shadow-sm); transition:transform .18s var(--spring), color .18s, border-color .18s, background .18s;
+  }
+  .pill:hover{transform:translateY(-2px);}
+  .pill[aria-pressed="true"]{color:#fff; background:var(--coral); border-color:var(--coral);}
+  .pill:focus-visible{outline:4px solid rgba(255,158,125,.5); outline-offset:2px;}
+
+  .knobs{display:flex; gap:7px; align-items:center; flex-wrap:wrap;}
+  .chip{
+    font-size:12px; font-weight:700; color:var(--ink-soft);
+    background:var(--card); border:2px solid #F0E4D8; border-radius:999px; padding:6px 11px; box-shadow:var(--shadow-sm);
+  }
+  .chip b{color:var(--ink);}
+  .icon-btn{
+    width:40px; height:40px; border-radius:50%; border:2px solid #F0E4D8; background:var(--card);
+    cursor:pointer; font-size:18px; box-shadow:var(--shadow-sm); line-height:1;
+  }
+  .icon-btn:focus-visible{outline:4px solid rgba(255,158,125,.5); outline-offset:2px;}
+
+  /* ── 상태 줄 ── */
+  .statusbar{display:flex; align-items:center; justify-content:space-between; margin:4px 2px 12px;}
+  .round-txt{font-size:14px; font-weight:700; color:var(--ink-soft);}
+  .round-txt b{color:var(--coral); font-size:17px;}
+  .stars{display:flex; gap:5px;}
+  .star{font-size:22px; filter:grayscale(1) opacity(.32); transition:filter .35s, transform .35s var(--spring);}
+  .star.on{filter:none; transform:scale(1.12);}
+
+  /* ── 무대 ── */
+  .stage-frame{position:relative; border-radius:var(--r-lg); padding:8px; background:
+      radial-gradient(120% 90% at 12% 8%, var(--bg-peach), transparent 60%),
+      radial-gradient(110% 90% at 92% 12%, var(--bg-sky), transparent 58%),
+      radial-gradient(120% 100% at 50% 110%, var(--bg-mint), transparent 60%),
+      var(--card);
+    box-shadow:var(--shadow); border:6px solid #fff; overflow:hidden;}
+  .stage{position:relative; width:100%; aspect-ratio:4/3; border-radius:var(--r-md); overflow:hidden;}
+  .blob{position:absolute; border-radius:50%; opacity:.5; pointer-events:none;}
+  .blob.a{width:42%; height:42%; background:var(--butter); top:-12%; left:-8%;}
+  .blob.b{width:34%; height:34%; background:var(--mint); bottom:-10%; right:-6%; opacity:.42;}
+
+  .node{position:absolute; transform:translate(-50%,-50%); display:flex; align-items:center; justify-content:center;}
+  .photo{width:100%; height:100%; border-radius:var(--r-md); background:linear-gradient(180deg,#FFFDF9,#FBF1E6);
+    box-shadow:inset 0 0 0 5px #fff, var(--shadow-sm); display:flex; align-items:center; justify-content:center;}
+  .emoji{line-height:1; user-select:none;}
+  .soil{width:100%; height:100%; border-radius:26px 26px 18px 18px;
+    background:linear-gradient(180deg,var(--soil),var(--soil-dk)); box-shadow:inset 0 6px 0 rgba(255,255,255,.18), var(--shadow-sm);
+    position:relative;}
+  .soil::before{content:""; position:absolute; inset:8px 14px auto 14px; height:8px; border-radius:6px;
+    background:repeating-linear-gradient(90deg,rgba(255,255,255,.25) 0 10px,transparent 10px 22px);}
+
+  /* 보기 버튼 */
+  .opt{
+    width:100%; height:100%; font:inherit; cursor:pointer; border:3px solid #EBDFD2; background:var(--card);
+    border-radius:var(--r-md); box-shadow:var(--shadow-sm); display:flex; align-items:center; justify-content:center;
+    gap:6px; color:var(--ink); transition:transform .16s var(--spring), border-color .16s, background .16s;
+  }
+  .opt .otxt{font-family:"Jua",sans-serif;}
+  .opt:hover:not(:disabled){transform:translateY(-3px); border-color:var(--coral);}
+  .opt:focus-visible{outline:4px solid rgba(255,158,125,.55); outline-offset:3px;}
+  .opt:disabled{cursor:default;}
+  .opt.correct{background:var(--ok-bg); border-color:var(--ok-bd); color:var(--ok-ink);}
+  .opt.wrong{background:var(--no-bg); border-color:var(--no-bd); color:var(--no-ink);}
+  .opt.picked{border-color:var(--sky); background:#EAF3FD;}
+  .opt.locked{background:var(--ok-bg); border-color:var(--ok-bd); color:var(--ok-ink);}
+
+  /* 피드백 배너 */
+  .banner{position:absolute; left:50%; top:12px; transform:translateX(-50%) translateY(-16px);
+    opacity:0; pointer-events:none; background:#fff; border-radius:999px; padding:9px 20px; box-shadow:var(--shadow);
+    font-family:"Jua",sans-serif; font-size:18px; display:flex; align-items:center; gap:8px; transition:opacity .25s, transform .25s var(--spring);}
+  .banner.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .banner.ok{color:var(--ok-ink);} .banner.no{color:var(--no-ink);}
+
+  /* 다음 버튼 */
+  .next{
+    position:absolute; right:14px; bottom:14px; font:inherit; font-family:"Jua",sans-serif; font-size:17px;
+    cursor:pointer; border:none; background:var(--coral); color:#fff; padding:12px 22px; border-radius:999px;
+    box-shadow:0 10px 22px rgba(255,158,125,.45); opacity:0; pointer-events:none; transform:translateY(8px);
+    transition:opacity .25s, transform .25s var(--spring);
+  }
+  .next.show{opacity:1; pointer-events:auto; transform:translateY(0);}
+  .next:focus-visible{outline:4px solid rgba(255,158,125,.55); outline-offset:3px;}
+
+  /* 시작 / 완료 오버레이 */
+  .overlay{position:absolute; inset:0; background:rgba(255,247,240,.86); backdrop-filter:blur(3px);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; padding:20px;
+    transition:opacity .3s; z-index:50;}
+  .overlay.hide{opacity:0; pointer-events:none;}
+  .overlay h2{font-family:"Jua",sans-serif; font-size:clamp(22px,5vw,30px); margin:0; color:var(--ink);}
+  .overlay p{margin:0; color:var(--ink-soft); font-weight:700; max-width:380px;}
+  .big-btn{font:inherit; font-family:"Jua",sans-serif; font-size:20px; cursor:pointer; border:none; color:#fff;
+    background:var(--coral); padding:14px 30px; border-radius:999px; box-shadow:0 12px 26px rgba(255,158,125,.45);
+    transition:transform .18s var(--spring);}
+  .big-btn:hover{transform:translateY(-2px) scale(1.02);}
+  .big-btn:focus-visible{outline:4px solid rgba(255,158,125,.55); outline-offset:3px;}
+  .finish-emoji{font-size:60px;}
+  .finish-stars{display:flex; gap:8px;}
+  .finish-stars .star{font-size:34px;}
+
+  .note{margin-top:16px; font-size:12.5px; color:var(--ink-soft); line-height:1.6; text-align:center;}
+  .note code{background:#F4EADF; padding:1px 6px; border-radius:6px; font-size:11.5px;}
+
+  @media (prefers-reduced-motion: reduce){
+    *{transition-duration:.01ms !important;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 교사 크롬 -->
+  <div class="chrome">
+    <div class="switcher" id="switcher" role="group" aria-label="게임 선택"></div>
+    <div class="knobs">
+      <span class="chip" id="chipDiff">난이도 <b>—</b></span>
+      <span class="chip" id="chipMood">분위기 <b>—</b></span>
+      <button class="icon-btn" id="muteBtn" title="읽어주기 켜기/끄기" aria-label="읽어주기 켜기/끄기">🔊</button>
+    </div>
+  </div>
+
+  <!-- 상태 -->
+  <div class="statusbar">
+    <span class="round-txt">문제 <b id="roundNow">1</b> / <span id="roundTot">1</span></span>
+    <div class="stars" id="stars" aria-label="점수"></div>
+  </div>
+
+  <!-- 무대 -->
+  <div class="stage-frame">
+    <div class="stage" id="stage">
+      <div class="blob a"></div><div class="blob b"></div>
+      <div class="banner" id="banner"><span id="bannerEmoji">🎉</span><span id="bannerText"></span></div>
+      <button class="next" id="nextBtn">다음 <span aria-hidden="true">→</span></button>
+
+      <div class="overlay" id="startOverlay">
+        <div class="finish-emoji" aria-hidden="true">🐾</div>
+        <h2 class="jua" id="startTitle">게임을 시작해요</h2>
+        <p id="startDesc">아래 버튼을 누르면 시작!</p>
+        <button class="big-btn" id="startBtn">▶ 시작</button>
+      </div>
+
+      <div class="overlay hide" id="finishOverlay">
+        <div class="finish-emoji" aria-hidden="true">🎉</div>
+        <h2 class="jua">참 잘했어요!</h2>
+        <div class="finish-stars" id="finishStars"></div>
+        <p id="finishDesc"></p>
+        <button class="big-btn" id="restartBtn">↺ 다시 하기</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    이 화면은 <code>InteractiveDoc</code> 픽스처를 그대로 먹여 렌더한 것입니다 — 게임 코드를 새로 짠 게 아니라
+    <b>하나의 문서 → 하나의 런타임</b>으로 플레이됩니다. 위 칩은 문서의 <code>settings</code>(난이도·분위기·읽어주기)가
+    플레이에 반영되는 모습이고, 보상·음성·모션 프리셋은 문서를 따라 자동으로 조합됩니다.
+    <br>(프로토 한정: 이미지 assetId는 이모지로 대체, 모션 프리셋은 WAAPI로 구현 — 실제 빌드에선 실사진/생성이미지 + Motion 스프링.)
+  </p>
+</div>
+
+<script>
+"use strict";
+
+/* ════════════ InteractiveDoc 픽스처 (스키마로 검증된 형태) ════════════ */
+const FIXTURES = {
+  animal: {
+    meta:{ id:"ex_animal_guess", title:"누굴까? 동물 친구 맞추기", archetype:"tap-the-right-one" },
+    settings:{ difficulty:"toddler", length:2, mood:"lively", optionCount:3, tts:{enabled:true} },
+    stage:{ nodes:[
+      { id:"cue", type:"image", role:"cue", transform:{x:.5,y:.30,w:.46,h:.46}, animation:{entrance:"pop", idle:"breathe"} },
+      { id:"opt0", type:"slot", role:"option", transform:{x:.2,y:.82,w:.24,h:.18} },
+      { id:"opt1", type:"slot", role:"option", transform:{x:.5,y:.82,w:.24,h:.18} },
+      { id:"opt2", type:"slot", role:"option", transform:{x:.8,y:.82,w:.24,h:.18} },
+    ]},
+    interaction:{ kind:"tap-the-right-one", cueSlotId:"cue", optionSlotIds:["opt0","opt1","opt2"],
+      rounds:[
+        { cue:{type:"asset", asset:{assetId:"asset_elephant"}},
+          options:[{content:{type:"text",text:"코끼리"},correct:true},{content:{type:"text",text:"토끼"}},{content:{type:"text",text:"강아지"}}] },
+        { cue:{type:"asset", asset:{assetId:"asset_cat"}},
+          options:[{content:{type:"text",text:"펭귄"}},{content:{type:"text",text:"고양이"},correct:true},{content:{type:"text",text:"코끼리"}}] },
+      ] },
+    effects:[], rewards:{ confetti:"full" }
+  },
+
+  match: {
+    meta:{ id:"ex_concept_match", title:"관련 있는 친구 찾기", archetype:"match-pair" },
+    settings:{ difficulty:"senior", length:1, mood:"calm", optionCount:3, tts:{enabled:true} },
+    stage:{ nodes:[
+      { id:"L0", type:"slot", role:"slot", transform:{x:.26,y:.3,w:.32,h:.2} },
+      { id:"L1", type:"slot", role:"slot", transform:{x:.26,y:.62,w:.32,h:.2} },
+      { id:"R0", type:"slot", role:"slot", transform:{x:.74,y:.3,w:.32,h:.2} },
+      { id:"R1", type:"slot", role:"slot", transform:{x:.74,y:.62,w:.32,h:.2} },
+    ]},
+    interaction:{ kind:"match-pair", leftSlotIds:["L0","L1"], rightSlotIds:["R0","R1"],
+      rounds:[ { pairs:[
+        { left:{type:"emoji",emoji:"🚒"}, right:{type:"text",text:"소방관"} },
+        { left:{type:"emoji",emoji:"🍎"}, right:{type:"text",text:"사과나무"} },
+      ] } ] },
+    effects:[], rewards:{ confetti:"light" }
+  },
+
+  garden: {
+    meta:{ id:"ex_garden_pull", title:"텃밭에 심긴 채소 맞추기", archetype:"reveal-and-collect" },
+    settings:{ difficulty:"toddler", length:1, mood:"punchy", optionCount:3, tts:{enabled:true} },
+    stage:{ nodes:[
+      { id:"leaf",   type:"image", role:"cue",    transform:{x:.5,y:.46,w:.22,h:.22} },
+      { id:"carrot", type:"image", role:"hidden", transform:{x:.5,y:.86,w:.24,h:.44} },
+      { id:"soil",   type:"shape", role:"cover",  shape:"rect", transform:{x:.5,y:.80,w:1.06,h:.34} },
+      { id:"opt0", type:"slot", role:"option", transform:{x:.2,y:.90,w:.24,h:.14} },
+      { id:"opt1", type:"slot", role:"option", transform:{x:.5,y:.90,w:.24,h:.14} },
+      { id:"opt2", type:"slot", role:"option", transform:{x:.8,y:.90,w:.24,h:.14} },
+    ]},
+    interaction:{ kind:"tap-the-right-one", cueSlotId:"leaf", optionSlotIds:["opt0","opt1","opt2"],
+      rounds:[ { cue:{type:"asset", asset:{assetId:"asset_carrot_leaf", variant:"leaf-crop"}},
+        options:[{content:{type:"text",text:"당근"},correct:true},{content:{type:"text",text:"감자"}},{content:{type:"text",text:"양파"}}] } ] },
+    effects:[ { kind:"reveal", coverNodeId:"soil", hiddenNodeId:"carrot", cueNodeId:"leaf", trigger:"correct", motion:"pull-up", dust:true } ],
+    rewards:{ confetti:"full" }
+  },
+};
+
+/* 프로토 한정: assetId / 정답 텍스트 → 이모지 */
+const ASSET_EMOJI = { asset_elephant:"🐘", asset_cat:"🐱", asset_carrot_leaf:"🌿" };
+const ANSWER_EMOJI = { "당근":"🥕","감자":"🥔","양파":"🧅","코끼리":"🐘","고양이":"🐱","토끼":"🐰","강아지":"🐶","펭귄":"🐧" };
+const DIFF_LABEL = { baby:"아기반", toddler:"유아반", senior:"형님반" };
+const MOOD_LABEL = { calm:"차분하게", lively:"신나게", punchy:"깜짝깜짝" };
+const PASTEL = ["#FF9E7D","#8FD9C3","#9BC9F2","#FFD98A","#CDBBE8","#F4A9A0"];
+
+/* ════════════ 유틸 ════════════ */
+const $ = (id) => document.getElementById(id);
+const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function shuffle(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function contentEmojiOrText(c){
+  if(c.type==="emoji") return {emoji:c.emoji};
+  if(c.type==="text")  return {text:c.text};
+  if(c.type==="asset") return {emoji: ASSET_EMOJI[c.asset.assetId] || "🖼️"};
+  return {text:"?"};
+}
+
+/* ════════════ 모션 프리셋 (WAAPI; 실제 빌드에선 Motion 스프링) ════════════ */
+const SPRING = "cubic-bezier(.34,1.56,.64,1)";
+const Preset = {
+  pop(el){ if(reduced)return; el.animate([{transform:"scale(.6)",opacity:0},{transform:"scale(1.08)",opacity:1},{transform:"scale(1)"}],{duration:520,easing:SPRING,fill:"backwards"}); },
+  drop(el){ if(reduced)return; el.animate([{transform:"translateY(-34px)",opacity:0},{transform:"translateY(0)",opacity:1}],{duration:560,easing:SPRING}); },
+  bounce(el,scale=1){ if(reduced)return; el.animate([{transform:"scale(1)"},{transform:`scale(${1.14+0.06*scale})`},{transform:"scale(1)"}],{duration:480,easing:SPRING}); },
+  cheer(el){ if(reduced)return; el.animate([{transform:"scale(1) rotate(0)"},{transform:"scale(1.16) rotate(-7deg)"},{transform:"scale(1.1) rotate(6deg)"},{transform:"scale(1) rotate(0)"}],{duration:680,easing:SPRING}); },
+  shake(el){ if(reduced)return; el.animate([{transform:"translateX(0)"},{transform:"translateX(-8px)"},{transform:"translateX(7px)"},{transform:"translateX(-5px)"},{transform:"translateX(0)"}],{duration:420,easing:"ease-in-out"}); },
+  pullUp(el,dist){ if(reduced){ el.style.transform = `translate(-50%,-50%) translateY(${-dist}px)`; return null;}
+    return el.animate([{transform:`translate(-50%,-50%) translateY(${dist*0.6}px)`},{transform:`translate(-50%,-50%) translateY(${-dist*1.08}px)`},{transform:`translate(-50%,-50%) translateY(${-dist}px)`}],{duration:760,easing:SPRING,fill:"forwards"}); },
+};
+const idleTimers = new Map();
+function startIdle(el,name){
+  if(reduced) return;
+  stopIdle(el);
+  let kf;
+  if(name==="breathe") kf=[{transform:"scale(1)"},{transform:"scale(1.035)"},{transform:"scale(1)"}];
+  else if(name==="wiggle") kf=[{transform:"rotate(-3deg)"},{transform:"rotate(3deg)"},{transform:"rotate(-3deg)"}];
+  else if(name==="bob") kf=[{transform:"translateY(0)"},{transform:"translateY(-6px)"},{transform:"translateY(0)"}];
+  else return;
+  const anim = el.animate(kf,{duration:2600,iterations:Infinity,easing:"ease-in-out"});
+  idleTimers.set(el,anim);
+}
+function stopIdle(el){ const a=idleTimers.get(el); if(a){a.cancel(); idleTimers.delete(el);} }
+
+/* ════════════ TTS (Web Speech, ko-KR) ════════════ */
+const TTS = {
+  enabled:true, voice:null,
+  init(){ if(!("speechSynthesis" in window)) return; const pick=()=>{ const vs=speechSynthesis.getVoices(); this.voice = vs.find(v=>/ko/i.test(v.lang)) || null; }; pick(); speechSynthesis.onvoiceschanged=pick; },
+  say(text){ if(!this.enabled || !("speechSynthesis" in window) || !text) return; try{ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(text); u.lang="ko-KR"; if(this.voice)u.voice=this.voice; u.rate=.98; u.pitch=1.12; speechSynthesis.speak(u);}catch(e){} },
+  stop(){ try{ speechSynthesis.cancel(); }catch(e){} }
+};
+
+/* ════════════ 보상 — 정돈된 한 방 (mood/confetti 따라 강도) ════════════ */
+function celebrate(targetEl, doc){
+  const mood = doc.settings.mood, conf = doc.rewards.confetti;
+  if(targetEl) Preset.cheer(targetEl);
+  if(conf==="off" || typeof confetti==="undefined") return;
+  const base = conf==="full"?150:80;
+  const count = Math.round(base * (mood==="punchy"?1.25:mood==="calm"?0.7:1));
+  const rect = targetEl ? targetEl.getBoundingClientRect() : {left:innerWidth/2,top:innerHeight/2,width:0,height:0};
+  const origin = { x:(rect.left+rect.width/2)/innerWidth, y:(rect.top+rect.height/2)/innerHeight };
+  confetti({ particleCount:count, spread:70, startVelocity:42, origin, colors:PASTEL, scalar:1.05, ticks:160, disableForReducedMotion:true });
+  confetti({ particleCount:Math.round(count*0.4), spread:120, startVelocity:30, origin, colors:PASTEL, shapes:["star"], scalar:1.2, ticks:160, disableForReducedMotion:true });
+}
+function dustBurst(soilEl){
+  if(typeof confetti==="undefined") return;
+  const r=soilEl.getBoundingClientRect();
+  confetti({ particleCount:26, spread:55, startVelocity:22, gravity:1.1, ticks:90,
+    origin:{x:(r.left+r.width/2)/innerWidth, y:r.top/innerHeight}, colors:["#B98A5E","#9C6E45","#D8B48A"], scalar:.8, disableForReducedMotion:true });
+}
+
+/* ════════════ 플레이어 ════════════ */
+const Player = {
+  doc:null, key:null, roundIdx:0, score:0, maxScore:0, busy:false,
+  nodeEls:new Map(), state:null,
+
+  load(key){
+    this.stopAll();
+    this.key=key; this.doc=FIXTURES[key];
+    TTS.enabled = this.doc.settings.tts?.enabled !== false; updateMuteUI();
+    this.roundIdx=0; this.score=0;
+    this.maxScore = this.computeMax();
+    this.renderChrome();
+    this.renderScene();
+    this.renderStars();
+    // 시작 오버레이
+    $("startTitle").textContent = this.doc.meta.title;
+    $("startDesc").textContent = ({"tap-the-right-one":"잘 보고 누구인지 맞혀봐요!","match-pair":"관련 있는 친구끼리 짝지어요!","reveal-and-collect":"흙에 뭐가 심겼을까요? 맞히면 쑥 뽑혀요!"})[this.doc.meta.archetype] || "시작해볼까요?";
+    $("startOverlay").classList.remove("hide");
+    $("finishOverlay").classList.add("hide");
+  },
+
+  computeMax(){
+    const it=this.doc.interaction;
+    if(it.kind==="match-pair") return it.rounds.reduce((s,r)=>s+r.pairs.length,0);
+    return it.rounds.length;
+  },
+
+  renderChrome(){
+    $("chipDiff").innerHTML = `난이도 <b>${DIFF_LABEL[this.doc.settings.difficulty]||"—"}</b>`;
+    $("chipMood").innerHTML = `분위기 <b>${MOOD_LABEL[this.doc.settings.mood]||"—"}</b>`;
+    $("roundTot").textContent = this.doc.interaction.rounds.length;
+    [...document.querySelectorAll(".pill")].forEach(p=>p.setAttribute("aria-pressed", p.dataset.key===this.key ? "true":"false"));
+  },
+
+  renderStars(){
+    const box=$("stars"); box.innerHTML="";
+    for(let i=0;i<this.maxScore;i++){ const s=document.createElement("span"); s.className="star"+(i<this.score?" on":""); s.textContent="⭐"; box.appendChild(s); }
+  },
+  bumpStar(){ const st=$("stars").children[this.score-1]; if(st){ st.classList.add("on"); if(!reduced)st.animate([{transform:"scale(.4)"},{transform:"scale(1.4)"},{transform:"scale(1.12)"}],{duration:480,easing:SPRING}); } },
+
+  // 무대 스캐폴드(지속 노드) 생성
+  renderScene(){
+    const stage=$("stage");
+    // 기존 노드 제거(오버레이/배너/버튼/blob 보존)
+    this.nodeEls.forEach(el=>el.remove()); this.nodeEls.clear();
+    const sorted=[...this.doc.stage.nodes].sort((a,b)=>(a.transform.z||0)-(b.transform.z||0));
+    for(const n of sorted){
+      const el=document.createElement("div");
+      el.className="node"; el.dataset.id=n.id;
+      const t=n.transform;
+      el.style.left=(t.x*100)+"%"; el.style.top=(t.y*100)+"%";
+      el.style.width=(t.w*100)+"%"; el.style.height=(t.h*100)+"%";
+      if(t.z!=null) el.style.zIndex=t.z;
+      if(t.rotation) el.style.transform=`translate(-50%,-50%) rotate(${t.rotation}deg)`;
+
+      if(n.type==="shape" && n.role==="cover"){ const d=document.createElement("div"); d.className="soil"; el.appendChild(d); }
+      else if(n.type==="slot"){ /* 인터랙션이 채움 */ }
+      else { const ph=document.createElement("div"); ph.className="photo"; const e=document.createElement("div"); e.className="emoji"; ph.appendChild(e); el.appendChild(ph); }
+
+      stage.insertBefore(el, $("banner"));
+      this.nodeEls.set(n.id, el);
+    }
+    this.relayout();
+  },
+
+  relayout(){ // 이모지 크기를 노드 크기에 맞춤
+    this.nodeEls.forEach(el=>{
+      const em = el.querySelector(".emoji"); if(!em) return;
+      const r = el.getBoundingClientRect();
+      em.style.fontSize = Math.max(20, Math.min(r.width,r.height)*0.62)+"px";
+    });
+    // 옵션 버튼 텍스트 크기
+    document.querySelectorAll(".opt").forEach(b=>{
+      const r=b.getBoundingClientRect(); const t=b.querySelector(".otxt"); const e=b.querySelector(".oemoji");
+      if(t) t.style.fontSize = Math.max(15, Math.min(r.height*0.5, r.width*0.22))+"px";
+      if(e) e.style.fontSize = Math.max(20, r.height*0.5)+"px";
+    });
+  },
+
+  start(){
+    $("startOverlay").classList.add("hide");
+    this.renderRound();
+  },
+
+  setNode(id, content){
+    const el=this.nodeEls.get(id); if(!el) return;
+    let ph=el.querySelector(".photo"); if(!ph){ ph=document.createElement("div"); ph.className="photo"; el.appendChild(ph); }
+    ph.innerHTML=""; const c=contentEmojiOrText(content);
+    const span=document.createElement("div");
+    if(c.emoji){ span.className="emoji"; span.textContent=c.emoji; }
+    else { span.className="emoji jua"; span.style.fontSize="clamp(18px,5vw,30px)"; span.style.color="var(--ink)"; span.textContent=c.text; }
+    ph.appendChild(span);
+  },
+
+  renderRound(){
+    this.busy=false; this.hideBanner(); this.hideNext();
+    const it=this.doc.interaction;
+    $("roundNow").textContent = this.roundIdx+1;
+    if(it.kind==="match-pair") this.renderMatch();
+    else this.renderTap(); // tap-the-right-one (+reveal effect)
+    requestAnimationFrame(()=>this.relayout());
+  },
+
+  /* ── tap-the-right-one (+ reveal) ── */
+  renderTap(){
+    const it=this.doc.interaction; const round=it.rounds[this.roundIdx];
+    const revealFx = (this.doc.effects||[]).find(e=>e.kind==="reveal");
+
+    // 정답 공개용 hidden 노드 채우기 + 초기화
+    if(revealFx){
+      const ans = round.options.find(o=>o.correct);
+      const emoji = ANSWER_EMOJI[ans?.content?.text] || "🥕";
+      this.setNode(revealFx.hiddenNodeId, {type:"emoji", emoji});
+      const hid=this.nodeEls.get(revealFx.hiddenNodeId); if(hid) hid.style.transform="translate(-50%,-50%)";
+    }
+
+    // cue
+    this.setNode(it.cueSlotId, round.cue);
+    const cueEl=this.nodeEls.get(it.cueSlotId);
+    if(cueEl){ const cueNode=this.doc.stage.nodes.find(n=>n.id===it.cueSlotId);
+      if(cueNode?.animation?.entrance && Preset[cueNode.animation.entrance]) Preset[cueNode.animation.entrance](cueEl);
+      if(cueNode?.animation?.idle) startIdle(cueEl, cueNode.animation.idle);
+    }
+
+    // options → slots (셔플)
+    const opts = shuffle(round.options);
+    it.optionSlotIds.forEach((sid,i)=>{
+      const el=this.nodeEls.get(sid); if(!el) return; el.innerHTML="";
+      const opt=opts[i]; if(!opt){ return; }
+      const btn=document.createElement("button"); btn.className="opt"; btn.type="button";
+      const c=contentEmojiOrText(opt.content);
+      if(c.emoji){ const s=document.createElement("span"); s.className="oemoji"; s.textContent=c.emoji; btn.appendChild(s);}
+      else { const s=document.createElement("span"); s.className="otxt"; s.textContent=c.text; btn.appendChild(s);}
+      Preset.drop(btn);
+      btn.addEventListener("click",()=>this.onTap(btn, opt, revealFx));
+      el.appendChild(btn);
+    });
+
+    // 질문 읽어주기
+    const archetype=this.doc.meta.archetype;
+    const say = archetype==="reveal-and-collect" ? "흙에 뭐가 심겼을까요?"
+      : (round.cue.type==="text" ? round.cue.text : "이건 누구일까요?");
+    setTimeout(()=>TTS.say(say), 350);
+  },
+
+  onTap(btn, opt, revealFx){
+    if(this.busy) return;
+    if(opt.correct){
+      this.busy=true;
+      btn.classList.add("correct");
+      document.querySelectorAll(".opt").forEach(b=>b.disabled=true);
+      const cueEl=this.nodeEls.get(this.doc.interaction.cueSlotId);
+      if(cueEl) stopIdle(cueEl);
+
+      const finishCorrect=()=>{
+        this.score++; this.bumpStar();
+        celebrate(cueEl, this.doc);
+        this.showBanner(true, pick(["딩동댕!","맞았어요!","최고예요!"]));
+        TTS.say("딩동댕! 맞았어요");
+        this.afterCorrect();
+      };
+
+      if(revealFx){
+        // 흙에서 쑥 뽑히는 연출
+        const hid=this.nodeEls.get(revealFx.hiddenNodeId);
+        const soil=this.nodeEls.get(revealFx.coverNodeId);
+        const stageH=$("stage").getBoundingClientRect().height;
+        const dist=stageH*0.44;
+        if(hid){ Preset.pullUp(hid, dist); }
+        if(revealFx.dust && soil) setTimeout(()=>dustBurst(soil), 240);
+        const ansTxt = this.doc.interaction.rounds[this.roundIdx].options.find(o=>o.correct).content.text;
+        setTimeout(()=>TTS.say(`${ansTxt}이에요!`), 520);
+        setTimeout(finishCorrect, 360);
+      } else {
+        finishCorrect();
+      }
+    } else {
+      btn.classList.add("wrong"); Preset.shake(btn);
+      this.showBanner(false, "다시 해볼까요?");
+      TTS.say("다시 해볼까요?");
+      setTimeout(()=>{ btn.classList.remove("wrong"); this.hideBanner(); }, 1100);
+    }
+  },
+
+  afterCorrect(){
+    const last = this.roundIdx >= this.doc.interaction.rounds.length-1;
+    if(last){ setTimeout(()=>this.finish(), 1500); }
+    else { this.showNext(); }
+  },
+
+  /* ── match-pair ── */
+  renderMatch(){
+    const round=this.doc.interaction.rounds[this.roundIdx];
+    const it=this.doc.interaction;
+    this.state={ pick:null, matched:0, total:round.pairs.length };
+
+    // 왼쪽: 순서대로 / 오른쪽: 셔플. pairIndex 로 정답 판정.
+    const lefts = round.pairs.map((p,i)=>({content:p.left, idx:i}));
+    const rights = shuffle(round.pairs.map((p,i)=>({content:p.right, idx:i})));
+
+    const fill=(slotIds, items)=>{
+      slotIds.forEach((sid,i)=>{
+        const el=this.nodeEls.get(sid); if(!el) return; el.innerHTML="";
+        const item=items[i]; if(!item) return;
+        const btn=document.createElement("button"); btn.className="opt"; btn.type="button"; btn.dataset.idx=item.idx;
+        const c=contentEmojiOrText(item.content);
+        if(c.emoji){ const s=document.createElement("span"); s.className="oemoji"; s.textContent=c.emoji; btn.appendChild(s);}
+        else{ const s=document.createElement("span"); s.className="otxt"; s.textContent=c.text; btn.appendChild(s);}
+        Preset.pop(btn);
+        btn.addEventListener("click",()=>this.onMatchTap(btn));
+        el.appendChild(btn);
+      });
+    };
+    fill(it.leftSlotIds, lefts);
+    fill(it.rightSlotIds, rights);
+    setTimeout(()=>TTS.say("관련 있는 친구끼리 짝지어요"), 350);
+  },
+
+  onMatchTap(btn){
+    if(this.busy || btn.classList.contains("locked")) return;
+    const st=this.state;
+    if(!st.pick){ st.pick=btn; btn.classList.add("picked"); return; }
+    if(st.pick===btn){ btn.classList.remove("picked"); st.pick=null; return; }
+
+    const a=st.pick, b=btn;
+    if(a.dataset.idx===b.dataset.idx){
+      a.classList.remove("picked"); a.classList.add("locked"); b.classList.add("locked");
+      Preset.bounce(a); Preset.bounce(b);
+      st.pick=null; st.matched++;
+      this.score++; this.bumpStar();
+      if(st.matched>=st.total){
+        this.busy=true;
+        celebrate(null, this.doc);
+        this.showBanner(true, "다 맞혔어요!");
+        TTS.say("딩동댕! 다 맞혔어요");
+        setTimeout(()=>this.afterCorrect(), 900);
+      } else {
+        TTS.say("좋아요!");
+      }
+    } else {
+      a.classList.add("wrong"); b.classList.add("wrong"); Preset.shake(a); Preset.shake(b);
+      this.showBanner(false,"다시 해볼까요?");
+      const A=a,B=b; st.pick=null;
+      setTimeout(()=>{ A.classList.remove("wrong","picked"); B.classList.remove("wrong"); this.hideBanner(); }, 900);
+    }
+  },
+
+  /* ── 배너 / 다음 / 완료 ── */
+  showBanner(ok,text){ const b=$("banner"); b.className="banner show "+(ok?"ok":"no"); $("bannerEmoji").textContent= ok?"🎉":"💪"; $("bannerText").textContent=text; },
+  hideBanner(){ $("banner").className="banner"; },
+  showNext(){ $("nextBtn").classList.add("show"); },
+  hideNext(){ $("nextBtn").classList.remove("show"); },
+
+  next(){ this.roundIdx++; this.renderRound(); },
+
+  finish(){
+    this.stopAll();
+    const ov=$("finishOverlay"); ov.classList.remove("hide");
+    const fs=$("finishStars"); fs.innerHTML="";
+    for(let i=0;i<this.maxScore;i++){ const s=document.createElement("span"); s.className="star"+(i<this.score?" on":""); s.textContent="⭐"; fs.appendChild(s); }
+    $("finishDesc").textContent = `${this.maxScore}개 중 ${this.score}개 맞혔어요!`;
+    TTS.say("참 잘했어요!");
+  },
+
+  stopAll(){ this.nodeEls.forEach(el=>stopIdle(el)); TTS.stop(); },
+  restart(){ this.load(this.key); }
+};
+function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+/* ════════════ 크롬/이벤트 와이어링 ════════════ */
+function buildSwitcher(){
+  const labels={ animal:"🐘 동물 맞추기", match:"🔗 짝 맞추기", garden:"🌱 텃밭 뽑기" };
+  const sw=$("switcher");
+  Object.keys(FIXTURES).forEach(k=>{
+    const b=document.createElement("button"); b.className="pill"; b.dataset.key=k; b.textContent=labels[k];
+    b.setAttribute("aria-pressed","false");
+    b.addEventListener("click",()=>Player.load(k));
+    sw.appendChild(b);
+  });
+}
+function updateMuteUI(){ $("muteBtn").textContent = TTS.enabled ? "🔊" : "🔇"; }
+
+$("startBtn").addEventListener("click",()=>Player.start());
+$("nextBtn").addEventListener("click",()=>Player.next());
+$("restartBtn").addEventListener("click",()=>Player.restart());
+$("muteBtn").addEventListener("click",()=>{ TTS.enabled=!TTS.enabled; if(!TTS.enabled)TTS.stop(); updateMuteUI(); });
+window.addEventListener("resize",()=>Player.relayout());
+
+/* 시작 */
+TTS.init();
+buildSwitcher();
+Player.load("animal");
+</script>
+</body>
+</html>

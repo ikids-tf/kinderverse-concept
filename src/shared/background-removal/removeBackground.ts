@@ -229,12 +229,12 @@ export async function cleanupBackground(
       if (a > FLOOR) orig[i] = 1;
       else if (a > 0) { data[i * 4 + 3] = 0; removed++; }
     }
-    let er = orig;
+    let er: Uint8Array = orig;
     for (let k = 0; k < E; k++) er = erode1(er);
     const sizes = labelOf(er, label);
     let maxC = 0, maxS = 0;
     for (let c = 1; c < sizes.length; c++) if (sizes[c] > maxS) { maxS = sizes[c]; maxC = c; }
-    let core = new Uint8Array(N);
+    let core: Uint8Array = new Uint8Array(N);
     if (maxC > 0) for (let p = 0; p < N; p++) core[p] = label[p] === maxC ? 1 : 0;
     for (let k = 0; k < E; k++) core = dilate1(core);
     // 복원한 주 피사체(원래 실루엣 내부) 밖은 모두 투명화.
