@@ -1,6 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useBoardStore, presentationVisibleSet, type BoardNode, type BoardLink } from '@/store/boardStore';
+import { addImageFileAtWorld } from '@/board/upload';
 import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, attachMotionSlotCmd, type NodeSnap } from '@/board/commands';
 import { linkSequence } from '@/board/links';
 import { nearestMotionSlot } from '@/board/motionGeometry';
@@ -73,6 +74,8 @@ interface Box {
 
 export function BoardCanvas() {
   const ref = useRef<HTMLDivElement>(null);
+  // 빈 화면 단일 클릭 확대(100%) 예약 타이머 — 더블클릭(축소 20%)이 뒤따르면 취소한다.
+  const clickZoomTimer = useRef<number | undefined>(undefined);
   const nodes = useBoardStore((s) => s.nodes);
   const order = useBoardStore((s) => s.order);
   const lanes = useBoardStore((s) => s.lanes);
@@ -774,6 +777,18 @@ export function BoardCanvas() {
         .map((n) => n.id);
       if (hits.length || !e.shiftKey) b.setSelection(hits);
       setBox(null);
+      // 배경 '클릭'(드래그 아님) → 클릭 지점을 화면 중앙으로 100% 확대.
+      // (프레임 안 빈 공간을 클릭해도 동작. 카드는 자체적으로 전파를 멈춰 여기 오지 않는다.)
+      // 더블클릭이면 onBackgroundDoubleClick이 이 타이머를 취소하고 축소(20%)로 대체한다.
+      const movedPx = Math.hypot(cur.x - st.boxStartWorld.x, cur.y - st.boxStartWorld.y) * b.viewport.zoom;
+      if (movedPx < 5) {
+        const wx = st.boxStartWorld.x;
+        const wy = st.boxStartWorld.y;
+        window.clearTimeout(clickZoomTimer.current);
+        clickZoomTimer.current = window.setTimeout(() => {
+          useBoardStore.getState().centerWorldPoint(wx, wy, 1);
+        }, 280);
+      }
     }
     st.mode = 'idle';
     unlockTextSelection();
@@ -874,55 +889,66 @@ export function BoardCanvas() {
   }
 
   function onBackgroundDoubleClick(e: React.MouseEvent) {
-    // Double-click inside a frame's box (click-through interior) → focus that frame;
-    // on truly empty canvas → fit all. (A card's own dblclick stops propagation.)
+    // 보류 중인 단일 클릭 확대(100%)를 취소 — 더블클릭은 축소(20%)로 대체한다.
+    window.clearTimeout(clickZoomTimer.current);
+    // 프레임 내부 더블클릭 → 그 프레임에 포커스(이전과 동일). 카드는 자체 dblclick이 전파를 멈춘다.
     const w = toWorld(e.clientX, e.clientY);
     const fid = frameOfPoint(w.x, w.y);
     const b = useBoardStore.getState();
-    if (fid) b.focusNode(fid);
-    else b.fit();
+    if (fid) {
+      b.focusNode(fid);
+      return;
+    }
+    // 빈 화면 더블클릭 = 줌 토글(클릭 위치를 화면 중앙으로):
+    //   · 축소돼 있으면(<100%) → 100%로 확대
+    //   · 이미 확대돼 있으면(>=100%) → 가장 작은 배율(20%)로 축소
+    const target = b.viewport.zoom >= 0.99 ? 0.2 : 1;
+    b.centerWorldPoint(w.x, w.y, target);
   }
 
-  // 입력 장치별로 휠 동작을 나눈다 (둘 다 같은 wheel 이벤트로 들어오므로 구분 필요):
-  //   · 맥북 트랙패드 두 손가락 스크롤 → 캔버스 팬(가로·세로, 내추럴 스크롤)
-  //   · PC 마우스 휠 → 커서 기준 확대/축소 (PC 팬은 휠 클릭 드래그)
-  //   · 핀치(ctrlKey) / ctrl·⌘+휠 → 항상 줌
-  // 맥 트랙패드 핀치는 Chrome류에서 ctrlKey가 켜진 wheel 이벤트로 들어온다.
+  /* 외부(데스크톱/다른 창)에서 이미지 파일을 보드로 드래그&드롭 → 드롭한 위치에 업로드.
+     실제 업로드 로직은 공용 모듈(@/board/upload)에 있어 상단 업로드 버튼과 공유한다. */
+  function onCanvasDragOver(e: React.DragEvent) {
+    // 파일 드래그일 때만 드롭을 허용(브라우저 기본 '파일 열기' 방지).
+    if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+  function onCanvasDrop(e: React.DragEvent) {
+    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    // 드롭 지점을 월드 좌표로 — 여러 장이면 살짝 어긋나게 놓아 겹치지 않게.
+    files.forEach((f, i) => {
+      const w = toWorld(e.clientX + i * 28, e.clientY + i * 28);
+      void addImageFileAtWorld(f, w.x, w.y);
+    });
+  }
+
+  // 휠 동작(사용자 요청 — PC 기준):
+  //   · 그냥 휠 / 트랙패드 두 손가락 스크롤 → 캔버스 팬(스크롤). 가로·세로 모두.
+  //   · Ctrl/⌘ + 휠, 또는 트랙패드 핀치(ctrlKey) → 커서 기준 확대/축소.
+  // 맥 트랙패드 핀치는 Chrome류에서 ctrlKey가 켜진 wheel 이벤트로 들어오므로 zoom 분기에 자연히 포함.
   // 브라우저 자체 페이지 줌을 막으려면 preventDefault가 실제로 동작해야 하는데
   // React onWheel은 passive로 붙어 무시되므로 네이티브 리스너를 non-passive로 단다.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const isMacLike = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-    // 한 번 정체가 잡히면 모호한 이벤트(관성 스크롤 등)에서도 같은 장치로 유지한다.
-    let device: 'mouse' | 'trackpad' | null = null;
     const onWheel = (e: WheelEvent) => {
-      const pinch = e.ctrlKey || e.metaKey; // 핀치(ctrlKey) 또는 ctrl/⌘+휠
+      const zoomGesture = e.ctrlKey || e.metaKey; // Ctrl/⌘+휠 또는 트랙패드 핀치 → 줌
       // 문서/프레임 등 자체 스크롤 영역 위에서는 그 내용 스크롤을 우선(긴 계획안 등).
-      if (!pinch && scrollableUnderCursor(e.target, e.deltaY, el)) return;
+      if (!zoomGesture && scrollableUnderCursor(e.target, e.deltaY, el)) return;
       e.preventDefault();
       const k = e.deltaMode === 1 ? 16 : 1; // line-mode wheel(Firefox) → px 근사
       const b = useBoardStore.getState();
       const rect = el.getBoundingClientRect();
-      // ── 장치 판별 ──
-      // 마우스 휠 특징: line 모드(Firefox 마우스), 또는 Chromium에서 wheelDelta가 120 배수(노치).
-      const wd = (e as WheelEvent & { wheelDeltaY?: number }).wheelDeltaY;
-      const looksMouse = e.deltaMode === 1 || (typeof wd === 'number' && wd !== 0 && wd % 120 === 0);
-      // 트랙패드 특징: 가로 성분이 있거나, 소수 delta, 또는 픽셀 모드의 잘은 delta.
-      const looksTrackpad =
-        e.deltaX !== 0 ||
-        !Number.isInteger(e.deltaY) ||
-        (e.deltaMode === 0 && Math.abs(e.deltaY) > 0 && Math.abs(e.deltaY) < 40);
-      if (looksTrackpad && !looksMouse) device = 'trackpad';
-      else if (looksMouse && !looksTrackpad) device = 'mouse';
-      const usingTrackpad = pinch ? false : (device ?? (isMacLike ? 'trackpad' : 'mouse')) === 'trackpad';
-      // ── 동작 ──
-      if (usingTrackpad) {
-        // 두 손가락 스크롤 → 캔버스 팬 (내용이 손가락을 따라가는 내추럴 스크롤).
+      if (!zoomGesture) {
+        // 휠·트랙패드 스크롤 → 캔버스 팬 (내용이 휠/손가락을 따라가는 내추럴 스크롤).
         b.setViewport({ panX: b.viewport.panX - e.deltaX * k, panY: b.viewport.panY - e.deltaY * k });
         return;
       }
-      // 마우스 휠·핀치 → 커서 기준 확대/축소.
+      // Ctrl/⌘+휠 · 핀치 → 커서 기준 확대/축소.
       // 핀치는 deltaY가 잘게 연속으로 와 지수 매핑이 부드럽고, 휠 클릭(±100)은 클램프된다.
       const factor = Math.min(1.25, Math.max(0.8, Math.exp(-e.deltaY * k * 0.01)));
       b.zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
@@ -968,6 +994,8 @@ export function BoardCanvas() {
       onPointerDown={onBackgroundPointerDown}
       onPointerMove={onCanvasHover}
       onDoubleClick={onBackgroundDoubleClick}
+      onDragOver={onCanvasDragOver}
+      onDrop={onCanvasDrop}
       className="relative h-full w-full overflow-hidden bg-bg"
       style={{ cursor: spaceDown ? 'grab' : 'default', touchAction: 'none' }}
     >

@@ -172,6 +172,36 @@ function inpaintByMask(work: HTMLCanvasElement, mask: Uint8Array, w: number, h: 
   return count;
 }
 
+/** 마스크(grow 포함) 영역을 '투명하게' 지운다 — 이미 배경이 없는(컷아웃) 이미지의 섬 객체용.
+ *  투명 배경 위에선 인페인팅이 주변(투명/검정)을 끌어와 검은 얼룩이 생기므로 이 경로를 쓴다. */
+function eraseMaskTransparent(work: HTMLCanvasElement, mask: Uint8Array, w: number, h: number): number {
+  const ctx = work.getContext('2d');
+  if (!ctx) return 0;
+  if (w !== work.width || h !== work.height) return -1;
+  const hole = growMask(mask, w, h, 2);
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  let n = 0;
+  for (let i = 0; i < w * h; i++) if (hole[i] && d[i * 4 + 3] !== 0) { d[i * 4 + 3] = 0; n++; }
+  ctx.putImageData(img, 0, 0);
+  return n;
+}
+
+/** 선택 객체의 '바깥 테두리 띠'가 대부분 투명인가? → 투명 배경 위 섬 객체로 보고 투명 삭제,
+ *  아니면(주변에 배경 픽셀이 있으면) 인페인팅으로 메운다. */
+function surroundingMostlyTransparent(work: HTMLCanvasElement, mask: Uint8Array, w: number, h: number): boolean {
+  const ctx = work.getContext('2d');
+  if (!ctx || w !== work.width || h !== work.height) return false;
+  const hole = growMask(mask, w, h, 3);
+  const band = growMask(hole, w, h, 8); // hole + 바깥 8px 띠
+  const d = ctx.getImageData(0, 0, w, h).data;
+  let trans = 0, tot = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (band[i] && !hole[i]) { tot++; if (d[i * 4 + 3] < 16) trans++; }
+  }
+  return tot > 0 && trans / tot > 0.6;
+}
+
 export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose: () => void }) {
   const viewRef = useRef<HTMLCanvasElement | null>(null); // 화면 표시용
   const workRef = useRef<HTMLCanvasElement | null>(null); // 풀해상도 작업 캔버스
@@ -202,6 +232,38 @@ export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose:
     ctx.clearRect(0, 0, view.width, view.height);
     ctx.drawImage(work, 0, 0);
   }, []);
+
+  // 지워질 영역을 잠깐 '로딩되듯' 코랄로 펄스 표시(선택 피드백) 후 resolve. 끝나면 호출부가 지운다.
+  const pulseHighlight = useCallback(
+    (mask: Uint8Array, w: number, h: number) =>
+      new Promise<void>((resolve) => {
+        const view = viewRef.current;
+        const ctx = view?.getContext('2d');
+        if (!view || !ctx || view.width !== w || view.height !== h) { resolve(); return; }
+        // 마스크 타일(코랄 #F2733E = 토큰 --coral. 캔버스 픽셀이라 CSS 변수 대신 RGB 직접 사용).
+        const ov = ctx.createImageData(w, h);
+        const od = ov.data;
+        for (let i = 0; i < w * h; i++) if (mask[i]) { od[i * 4] = 242; od[i * 4 + 1] = 115; od[i * 4 + 2] = 62; od[i * 4 + 3] = 255; }
+        const tile = document.createElement('canvas');
+        tile.width = w; tile.height = h;
+        tile.getContext('2d')?.putImageData(ov, 0, 0);
+        const start = performance.now();
+        const dur = 680;
+        const tick = (now: number) => {
+          const t = Math.min(1, (now - start) / dur);
+          redraw(); // 작업본 다시 그린 위에 펄스 오버레이
+          const pulse = 0.25 + 0.4 * (0.5 - 0.5 * Math.cos(t * Math.PI * 4)); // 약 2회 펄스
+          ctx.save();
+          ctx.globalAlpha = pulse;
+          ctx.drawImage(tile, 0, 0);
+          ctx.restore();
+          if (t < 1) requestAnimationFrame(tick);
+          else { redraw(); resolve(); }
+        };
+        requestAnimationFrame(tick);
+      }),
+    [redraw],
+  );
 
   // 초기 로드
   useEffect(() => {
@@ -289,7 +351,9 @@ export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose:
       return;
     }
 
-    // tool === 'ai' — 클릭한 객체를 SAM으로 분할하고, 그 자리를 주변 배경으로 자연스럽게 채운다.
+    // tool === 'ai' — 클릭한 객체를 SAM으로 분할 → 지워질 영역 표시 → 지운다.
+    //  · 주변에 배경이 있으면 인페인팅으로 자연스럽게 메우고,
+    //  · 이미 배경이 없는(투명) 컷아웃의 섬 객체면 투명하게 삭제한다(검은 얼룩 방지).
     setBusy(
       segPreparedRef.current === `${nodeId}:${segVersionRef.current}`
         ? 'AI가 객체를 분석하고 있어요…'
@@ -298,8 +362,13 @@ export function ImageEditorModal({ nodeId, onClose }: { nodeId: string; onClose:
     try {
       const segId = await ensurePrepared();
       const { mask, w, h } = await segmentAt(segId, x, y);
+      setBusy(null);
+      await pulseHighlight(mask, w, h); // 지워질 영역을 로딩되듯 잠깐 표시
       pushUndo();
-      const n = inpaintByMask(work, mask, w, h);
+      const transparentMode = surroundingMostlyTransparent(work, mask, w, h);
+      const n = transparentMode
+        ? eraseMaskTransparent(work, mask, w, h)
+        : inpaintByMask(work, mask, w, h);
       if (n <= 0) undoRef.current.pop();
       if (n === -1) showToast('마스크 크기가 맞지 않아 다시 시도해 주세요', 'error');
       else bumpWork(); // 픽셀이 바뀜 → 다음 AI 클릭은 임베딩 재준비
