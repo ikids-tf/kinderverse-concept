@@ -26,6 +26,7 @@ import {
   type LaneStepMeta,
 } from './mock';
 import { generateImage, detectImageElements, askImage } from './image';
+import { synthSpeech } from './tts';
 
 export interface GatewayConfig {
   anthropicKey?: string;
@@ -34,6 +35,12 @@ export interface GatewayConfig {
   imageModel?: string;
   /** Gemini Veo video model, e.g. veo-3.0-generate-001 (전용 영상 엔드포인트에서 사용). */
   videoModel?: string;
+  /** NCP CLOVA Voice (task "tts") — 키 없으면 클라이언트가 브라우저 TTS 로 폴백. */
+  clovaId?: string;
+  clovaSecret?: string;
+  /** CLOVA 화자 오버라이드(톤별). 미설정 시 'nara'. */
+  clovaSpeakerBright?: string;
+  clovaSpeakerCalm?: string;
   /** Optional model overrides, e.g. { 'anthropic.low': 'claude-haiku-4-5' }. */
   models?: Record<string, string>;
 }
@@ -99,6 +106,21 @@ export async function handleGatewayRequest(
       question: meta.question ?? '',
     });
     return { ok: true, text, mocked, error: mocked ? detail : undefined };
+  }
+
+  // ---- TTS task: CLOVA Voice 합성(키 있으면 real mp3, 없으면 mocked → 브라우저 폴백). ----
+  if (req.task === 'tts') {
+    const meta = (req.meta ?? {}) as { text?: string; tone?: 'bright' | 'calm'; locale?: string };
+    const { audio, real, detail } = await synthSpeech({
+      clientId: config.clovaId,
+      clientSecret: config.clovaSecret,
+      speakerBright: config.clovaSpeakerBright,
+      speakerCalm: config.clovaSpeakerCalm,
+      text: meta.text ?? '',
+      tone: meta.tone,
+      locale: meta.locale,
+    });
+    return { ok: true, audio, mocked: !real, error: real ? undefined : detail };
   }
 
   // ---- Web search task: Gemini Google Search grounding (real when keyed). ----

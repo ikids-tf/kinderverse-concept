@@ -53,6 +53,8 @@ export interface GatewayResponse {
   text?: string;
   /** Image data URI (for task "image"). */
   image?: string;
+  /** Audio data URI (for task "tts" — CLOVA Voice mp3). */
+  audio?: string;
   /** Grounding citations (for task "search"). */
   sources?: SearchSource[];
   /** Detected element regions (for task "detect"). */

@@ -51,6 +51,10 @@ export function devGateway(): Plugin {
         geminiKey: env.GEMINI_API_KEY || process.env.GEMINI_API_KEY,
         imageModel: env.KV_GEMINI_IMAGE_MODEL || process.env.KV_GEMINI_IMAGE_MODEL,
         videoModel: env.KV_GEMINI_VIDEO_MODEL || process.env.KV_GEMINI_VIDEO_MODEL,
+        clovaId: env.CLOVA_VOICE_CLIENT_ID || process.env.CLOVA_VOICE_CLIENT_ID,
+        clovaSecret: env.CLOVA_VOICE_CLIENT_SECRET || process.env.CLOVA_VOICE_CLIENT_SECRET,
+        clovaSpeakerBright: env.CLOVA_VOICE_SPEAKER_BRIGHT || process.env.CLOVA_VOICE_SPEAKER_BRIGHT,
+        clovaSpeakerCalm: env.CLOVA_VOICE_SPEAKER_CALM || process.env.CLOVA_VOICE_SPEAKER_CALM,
         models: {
           ...(env.KV_ANTHROPIC_MODEL_LOW ? { 'anthropic.low': env.KV_ANTHROPIC_MODEL_LOW } : {}),
           ...(env.KV_ANTHROPIC_MODEL_MID ? { 'anthropic.mid': env.KV_ANTHROPIC_MODEL_MID } : {}),

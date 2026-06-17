@@ -16,7 +16,9 @@
  *  - TtsProvider: CLOVA config 있으면 CLOVA, 없으면 브라우저 TTS 폴백. 캐싱 골격은 지금 동작.
  */
 
+import { callGateway } from "@/ai/client";
 import { RmbgCutoutProvider } from "./cutoutAdapter";
+import { SamObjectSegmenter } from "./segmentAdapter";
 import { NanoBananaImageProvider } from "./nanoBanana";
 
 /* ════════════ 공통 타입 ════════════ */
@@ -242,6 +244,56 @@ export class ClovaTtsProvider implements TtsProvider {
   }
 }
 
+/**
+ * 게이트웨이 경유 CLOVA Voice — 레포의 얇은 게이트웨이(`/api/ai/run` task:"tts")를 호출.
+ * 키(서버)에서 CLOVA 가 켜지면 실제 mp3 합성·재생(문장 캐시), 키 없으면 게이트웨이가
+ * mocked 를 돌려주고 즉시 브라우저 TTS 로 폴백한다(이후 호출은 폴백 고정 — 불필요 호출 0).
+ * 🔴 새 API 클라이언트 없음 — nanoBanana 와 동일하게 `@/ai/client` 재사용. 키는 서버에만.
+ */
+export class GatewayTtsProvider implements TtsProvider {
+  private audio: HTMLAudioElement | null = null;
+  private mem = new Map<string, string>(); // key -> audio data URL
+  private clovaOff = false;                 // mocked 1회 감지 → 영구 브라우저 폴백
+  private browser = new BrowserTtsProvider();
+
+  private async resolve(text: string, opts?: TtsOptions): Promise<string | null> {
+    const key = ttsKey(text, opts);
+    const hit = this.mem.get(key);
+    if (hit) return hit;
+    const res = await callGateway({
+      task: "tts",
+      provider: "auto",
+      messages: [],
+      meta: { text, tone: opts?.voice ?? "bright", locale: opts?.locale ?? "ko-KR" },
+    });
+    if (!res.ok || res.mocked || !res.audio) {
+      if (res.mocked) this.clovaOff = true; // 키 없음 → 폴백 고정
+      return null;
+    }
+    this.mem.set(key, res.audio);
+    return res.audio;
+  }
+
+  async speak(text: string, opts?: TtsOptions): Promise<void> {
+    if (!text) return;
+    if (this.clovaOff) return this.browser.speak(text, opts);
+    let url: string | null = null;
+    try { url = await this.resolve(text, opts); } catch { url = null; }
+    if (!url) return this.browser.speak(text, opts);
+    this.stop();
+    this.audio = new Audio(url);
+    await this.audio.play().catch(() => { /* 자동재생 제한 등 — 무시 */ });
+  }
+  async prefetch(text: string, opts?: TtsOptions): Promise<void> {
+    if (!text || this.clovaOff) return;
+    try { await this.resolve(text, opts); } catch { /* prefetch 실패는 조용히 무시 */ }
+  }
+  stop(): void {
+    this.browser.stop();
+    if (this.audio) { try { this.audio.pause(); } catch { /* noop */ } this.audio = null; }
+  }
+}
+
 /* ──────────────── 팩토리 (앱이 env → config 주입) ──────────────── */
 
 export function createImageProvider(): ImageProvider {
@@ -255,11 +307,12 @@ export function createCutoutProvider(): CutoutProvider {
   return new RmbgCutoutProvider();
 }
 export function createObjectSegmenter(): ObjectSegmenter {
-  return new NotImplementedObjectSegmenter();
+  // 🔴 공용 온디바이스 SAM 엔진(@/shared/segment) 어댑터. NotImplemented 는 폴백으로 남겨둠.
+  return new SamObjectSegmenter();
 }
-/** CLOVA config 있으면 CLOVA, 없으면 브라우저 폴백. */
+/** 명시 ClovaConfig 있으면 그 엔드포인트, 없으면 게이트웨이 경유 CLOVA(키 없으면 브라우저 폴백). */
 export function createTtsProvider(clova?: ClovaConfig): TtsProvider {
-  return clova ? new ClovaTtsProvider(clova) : new BrowserTtsProvider();
+  return clova ? new ClovaTtsProvider(clova) : new GatewayTtsProvider();
 }
 
 /* ──────────────── 내부 유틸 ──────────────── */
