@@ -5,7 +5,7 @@
  * 콘텐츠 교체/대화 편집은 기본 경로(M2 Resolver) 담당 — 여긴 정밀 레이아웃 전용(99% 교사는 안 봄).
  * 각 노드는 라운드0 콘텐츠 미리보기 + 역할 배지로 표시한다.
  */
-import { useEffect, useRef, type PointerEvent as RPE } from "react";
+import { useEffect, useRef, useState, type PointerEvent as RPE } from "react";
 import { transformStyle } from "../layout";
 import { resolveVisual, type Visual } from "../content";
 import { useStageSize } from "../stageSize";
@@ -44,21 +44,31 @@ function previewOf(node: SceneNode, binding?: ContentBinding): Visual | null {
   return null;
 }
 
-type DragState = { px: number; py: number; x0: number; y0: number; w0: number; h0: number; mode: "move" | "resize" };
+type Live = { x: number; y: number; w: number; h: number };
+type DragState = { px: number; py: number; base: Live; mode: "move" | "resize" };
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const clampWH = (v: number) => Math.max(0.05, Math.min(1, v));
 
+/**
+ * 드래그 중엔 로컬 live 상태로만 그려(스토어 미접촉) 부드럽게 움직이고,
+ * 릴리스(pointerup) 때 patchNodeTransform 으로 '한 번만' 커밋한다 → undo 1드래그=1스텝.
+ */
 function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: ContentBinding; selected: boolean }) {
   const { w: sw, h: sh } = useStageSize();
   const selectNode = useGame((s) => s.selectNode);
   const patch = useGame((s) => s.patchNodeTransform);
   const drag = useRef<DragState | null>(null);
+  const [live, setLive] = useState<Live | null>(null);
+
+  const t = node.transform;
+  const view: Live = live ?? { x: t.x, y: t.y, w: t.w, h: t.h };
 
   const down = (e: RPE<HTMLElement>, mode: "move" | "resize") => {
     e.stopPropagation();
     selectNode(node.id);
-    drag.current = {
-      px: e.clientX, py: e.clientY,
-      x0: node.transform.x, y0: node.transform.y, w0: node.transform.w, h0: node.transform.h, mode,
-    };
+    const base: Live = { x: t.x, y: t.y, w: t.w, h: t.h };
+    drag.current = { px: e.clientX, py: e.clientY, base, mode };
+    setLive(base);
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
   };
   const move = (e: RPE<HTMLElement>) => {
@@ -66,19 +76,29 @@ function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: C
     if (!d || !sw || !sh) return;
     const dx = (e.clientX - d.px) / sw;
     const dy = (e.clientY - d.py) / sh;
-    if (d.mode === "move") patch(node.id, { x: d.x0 + dx, y: d.y0 + dy });
-    else patch(node.id, { w: d.w0 + dx * 2, h: d.h0 + dy * 2 }); // 중심정렬이라 양쪽으로
+    const b = d.base;
+    if (d.mode === "move") setLive({ ...b, x: clamp01(b.x + dx), y: clamp01(b.y + dy) });
+    else setLive({ ...b, w: clampWH(b.w + dx * 2), h: clampWH(b.h + dy * 2) }); // 중심정렬→양쪽
   };
   const up = (e: RPE<HTMLElement>) => {
+    const d = drag.current;
     drag.current = null;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    if (d && sw && sh) {
+      const dx = (e.clientX - d.px) / sw;
+      const dy = (e.clientY - d.py) / sh;
+      const b = d.base;
+      if (d.mode === "move") patch(node.id, { x: b.x + dx, y: b.y + dy });
+      else patch(node.id, { w: b.w + dx * 2, h: b.h + dy * 2 });
+    }
+    setLive(null);
   };
 
   const vis = previewOf(node, binding);
   return (
     <div
       className={`edit-node${selected ? " selected" : ""}`}
-      style={transformStyle(node.transform)}
+      style={transformStyle({ ...t, x: view.x, y: view.y, w: view.w, h: view.h })}
       onPointerDown={(e) => down(e, "move")}
       onPointerMove={move}
       onPointerUp={up}

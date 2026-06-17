@@ -6,6 +6,7 @@
  * 무대 픽셀 크기는 ResizeObserver로 재서 StageSizeContext로 내려준다(이모지/뽑힘거리 환산).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useStore } from "zustand";
 import { NodeRenderer } from "./NodeRenderer";
 import { TapTheRightOne } from "./interactions/TapTheRightOne";
 import { MatchPair } from "./interactions/MatchPair";
@@ -47,6 +48,13 @@ export function GameStage() {
   const toggleTts = useGame((s) => s.toggleTts);
   const mode = useGame((s) => s.mode);
   const setMode = useGame((s) => s.setMode);
+
+  // 에디터 undo/redo (zundo temporal). 게임/모드 전환 시 히스토리 초기화(세션 단위).
+  const canUndo = useStore(useGame.temporal, (s) => s.pastStates.length > 0);
+  const canRedo = useStore(useGame.temporal, (s) => s.futureStates.length > 0);
+  useEffect(() => {
+    useGame.temporal.getState().clear();
+  }, [exampleKey, mode]);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<StageSize>({ w: 0, h: 0 });
@@ -140,6 +148,30 @@ export function GameStage() {
             >
               {mode === "edit" ? "▶" : "✏️"}
             </button>
+            {mode === "edit" && (
+              <>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="실행취소"
+                  aria-label="실행취소"
+                  disabled={!canUndo}
+                  onClick={() => useGame.temporal.getState().undo()}
+                >
+                  ↶
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="다시실행"
+                  aria-label="다시실행"
+                  disabled={!canRedo}
+                  onClick={() => useGame.temporal.getState().redo()}
+                >
+                  ↷
+                </button>
+              </>
+            )}
           </div>
         </div>
 

@@ -110,6 +110,7 @@
 
 /* 직접 에디터(고급) */
 .kv-v2 .icon-btn.on { background: var(--coral); color: #fff; border-color: var(--coral); }
+.kv-v2 .icon-btn:disabled { opacity: 0.4; cursor: default; }
 .kv-v2 .edit-layer { position: absolute; inset: 0; z-index: 30; }
 .kv-v2 .edit-node {
   position: absolute; display: flex; align-items: center; justify-content: center;

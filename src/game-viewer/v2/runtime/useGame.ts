@@ -11,6 +11,7 @@
  * zundo(undo/redo)는 직접 에디터(M1) 관심사라 런타임 스토어엔 적용하지 않는다(설치만).
  */
 import { create } from "zustand";
+import { temporal } from "zundo";
 import {
   parseInteractiveDoc,
 } from "../schema/parse";
@@ -272,7 +273,7 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
   return emptyRound();
 }
 
-export const useGame = create<GameStore>((set, get) => {
+export const useGame = create<GameStore>()(temporal((set, get) => {
   const bump = (s: Omit<Sfx, "seq">) =>
     set((st) => ({ sfx: { seq: (st.sfx?.seq ?? 0) + 1, ...s } }));
 
@@ -632,4 +633,11 @@ export const useGame = create<GameStore>((set, get) => {
       set({ doc: { ...doc, stage: { ...doc.stage, nodes } } });
     },
   };
-});
+}, {
+  // 에디터 undo/redo — doc(노드 transform)만 추적, doc 객체가 바뀔 때만 기록(equality).
+  // 드래그는 커밋-온-릴리스라 1드래그=1기록(EditLayer가 release 때만 patchNodeTransform).
+  // 게임/모드 전환 시 GameStage가 clear()로 세션 단위 리셋.
+  partialize: (s) => ({ doc: s.doc }),
+  equality: (a, b) => a.doc === b.doc,
+  limit: 100,
+}));
