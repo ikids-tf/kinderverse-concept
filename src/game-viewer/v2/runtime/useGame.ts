@@ -42,6 +42,12 @@ export interface FlipCard {
   faceKey: string; // 같은 faceKey끼리 짝
   status: "down" | "up" | "locked";
 }
+export interface OrderSlot {
+  slotId: string;
+  content: ContentBinding;
+  orderIdx: number; // 정답 순서(0..n-1)
+  status: "idle" | "locked" | "wrong";
+}
 export interface RevealView {
   coverId: string;
   hiddenId: string;
@@ -92,6 +98,10 @@ export interface GameStore {
   flipPick: string | null; // 첫 번째로 뒤집은 카드 slotId
   flipMatched: number;
 
+  // order-sequence
+  orderSlots: OrderSlot[];
+  orderNext: number; // 다음에 눌러야 할 정답 순서
+
   // effects bus
   sfx: Sfx | null;
 
@@ -106,6 +116,7 @@ export interface GameStore {
   matchTap: (side: Side, slotId: string) => void;
   answerBinary: (value: boolean) => void;
   flipTap: (slotId: string) => void;
+  orderTap: (slotId: string) => void;
   next: () => void;
   finish: () => void;
   restart: () => void;
@@ -144,6 +155,7 @@ function maxScoreOf(doc: InteractiveDoc): number {
   if (it.kind === "match-pair") return it.rounds.reduce((s, r) => s + r.pairs.length, 0);
   if (it.kind === "connect") return it.rounds.reduce((s, r) => s + r.links.length, 0);
   if (it.kind === "flip-memory") return it.rounds.reduce((s, r) => s + r.faces.length, 0);
+  if (it.kind === "order-sequence") return it.rounds.reduce((s, r) => s + r.steps.length, 0);
   return it.rounds.length; // tap-the-right-one · binary-choice · combine
 }
 
@@ -158,6 +170,7 @@ interface RoundView {
   binaryAnswer: boolean | null;
   binaryStatus: { yes: OptStatus; no: OptStatus };
   flipCards: FlipCard[];
+  orderSlots: OrderSlot[];
   question: string;
 }
 function emptyRound(): RoundView {
@@ -171,6 +184,7 @@ function emptyRound(): RoundView {
     binaryAnswer: null,
     binaryStatus: { yes: "idle", no: "idle" },
     flipCards: [],
+    orderSlots: [],
     question: "",
   };
 }
@@ -271,6 +285,19 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
     return { ...emptyRound(), flipCards, question: "같은 카드를 찾아 뒤집어요" };
   }
 
+  if (it.kind === "order-sequence") {
+    const round = it.rounds[idx];
+    // steps = 정답 순서. 슬롯엔 셔플 배치, orderIdx로 정답 순서 기억.
+    const indexed = round.steps.map((content, orderIdx) => ({ content, orderIdx }));
+    const shuffled = shuffle(indexed);
+    const orderSlots: OrderSlot[] = [];
+    it.slotIds.forEach((slotId, i) => {
+      const e = shuffled[i];
+      if (e) orderSlots.push({ slotId, content: e.content, orderIdx: e.orderIdx, status: "idle" });
+    });
+    return { ...emptyRound(), orderSlots, question: "순서대로 눌러볼까요?" };
+  }
+
   // combine 등 미지원 — 빈 라운드.
   return emptyRound();
 }
@@ -303,6 +330,8 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
     flipCards: [],
     flipPick: null,
     flipMatched: 0,
+    orderSlots: [],
+    orderNext: 0,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -336,6 +365,8 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       flipCards: rv.flipCards,
       flipPick: null,
       flipMatched: 0,
+      orderSlots: rv.orderSlots,
+      orderNext: 0,
     });
     later(() => bump({ kind: "say", text: rv.question }), 350);
   };
@@ -383,6 +414,8 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     flipCards: [],
     flipPick: null,
     flipMatched: 0,
+    orderSlots: [],
+    orderNext: 0,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -579,6 +612,42 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       }
     },
 
+    orderTap: (slotId) => {
+      const st = get();
+      if (st.busy || st.phase !== "playing") return;
+      const slot = st.orderSlots.find((o) => o.slotId === slotId);
+      if (!slot || slot.status === "locked") return;
+      const setStatus = (id: string, status: OrderSlot["status"]) =>
+        set((s) => ({ orderSlots: s.orderSlots.map((o) => (o.slotId === id ? { ...o, status } : o)) }));
+
+      if (slot.orderIdx === st.orderNext) {
+        // 정답 순서 → 잠금, 다음으로
+        setStatus(slotId, "locked");
+        const next = st.orderNext + 1;
+        set({ orderNext: next, score: st.score + 1 });
+        if (next >= st.orderSlots.length) {
+          set({ busy: true, banner: { ok: true, text: "다 맞혔어요!" } });
+          bump({ kind: "confetti" });
+          bump({ kind: "say", text: "딩동댕! 순서를 맞혔어요" });
+          later(afterCorrect, 900);
+        } else {
+          bump({ kind: "say", text: "좋아요!" });
+        }
+      } else {
+        // 순서 틀림 → 흔들고 리셋(진행 유지)
+        setStatus(slotId, "wrong");
+        set({ banner: { ok: false, text: "다시 해볼까요?" } });
+        bump({ kind: "say", text: "다시 해볼까요?" });
+        later(() => {
+          // 아직 'wrong'일 때만 되돌린다(그 사이 정답으로 잠겼으면 건드리지 않음).
+          set((s) => ({
+            orderSlots: s.orderSlots.map((o) => (o.slotId === slotId && o.status === "wrong" ? { ...o, status: "idle" } : o)),
+            banner: s.banner && !s.banner.ok ? null : s.banner,
+          }));
+        }, 900);
+      }
+    },
+
     next: () => {
       enterRound(get().roundIdx + 1);
     },
@@ -625,6 +694,8 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         flipCards: [],
         flipPick: null,
         flipMatched: 0,
+        orderSlots: [],
+        orderNext: 0,
       });
     },
 

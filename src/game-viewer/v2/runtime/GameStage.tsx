@@ -12,6 +12,7 @@ import { TapTheRightOne } from "./interactions/TapTheRightOne";
 import { MatchPair } from "./interactions/MatchPair";
 import { BinaryChoice } from "./interactions/BinaryChoice";
 import { FlipMemory } from "./interactions/FlipMemory";
+import { OrderSequence } from "./interactions/OrderSequence";
 import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
 import { PromptEntry } from "../entry/PromptEntry";
@@ -79,6 +80,7 @@ export function GameStage() {
       it.rightSlotIds.forEach((id) => s.add(id));
     }
     if (it.kind === "flip-memory") it.cardSlotIds.forEach((id) => s.add(id));
+    if (it.kind === "order-sequence") it.slotIds.forEach((id) => s.add(id));
     doc.effects.forEach((e) => {
       if (e.kind === "reveal") {
         s.add(e.coverNodeId);
@@ -213,6 +215,8 @@ export function GameStage() {
                   <BinaryChoice />
                 ) : kind === "flip-memory" ? (
                   <FlipMemory />
+                ) : kind === "order-sequence" ? (
+                  <OrderSequence />
                 ) : (
                   <TapTheRightOne />
                 )}

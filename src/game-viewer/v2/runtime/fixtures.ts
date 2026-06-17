@@ -8,6 +8,7 @@ import {
   tapTheRightOneExample,
   matchPairExample,
   revealAndCollectExample,
+  orderSequenceExample,
 } from "../schema/examples";
 import type { InteractiveDocInput } from "../schema/interactiveDoc";
 
@@ -139,6 +140,7 @@ export const FIXTURES: Record<string, { label: string; input: InteractiveDocInpu
   ox: { label: "⭕ OX 퀴즈", input: binaryChoiceExample },
   connect: { label: "🧩 관계 잇기", input: connectExample },
   flip: { label: "🃏 카드 뒤집기", input: flipMemoryExample },
+  order: { label: "🌱 순서대로", input: orderSequenceExample },
 };
 
 export type ExampleKey = keyof typeof FIXTURES;
