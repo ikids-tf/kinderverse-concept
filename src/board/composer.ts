@@ -293,6 +293,11 @@ export async function composeCutoutFromPrompt(request: string): Promise<void> {
       useBoardStore.getState().updateNodeRaw(cardId, { loading: false, src: img.url });
       // 그 자리에서 배경 제거(제자리 교체) → 투명 PNG.
       await removeBgFromNode(cardId, { mode: 'replace', assetKind: 'generated' });
+      // 누끼 후 자동 정리(디스펙클) 1패스 — 모서리 잔여 점·희미한 가장자리를 약하게 제거해
+      // 배경에 지저분한 내용물이 남지 않게 한다(침식 없는 약한 정리 → 본체는 그대로).
+      if (useBoardStore.getState().nodes[cardId]?.data?.bgRemoved) {
+        await removeBgFromNode(cardId, { mode: 'replace', assetKind: 'generated' });
+      }
       useBoardStore.getState().setSelection([cardId]);
     }
     fitFrameToChildren(frameId);
