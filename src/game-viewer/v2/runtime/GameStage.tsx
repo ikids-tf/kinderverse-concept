@@ -149,6 +149,9 @@ export function GameStage() {
   const hasReveal = !!doc?.effects.some((e) => e.kind === "reveal");
   const kind = doc?.interaction.kind;
 
+  // 가로 레인 카메라(PRD §10.1): 게임=섹션0, 확장활동=오른쪽 섹션들. 확장 단계면 그 섹션으로 팬.
+  const cam = phase === "extend" ? extendIdx + 1 : 0;
+
   const onMute = () => {
     const was = ttsEnabled;
     toggleTts();
@@ -326,117 +329,119 @@ export function GameStage() {
         {/* 무대 */}
         <div className="stage-frame">
           <div className="stage" ref={stageRef}>
-            <div className="blob a" />
-            <div className="blob b" />
+            {/* 카메라 — 게임(섹션0) + 확장활동(오른쪽 섹션들)을 가로 레인으로 팬 */}
+            <div className="kv-camera" style={{ transform: `translateX(-${cam * 100}%)` }}>
+              {/* 섹션 0 — 게임 */}
+              <div className="kv-section">
+                <div className="blob a" />
+                <div className="blob b" />
 
-            {doc && mode === "edit" && <EditLayer />}
+                {doc && mode === "edit" && <EditLayer />}
 
-            {doc && mode === "play" && (
-              <>
-                {unclaimed.map((node) => (
-                  <NodeRenderer
-                    key={node.id}
-                    node={node}
-                    binding={node.id === cueSlotId ? cueContent : undefined}
-                    reactSeq={node.id === cueSlotId ? cueReactSeq : undefined}
-                  />
-                ))}
-                {hasReveal && <RevealEffect />}
-                {kind === "match-pair" || kind === "connect" ? (
-                  <MatchPair />
-                ) : kind === "binary-choice" ? (
-                  <BinaryChoice />
-                ) : kind === "flip-memory" ? (
-                  <FlipMemory />
-                ) : kind === "order-sequence" ? (
-                  <OrderSequence />
-                ) : (
-                  <TapTheRightOne />
-                )}
-              </>
-            )}
-
-            {/* 자료 레이어 — 교사가 올린 스티커·글자·그림(게임 위, 즉흥 확장 활동) */}
-            {doc && mode === "play" && <MaterialsLayer />}
-
-            <div className={`banner${banner ? " show " + (banner.ok ? "ok" : "no") : ""}`}>
-              <span aria-hidden>{banner?.ok ? "🎉" : "💪"}</span>
-              <span>{banner?.text}</span>
-            </div>
-
-            <button type="button" className={`next${showNext ? " show" : ""}`} onClick={next}>
-              다음 <span aria-hidden>→</span>
-            </button>
-
-            {/* 시작 오버레이 (편집 모드에선 숨김) */}
-            <div className={`overlay${phase !== "start" || mode === "edit" ? " hide" : ""}`}>
-              <div className="finish-emoji" aria-hidden>🐾</div>
-              <h2 className="jua">{doc?.meta.title ?? "게임을 시작해요"}</h2>
-              <p>{doc ? START_DESC[doc.meta.archetype] ?? "시작해볼까요?" : ""}</p>
-              <button type="button" className="big-btn" onClick={start}>▶ 시작</button>
-            </div>
-
-            {/* 완료 오버레이 */}
-            <div className={`overlay${phase !== "finished" ? " hide" : ""}`}>
-              <div className="finish-emoji" aria-hidden>🎉</div>
-              <h2 className="jua">참 잘했어요!</h2>
-              <div className="finish-stars">
-                {Array.from({ length: maxScore }).map((_, i) => (
-                  <span key={i} className={`star${i < score ? " on" : ""}`}>⭐</span>
-                ))}
-              </div>
-              <p>
-                {maxScore}개 중 {score}개 맞혔어요!
-              </p>
-              <button type="button" className="big-btn" onClick={restart}>↺ 다시 하기</button>
-            </div>
-
-            {/* 확장활동 — 게임 다음, 끊김없이 이어지는 교사 진행 단계(레인 오른쪽으로 팬) */}
-            {phase === "extend" && doc && doc.extend[extendIdx] && (() => {
-              const act = doc.extend[extendIdx];
-              const m = EXTEND_META[act.type] ?? { emoji: "🌟", label: "확장활동" };
-              const last = extendIdx + 1 >= doc.extend.length;
-              return (
-                <div className="extend-ov" role="group" aria-label="확장활동">
-                  <div className="extend-card" key={extendIdx}>
-                    <div className="extend-top">
-                      <span className="extend-kind">{m.emoji} {m.label}</span>
-                      <span className="extend-step">확장활동 {extendIdx + 1} / {doc.extend.length}</span>
-                    </div>
-                    <ul className="extend-prompts">
-                      {act.prompts.map((p, i) => (
-                        <li key={i}>{p}</li>
-                      ))}
-                    </ul>
-                    {act.nuri && act.nuri.length > 0 && (
-                      <div className="extend-nuri" aria-label="누리과정 영역">
-                        {act.nuri.map((n) => (
-                          <span key={n} className="nuri-chip">🌱 {NURI_LABEL[n] ?? n}</span>
-                        ))}
-                      </div>
+                {doc && mode === "play" && (
+                  <>
+                    {unclaimed.map((node) => (
+                      <NodeRenderer
+                        key={node.id}
+                        node={node}
+                        binding={node.id === cueSlotId ? cueContent : undefined}
+                        reactSeq={node.id === cueSlotId ? cueReactSeq : undefined}
+                      />
+                    ))}
+                    {hasReveal && <RevealEffect />}
+                    {kind === "match-pair" || kind === "connect" ? (
+                      <MatchPair />
+                    ) : kind === "binary-choice" ? (
+                      <BinaryChoice />
+                    ) : kind === "flip-memory" ? (
+                      <FlipMemory />
+                    ) : kind === "order-sequence" ? (
+                      <OrderSequence />
+                    ) : (
+                      <TapTheRightOne />
                     )}
-                    <div className="extend-actions">
-                      <button
-                        type="button"
-                        className="extend-listen"
-                        onClick={() => { if (ttsEnabled) say(act.prompts.join("  ")); }}
-                      >
-                        🔊 다시 듣기
-                      </button>
-                      <button type="button" className="big-btn" onClick={nextExtend}>
-                        {last ? "마치기 ✓" : "다음 →"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
+                  </>
+                )}
 
-            {mode === "edit" && (
-              <div className="edit-hint" aria-hidden>
-                ✏️ 끌어서 이동 · 모서리로 크기 · 방향키 미세이동
+                <div className={`banner${banner ? " show " + (banner.ok ? "ok" : "no") : ""}`}>
+                  <span aria-hidden>{banner?.ok ? "🎉" : "💪"}</span>
+                  <span>{banner?.text}</span>
+                </div>
+
+                <button type="button" className={`next${showNext ? " show" : ""}`} onClick={next}>
+                  다음 <span aria-hidden>→</span>
+                </button>
+
+                {/* 시작 오버레이 (편집 모드에선 숨김) */}
+                <div className={`overlay${phase !== "start" || mode === "edit" ? " hide" : ""}`}>
+                  <div className="finish-emoji" aria-hidden>🐾</div>
+                  <h2 className="jua">{doc?.meta.title ?? "게임을 시작해요"}</h2>
+                  <p>{doc ? START_DESC[doc.meta.archetype] ?? "시작해볼까요?" : ""}</p>
+                  <button type="button" className="big-btn" onClick={start}>▶ 시작</button>
+                </div>
+
+                {/* 완료 오버레이 */}
+                <div className={`overlay${phase !== "finished" ? " hide" : ""}`}>
+                  <div className="finish-emoji" aria-hidden>🎉</div>
+                  <h2 className="jua">참 잘했어요!</h2>
+                  <div className="finish-stars">
+                    {Array.from({ length: maxScore }).map((_, i) => (
+                      <span key={i} className={`star${i < score ? " on" : ""}`}>⭐</span>
+                    ))}
+                  </div>
+                  <p>
+                    {maxScore}개 중 {score}개 맞혔어요!
+                  </p>
+                  <button type="button" className="big-btn" onClick={restart}>↺ 다시 하기</button>
+                </div>
+
+                {mode === "edit" && (
+                  <div className="edit-hint" aria-hidden>
+                    ✏️ 끌어서 이동 · 모서리로 크기 · 방향키 미세이동
+                  </div>
+                )}
               </div>
-            )}
+
+              {/* 확장활동 섹션들 — 게임 오른쪽으로 펼쳐지는 레인(끊김없이 카메라 팬) */}
+              {doc &&
+                doc.extend.map((act, i) => {
+                  const m = EXTEND_META[act.type] ?? { emoji: "🌟", label: "확장활동" };
+                  const last = i + 1 >= doc.extend.length;
+                  return (
+                    <div className="kv-section kv-section-extend" key={i} style={{ left: `${(i + 1) * 100}%` }} role="group" aria-label="확장활동">
+                      <div className="extend-card">
+                        <div className="extend-top">
+                          <span className="extend-kind">{m.emoji} {m.label}</span>
+                          <span className="extend-step">확장활동 {i + 1} / {doc.extend.length}</span>
+                        </div>
+                        <ul className="extend-prompts">
+                          {act.prompts.map((p, j) => (
+                            <li key={j}>{p}</li>
+                          ))}
+                        </ul>
+                        {act.nuri && act.nuri.length > 0 && (
+                          <div className="extend-nuri" aria-label="누리과정 영역">
+                            {act.nuri.map((n) => (
+                              <span key={n} className="nuri-chip">🌱 {NURI_LABEL[n] ?? n}</span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="extend-actions">
+                          <button type="button" className="extend-listen" onClick={() => { if (ttsEnabled) say(act.prompts.join("  ")); }}>
+                            🔊 다시 듣기
+                          </button>
+                          <button type="button" className="big-btn" onClick={nextExtend}>
+                            {last ? "마치기 ✓" : "다음 →"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* 자료 레이어 — 카메라 밖(뷰포트 고정): 팬과 무관하게 항상 화면 위에서 추가/이동/삭제 */}
+            {doc && mode === "play" && <MaterialsLayer />}
           </div>
         </div>
 
