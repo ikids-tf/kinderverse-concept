@@ -15,6 +15,7 @@ import { IMG_PLACEHOLDER_ZOOM } from '@/board/imageLod';
 import { NodeView } from './NodeView';
 import { normalizeMotionNode } from '@/board/motionGeometry';
 import { LaneView } from './LaneView';
+import { ImageEditorModal } from './ImageEditorModal';
 
 // Memoized node — on pan/zoom the viewport changes but each node's props (node,
 // selected, dx, dy, onPointerDown) don't, so memo skips re-rendering every card.
@@ -382,6 +383,16 @@ export function BoardCanvas() {
   const [genConfirm, setGenConfirm] = useState<{ count: number; run: () => void } | null>(null);
   // 빈 동영상 뷰어 생성 직후 "무엇을 할까요?"(영상 생성 / 자료 연결) 질문 팝오버.
   const [viewerAsk, setViewerAsk] = useState<{ viewerId: string } | null>(null);
+  // 이미지 편집 모달 — 카드의 ✏️ 버튼이 'kv:edit-image' 이벤트로 연다.
+  const [editImageId, setEditImageId] = useState<string | null>(null);
+  useEffect(() => {
+    const h = (e: Event) => {
+      const id = (e as CustomEvent).detail?.nodeId;
+      if (typeof id === 'string') setEditImageId(id);
+    };
+    window.addEventListener('kv:edit-image', h);
+    return () => window.removeEventListener('kv:edit-image', h);
+  }, []);
   // mode 'new' = 빈 포트에서 새 연결, 'detach' = 연결된 포트를 떼어내 분리/옮기기.
   // from = 고정된(반대쪽) 끝, keepFrom = 고정 끝이 링크의 from인지.
   const lk = useRef<{ mode: 'new' | 'detach'; from: string; x1: number; y1: number; linkId?: string; keepFrom?: boolean } | null>(null);
@@ -1503,6 +1514,12 @@ export function BoardCanvas() {
             <span className="text-sm font-medium text-fg">{generating}</span>
           </div>
         </div>
+      )}
+      {editImageId && createPortal(
+        <ImageEditorModal nodeId={editImageId} onClose={() => setEditImageId(null)} />,
+        // React 루트(#root) 안으로 포털해야 onClick(이벤트 위임)이 동작한다. body로 포털하면
+        // 루트 밖이라 React 합성 이벤트가 잡히지 않는다. #root는 transform이 없어 fixed도 정상.
+        document.getElementById('root') ?? document.body,
       )}
     </div>
   );

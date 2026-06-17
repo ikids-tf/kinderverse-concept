@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Upload, FolderPlus, X, Trash2, Folder, Check, Images, Film, Music, FileText, ChevronLeft, ChevronRight, Download, Frame } from 'lucide-react';
+import { Upload, FolderPlus, X, Trash2, Folder, Check, Images, Film, Music, FileText, ChevronLeft, ChevronRight, Download, Frame, Archive, Play, Link2, ExternalLink } from 'lucide-react';
 import { PageHero } from '@/components/PageHero';
 import { useFolderStore, savedFileCount, type SavedFolder, type SavedFile, type BoardSnap } from '@/store/folderStore';
 import { useBoardStore } from '@/store/boardStore';
+import { listAssets, type ImageAsset } from '@/board/assets';
+import { listWebLinks, type WebLink } from '@/board/webLinks';
+import { getVideoAsset } from '@/board/videoAssets';
 import { showToast } from '@/lib/toast';
 
 /* ---------------- Folder Vault (자료보관함) ----------------
@@ -356,6 +359,32 @@ export function FolderPage() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // ── 보관함 — 보드에서 자동 수집된 자산(이미지·도안·생성 동영상 포스터) + 웹 링크 ──
+  //    별도 store가 아니라 보드와 공유하는 IDB 보관함(assets.ts·webLinks.ts·videoAssets.ts)을
+  //    읽어 보여준다(읽기 전용 집계 — 보드 생성/검색이 곧 이 폴더를 채운다).
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const [vaultAssets, setVaultAssets] = useState<ImageAsset[]>([]);
+  const [vaultLinks, setVaultLinks] = useState<WebLink[]>([]);
+  const [vaultView, setVaultView] = useState<{ kind: 'image' | 'video'; url: string; title: string } | null>(null);
+  const loadVault = useCallback(() => {
+    void listAssets().then(setVaultAssets);
+    void listWebLinks().then(setVaultLinks);
+  }, []);
+  useEffect(() => { loadVault(); }, [loadVault]);
+  const vaultCount = vaultAssets.length + vaultLinks.length;
+  // 동영상은 실제 mp4를 클릭 시점에 videoAssets(IDB)에서 로드(포스터는 그리드 썸네일).
+  const openVaultVideo = async (asset: ImageAsset) => {
+    const mp4 = asset.videoAssetId ? await getVideoAsset(asset.videoAssetId) : undefined;
+    if (!mp4) { showToast('동영상을 불러올 수 없어요 — 원본이 삭제되었을 수 있어요', 'error'); return; }
+    setVaultView({ kind: 'video', url: mp4, title: asset.tag });
+  };
+  useEffect(() => {
+    if (!vaultView) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setVaultView(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [vaultView]);
+
   const toggle = (id: number) =>
     setSel((s) => {
       const n = new Set(s);
@@ -477,6 +506,31 @@ export function FolderPage() {
           </div>
         </div>
       )}
+      {/* ── 보관함 라이트박스 — 이미지/동영상 바로 보기(Esc·배경·X 닫기) ── */}
+      {vaultView && (
+        <div
+          onClick={() => setVaultView(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(20,19,17,.8)', display: 'flex', flexDirection: 'column' }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 22px' }}>
+            <span style={{ color: '#fff', fontWeight: 700, fontSize: 15, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vaultView.title}</span>
+            <button
+              title="닫기 (Esc)"
+              onClick={() => setVaultView(null)}
+              style={{ width: 36, height: 36, borderRadius: 999, border: '1px solid rgba(255,255,255,.3)', background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
+            >
+              <X size={17} color="#fff" />
+            </button>
+          </div>
+          <div onClick={(e) => e.stopPropagation()} style={{ flex: 1, minHeight: 0, display: 'grid', placeItems: 'center', padding: '0 26px 30px' }}>
+            {vaultView.kind === 'image' ? (
+              <img src={vaultView.url} alt="" style={{ maxWidth: '92%', maxHeight: '100%', objectFit: 'contain', borderRadius: 12, background: '#fff' }} />
+            ) : (
+              <video src={vaultView.url} controls autoPlay style={{ maxWidth: '92%', maxHeight: '100%', borderRadius: 12, background: '#000' }} />
+            )}
+          </div>
+        </div>
+      )}
       <PageHero
         eyebrow="자료 보관함"
         title="자료보관함"
@@ -556,6 +610,85 @@ export function FolderPage() {
             </div>
           )}
         </>
+      ) : vaultOpen ? (
+        /* ── 보관함 — 보드 자동수집 자료·동영상 + 웹 링크(읽기 전용 집계) ── */
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 22, flexWrap: 'wrap' }}>
+            <button style={ghostBtn} onClick={() => setVaultOpen(false)}>자료보관함</button>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <ChevronRight size={14} color={C.muted} />
+              <button style={{ ...ghostBtn, color: C.ink, fontWeight: 700 }}>보관함</button>
+            </span>
+          </div>
+          {vaultCount === 0 ? (
+            <div style={{ padding: '48px 0', textAlign: 'center', color: C.muted, fontSize: 13 }}>
+              보관함이 비어 있어요 — 보드에서 자료·동영상을 만들거나 웹 링크를 검색하면 자동으로 모여요.
+            </div>
+          ) : (
+            <>
+              {vaultAssets.length > 0 && (
+                <>
+                  <div style={head}><span>자료 · 동영상</span><span style={{ fontSize: 12.5, color: C.muted, fontWeight: 400, fontFamily: 'var(--font-sans)' }}>{vaultAssets.length}개</span></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 14, marginBottom: 30 }}>
+                    {vaultAssets.map((it, i) => {
+                      const isVideo = it.kind === 'video';
+                      return (
+                        <div
+                          key={`${it.tag}-${it.createdAt}-${i}`}
+                          onClick={() => (isVideo ? void openVaultVideo(it) : setVaultView({ kind: 'image', url: it.url, title: it.tag }))}
+                          title={`${it.tag} 보기`}
+                          style={{ background: '#fff', border: `1.5px solid ${C.line}`, borderRadius: 14, padding: 12, cursor: 'pointer', boxShadow: C.shadow1 }}
+                        >
+                          <div style={{ height: 110, borderRadius: 10, background: `${a}08`, marginBottom: 10, overflow: 'hidden', position: 'relative' }}>
+                            <img src={it.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 10 }} />
+                            {isVideo && (
+                              <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(20,19,17,.18)' }}>
+                                <span style={{ width: 40, height: 40, borderRadius: 999, background: 'rgba(20,19,17,.55)', display: 'grid', placeItems: 'center' }}>
+                                  <Play size={18} color="#fff" fill="#fff" />
+                                </span>
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.tag}</div>
+                          <div style={{ color: C.muted, fontSize: 11.5, marginTop: 3 }}>{isVideo ? '동영상' : it.kind === '도안' ? '도안' : '이미지'} · 클릭해 보기</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+              {vaultLinks.length > 0 && (
+                <>
+                  <div style={head}><span>웹 링크</span><span style={{ fontSize: 12.5, color: C.muted, fontWeight: 400, fontFamily: 'var(--font-sans)' }}>{vaultLinks.length}개</span></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
+                    {vaultLinks.map((l, i) => (
+                      <a
+                        key={`${l.url}-${i}`}
+                        href={l.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={l.url}
+                        className="kv-doc"
+                        style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 12, boxShadow: C.shadow1, display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: C.ink }}
+                      >
+                        <span style={{ width: 44, height: 44, borderRadius: 10, background: `${a}10`, display: 'grid', placeItems: 'center', flexShrink: 0, overflow: 'hidden' }}>
+                          {l.thumb ? <img src={l.thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Link2 size={18} color={a} />}
+                        </span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.title}</div>
+                          <div style={{ color: C.muted, fontSize: 11.5, marginTop: 3, display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.domain || l.url}</span>
+                            <ExternalLink size={11} color={C.muted} style={{ flexShrink: 0 }} />
+                          </div>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </>
       ) : (
         <>
       {/* action bar */}
@@ -577,6 +710,18 @@ export function FolderPage() {
       {/* folders */}
       <div style={head}><span>폴더</span></div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14, marginBottom: 30 }}>
+        {/* 보관함 — 보드에서 자동 수집된 자료·동영상·웹 링크(클릭 = 안으로) */}
+        <div
+          onClick={() => { loadVault(); setVaultOpen(true); }}
+          className="kv-doc"
+          style={{ position: 'relative', background: '#fff', border: `1.5px solid ${a}55`, borderRadius: 14, padding: 14, cursor: 'pointer', boxShadow: C.shadow1, display: 'flex', alignItems: 'center', gap: 12 }}
+        >
+          <span style={{ width: 40, height: 40, borderRadius: 11, background: `${a}14`, display: 'grid', placeItems: 'center', flexShrink: 0 }}><Archive size={20} color={a} /></span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>보관함</div>
+            <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>{vaultCount}개 항목 · 보드 자동수집</div>
+          </div>
+        </div>
         {/* 보드 프레임에서 저장된 폴더(클릭 = 안으로 — 이미지 jpg·문서 pdf·메모 txt·중첩 프레임은 하위 폴더) */}
         {saved.map((f) => (
           <div

@@ -7,7 +7,7 @@ import { showToast } from '@/lib/toast';
 import { SHAPE_PATHS } from '@/lib/shapes';
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { editTextCmd, captureNodes, pushRedesign, deleteNodesCmd } from '@/board/commands';
-import { runWorkflowStep, spawnWebViewer, removeBgFromNode, type RunnerData, type StepKind } from '@/board/workflow';
+import { runWorkflowStep, spawnWebViewer, type RunnerData, type StepKind } from '@/board/workflow';
 import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren } from '@/board/frames';
 import { alignFrameCmd } from '@/board/align';
 import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
@@ -1028,12 +1028,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
 
   /* ---------- image card (real src / loading / placeholder) ---------- */
   if (node.type === 'image') {
+    // 배경제거(누끼) 이미지는 흰 카드 배경·테두리·그림자를 없애 보드 위에 '컷아웃'처럼
+    // 투명하게 보이게 한다(흰 bg-surface가 비쳐 안 지워진 것처럼 보이던 문제 해결).
+    const bgRemoved = node.data?.bgRemoved === true;
     return (
       <div
         ref={cardRef}
         onPointerDown={down}
         onDoubleClick={dbl}
-        className={`group/card absolute select-none overflow-hidden rounded-md border border-border bg-surface shadow-sm ${ring}${idleCls}`}
+        className={`group/card absolute select-none overflow-hidden rounded-md ${bgRemoved ? '' : 'border border-border bg-surface shadow-sm'} ${ring}${idleCls}`}
         style={{ left, top, width: node.w, ...radiusStyle(node), ...rootTransform(node), ...idleVars }}
       >
         <div className="relative" style={{ width: '100%', height: node.h }}>
@@ -1054,7 +1057,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 src={(node.data?.thumb as string | undefined) || node.src}
                 alt={node.text ?? ''}
                 draggable={false}
-                className="h-full w-full object-cover"
+                className={`h-full w-full ${bgRemoved ? 'object-contain' : 'object-cover'}`}
                 style={node.data?.flipX ? { transform: 'scaleX(-1)' } : undefined}
               />
             )
@@ -1096,12 +1099,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             >
               <button
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => { e.stopPropagation(); void removeBgFromNode(node.id, { assetKind: 'unknown' }); }}
-                title="배경 제거 (누끼)"
-                aria-label="배경 제거"
+                onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('kv:edit-image', { detail: { nodeId: node.id } })); }}
+                title="이미지 편집 (배경 제거·요소 지우기·다운로드)"
+                aria-label="이미지 편집"
                 className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:bg-accent hover:text-on-accent"
               >
-                <Icon name="scissors" size={15} />
+                <Icon name="edit" size={15} />
               </button>
               <button
                 onPointerDown={(e) => e.stopPropagation()}
