@@ -2,7 +2,7 @@ import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
-import { composeFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior } from './composer';
+import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior } from './composer';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import {
   contentIntentFast,
@@ -106,6 +106,18 @@ function createVessel(v: VesselMatch): void {
      mixed selection) → raise the disambiguation popup (promptChoiceStore) so the
      teacher chooses: 그 자리에 생성 / 성격 바꿔 생성 / 새 프레임.
    Returns true (handled on the board). */
+/** "투명/배경 없이 + 생성" 프롬프트에서 배경 관련 표현만 떼어내 깔끔한 생성 주제를 남긴다.
+    (이미지 모델은 투명을 못 만드므로 단색 배경에 단일 오브젝트로 생성한 뒤 누끼한다.) */
+function stripBgKeywords(text: string): string {
+  return text
+    .replace(/투명\s*(한)?\s*배경\s*(에다가|에다|에서|위에|으로|에)?/g, ' ')
+    .replace(/배경\s*(을|를)?\s*(없이|빼고|제거(하고|해서|한)?|지우고|지운|없는)/g, ' ')
+    .replace(/뒷?배경\s*(없이|제거|삭제)/g, ' ')
+    .replace(/누끼\s*(로|를|만)?/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function handleBoardPrompt(text: string): boolean {
   const b = useBoardStore.getState();
   const sel = b.selection.map((id) => b.nodes[id]).filter(Boolean);
@@ -124,9 +136,21 @@ export function handleBoardPrompt(text: string): boolean {
     return true;
   }
 
-  // 배경 제거(누끼) 의도 — 대상 이미지가 선택돼 있지 않으면 생성으로 새지 않게 다정히 안내.
-  // (선택된 이미지가 있으면 아래 전용 분기에서 공용 엔진으로 처리.)
+  // 배경 제거(누끼) 의도 — 선택된 이미지가 없을 때.
   if (BG_REMOVE_RE.test(text) && !sel.some((n) => n.type === 'image' && n.src)) {
+    // "투명 배경으로 ○○ 그려줘"처럼 '생성' 요청이면 → 컷아웃 컴포저로 단색 배경·단일
+    // 오브젝트를 생성한 뒤 그 자리에서 배경 제거(투명 PNG 한 장)로 한 번에 만든다.
+    //  · 생성 동사(그려/만들/생성…)가 있고  · 기존 이미지를 가리키는 말(이 이미지/사진…)이
+    //    아니어야 생성으로 본다(후자는 대상 선택 안내).
+    const cleaned = stripBgKeywords(text);
+    const hasGenVerb = /(그려|그림|만들|만드|생성|제작|그릴|뽑아|꾸며)/.test(cleaned);
+    const refsExisting = /(이|그|저|요|현재|선택)\s*(이미지|사진|그림|그거|것)/.test(text);
+    if (hasGenVerb && !refsExisting && cleaned.replace(/\s/g, '').length >= 2) {
+      showToast('투명 배경 그림을 만들고 있어요', 'success');
+      void composeCutoutFromPrompt(cleaned);
+      return true;
+    }
+    // 생성 대상이 없는 순수 '배경 제거' 요청 → 대상 이미지를 먼저 고르라고 안내.
     showToast('배경을 지울 이미지를 먼저 선택해 주세요', 'error');
     return true;
   }

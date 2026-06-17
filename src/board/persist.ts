@@ -110,7 +110,11 @@ async function write(): Promise<void> {
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
+// 하이드레이션이 끝나기 전에는 저장하지 않는다 — 복원되기 전 빈/부분 상태가 저장본을
+// 덮어쓰는 것을 막는다(saveActiveLive의 빈-덮어쓰기 가드와 함께 이중 안전).
+let hydrated = false;
 function scheduleWrite(): void {
+  if (!hydrated) return;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => void write(), DEBOUNCE_MS);
 }
@@ -137,6 +141,11 @@ async function hydrateSnapshots(meta: Meta | null, legacy: LegacyBlob | null): P
   if (active && clean[active]) useBoardStore.getState().loadSnapshot(clean[active]);
 }
 
+/** 하이드레이션 완료 표시 — 이후부터 자동저장 허용(그 전 빈 상태는 저장 안 함). */
+function markHydrated(): void {
+  hydrated = true;
+}
+
 /** Hydrate from storage (if present) and start mirroring changes. Call ONCE, before
     the board UI mounts. The board LIST + activeId restore synchronously (from the
     light meta, or the legacy blob on first migration) so MyBoardPage's "ensure one
@@ -153,7 +162,8 @@ export function initBoardPersistence(): void {
     useBoardsStore.setState({ boards: effectiveMeta.boards, activeId: effectiveMeta.activeId ?? null });
   }
 
-  void hydrateSnapshots(effectiveMeta, legacy);
+  // 하이드레이션이 끝난 뒤에야 자동저장을 켠다(복원 전 빈 상태가 저장본을 덮지 않게).
+  void hydrateSnapshots(effectiveMeta, legacy).finally(markHydrated);
 
   // Live-board changes (edits, drags, board switches via loadSnapshot) trigger a
   // debounced write. Subscribe to boardStore only — saveActiveLive() mutates

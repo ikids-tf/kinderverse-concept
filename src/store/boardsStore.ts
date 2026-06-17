@@ -40,9 +40,21 @@ export const useBoardsStore = create<BoardsState>((set, get) => ({
   activeId: null,
 
   saveActiveLive: () => {
-    const { activeId } = get();
+    const { activeId, snapshots } = get();
     if (!activeId) return;
-    set((s) => ({ snapshots: { ...s.snapshots, [activeId]: useBoardStore.getState().snapshot() } }));
+    const live = useBoardStore.getState().snapshot();
+    // ★ 사고 방지 — 빈 라이브 보드로 '내용 있는' 저장본을 덮어쓰지 않는다. 하이드레이션
+    //   전/일시적 빈 상태나 전체 새로고침 사이에 빈 보드가 자동저장돼 콘텐츠를 날리던 문제.
+    //   (보드를 정말 비우려면 보드 자체를 삭제하면 된다.)
+    const liveEmpty = Object.keys(live.nodes).length === 0 && (live.laneOrder?.length ?? 0) === 0;
+    const prev = snapshots[activeId];
+    const prevHadContent = !!prev && Object.keys(prev.nodes ?? {}).length > 0;
+    if (liveEmpty && prevHadContent) {
+      // eslint-disable-next-line no-console
+      console.warn('[boards] skip save — live board empty but saved snapshot has content (overwrite blocked)');
+      return;
+    }
+    set((s) => ({ snapshots: { ...s.snapshots, [activeId]: live } }));
   },
 
   createBoard: (kind, title) => {

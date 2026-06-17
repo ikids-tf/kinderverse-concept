@@ -23,6 +23,7 @@ import {
   openDocSpot,
   generateActivityImages,
   genSignal,
+  removeBgFromNode,
   PLAN_DOC_W,
   type SourceLink,
   type SourceThumb,
@@ -36,7 +37,7 @@ import { runDesignDirector } from '@/ai/agents/design';
 import { pickTemplate, type FrameTemplate, type FrameRegion, type FillAgent } from './templates';
 import { runRouter } from '@/ai/agents/router';
 import { runPlanIdeas, runPlan, runMindMapActivities, type MindActivity } from '@/ai/agents/plan';
-import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImage, KV_ART_STYLE } from '@/ai/agents/studio';
+import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImage, KV_ART_STYLE, KV_CUTOUT_STYLE } from '@/ai/agents/studio';
 import { findAsset, saveAsset } from './assets';
 import { runRecord } from '@/ai/agents/record';
 import { runWriting } from '@/ai/agents/writing';
@@ -244,6 +245,65 @@ function clearFrameLoading(frameId: string): void {
   }
 }
 
+/** 투명 배경 컷아웃 생성 — "투명 배경에 ○○ 그려줘". 장식 배경을 그리는 일반 컴포저와
+    달리 **단색 순백 배경에 단일 오브젝트만** 생성(누끼가 깨끗이 떨어지게)한 뒤, 그 자리에서
+    배경을 제거한다. 결과 = 프레임 1개 + 투명 PNG 이미지 카드 1장.
+    (장식 scene을 그리는 KV_ART_STYLE로 생성하면 RMBG가 배경을 전경으로 오인해 못 지운다.) */
+export async function composeCutoutFromPrompt(request: string): Promise<void> {
+  const b = useBoardStore.getState();
+  b.beginGen();
+  say('🎨 투명 배경 그림을 만들고 있어요…');
+  const created: string[] = [];
+  let frameId: string | undefined;
+  try {
+    const ctx = buildAgentContext('studio');
+    // 깔끔한 주제 추출(오타 교정 + 주제어) — 단일 이미지 spec.
+    const plan = await planStudioImages(request, [], ctx, 'image', { simple: true });
+    const spec = plan.specs[0] ?? { caption: request, prompt: request };
+    const title = (plan.title || spec.caption || request).slice(0, 18);
+
+    // 프레임 + 헤더 + 빈 이미지 카드(스피너)를 화면 중앙에 즉시 배치 — 만들어지는 과정을 그 자리에서.
+    const vc = viewportCenterBoardPoint();
+    const parallelLane = Math.max(0, useBoardStore.getState().genActive - 1);
+    frameId = newId('frame');
+    b.addNodeRaw({
+      id: frameId,
+      type: 'frame',
+      x: Math.round(vc.x - 150),
+      y: Math.round(vc.y - 175) + parallelLane * 640,
+      w: 300,
+      h: 350,
+      data: { title, composer: true, loading: true, working: true, loadingLabel: '✨ 투명 이미지를 만들고 있어요…', sourcePrompt: request },
+    });
+    created.push(frameId);
+    if (parallelLane === 0) useBoardStore.getState().focusNode(frameId);
+    created.push(spawnHeaderCard(frameId, title));
+    const cardId = spawnImageCard(frameId, undefined, spec.caption, true);
+    created.push(cardId);
+
+    // 단색 배경·단일 오브젝트 스타일로 생성 → 누끼가 깨끗하게 떨어진다.
+    say(`🖼️ '${spec.caption}' 그리는 중…`);
+    const img = await renderStudioImage(spec, KV_CUTOUT_STYLE).catch(
+      () => ({ url: undefined as string | undefined, mocked: false }),
+    );
+    clearFrameLoading(frameId);
+    if (!img.url) {
+      useBoardStore.getState().updateNodeRaw(cardId, { loading: false }); // 실패 — 빈 카드만 남김
+    } else {
+      useBoardStore.getState().updateNodeRaw(cardId, { loading: false, src: img.url });
+      // 그 자리에서 배경 제거(제자리 교체) → 투명 PNG.
+      await removeBgFromNode(cardId, { mode: 'replace', assetKind: 'generated' });
+      useBoardStore.getState().setSelection([cardId]);
+    }
+    fitFrameToChildren(frameId);
+    if (parallelLane === 0) slideFrameToEmpty(frameId);
+  } finally {
+    if (frameId) clearFrameLoading(frameId);
+    recordSpawnedNodes(created.filter((id) => useBoardStore.getState().nodes[id]), 'AI 투명 이미지 생성');
+    useBoardStore.getState().endGen();
+  }
+}
+
 /* ---------------- 단일 계획안 — A4 세로 + 스트리밍 생성 ---------------- */
 
 /** 초안 스트리밍용 시스템 프롬프트 — 채팅 답변이 아니라 '계획안 문서 초안' 톤.
@@ -384,6 +444,7 @@ async function composePlanDocStream(
       b2.removeNodeRaw(docId);
       b2.removeNodeRaw(frameId);
     }
+    clearFrameLoading(frameId); // 제목 탭 스피너 끄기(중단)
     return frameId;
   }
 
@@ -401,6 +462,7 @@ async function composePlanDocStream(
       useBoardStore.getState().updateNodeRaw(docId, { text: '⚠️ 계획안 생성에 실패했어요. 다시 시도해 주세요.' });
     }
   }
+  clearFrameLoading(frameId); // 문서 정리 완료 — 제목 탭 스피너 끄기(이 경로엔 정리 코드가 없어 무한 스피너가 됐었다)
 
   if (signal.aborted) return frameId; // 정리 단계 중 정지 — 칩·표지 생략
 

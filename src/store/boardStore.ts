@@ -207,6 +207,27 @@ const safeViewport = (v: Viewport): Viewport => ({
   panY: finite(v.panY, 0),
 });
 
+/** 스냅샷 로드 시 stale 진행 플래그 제거 — 생성 도중 저장된 보드가 무한 스피너/오버레이를
+    돌리지 않게(로드 직후엔 진행 중인 생성이 없으므로 안전). data.working/loading/loadingLabel만 손댄다. */
+function stripStaleProgress(nodes: Record<string, BoardNode>): Record<string, BoardNode> {
+  let changed = false;
+  const out: Record<string, BoardNode> = {};
+  for (const [id, n] of Object.entries(nodes)) {
+    const d = n.data as Record<string, unknown> | undefined;
+    if (d && (d.working || d.loading || d.loadingLabel)) {
+      const data = { ...d };
+      delete data.working;
+      delete data.loading;
+      delete data.loadingLabel;
+      out[id] = { ...n, data };
+      changed = true;
+    } else {
+      out[id] = n;
+    }
+  }
+  return changed ? out : nodes;
+}
+
 export const useBoardStore = create<BoardState>((set, get) => ({
   nodes: {},
   order: [],
@@ -619,7 +640,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
   loadSnapshot: (snap) =>
     set({
-      nodes: snap.nodes,
+      // 로드 직후엔 진행 중인 생성이 없다 — 스냅샷에 남은 진행 플래그(프레임 제목 스피너
+      // data.working · 로딩 오버레이 data.loading/loadingLabel)는 stale이므로 제거한다.
+      // (생성 도중 저장·중단된 보드가 영원히 스피너를 돌리던 문제 방지.)
+      nodes: stripStaleProgress(snap.nodes),
       order: snap.order,
       lanes: snap.lanes,
       laneOrder: snap.laneOrder,
