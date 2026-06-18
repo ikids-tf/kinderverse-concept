@@ -6,7 +6,7 @@
  * 끌어온 시드 이미지는 앞쪽 요소에 그대로 넣어 교사 그림이 게임에 등장한다.
  */
 import { recommendFromPromptAI, type Knobs } from "../resolver/resolver";
-import type { ContentBinding, InteractiveDocInput } from "../schema/interactiveDoc";
+import type { ContentBindingInput, InteractiveDocInput } from "../schema/interactiveDoc";
 import { useGame } from "../runtime/useGame";
 import { useGen } from "../runtime/genProgress";
 import { useAssetStore } from "../runtime/assetStore";
@@ -14,7 +14,7 @@ import { useAssetStore } from "../runtime/assetStore";
 /** input에서 생성/소싱 대상 asset 라벨 수집 — assetStore.request 키와 동일 규칙. */
 function inputLabels(input: InteractiveDocInput): string[] {
   const set = new Set<string>();
-  const scan = (c: ContentBinding) => {
+  const scan = (c: ContentBindingInput) => {
     if (c.type === "asset") set.add(c.asset.assetId);
   };
   const it = input.interaction;

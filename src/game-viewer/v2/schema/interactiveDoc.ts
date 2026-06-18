@@ -550,5 +550,6 @@ export type Interaction = z.infer<typeof Interaction>;
 export type Effect = z.infer<typeof Effect>;
 export type Settings = z.infer<typeof Settings>;
 export type ContentBinding = z.infer<typeof ContentBinding>;
+export type ContentBindingInput = z.input<typeof ContentBinding>;
 export type AssetRef = z.infer<typeof AssetRef>;
 export type PresetName = z.infer<typeof PresetName>;
