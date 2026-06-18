@@ -153,6 +153,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   // 동영상 '프롬프트 추가' 작성 모드 — 설정되면 입력창 placeholder가 추천 프롬프트로
   // 바뀌고, 연결한 이미지 썸네일이 바 위에 뜨며, 전송 시 그 프롬프트+이미지로 영상 생성.
   const videoCompose = useUIStore((s) => s.videoCompose);
+  // 게임 뷰어 풀스크린 — 입력이 무조건 그 게임으로 가므로 placeholder도 게임 문구로.
+  const gameViewerFs = useUIStore((s) => s.gameViewerFsNodeId);
   const setVideoCompose = useUIStore((s) => s.setVideoCompose);
 
   const sendToRouter = useRouterStore((s) => s.send);
@@ -369,6 +371,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   // current selection. On My Board it scopes to the selected card(s)/frame.
   const boardSelectionCount = location.pathname.startsWith('/board') ? boardSelection.length : 0;
   const placeholder = (() => {
+    // 게임 뷰어 풀스크린 — 입력은 그 게임 전용. (보드 선택과 무관.)
+    if (gameViewerFs) return '무슨 게임을 만들까요?  예) 동물 이름 맞추기 · 과일 짝 맞추기';
     // 동영상 작성 모드 — 추천 프롬프트를 placeholder로(비워서 보내면 이 값을 사용).
     if (videoCompose) {
       const base = videoCompose.placeholder.trim().replace(/\s+/g, ' ').slice(0, 48);

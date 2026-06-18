@@ -382,3 +382,16 @@
 @media (prefers-reduced-motion: reduce) {
   .kv-heart { animation: none; display: none; }
 }
+
+/* 게임 뷰어 풀스크린 — 보드 프롬프트바가 '아래로 내려오며' 등장(게임 섹션은 제자리). */
+@keyframes kv-fsbar-slidedown {
+  from { transform: translateY(-22px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+/* 풀스크린 포털 바는 화면 바닥에 바짝 붙인다(기본 padding-bottom은 보드용이라 커서 무대와 겹침). */
+.kv-fsbar-enter .kv-promptbar { padding-bottom: 10px; animation: kv-fsbar-slidedown 300ms cubic-bezier(.22,.61,.36,1); }
+/* 바 아래 도움말 캡션은 풀스크린에선 숨겨 바를 바닥에 더 붙인다(무대와 겹침 방지). */
+.kv-fsbar-enter .kv-promptbar .relative > .text-xs { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .kv-fsbar-enter .kv-promptbar { animation: none; }
+}

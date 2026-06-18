@@ -9,8 +9,9 @@
  */
 import { useEffect } from "react";
 import { create } from "zustand";
-import { recommendFromPromptAI } from "../resolver/resolver";
+import { generateGame } from "../generate/orchestrator";
 import { useGame } from "./useGame";
+import { useGen, latestStep } from "./genProgress";
 import { useMaterials } from "./materials";
 
 /** iframe(보드 카드) 안에서 실행 중인지 — 단독 탭이면 false. */
@@ -27,20 +28,9 @@ const useChromeStore = create<ChromeState>((set) => ({
 }));
 export const useChromeVisible = (): boolean => useChromeStore((s) => s.visible);
 
-/** 프롬프트 → 추천 1순위 자동 채택 → 즉시 플레이(보드 프롬프트바가 입력 자체라 카드 UI 불필요). */
+/** 프롬프트(+드래그 시드) → 게임 생성(orchestrator). 진행은 useGen 채널로 스트리밍된다. */
 async function generateFromPrompt(prompt: string): Promise<void> {
-  const text = (prompt || "").trim();
-  if (!text) return;
-  try {
-    const cards = await recommendFromPromptAI(text);
-    const top = cards[0];
-    if (!top) return;
-    const { input } = top.build();
-    useGame.getState().loadDoc(input);
-    useGame.getState().start();
-  } catch {
-    /* 생성 실패는 조용히 무시(기존 게임 유지) */
-  }
+  await generateGame(prompt, { seedImages: useGen.getState().seeds });
 }
 
 type ChromeWindow = Window & { kvSetChrome?: (show: boolean) => void };
@@ -57,13 +47,24 @@ export function useBoardBridge(): void {
       if (d.type === "kv-game-create" && typeof d.prompt === "string") {
         void generateFromPrompt(d.prompt);
       } else if (d.type === "kv-game-add-image" && typeof d.src === "string") {
-        // 보드에서 드롭한 이미지를 게임 위 '자료'로 올린다(교사 즉흥 활동).
-        useMaterials.getState().add("image", d.src);
+        // 게임 전(환영 화면)이면 '시드'(만들기 재료), 게임 중이면 '자료'로.
+        if (useGame.getState().doc) useMaterials.getState().add("image", d.src);
+        else useGen.getState().addSeed(d.src);
       }
     };
     window.addEventListener("message", onMessage);
+
+    // 생성 진행을 보드(부모)로 릴레이 → 보드 프롬프트바가 스트리밍 표시.
+    const unsubGen = useGen.subscribe((s) => {
+      window.parent.postMessage(
+        { type: "kv-game-progress", active: s.active, step: latestStep(s.steps) },
+        "*",
+      );
+    });
+
     return () => {
       window.removeEventListener("message", onMessage);
+      unsubGen();
       delete (window as ChromeWindow).kvSetChrome;
     };
   }, []);

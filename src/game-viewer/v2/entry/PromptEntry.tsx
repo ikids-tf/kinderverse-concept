@@ -1,12 +1,13 @@
 /**
- * PromptEntry.tsx — 프롬프트로 시작(빠른 길) + 노브(난이도·분량·분위기) + 추천 카드.
+ * PromptEntry.tsx — 단독 탭 하단 프롬프트바. 한 줄 입력(+드래그 시드) → 게임 생성(orchestrator).
  * ------------------------------------------------------------------
- * 교사가 한 줄 입력 + 큰 노브 → Resolver가 추천 카드 2~3장 제시(교사 언어).
- * 카드 탭 = 결정론 조립(노브 반영) → 즉시 플레이(빈 캔버스 금지).
+ * 생성 과정은 useGen 채널로 스트리밍되어 바로 위에 한 줄로 표시된다("주제 분석 → 요소 생성/보관함
+ * 가져오기 → 배경 제거 → 완성"). '그림 출처' 노브로 보관함 우선/전용/생성을 고른다.
  */
 import { useState } from "react";
-import { recommendFromPromptAI, type Recommendation, type Knobs } from "../resolver/resolver";
-import { useGame } from "../runtime/useGame";
+import type { Knobs } from "../resolver/resolver";
+import { generateGame } from "../generate/orchestrator";
+import { useGen, latestStep, type SourceMode } from "../runtime/genProgress";
 
 /** 작은 세그먼트 노브(라벨 + 옵션 버튼들). */
 function Seg<T extends string>(props: {
@@ -36,33 +37,24 @@ function Seg<T extends string>(props: {
 }
 
 export function PromptEntry() {
-  const loadDoc = useGame((s) => s.loadDoc);
-  const start = useGame((s) => s.start);
   const [text, setText] = useState("");
-  const [cards, setCards] = useState<Recommendation[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [useImages, setUseImages] = useState(false); // AI 생성 이미지(기본 끔 → 비용 0)
   const [difficulty, setDifficulty] = useState<Knobs["difficulty"]>("toddler");
   const [length, setLength] = useState<Knobs["length"]>("normal");
   const [mood, setMood] = useState<Knobs["mood"]>("lively");
 
+  const active = useGen((s) => s.active);
+  const steps = useGen((s) => s.steps);
+  const seeds = useGen((s) => s.seeds);
+  const sourceMode = useGen((s) => s.sourceMode);
+  const setSourceMode = useGen((s) => s.setSourceMode);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading) return;
-    setLoading(true);
-    try {
-      // LLM 의도파싱(키 있으면) → 없으면 결정론 폴백. 노브가 조립에 반영된다.
-      setCards(await recommendFromPromptAI(text, { useImages, knobs: { difficulty, length, mood } }));
-    } finally {
-      setLoading(false);
-    }
-  };
-  const pick = (c: Recommendation) => {
-    const { input } = c.build();
-    loadDoc(input);
-    start(); // 시드로 즉시 플레이
-    setCards([]);
+    if (active) return;
+    const t = text.trim();
+    if (!t && seeds.length === 0) return;
     setText("");
+    await generateGame(t, { seedImages: seeds, knobs: { difficulty, length, mood } });
   };
 
   return (
@@ -73,20 +65,22 @@ export function PromptEntry() {
           onChange={(e) => setText(e.target.value)}
           placeholder="어떤 놀이를 만들까요?  예) 동물 이름 맞추기 · 과일 짝 맞추기"
           aria-label="놀이 만들기 프롬프트"
+          disabled={active}
         />
-        <button
-          type="button"
-          className={`img-toggle${useImages ? " on" : ""}`}
-          aria-pressed={useImages}
-          title="AI 그림 — 이모지 대신 생성 이미지(시드→스왑)"
-          onClick={() => setUseImages((v) => !v)}
-        >
-          🖼️ AI 그림
-        </button>
-        <button type="submit" disabled={loading}>{loading ? "만드는 중…" : "✨ 만들기"}</button>
+        <button type="submit" disabled={active}>{active ? "만드는 중…" : "✨ 만들기"}</button>
       </form>
 
+      {/* 생성 진행 스트리밍 — 단계 메시지를 한 줄로 */}
+      {active && (
+        <div className="gen-stream" aria-live="polite">
+          <span className="gen-spinner" aria-hidden>⏳</span>
+          <span className="gen-step">{latestStep(steps) || "준비 중…"}</span>
+        </div>
+      )}
+
       <div className="knob-row">
+        <Seg label="그림 출처" value={sourceMode} onChange={(v: SourceMode) => setSourceMode(v)}
+          options={[["auto", "보관함 우선"], ["gallery", "모두 보관함"], ["generate", "모두 생성"]]} />
         <Seg label="난이도" value={difficulty} onChange={setDifficulty}
           options={[["baby", "아기"], ["toddler", "유아"], ["senior", "형님"]]} />
         <Seg label="분량" value={length} onChange={setLength}
@@ -94,24 +88,6 @@ export function PromptEntry() {
         <Seg label="분위기" value={mood} onChange={setMood}
           options={[["calm", "차분"], ["lively", "신나게"], ["punchy", "깜짝"]]} />
       </div>
-
-      {cards.length > 0 && (
-        <div className="rec-cards" role="list" aria-label="추천 놀이">
-          {cards.map((c, i) => (
-            <button
-              key={c.archetype}
-              type="button"
-              role="listitem"
-              className={`rec-card${i === 0 ? " primary" : ""}`}
-              onClick={() => pick(c)}
-            >
-              <span className="rec-emoji" aria-hidden>{c.emoji}</span>
-              <span className="rec-title">{c.title}</span>
-              {i === 0 && <span className="rec-tag">추천</span>}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

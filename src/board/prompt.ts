@@ -4,6 +4,7 @@ import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
 import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior } from './composer';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
+import { useUIStore } from '@/store/uiStore';
 import {
   contentIntentFast,
   boardOp,
@@ -132,6 +133,14 @@ export function handleBoardPrompt(text: string): boolean {
   // 의미 없는 요청 어미만 들어오면 무시 — 한글 IME 잔여('줘'·'주세요' 등)가 단독 제출돼
   // 엉뚱한 카드를 만들던 문제 방지(근본 원인은 PromptBar IME-Enter, 여기선 이중 안전장치).
   if (/^(줘|줴|주|주세요|줄래|주라|다오|요|해)$/u.test(text.trim())) return true;
+
+  // 🔴 게임 뷰어 풀스크린이면 — 선택/컴포저로 새지 않고 무조건 그 게임 뷰어로 라우팅한다.
+  // (풀스크린 = 그 게임 전용 컨텍스트. 보드 프롬프트바가 포털 위에 떠 있어도 입력은 게임으로.)
+  const fsViewerId = useUIStore.getState().gameViewerFsNodeId;
+  if (fsViewerId) {
+    window.dispatchEvent(new CustomEvent('kv:game-create', { detail: { nodeId: fsViewerId, prompt: text } }));
+    return true;
+  }
 
   // 게임 뷰어 카드가 단독 선택돼 있으면 — 보드 프롬프트를 그 카드의 게임 생성으로 보낸다.
   // (게임뷰어 하단바 하이브리드: 임베드 소형 카드는 보드 프롬프트바로 제어. NodeView가 iframe에 전달)

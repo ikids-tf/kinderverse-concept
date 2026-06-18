@@ -46,6 +46,11 @@ interface UIState {
   setPromptDraft: (v: string) => void;
   setAvailableActions: (actions: string[]) => void;
   setVideoCompose: (v: VideoComposeCtx | null) => void;
+
+  /** 게임 뷰어가 풀스크린(보드 포털)으로 떠 있을 때 그 카드 id. 설정되면 프롬프트바 입력은
+      보드로 새지 않고 무조건 이 게임 뷰어로 라우팅된다(풀스크린 = 그 게임 전용 컨텍스트). */
+  gameViewerFsNodeId: string | null;
+  setGameViewerFs: (id: string | null) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -55,7 +60,9 @@ export const useUIStore = create<UIState>((set) => ({
   videoCompose: null,
   availableActions: [],
   promptBarLeftInset: 0,
+  gameViewerFsNodeId: null,
 
+  setGameViewerFs: (id) => set({ gameViewerFsNodeId: id }),
   setPromptBarLeftInset: (px) => set({ promptBarLeftInset: px }),
   setPromptBarCollapsed: (v) => set(v ? { promptBarCollapsed: true, favoritesOpen: false } : { promptBarCollapsed: false }),
   togglePromptBar: () =>

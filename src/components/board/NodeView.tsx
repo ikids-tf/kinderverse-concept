@@ -24,6 +24,8 @@ import { getVideoAsset, saveVideoAsset } from '@/board/videoAssets';
 import { saveAsset } from '@/board/assets';
 import { isEditableTarget } from '@/hooks/useKeyboardShortcuts';
 import { MotionPathNode } from './MotionPathNode';
+import { PromptBar } from '@/components/PromptBar';
+import { useUIStore } from '@/store/uiStore';
 
 /* Renders one board node (reference board model): frame container, runner control,
    image card (real src), and content-sized sticky/text memos. Selection ring +
@@ -198,6 +200,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 풀스크린 — body 레벨 포털 오버레이로 화면 전체를 덮는다(캔버스 변형 밖이라
   // 확실히 꽉 차고, 보드의 다른 요소를 가려 클릭·선택을 차단). Esc·✕로 닫는다.
   const [fsOpen, setFsOpen] = useState(false);
+  // 게임 뷰어 풀스크린: 확대 애니가 끝난 뒤에 하단 보드 프롬프트바를 띄운다(부드럽게).
+  const [fsBarReady, setFsBarReady] = useState(false);
   // 풀스크린이 '그 카드 위치'에서 커지도록 origin(카드 화면 사각형)을 기억한다.
   const [fsOrigin, setFsOrigin] = useState<OriginRect | null>(null);
   const fsOverlayRef = useRef<ZoomOverlayHandle | null>(null);
@@ -232,12 +236,18 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     const r = (el ?? embedFrameRef.current)?.getBoundingClientRect();
     setFsOrigin(r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null);
     setFsOpen(true);
+    // 게임 뷰어 풀스크린 → 프롬프트바 입력을 이 카드로 강제 라우팅(보드로 새지 않게).
+    if (isGameViewer) useUIStore.getState().setGameViewerFs(node.id);
   };
   // 풀스크린 닫기 — 오버레이가 떠 있으면 애니메이션 닫기, 아니면 즉시.
   const closeFs = () => {
     if (fsOverlayRef.current) fsOverlayRef.current.close();
     else setFsOpen(false);
   };
+  // 안전: 카드 언마운트 시 풀스크린 라우팅 플래그 정리(이 카드 것이면).
+  useEffect(() => () => {
+    if (useUIStore.getState().gameViewerFsNodeId === node.id) useUIStore.getState().setGameViewerFs(null);
+  }, [node.id]);
   // 헤더/푸터 빈 곳 드래그(kv-embed-drag)로 카드 이동 — 시작 스냅샷·기준 좌표.
   const embedDragRef = useRef<{ snap: ReturnType<typeof captureNodes>; sx: number; sy: number; x: number; y: number } | null>(null);
   /** 모션 라인 연결 여부 미러 — 아래 message 리스너가 최신값을 읽는다(아래에서 계산). */
@@ -255,6 +265,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const isVideoPlayer = embedStr.includes('video-player');
   // 게임 뷰어(game-viewer.html) — 헤더에 ⛶·탭이 있어 일반 뷰어보다 상단 클리어런스가 더 필요하다.
   const isGameViewer = embedStr.includes('game-viewer');
+  // 게임 뷰어 풀스크린: 확대 애니(≈240ms)가 끝난 뒤 보드 프롬프트바를 띄운다.
+  useEffect(() => {
+    if (!fsOpen || !isGameViewer) { setFsBarReady(false); return; }
+    const t = setTimeout(() => setFsBarReady(true), 280);
+    return () => clearTimeout(t);
+  }, [fsOpen, isGameViewer]);
   const [videoPlaying, setVideoPlaying] = useState(false);
   const [videoReady, setVideoReady] = useState<boolean>(typeof node.data?.videoAssetId === 'string');
   const [viewerMode, setViewerMode] = useState<string>(
@@ -534,24 +550,44 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 보드 프롬프트바 → 이 게임 뷰어 카드로 게임 생성 전달(prompt.ts가 kv:game-create 디스패치).
   useEffect(() => {
     if (!isGameViewer) return;
+    // 풀스크린(포털)일 땐 포털 iframe(fsFrameRef)이 보이는 게임 → 그쪽으로 보낸다(이중 생성 방지).
+    const targetWin = () => (fsOpen ? fsFrameRef.current : embedFrameRef.current)?.contentWindow;
     const onCreate = (e: Event) => {
       const d = (e as CustomEvent).detail as { nodeId?: string; prompt?: string } | null;
       if (d?.nodeId !== node.id || !d.prompt) return;
-      embedFrameRef.current?.contentWindow?.postMessage({ type: 'kv-game-create', prompt: d.prompt }, '*');
+      targetWin()?.postMessage({ type: 'kv-game-create', prompt: d.prompt }, '*');
     };
     // 보드 이미지를 이 게임 뷰어 카드로 드롭(BoardCanvas가 kv:game-add-image 디스패치) → iframe에 전달.
     const onAddImage = (e: Event) => {
       const d = (e as CustomEvent).detail as { nodeId?: string; src?: string; label?: string } | null;
       if (d?.nodeId !== node.id || !d.src) return;
-      embedFrameRef.current?.contentWindow?.postMessage({ type: 'kv-game-add-image', src: d.src, label: d.label || '내 그림' }, '*');
+      targetWin()?.postMessage({ type: 'kv-game-add-image', src: d.src, label: d.label || '내 그림' }, '*');
+    };
+    // 뷰어(iframe) → 보드: 게임 생성 진행을 받아 보드 프롬프트바에 스트리밍 표시.
+    let relaying = false;
+    const onProgress = (e: MessageEvent) => {
+      if (e.source !== embedFrameRef.current?.contentWindow && e.source !== fsFrameRef.current?.contentWindow) return;
+      const d = e.data as { type?: string; active?: boolean; step?: string } | null;
+      if (d?.type !== 'kv-game-progress') return;
+      const b = useBoardStore.getState();
+      if (d.active) {
+        if (!relaying) { relaying = true; b.beginGen(); }
+        if (d.step) b.setGenerating(`🎮 ${d.step}`);
+      } else if (relaying) {
+        relaying = false;
+        b.endGen();
+      }
     };
     window.addEventListener('kv:game-create', onCreate);
     window.addEventListener('kv:game-add-image', onAddImage);
+    window.addEventListener('message', onProgress);
     return () => {
       window.removeEventListener('kv:game-create', onCreate);
       window.removeEventListener('kv:game-add-image', onAddImage);
+      window.removeEventListener('message', onProgress);
+      if (relaying) useBoardStore.getState().endGen();
     };
-  }, [isGameViewer, node.id]);
+  }, [isGameViewer, node.id, fsOpen]);
   // 유튜브 검색 결과 카드의 ▶ → 이 뷰어(iframe)의 loadSrc로 바로 재생.
   // kv:yt-propose — 다른 요소와 선이 연결되면 뷰어 안에 "영상을 찾아 연결할까요?"
   // 확인 카드를 띄운다(확인 → 뷰어가 직접 검색해 재생).
@@ -1465,7 +1501,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             <ZoomOverlay
               ref={fsOverlayRef}
               origin={fsOrigin}
-              onClose={() => { setFsOpen(false); setFsOrigin(null); }}
+              onClose={() => { setFsOpen(false); setFsOrigin(null); useUIStore.getState().setGameViewerFs(null); }}
               zIndex={9999}
               backdropClassName="bg-bg"
             >
@@ -1506,7 +1542,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               {/* 닫기 — Esc로도 닫힌다. 동영상 플레이어는 뷰어 우상단 버튼(#fs)을 ✕로 바꿔
                   스스로 닫으므로(kv-fs-exit) 여기 ✕는 두지 않는다(이중 표시 방지). 자체 ✕가
                   없는 다른 뷰어를 위해서만 둔다. */}
-              {!isVideoPlayer && (
+              {/* 게임 뷰어는 자체 툴바의 ⛶→X 버튼이 닫기를 담당(kv-fs-exit) → 별도 ✕ 안 둔다. */}
+              {!isVideoPlayer && !isGameViewer && (
                 <button
                   onClick={closeOverlay}
                   title="전체 화면 닫기 (Esc)"
@@ -1514,6 +1551,13 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 >
                   <Icon name="x" size={20} />
                 </button>
+              )}
+              {/* 게임 뷰어 풀스크린 — 확대 애니가 끝난 뒤 보드 공통 프롬프트바를 포털 안 하단에
+                  '아래로 내려오며' 띄운다(게임 섹션은 제자리). 선택과 무관하게 이 게임으로 라우팅. */}
+              {isGameViewer && fsBarReady && (
+                <div className="kv-fsbar-enter">
+                  <PromptBar />
+                </div>
               )}
               </div>
               )}

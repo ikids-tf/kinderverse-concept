@@ -17,14 +17,46 @@ import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
 import { MaterialsLayer } from "./MaterialsLayer";
 import { useMaterials } from "./materials";
-import { PromptEntry } from "../entry/PromptEntry";
+import { WelcomeScreen } from "./WelcomeScreen";
+import { useGen } from "./genProgress";
 import { StageSizeContext, type StageSize } from "./stageSize";
-import { DIFF_LABEL, MOOD_LABEL } from "./content";
 import { FIXTURES, FIXTURE_KEYS, type ExampleKey } from "./fixtures";
 import { useGame } from "./useGame";
 import { say, stopSay } from "./tts";
 import { useFullscreen } from "./useFullscreen";
 import { isEmbedded, useChromeVisible } from "./useBoardBridge";
+import { Icon } from "@/lib/icons";
+
+/** 보드가 카드를 풀스크린으로 띄울 때 iframe을 ?fs=1로 로드한다. 이 땐 X(닫기) 토글 + 하단
+    보드 프롬프트바 공간 확보를 한다. */
+const isBoardFs = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("fs");
+
+/** 설정 메뉴용 세로 노브(라벨 위, 옵션 아래) — 그림 출처·난이도·분량·분위기 공용. */
+function KnobRow<T extends string>(props: {
+  label: string;
+  value: T;
+  options: Array<[T, string]>;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="kv-set-knob">
+      <span className="knob-label">{props.label}</span>
+      <div className="knob-opts">
+        {props.options.map(([v, t]) => (
+          <button
+            key={v}
+            type="button"
+            className={`knob-opt${v === props.value ? " on" : ""}`}
+            aria-pressed={v === props.value}
+            onClick={() => props.onChange(v)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const START_DESC: Record<string, string> = {
   "tap-the-right-one": "잘 보고 누구인지 맞혀봐요!",
@@ -86,7 +118,28 @@ export function GameStage() {
 
   // 자료(요소) — 게임 위에 즉흥으로 올리는 스티커·글자·그림.
   const addMaterial = useMaterials((s) => s.add);
+  const addSeed = useGen((s) => s.addSeed);
+  const sourceMode = useGen((s) => s.sourceMode);
+  const setSourceMode = useGen((s) => s.setSourceMode);
+  const knobs = useGen((s) => s.knobs);
+  const setKnobs = useGen((s) => s.setKnobs);
   const [matText, setMatText] = useState("");
+
+  // 뷰어에 이미지를 끌어다 놓으면: 게임 없을 땐 '시드'(만들기 재료), 게임 중엔 '자료'로.
+  const onSeedDrop = (e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    e.preventDefault();
+    files.forEach((f) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result !== "string") return;
+        if (useGame.getState().doc) addMaterial("image", reader.result);
+        else addSeed(reader.result);
+      };
+      reader.readAsDataURL(f);
+    });
+  };
   const onUploadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -161,9 +214,9 @@ export function GameStage() {
   return (
     <StageSizeContext.Provider value={size}>
       <div className="wrap">
-        {/* 교사 크롬 — 카테고리 접이식 툴바 (비포커스/풀스크린 시 숨김) */}
-        {showToolbar && (
-          <div className="chrome">
+        {/* 교사 크롬 — 카테고리 접이식 툴바. 자리는 항상 예약(무대 안 밀림), 호버 시 버튼만 페이드인. */}
+        {!isFs && (
+          <div className={`chrome${showToolbar ? " is-on" : ""}`}>
             <div className="kv-toolbar">
               {/* 놀이 고르기 (예제 8종을 한 메뉴로 접음) */}
               <div className="kv-menu-wrap">
@@ -174,7 +227,7 @@ export function GameStage() {
                   aria-expanded={openMenu === "play"}
                   onClick={() => setOpenMenu(openMenu === "play" ? null : "play")}
                 >
-                  🎮 놀이
+                  <span className="kv-btn-ic"><Icon name="gamepad" size={17} /> 놀이</span>
                 </button>
                 {openMenu === "play" && (
                   <div className="kv-menu" role="menu">
@@ -207,12 +260,18 @@ export function GameStage() {
                   aria-expanded={openMenu === "set"}
                   onClick={() => setOpenMenu(openMenu === "set" ? null : "set")}
                 >
-                  ⚙️ 설정
+                  <span className="kv-btn-ic"><Icon name="settings" size={17} /> 설정</span>
                 </button>
                 {openMenu === "set" && (
-                  <div className="kv-menu" role="menu">
-                    <div className="kv-menu-row">난이도 <b>{doc ? DIFF_LABEL[doc.settings.difficulty] ?? "—" : "—"}</b></div>
-                    <div className="kv-menu-row">분위기 <b>{doc ? MOOD_LABEL[doc.settings.mood] ?? "—" : "—"}</b></div>
+                  <div className="kv-menu kv-menu-set" role="menu">
+                    <KnobRow label="그림 출처" value={sourceMode} onChange={setSourceMode}
+                      options={[["auto", "보관함 우선"], ["gallery", "모두 보관함"], ["generate", "모두 생성"]]} />
+                    <KnobRow label="난이도" value={knobs.difficulty} onChange={(v) => setKnobs({ difficulty: v })}
+                      options={[["baby", "아기"], ["toddler", "유아"], ["senior", "형님"]]} />
+                    <KnobRow label="분량" value={knobs.length} onChange={(v) => setKnobs({ length: v })}
+                      options={[["short", "짧게"], ["normal", "보통"], ["long", "길게"]]} />
+                    <KnobRow label="분위기" value={knobs.mood} onChange={(v) => setKnobs({ mood: v })}
+                      options={[["calm", "차분"], ["lively", "신나게"], ["punchy", "깜짝"]]} />
                   </div>
                 )}
               </div>
@@ -226,7 +285,7 @@ export function GameStage() {
                   aria-expanded={openMenu === "mat"}
                   onClick={() => setOpenMenu(openMenu === "mat" ? null : "mat")}
                 >
-                  ➕ 자료
+                  <span className="kv-btn-ic"><Icon name="plus" size={17} /> 자료</span>
                 </button>
                 {openMenu === "mat" && (
                   <div className="kv-menu kv-menu-mat" role="menu">
@@ -255,7 +314,7 @@ export function GameStage() {
                     </form>
                     <div className="kv-menu-label">그림</div>
                     <label className="kv-mat-upload">
-                      📁 그림 올리기
+                      <span className="kv-btn-ic"><Icon name="folder" size={15} /> 그림 올리기</span>
                       <input type="file" accept="image/*" onChange={onUploadImage} hidden />
                     </label>
                   </div>
@@ -272,7 +331,7 @@ export function GameStage() {
                 aria-label="읽어주기 켜기/끄기"
                 onClick={onMute}
               >
-                {ttsEnabled ? "🔊" : "🔇"}
+                <Icon name={ttsEnabled ? "sound" : "mute"} size={18} />
               </button>
               <button
                 type="button"
@@ -282,22 +341,26 @@ export function GameStage() {
                 aria-pressed={mode === "edit"}
                 onClick={() => setMode(mode === "edit" ? "play" : "edit")}
               >
-                {mode === "edit" ? "▶" : "✏️"}
+                <Icon name={mode === "edit" ? "play" : "edit"} size={18} />
               </button>
               {mode === "edit" && (
                 <>
-                  <button type="button" className="icon-btn" title="실행취소" aria-label="실행취소" disabled={!canUndo} onClick={() => useGame.temporal.getState().undo()}>↶</button>
-                  <button type="button" className="icon-btn" title="다시실행" aria-label="다시실행" disabled={!canRedo} onClick={() => useGame.temporal.getState().redo()}>↷</button>
+                  <button type="button" className="icon-btn" title="실행취소" aria-label="실행취소" disabled={!canUndo} onClick={() => useGame.temporal.getState().undo()}><Icon name="undo" size={18} /></button>
+                  <button type="button" className="icon-btn" title="다시실행" aria-label="다시실행" disabled={!canRedo} onClick={() => useGame.temporal.getState().redo()}><Icon name="redo" size={18} /></button>
                 </>
               )}
               <button
                 type="button"
                 className="icon-btn"
-                title={isFs ? "전체 화면 끄기" : "전체 화면"}
-                aria-label={isFs ? "전체 화면 끄기" : "전체 화면"}
-                onClick={toggleFs}
+                title={isFs || isBoardFs ? "전체 화면 닫기" : "전체 화면"}
+                aria-label={isFs || isBoardFs ? "전체 화면 닫기" : "전체 화면"}
+                onClick={() => {
+                  // 보드 풀스크린(포털)이면 부모에 닫기 알림(kv-fs-exit) → 보드가 포털을 닫는다.
+                  if (isBoardFs) window.parent.postMessage({ type: "kv-fs-exit" }, "*");
+                  else toggleFs(); // 단독 탭: 네이티브 풀스크린 토글
+                }}
               >
-                {isFs ? "🡼" : "⛶"}
+                <Icon name={isFs || isBoardFs ? "x" : "maximize"} size={18} />
               </button>
             </div>
             {openMenu && <div className="kv-menu-backdrop" onClick={() => setOpenMenu(null)} aria-hidden />}
@@ -310,24 +373,26 @@ export function GameStage() {
             <button type="button" className="icon-btn" title="읽어주기 켜기/끄기" aria-label="읽어주기 켜기/끄기" onClick={onMute}>
               {ttsEnabled ? "🔊" : "🔇"}
             </button>
-            <button type="button" className="icon-btn" title="전체 화면 끄기" aria-label="전체 화면 끄기" onClick={toggleFs}>🡼</button>
+            <button type="button" className="icon-btn" title="전체 화면 끄기" aria-label="전체 화면 끄기" onClick={toggleFs}><Icon name="minimize" size={18} /></button>
           </div>
         )}
 
-        {/* 상태 줄 */}
-        <div className="statusbar">
-          <span className="round-txt">
-            문제 <b>{roundIdx + 1}</b> / {totalRounds || 1}
-          </span>
-          <div className="stars" aria-label={`점수 ${score} / ${maxScore}`}>
-            {Array.from({ length: maxScore }).map((_, i) => (
-              <span key={i} className={`star${i < score ? " on" : ""}`}>⭐</span>
-            ))}
+        {/* 상태 줄 — 게임이 있을 때만(환영 화면에선 숨김) */}
+        {doc && (
+          <div className="statusbar">
+            <span className="round-txt">
+              문제 <b>{roundIdx + 1}</b> / {totalRounds || 1}
+            </span>
+            <div className="stars" aria-label={`점수 ${score} / ${maxScore}`}>
+              {Array.from({ length: maxScore }).map((_, i) => (
+                <span key={i} className={`star${i < score ? " on" : ""}`}>⭐</span>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* 무대 */}
-        <div className="stage-frame">
+        {/* 무대 — 이미지 드롭존(시드/자료) */}
+        <div className="stage-frame" onDragOver={(e) => e.preventDefault()} onDrop={onSeedDrop}>
           <div className="stage" ref={stageRef}>
             {/* 카메라 — 게임(섹션0) + 확장활동(오른쪽 섹션들)을 가로 레인으로 팬 */}
             <div className="kv-camera" style={{ transform: `translateX(-${cam * 100}%)` }}>
@@ -372,8 +437,11 @@ export function GameStage() {
                   다음 <span aria-hidden>→</span>
                 </button>
 
-                {/* 시작 오버레이 (편집 모드에선 숨김) */}
-                <div className={`overlay${phase !== "start" || mode === "edit" ? " hide" : ""}`}>
+                {/* 환영 화면 — 게임이 없을 때(데모 대신). 프롬프트/이미지 드래그로 만들기 시작 */}
+                {!doc && <WelcomeScreen />}
+
+                {/* 시작 오버레이 (게임 있고 start 단계일 때만; 편집 모드 숨김) */}
+                <div className={`overlay${phase !== "start" || mode === "edit" || !doc ? " hide" : ""}`}>
                   <div className="finish-emoji" aria-hidden>🐾</div>
                   <h2 className="jua">{doc?.meta.title ?? "게임을 시작해요"}</h2>
                   <p>{doc ? START_DESC[doc.meta.archetype] ?? "시작해볼까요?" : ""}</p>
@@ -428,7 +496,7 @@ export function GameStage() {
                         )}
                         <div className="extend-actions">
                           <button type="button" className="extend-listen" onClick={() => { if (ttsEnabled) say(act.prompts.join("  ")); }}>
-                            🔊 다시 듣기
+                            <span className="kv-btn-ic"><Icon name="sound" size={15} /> 다시 듣기</span>
                           </button>
                           <button type="button" className="big-btn" onClick={nextExtend}>
                             {last ? "마치기 ✓" : "다음 →"}
@@ -445,11 +513,9 @@ export function GameStage() {
           </div>
         </div>
 
-        {/* 뷰어 내 프롬프트: 단독 탭에서만. 임베드 시엔 보드 메인 프롬프트바가 제어한다. */}
-        {mode === "play" && !isEmbedded && <PromptEntry />}
-        {mode === "play" && isEmbedded && !isFs && (
-          <div className="kv-board-hint">💬 보드 프롬프트바에서 놀이를 만들어요</div>
-        )}
+        {/* 뷰어 자체 프롬프트바는 두지 않는다 — 만들기는 보드 공통 프롬프트바가 담당한다
+            (임베드 소형 카드: 보드 바가 제어 / 풀스크린: 보드 바가 그 자리에 떠서 제어).
+            그림 출처·난이도·분량·분위기는 상단 ⚙️ 설정 메뉴에서 조절한다. */}
 
         {!isEmbedded && (
           <p className="note">

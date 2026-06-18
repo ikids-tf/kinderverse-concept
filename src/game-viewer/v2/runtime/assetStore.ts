@@ -8,6 +8,9 @@ import { create } from "zustand";
 import { createImageProvider, createCutoutProvider } from "../providers/providers";
 import { CATEGORIES } from "../resolver/contentSets";
 import type { ContentBinding, InteractiveDoc } from "../schema/interactiveDoc";
+import { useGen } from "./genProgress";
+import { findGalleryImage } from "../generate/gallery";
+import { saveAsset } from "@/board/assets";
 
 const LABELS = new Set(CATEGORIES.flatMap((c) => c.items.map((it) => it.label)));
 const provider = createImageProvider();
@@ -26,24 +29,50 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     if (cur && cur.status !== "error") return; // 캐시/진행중 → 재생성 0
     set((s) => ({ map: { ...s.map, [key]: { status: "pending" } } }));
     const put = (e: Entry) => set((s) => ({ map: { ...s.map, [key]: e } }));
-    provider
-      .generate(prompt)
-      .then(async (imgs) => {
+    const step = (m: string) => useGen.getState().pushStep(m);
+
+    void (async () => {
+      const mode = useGen.getState().sourceMode;
+      try {
+        // 1) 보관함 우선 — 'generate'(모두 생성)가 아니면 갤러리에서 먼저 찾는다.
+        if (mode !== "generate") {
+          step(`‘${key}’ 보관함에서 찾는 중…`);
+          const hit = await findGalleryImage(key);
+          if (hit) {
+            step(`‘${key}’ 보관함에서 가져왔어요`);
+            put({ status: "ready", url: hit });
+            return; // 생성 0
+          }
+          if (mode === "gallery") {
+            // 모두 보관함: 없는 요소는 이모지 시드 유지(생성 안 함).
+            step(`‘${key}’은 보관함에 없어 그대로 둬요`);
+            put({ status: "error" });
+            return;
+          }
+        }
+        // 2) 생성(모두 생성 또는 보관함 우선의 미스분) → 누끼 → 보관함 저장.
+        step(`‘${key}’ 새로 그리는 중…`);
+        const imgs = await provider.generate(prompt);
         const raw = imgs[0]?.url;
         if (!raw) {
           put({ status: "error" });
           return;
         }
-        put({ status: "ready", url: raw }); // 1차 스왑: 이모지 → 생성 이미지(흰 배경)
+        put({ status: "ready", url: raw }); // 1차 스왑: 이모지 → 생성(흰 배경)
+        let finalUrl = raw;
         try {
-          // 2차: 생성 → 누끼(온디바이스 RMBG) → 투명 컷아웃으로 조용히 교체(카드에 깔끔히).
+          step(`‘${key}’ 배경 지우는 중…`);
           const cut = await cutout.cutout(raw);
-          put({ status: "ready", url: cut.url });
+          finalUrl = cut.url;
+          put({ status: "ready", url: finalUrl }); // 2차: 투명 누끼로 교체
         } catch {
           /* 누끼 실패 시 생성 원본 유지 */
         }
-      })
-      .catch(() => put({ status: "error" }));
+        void saveAsset(`${key} (배경제거)`, "image", finalUrl, key); // 다음엔 보관함에서 재사용
+      } catch {
+        put({ status: "error" });
+      }
+    })();
   },
 }));
 
