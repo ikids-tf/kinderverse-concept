@@ -90,7 +90,9 @@ function Inspector({ m }: { m: Material }) {
   );
 }
 
-function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: boolean; sole: boolean; editing: boolean }) {
+function MaterialBox({ m, selected, sole, editing, screenW }: { m: Material; selected: boolean; sole: boolean; editing: boolean; screenW: number }) {
+  // 위치(x,y)는 캔버스(3화면) 기준, 크기(w,h)는 화면(viewport) 기준 — 분리해야 가로가 부풀지 않는다.
+  // sw=캔버스 폭(위치 변환용), screenW=한 화면 폭(크기 변환용), sh=화면 높이(=캔버스 높이).
   const { w: sw, h: sh } = useStageSize();
   const update = useMaterials((s) => s.update);
   const remove = useMaterials((s) => s.remove);
@@ -112,7 +114,7 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
 
   // 모서리 드래그 → 반대 모서리 고정 박스 리사이즈(회전 반영). My Board resizeBox와 동질.
   const resizeFrom = (d: Extract<Drag, { mode: "resize" }>, e: { clientX: number; clientY: number }): Live => {
-    const ndx = (e.clientX - d.px) / sw;
+    const ndx = (e.clientX - d.px) / screenW; // 폭은 화면 기준
     const ndy = (e.clientY - d.py) / sh;
     const rad = (d.base.rot * Math.PI) / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
@@ -122,11 +124,12 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
     const sgnH = d.corner === 2 || d.corner === 3 ? 1 : -1; // 하단 모서리면 +
     const w = clampWH(d.base.w + sgnW * ldx);
     const h = clampWH(d.base.h + sgnH * ldy);
-    const lcx = (sgnW * (w - d.base.w)) / 2; // 중심 이동(로컬) — 반대 모서리 고정
+    const lcx = (sgnW * (w - d.base.w)) / 2; // 중심 이동(로컬, 화면단위) — 반대 모서리 고정
     const lcy = (sgnH * (h - d.base.h)) / 2;
-    const csx = lcx * cos - lcy * sin; // 다시 캔버스 좌표계로
+    const csx = lcx * cos - lcy * sin; // 다시 무대 좌표계로(화면단위)
     const csy = lcx * sin + lcy * cos;
-    return { x: clamp01(d.base.x + csx), y: clamp01(d.base.y + csy), w, h, rot: d.base.rot };
+    // x는 캔버스 정규화라 화면→캔버스 비율(screenW/sw)로 환산해 더한다.
+    return { x: clamp01(d.base.x + csx * (screenW / sw)), y: clamp01(d.base.y + csy), w, h, rot: d.base.rot };
   };
 
   const down = (e: RPE<HTMLElement>, mode: "move" | "resize", corner = 2) => {
@@ -238,14 +241,14 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
   };
 
   const radius = m.style?.radius;
-  const minPx = Math.min(view.w * sw, view.h * sh);
+  const pxW = view.w * screenW; // 화면 기준 픽셀 폭(위치는 캔버스 %, 크기는 화면 px)
+  const pxH = view.h * sh;
+  const minPx = Math.min(pxW, pxH);
   const style: React.CSSProperties = {
     left: `${view.x * 100}%`, top: `${view.y * 100}%`,
-    width: `${view.w * 100}%`, height: `${view.h * 100}%`,
+    width: `${pxW}px`, height: `${pxH}px`,
     transform: `translate(-50%,-50%)${view.rot ? ` rotate(${view.rot}deg)` : ""}`,
   };
-  const pxW = view.w * sw;
-  const pxH = view.h * sh;
   const emojiPx = Math.max(16, Math.min(pxW, pxH) * 0.8);
   const textPx = Math.max(13, Math.min(pxH * 0.5, pxW * 0.2));
   const btnPx = Math.max(13, Math.min(pxH * 0.42, pxW * 0.16));
@@ -472,7 +475,7 @@ function useBoardShortcuts() {
   return box;
 }
 
-export function MaterialsLayer() {
+export function MaterialsLayer({ screenW }: { screenW: number }) {
   const items = useMaterials((s) => s.items);
   const selectedIds = useMaterials((s) => s.selectedIds);
   const editId = useMaterials((s) => s.editId);
@@ -494,6 +497,7 @@ export function MaterialsLayer() {
           selected={selSet.has(m.id)}
           sole={selectedIds.length === 1 && selSet.has(m.id)}
           editing={m.id === editId}
+          screenW={screenW}
         />
       ))}
       {box && (

@@ -117,10 +117,12 @@ export const useMaterials = create<MaterialsState>()(temporal((set, get) => ({
   add: (kind, value, extra) => {
     const n = get().items.length;
     const { w, h } = SIZE[kind];
-    // 현재 보이는 캔버스 중심 근처에 약간씩 어긋나게 추가(겹침 줄이고, 보이는 곳에).
+    // 보이는 화면 중앙(viewX)에 추가. 첫 요소는 정중앙, 이후 0 기준 좌우 교차로 작게 어긋낸다
+    // (x는 캔버스 정규화 = 3화면이라 작은 값으로). 겹침만 피하고 중앙 느낌 유지.
     const vx = get().viewX;
-    const x = Math.max(0.04, Math.min(0.96, vx + ((n % 5) - 2) * 0.04));
-    const y = Math.max(0.16, Math.min(0.84, 0.4 + (Math.floor(n / 5) % 4) * 0.12));
+    const STAGGER = [0, 0.016, -0.016, 0.032, -0.032];
+    const x = Math.max(0.04, Math.min(0.96, vx + STAGGER[n % 5]));
+    const y = Math.max(0.16, Math.min(0.84, 0.48 + (Math.floor(n / 5) % 3) * 0.1));
     const id = `mat_${++seq}`;
     const item: Material = { id, kind, value, x, y, w, h, ...defaults(kind), ...extra };
     set((s) => ({ items: [...s.items, item], selectedId: id, selectedIds: [id] }));

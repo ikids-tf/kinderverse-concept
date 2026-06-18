@@ -291,7 +291,8 @@ export function GameStage() {
     const ch = g.vpH || 1;
     const cx = Math.max(0.03, Math.min(0.97, (px - (g.panX - g.side)) / cw));
     const cy = Math.max(0.05, Math.min(0.95, py / ch));
-    const w = screenW ? Math.max(0.05, Math.min(0.6, screenW / cw)) : 0.18;
+    // 크기(w,h)는 화면 기준 정규화 — 폭은 한 화면 폭(g.side=vp.w)으로 나눈다(캔버스 cw 아님).
+    const w = screenW ? Math.max(0.05, Math.min(0.9, screenW / (g.side || 1))) : 0.18;
     const h = screenH ? Math.max(0.05, Math.min(0.85, screenH / ch)) : 0.18;
     useMaterials.getState().add("image", src, { x: cx, y: cy, w, h });
   };
@@ -720,7 +721,7 @@ export function GameStage() {
             {/* 자료/편집 레이어 — 캔버스 전체(게임+확장에 인터랙티브). 팬과 함께 이동. */}
             {!isFs && (
               <StageSizeContext.Provider value={canvasSize}>
-                <MaterialsLayer />
+                <MaterialsLayer screenW={vp.w} />
               </StageSizeContext.Provider>
             )}
           </div>
