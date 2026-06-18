@@ -10,8 +10,10 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { generateGame } from "../generate/orchestrator";
+import { setBackgroundFromPrompt } from "../generate/background";
 import { useGen, latestStep } from "./genProgress";
 import { applyEditIntent } from "./editIntent";
+import { useGame } from "./useGame";
 
 /** iframe(보드 카드) 안에서 실행 중인지 — 단독 탭이면 false. */
 export const isEmbedded = typeof window !== "undefined" && window.parent !== window;
@@ -33,6 +35,9 @@ export const useChromeVisible = (): boolean => useChromeStore((s) => s.visible);
  *  - 아니면 프롬프트 → 게임 생성(orchestrator). 진행은 useGen 채널로 스트리밍.
  */
 async function generateFromPrompt(prompt: string): Promise<void> {
+  // 0) 배경 선택(편집) → 프롬프트로 배경 이미지 생성
+  const g = useGame.getState();
+  if (g.bgSelected && g.mode === "edit") { await setBackgroundFromPrompt(prompt); return; }
   if (applyEditIntent(prompt).ok) return;
   await generateGame(prompt, { seedImages: useGen.getState().seeds });
 }

@@ -423,6 +423,11 @@
 .kv-v2 .blob { position: absolute; border-radius: 50%; opacity: .5; pointer-events: none; }
 .kv-v2 .blob.a { width: 42%; height: 42%; background: var(--butter); top: -12%; left: -8%; }
 .kv-v2 .blob.b { width: 34%; height: 34%; background: var(--mint); bottom: -10%; right: -6%; opacity: .42; }
+/* 생성한 배경 이미지 — 무대 전체 cover, 노드 뒤(z 0) */
+.kv-v2 .kv-stage-bg {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+}
 
 .kv-v2 .node { position: absolute; display: flex; align-items: center; justify-content: center; }
 .kv-v2 .node-inner { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
@@ -509,6 +514,14 @@
 .kv-v2 .icon-btn.on { background: var(--coral); color: #fff; border-color: var(--coral); }
 .kv-v2 .icon-btn:disabled { opacity: 0.4; cursor: default; }
 .kv-v2 .edit-layer { position: absolute; inset: 0; z-index: 30; }
+/* 배경 선택됨 — 무대 안쪽 테두리로 '배경이 선택됨'을 표시 + 안내 배지 */
+.kv-v2 .edit-layer.bg-on { box-shadow: inset 0 0 0 3px var(--coral); border-radius: var(--r-md); }
+.kv-v2 .edit-bg-badge {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 36;
+  background: var(--coral); color: #fff; font-size: 12px; font-weight: 800;
+  padding: 6px 13px; border-radius: 999px; box-shadow: var(--shadow-sm);
+  pointer-events: none; white-space: nowrap;
+}
 .kv-v2 .edit-node {
   position: absolute; display: flex; align-items: center; justify-content: center;
   border: 2px dashed rgba(120,92,60,.42); border-radius: var(--r-sm); background: rgba(255,255,255,.35);

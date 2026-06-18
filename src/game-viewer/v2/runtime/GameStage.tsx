@@ -18,6 +18,7 @@ import { Categorize } from "./interactions/Categorize";
 import { FindIt } from "./interactions/FindIt";
 import { SequenceTap } from "./interactions/SequenceTap";
 import { CombineGame } from "./interactions/CombineGame";
+import { StageBackground } from "./StageBackground";
 import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
 import { GameEditRail } from "./editor/GameEditRail";
@@ -611,6 +612,8 @@ export function GameStage() {
                         <div className="blob b" />
                       </>
                     )}
+                    {/* 생성한 배경 이미지(있으면) — 노드 뒤 풀블리드 */}
+                    {doc && <StageBackground />}
 
                     {doc && mode === "edit" && <EditLayer />}
 

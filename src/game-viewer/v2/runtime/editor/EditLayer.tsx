@@ -120,7 +120,8 @@ function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: C
 export function EditLayer() {
   const doc = useGame((s) => s.doc);
   const selectedNodeId = useGame((s) => s.selectedNodeId);
-  const selectNode = useGame((s) => s.selectNode);
+  const bgSelected = useGame((s) => s.bgSelected);
+  const selectBg = useGame((s) => s.selectBg);
   const patch = useGame((s) => s.patchNodeTransform);
 
   // 방향키 미세 이동(선택 노드). Shift=큰 스텝.
@@ -145,8 +146,12 @@ export function EditLayer() {
 
   if (!doc) return null;
   const bindings = roundZeroBindings(doc);
+  // 빈 곳(노드 아님) 클릭 = 배경 선택 → 프롬프트로 배경 이미지 생성 대상.
   return (
-    <div className="edit-layer" onPointerDown={() => selectNode(null)}>
+    <div className={`edit-layer${bgSelected ? " bg-on" : ""}`} onPointerDown={() => selectBg(true)}>
+      {bgSelected && (
+        <span className="edit-bg-badge" aria-live="polite">🖼 배경 선택됨 — 아래 프롬프트로 배경을 만들어 넣어요</span>
+      )}
       {doc.stage.nodes.map((n) => (
         <EditNodeBox key={n.id} node={n} binding={bindings[n.id]} selected={n.id === selectedNodeId} />
       ))}

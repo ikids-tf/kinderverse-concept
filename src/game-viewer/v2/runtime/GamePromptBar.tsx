@@ -9,8 +9,10 @@ import { useRef, useState } from "react";
 import { Icon } from "@/lib/icons";
 import { applyEditIntent } from "./editIntent";
 import { generateGame } from "../generate/orchestrator";
+import { setBackgroundFromPrompt } from "../generate/background";
 import { useGen } from "./genProgress";
 import { useMaterials } from "./materials";
+import { useGame } from "./useGame";
 
 export function GamePromptBar() {
   const [text, setText] = useState("");
@@ -19,6 +21,7 @@ export function GamePromptBar() {
   const toastT = useRef<number | null>(null);
   const selectedId = useMaterials((s) => s.selectedId);
   const hasSel = !!selectedId && useMaterials.getState().items.some((m) => m.id === selectedId);
+  const bgSel = useGame((s) => s.bgSelected && s.mode === "edit");
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -30,6 +33,19 @@ export function GamePromptBar() {
     e.preventDefault();
     const t = text.trim();
     if (!t || busy) return;
+    // 0) 배경 선택(편집) → 프롬프트로 배경 이미지 생성
+    if (useGame.getState().bgSelected && useGame.getState().mode === "edit") {
+      setText("");
+      setBusy(true);
+      flash("배경을 그리고 있어요…");
+      try {
+        const ok = await setBackgroundFromPrompt(t);
+        flash(ok ? "배경을 넣었어요!" : "배경 생성에 실패했어요");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     // 1) 선택 요소 편집 시도
     const r = applyEditIntent(t);
     if (r.ok) { setText(""); flash(r.msg); return; }
@@ -51,15 +67,17 @@ export function GamePromptBar() {
     <div className="kv-gpbar-wrap">
       {toast && <div className="kv-gpbar-toast">{toast}</div>}
       <form className="kv-gpbar" onSubmit={submit}>
-        <span className="kv-gpbar-ic" aria-hidden><Icon name={hasSel ? "edit" : "sparkle"} size={18} /></span>
+        <span className="kv-gpbar-ic" aria-hidden><Icon name={bgSel ? "studio" : hasSel ? "edit" : "sparkle"} size={18} /></span>
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
           disabled={busy}
           placeholder={
-            hasSel
-              ? "선택한 요소에 명령…  예) 빨갛게 · 글자 사과로 · 통통 튀게 · 정답"
-              : "무엇이든 만들어 보세요…  예) 동물 이름 맞추기 · 과일 짝 맞추기"
+            bgSel
+              ? "배경 이미지를 만들어요…  예) 숲속 · 바닷속 · 우주 · 꽃밭"
+              : hasSel
+                ? "선택한 요소에 명령…  예) 빨갛게 · 글자 사과로 · 통통 튀게 · 정답"
+                : "무엇이든 만들어 보세요…  예) 동물 이름 맞추기 · 과일 짝 맞추기"
           }
           aria-label="게임 명령 입력"
         />

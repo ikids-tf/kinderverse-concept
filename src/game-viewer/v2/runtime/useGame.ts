@@ -174,6 +174,7 @@ export interface GameStore {
   // 직접 에디터(M1, "고급" 뒤) — 레이아웃 편집(노드 transform)
   mode: "play" | "edit";
   selectedNodeId: string | null;
+  bgSelected: boolean; // 편집 모드에서 '배경'을 선택했는지(프롬프트로 배경 생성 대상)
 
   loadExample: (key: ExampleKey) => void;
   loadDoc: (input: InteractiveDocInput, key?: ExampleKey | null) => void;
@@ -195,6 +196,8 @@ export interface GameStore {
   toggleTts: () => void;
   setMode: (mode: "play" | "edit") => void;
   selectNode: (id: string | null) => void;
+  selectBg: (v: boolean) => void;
+  setBackgroundImage: (assetId: string | null) => void;
   patchNodeTransform: (id: string, patch: Partial<{ x: number; y: number; w: number; h: number }>) => void;
 }
 
@@ -508,6 +511,7 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
     sfx: null,
     mode: "play",
     selectedNodeId: null,
+    bgSelected: false,
   };
 }
 
@@ -625,6 +629,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     sfx: null,
     mode: "play",
     selectedNodeId: null,
+    bgSelected: false,
 
     loadExample: (key) => {
       clearTimers();
@@ -1088,6 +1093,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         banner: null,
         showNext: false,
         selectedNodeId: null,
+        bgSelected: false,
         roundIdx: 0,
         score: 0,
         maxScore: doc ? maxScoreOf(doc) : 0,
@@ -1122,7 +1128,23 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       });
     },
 
-    selectNode: (id) => set({ selectedNodeId: id }),
+    selectNode: (id) => set({ selectedNodeId: id, bgSelected: id ? false : get().bgSelected }),
+
+    selectBg: (v) => set({ bgSelected: v, selectedNodeId: v ? null : get().selectedNodeId }),
+
+    // 배경 이미지 적용 — stage.background를 asset(assetId) 바인딩으로(URL은 assetStore가 보유).
+    // assetId=null이면 배경 제거(파스텔 기본으로). doc 교체라 undo 가능.
+    setBackgroundImage: (assetId) => {
+      const doc = get().doc;
+      if (!doc) return;
+      const background = assetId
+        ? ({
+            type: "asset" as const,
+            asset: { assetId, kind: "generated" as const, variant: "full" as const, cutout: "none" as const, styleLock: false },
+          })
+        : undefined;
+      set({ doc: { ...doc, stage: { ...doc.stage, background } } });
+    },
 
     patchNodeTransform: (id, patch) => {
       const doc = get().doc;
