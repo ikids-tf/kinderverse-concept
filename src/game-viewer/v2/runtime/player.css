@@ -84,6 +84,16 @@
 }
 .kv-v2 .kv-toolbar { display: flex; align-items: center; gap: 8px; width: 100%; flex-wrap: wrap; }
 .kv-v2 .kv-toolbar-spacer { flex: 1; min-width: 8px; }
+/* 제목 — 상단 가장 왼쪽(앱 크롬, Milray 토큰) */
+.kv-v2 .kv-title {
+  font-weight: 800; font-size: 16px; color: var(--ink); letter-spacing: -.01em;
+  padding: 2px 8px 2px 2px; margin-right: 2px; white-space: nowrap; user-select: none;
+}
+/* 집중(플레이) 버튼 — 코랄 악센트로 주 동작 강조 */
+.kv-v2 .kv-play-btn { color: var(--coral); }
+.kv-v2 .kv-play-btn:hover { background: rgba(242,115,62,.12); }
+/* 집중 모드 — 게임 카드만 보이게(선택 외곽선·블롭 정리) */
+.kv-v2 .kv-focus .kv-game-card.selected { outline: none; }
 .kv-v2 .kv-menu-wrap { position: relative; }
 .kv-v2 .kv-menu-btn {
   font: inherit; font-weight: 800; cursor: pointer; border: 2px solid #F0E4D8;

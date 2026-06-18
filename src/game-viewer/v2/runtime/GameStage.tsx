@@ -115,7 +115,9 @@ export function GameStage() {
   const { isFs, toggle: toggleFs } = useFullscreen();
   const chromeVisible = useChromeVisible();
   const [openMenu, setOpenMenu] = useState<"play" | "set" | "mat" | null>(null);
-  const showToolbar = !isFs && chromeVisible;
+  // 집중(플레이) 모드 — 교사 UI를 모두 숨기고 게임 프레임만 보여 아이가 게임에만 집중.
+  const [focus, setFocus] = useState(false);
+  const showToolbar = !isFs && !focus && chromeVisible;
 
   // 자료(요소) — 게임 위에 즉흥으로 올리는 스티커·글자·그림.
   const addMaterial = useMaterials((s) => s.add);
@@ -259,9 +261,10 @@ export function GameStage() {
   }, []);
   // panX = 홈(게임 중앙)에서의 오프셋. 0 = 게임 화면. 음수 = 오른쪽 보드, 양수 = 왼쪽 보드.
   const SIDE = vp.w; // 카드 양옆 빈 보드 폭(각 한 화면)
-  const TOP_RESERVE = 58; // 떠 있는 상단 크롬 자리
-  const BOTTOM_RESERVE = isBoardFs || !isEmbedded ? 96 : 18; // 하단 프롬프트바 자리(단독/풀스크린)
-  const cardW = vp.w ? Math.min(vp.w * 0.86, 980) : 0;
+  // 집중 모드선 상/하단 크롬이 없으니 예약을 줄여 카드가 더 꽉 차게(가운데).
+  const TOP_RESERVE = focus ? 20 : 58; // 떠 있는 상단 크롬 자리
+  const BOTTOM_RESERVE = focus ? 20 : (isBoardFs || !isEmbedded ? 96 : 18); // 하단 프롬프트바 자리
+  const cardW = vp.w ? Math.min(vp.w * (focus ? 0.94 : 0.86), focus ? 1200 : 980) : 0;
   const cardH = vp.h ? Math.max(220, vp.h - TOP_RESERVE - BOTTOM_RESERVE) : 0;
   const cardX = SIDE + (vp.w - cardW) / 2; // 캔버스 내 게임 카드 위치(가운데 화면)
   const canvasW = SIDE * 2 + vp.w; // 좌 빈보드 + 화면 + 우 빈보드 = 3화면
@@ -412,13 +415,15 @@ export function GameStage() {
 
   return (
     <StageSizeContext.Provider value={size}>
-      <div className={`wrap${showToolbar ? " kv-has-rail" : ""}${spaceDown ? " kv-space" : ""}`}>
+      <div className={`wrap${showToolbar ? " kv-has-rail" : ""}${spaceDown ? " kv-space" : ""}${focus ? " kv-focus" : ""}`}>
         {/* 게임 전용 편집 LNB — 화면 가장 왼쪽(부모) 고정 컬럼. 보드 영역은 그 오른쪽. */}
         {showToolbar && <GameEditRail />}
         {/* 교사 크롬 — 카테고리 접이식 툴바. 자리는 항상 예약(무대 안 밀림), 호버 시 버튼만 페이드인. */}
-        {!isFs && (
+        {!isFs && !focus && (
           <div className={`chrome${showToolbar ? " is-on" : ""}`}>
             <div className="kv-toolbar">
+              {/* 제목 — 상단 가장 왼쪽 */}
+              <span className="kv-title">게임뷰어</span>
               {/* 놀이 고르기 (예제 8종을 한 메뉴로 접음) */}
               <div className="kv-menu-wrap">
                 <button
@@ -485,7 +490,16 @@ export function GameStage() {
 
               <div className="kv-toolbar-spacer" />
 
-              {/* 아이콘 클러스터 — 소리 / 편집 / 풀스크린 */}
+              {/* 아이콘 클러스터 — 집중(플레이) / 소리 / 편집 / 풀스크린 */}
+              <button
+                type="button"
+                className="icon-btn kv-play-btn"
+                title="게임에 집중 (다른 건 숨기고 게임만 보기)"
+                aria-label="게임에 집중하기"
+                onClick={() => { setPanX(0); setOpenMenu(null); setFocus(true); }}
+              >
+                <Icon name="play" size={18} />
+              </button>
               <button
                 type="button"
                 className="icon-btn"
@@ -527,7 +541,7 @@ export function GameStage() {
             </div>
           </div>
         )}
-        {openMenu && !isFs && <div className="kv-menu-backdrop" onClick={() => setOpenMenu(null)} aria-hidden />}
+        {openMenu && !isFs && !focus && <div className="kv-menu-backdrop" onClick={() => setOpenMenu(null)} aria-hidden />}
 
         {/* 풀스크린 시 최소 플로팅 컨트롤(게임만 보이게 — 코너에 소리/나가기) */}
         {isFs && (
@@ -539,8 +553,20 @@ export function GameStage() {
           </div>
         )}
 
-        {/* 상태 줄 — 게임이 있을 때만(환영 화면에선 숨김) */}
-        {doc && (
+        {/* 집중(플레이) 모드 시 최소 컨트롤 — 게임만 보이고 코너에 소리/나가기 */}
+        {focus && !isFs && (
+          <div className="kv-fs-bar">
+            <button type="button" className="icon-btn" title="읽어주기 켜기/끄기" aria-label="읽어주기 켜기/끄기" onClick={onMute}>
+              <Icon name={ttsEnabled ? "sound" : "mute"} size={18} />
+            </button>
+            <button type="button" className="icon-btn" title="집중 모드 끄기" aria-label="집중 모드 끄기" onClick={() => setFocus(false)}>
+              <Icon name="x" size={18} />
+            </button>
+          </div>
+        )}
+
+        {/* 상태 줄 — 게임이 있을 때만(환영 화면·집중 모드에선 숨김) */}
+        {doc && !focus && (
           <div className="statusbar">
             <span className="round-txt">
               문제 <b>{roundIdx + 1}</b> / {totalRounds || 1}
@@ -572,7 +598,7 @@ export function GameStage() {
               style={{ position: "absolute", left: cardX, top: TOP_RESERVE, width: cardW || undefined, height: cardH || undefined }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={onSeedDrop}
-              onClick={(e) => { if (!(e.target as Element).closest("button, input")) { e.stopPropagation(); setCardSel(true); } }}
+              onClick={(e) => { if (!focus && !(e.target as Element).closest("button, input")) { e.stopPropagation(); setCardSel(true); } }}
               onDoubleClick={() => centerCanvasX(cardX + cardW / 2)}
             >
                 <div className="stage" ref={stageRef}>
@@ -683,7 +709,7 @@ export function GameStage() {
             </div>
 
             {/* 오른쪽 빈 보드 — 자유 확장활동 공간(그냥 배경 + 옅은 안내). 게임 확장활동이 있으면 카드로 띄움 */}
-            {vp.w > 0 && (
+            {vp.w > 0 && !focus && (
               doc && doc.extend.length > 0 ? (
                 <div className="kv-ext-float" style={{ position: "absolute", left: cardX + cardW + 56, top: 72, width: 320 }}>
                   {doc.extend.map((act, i) => {
@@ -718,8 +744,8 @@ export function GameStage() {
               )
             )}
 
-            {/* 자료/편집 레이어 — 캔버스 전체(게임+확장에 인터랙티브). 팬과 함께 이동. */}
-            {!isFs && (
+            {/* 자료/편집 레이어 — 캔버스 전체(게임+확장에 인터랙티브). 팬과 함께 이동. 집중 모드선 숨김. */}
+            {!isFs && !focus && (
               <StageSizeContext.Provider value={canvasSize}>
                 <MaterialsLayer screenW={vp.w} />
               </StageSizeContext.Provider>
@@ -729,7 +755,7 @@ export function GameStage() {
 
         {/* 하단 프롬프트바 — 단독 탭은 자체 바, 임베드/풀스크린은 보드 공통 바가 같은 동작을 한다.
             요소 선택 후 입력 = 그 요소 편집(보드와 동일), 선택 없으면 게임 생성. */}
-        {!isEmbedded && !isFs && <GamePromptBar />}
+        {!isEmbedded && !isFs && !focus && <GamePromptBar />}
       </div>
     </StageSizeContext.Provider>
   );
