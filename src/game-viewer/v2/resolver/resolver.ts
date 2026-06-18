@@ -8,7 +8,14 @@
 import type { InteractiveDocInput } from "../schema/interactiveDoc";
 import { CATEGORIES, findCategory, type Category, type Item } from "./contentSets";
 
-export type Archetype = "tap-the-right-one" | "match-pair" | "flip-memory" | "binary-choice" | "connect";
+export type Archetype =
+  | "tap-the-right-one"
+  | "match-pair"
+  | "flip-memory"
+  | "binary-choice"
+  | "connect"
+  | "categorize"
+  | "pattern-next";
 
 export interface Intent {
   category: Category;
@@ -38,6 +45,8 @@ export function parseIntent(prompt: string): Intent | null {
   if (!cat) return null;
   let archetype: Archetype | undefined;
   if (/ox|오엑스|맞을까|틀릴|참\s*거짓|일까요|맞나요/i.test(prompt)) archetype = "binary-choice";
+  else if (/분류|나누|나눠|나눔|모으|구분|담기|골라\s*담/.test(prompt)) archetype = "categorize";
+  else if (/패턴|규칙|다음에?\s*올|이어지는|다음\s*차례/.test(prompt)) archetype = "pattern-next";
   else if (/관계|연결|이어|이을|이으|어울리/.test(prompt)) archetype = "connect";
   else if (/짝|매칭|같은/.test(prompt)) archetype = "match-pair";
   else if (/뒤집|기억|메모리|카드/.test(prompt)) archetype = "flip-memory";
@@ -89,6 +98,27 @@ function cardSlots(count: number): SlotInput[] {
     const r = Math.floor(i / cols), c = i % cols;
     return { id: `c${i}`, type: "slot", role: "slot", transform: { x: (c + 1) / (cols + 1), y: (r + 1) / (rows + 1), w, h } };
   });
+}
+/** categorize — 윗줄 버킷(담는 곳) n개. */
+function bucketSlots(n: number): SlotInput[] {
+  const w = Math.min(0.34, 0.8 / n);
+  return Array.from({ length: n }, (_, i) => ({
+    id: `b${i}`, type: "slot", role: "slot", transform: { x: (i + 1) / (n + 1), y: 0.24, w, h: 0.2 },
+  }));
+}
+/** categorize — 아랫줄 분류할 아이템 n개(한 줄). */
+function catItemSlots(n: number): SlotInput[] {
+  const w = Math.min(0.18, 0.9 / n);
+  return Array.from({ length: n }, (_, i) => ({
+    id: `i${i}`, type: "slot", role: "slot", transform: { x: (i + 1) / (n + 1), y: 0.78, w, h: 0.18 },
+  }));
+}
+/** pattern-next — 제시 수열 n칸(한 줄). */
+function patternSeqSlots(n: number): SlotInput[] {
+  const w = Math.min(0.16, 0.8 / n);
+  return Array.from({ length: n }, (_, i) => ({
+    id: `q${i}`, type: "slot", role: "slot", transform: { x: (i + 1) / (n + 1), y: 0.36, w, h: 0.18 },
+  }));
 }
 
 /* ───────────────────────── 아키타입별 결정론 조립 ───────────────────────── */
@@ -226,12 +256,69 @@ function assembleConnect(cat: Category, _useImages: boolean, k: Knobs): Interact
   };
 }
 
+/** 분류 담기 — 의도 카테고리 + 다른 카테고리를 두 버킷으로, 아이템을 섞어 분류. */
+function assembleCategorize(cat: Category, useImages: boolean, k: Knobs): InteractiveDocInput {
+  const per = PAIR_COUNT[k.difficulty]; // 버킷당 아이템 수(2/3/4)
+  const other = shuffle(CATEGORIES.filter((c) => c.key !== cat.key))[0] ?? cat;
+  const buckets = [
+    { type: "text" as const, text: cat.label },
+    { type: "text" as const, text: other.label },
+  ];
+  const items = shuffle([
+    ...pickN(cat.items, per).map((it) => ({ content: itemContent(it, useImages), bucket: 0 })),
+    ...pickN(other.items, per).map((it) => ({ content: itemContent(it, useImages), bucket: 1 })),
+  ]);
+  const bSlots = bucketSlots(2);
+  const iSlots = catItemSlots(items.length);
+  return {
+    meta: { id: `gen_cat_${cat.key}`, title: `${cat.label}·${other.label} 분류하기`, archetype: "categorize", createdFrom: "prompt" },
+    settings: { difficulty: k.difficulty, length: 1, mood: k.mood },
+    stage: { nodes: [...bSlots, ...iSlots] },
+    interaction: {
+      kind: "categorize",
+      bucketSlotIds: bSlots.map((s) => s.id),
+      itemSlotIds: iSlots.map((s) => s.id),
+      rounds: [{ buckets, items }],
+    },
+    rewards: { confetti: "full" },
+  };
+}
+
+/** 패턴 잇기 — 두 아이템으로 ABAB 수열, 다음 항(A)을 보기에서 고르기. */
+function assemblePatternNext(cat: Category, useImages: boolean, k: Knobs): InteractiveDocInput {
+  const optionCount = OPTION_COUNT[k.difficulty];
+  const picks = pickN(cat.items, Math.max(3, optionCount));
+  const [a, b] = picks;
+  const sequence = [a, b, a, b].map((it) => itemContent(it, useImages));
+  const wrongPool = [b, ...picks.slice(2)];
+  const options = shuffle([
+    { content: itemContent(a, useImages), correct: true },
+    ...shuffle(wrongPool).slice(0, optionCount - 1).map((it) => ({ content: itemContent(it, useImages) })),
+  ]);
+  const qSlots = patternSeqSlots(4);
+  const oSlots = optionSlots(optionCount);
+  return {
+    meta: { id: `gen_pattern_${cat.key}`, title: `${cat.label} 패턴 잇기`, archetype: "pattern-next", createdFrom: "prompt" },
+    settings: { difficulty: k.difficulty, length: 1, mood: k.mood, optionCount },
+    stage: { nodes: [...qSlots, ...oSlots] },
+    interaction: {
+      kind: "pattern-next",
+      sequenceSlotIds: qSlots.map((s) => s.id),
+      optionSlotIds: oSlots.map((s) => s.id),
+      rounds: [{ sequence, options }],
+    },
+    rewards: { confetti: "full" },
+  };
+}
+
 const ASSEMBLERS: Record<Archetype, (cat: Category, useImages: boolean, k: Knobs) => InteractiveDocInput> = {
   "tap-the-right-one": assembleTap,
   "match-pair": assembleMatch,
   "flip-memory": assembleFlip,
   "binary-choice": assembleBinary,
   "connect": assembleConnect,
+  "categorize": assembleCategorize,
+  "pattern-next": assemblePatternNext,
 };
 
 /** 카테고리에 어울리는 추천 카드(교사 언어). 의도에 명시된 아키타입이 1순위.
@@ -246,6 +333,8 @@ export function recommend(intent: Intent, opts: RecommendOpts = {}): Recommendat
     { archetype: "flip-memory", title: `${cat.label} 카드 뒤집기`, emoji: "🃏" },
     { archetype: "binary-choice", title: `${cat.label} OX 퀴즈`, emoji: "⭕" },
     { archetype: "connect", title: `${cat.label} 관계 잇기`, emoji: "🧩" },
+    { archetype: "categorize", title: `${cat.label} 분류 담기`, emoji: "🧺" },
+    { archetype: "pattern-next", title: `${cat.label} 패턴 잇기`, emoji: "🔵" },
   ];
   const ordered = intent.archetype
     ? [...base.filter((b) => b.archetype === intent.archetype), ...base.filter((b) => b.archetype !== intent.archetype)]
