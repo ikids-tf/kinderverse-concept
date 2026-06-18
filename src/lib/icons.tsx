@@ -54,7 +54,9 @@ export type IconName =
   | 'maximize'
   | 'minimize'
   | 'undo'
-  | 'redo';
+  | 'redo'
+  | 'upload'
+  | 'link';
 
 const ICON_PATHS: Record<IconName, string> = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
@@ -110,6 +112,8 @@ const ICON_PATHS: Record<IconName, string> = {
   layers: '<path d="M12 2 2 7l10 5 10-5z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/>',
   history: '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 4v4h4"/><path d="M12 7.5V12l3.2 1.9"/>',
   motion: '<circle cx="5" cy="18" r="2.6"/><circle cx="19" cy="6" r="2.6"/><path d="M7.3 16.2C10.5 13.6 13.5 10.4 16.7 7.8"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
+  upload: '<path d="M12 19V7"/><path d="m7 11 5-5 5 5"/><path d="M5 21h14"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/>',
 };
 
 export interface IconProps {

@@ -15,6 +15,8 @@ import { FlipMemory } from "./interactions/FlipMemory";
 import { OrderSequence } from "./interactions/OrderSequence";
 import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
+import { GameEditRail } from "./editor/GameEditRail";
+import { GamePromptBar } from "./GamePromptBar";
 import { MaterialsLayer } from "./MaterialsLayer";
 import { useMaterials } from "./materials";
 import { WelcomeScreen } from "./WelcomeScreen";
@@ -81,9 +83,6 @@ const NURI_LABEL: Record<string, string> = {
   physical: "신체운동",
 };
 
-/* 자료 메뉴 빠른 스티커 팔레트. */
-const MAT_EMOJIS = ["⭐", "❤️", "👍", "🎈", "🌈", "🍎", "🐶", "🌟", "✅", "🎵", "🌸", "🚗"];
-
 export function GameStage() {
   const doc = useGame((s) => s.doc);
   const exampleKey = useGame((s) => s.exampleKey);
@@ -99,12 +98,9 @@ export function GameStage() {
   const cueContent = useGame((s) => s.cueContent);
   const cueReactSeq = useGame((s) => s.cueReactSeq);
 
-  const extendIdx = useGame((s) => s.extendIdx);
-
   const loadExample = useGame((s) => s.loadExample);
   const start = useGame((s) => s.start);
   const next = useGame((s) => s.next);
-  const nextExtend = useGame((s) => s.nextExtend);
   const restart = useGame((s) => s.restart);
   const toggleTts = useGame((s) => s.toggleTts);
   const mode = useGame((s) => s.mode);
@@ -118,12 +114,12 @@ export function GameStage() {
 
   // 자료(요소) — 게임 위에 즉흥으로 올리는 스티커·글자·그림.
   const addMaterial = useMaterials((s) => s.add);
+  const matCount = useMaterials((s) => s.items.length);
   const addSeed = useGen((s) => s.addSeed);
   const sourceMode = useGen((s) => s.sourceMode);
   const setSourceMode = useGen((s) => s.setSourceMode);
   const knobs = useGen((s) => s.knobs);
   const setKnobs = useGen((s) => s.setKnobs);
-  const [matText, setMatText] = useState("");
 
   // 뷰어에 이미지를 끌어다 놓으면: 게임 없을 땐 '시드'(만들기 재료), 게임 중엔 '자료'로.
   const onSeedDrop = (e: React.DragEvent) => {
@@ -202,8 +198,107 @@ export function GameStage() {
   const hasReveal = !!doc?.effects.some((e) => e.kind === "reveal");
   const kind = doc?.interaction.kind;
 
-  // 가로 레인 카메라(PRD §10.1): 게임=섹션0, 확장활동=오른쪽 섹션들. 확장 단계면 그 섹션으로 팬.
-  const cam = phase === "extend" ? extendIdx + 1 : 0;
+  // ── 무한(가로) 보드 — My Board처럼 ───────────────────────────────────
+  // 화면 전체가 하나의 연속된 보드. 게임은 그 위에 떠 있는 '카드'. 보드 전체를
+  // 휠버튼(가운데 버튼) 드래그 · 투핑거(휠) · Space+드래그로 좌우 자유 팬(가로 전용).
+  // 카드 좌·우는 빈 보드 — 교사가 자유롭게 확장활동 자료를 놓는다.
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [vp, setVp] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const measure = () => setVp({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // panX = 홈(게임 중앙)에서의 오프셋. 0 = 게임 화면. 음수 = 오른쪽 보드, 양수 = 왼쪽 보드.
+  const SIDE = vp.w; // 카드 양옆 빈 보드 폭(각 한 화면)
+  const TOP_RESERVE = 58; // 떠 있는 상단 크롬 자리
+  const BOTTOM_RESERVE = isBoardFs || !isEmbedded ? 96 : 18; // 하단 프롬프트바 자리(단독/풀스크린)
+  const cardW = vp.w ? Math.min(vp.w * 0.86, 980) : 0;
+  const cardH = vp.h ? Math.max(220, vp.h - TOP_RESERVE - BOTTOM_RESERVE) : 0;
+  const cardX = SIDE + (vp.w - cardW) / 2; // 캔버스 내 게임 카드 위치(가운데 화면)
+  const canvasW = SIDE * 2 + vp.w; // 좌 빈보드 + 화면 + 우 빈보드 = 3화면
+  const canvasSize = useMemo<StageSize>(() => ({ w: canvasW, h: vp.h }), [canvasW, vp.h]);
+  const clampPan = (v: number) => Math.max(-SIDE, Math.min(SIDE, v));
+
+  const [panX, setPanX] = useState(0);
+  const [panning, setPanning] = useState(false);
+  const [spaceDown, setSpaceDown] = useState(false);
+  const panRef = useRef<{ startX: number; base: number; active: boolean } | null>(null);
+  const geomRef = useRef({ side: 0, vw: 0 });
+  geomRef.current = { side: SIDE, vw: vp.w };
+  const [cardSel, setCardSel] = useState(false); // 게임 프레임 선택 상태
+  useEffect(() => { setPanX(0); }, [doc?.meta.id]);
+  // 캔버스 x(px)를 화면 가로 중앙으로 — 더블클릭 포커스(요소 가운데 정렬)
+  const centerCanvasX = (cx: number) => { if (vp.w) setPanX(clampPan(vp.w / 2 - cx + SIDE)); };
+  useEffect(() => {
+    const onCenter = (e: Event) => {
+      const { side, vw } = geomRef.current;
+      const cx = (e as CustomEvent<{ cx: number }>).detail?.cx;
+      if (typeof cx === "number" && vw) setPanX(Math.max(-side, Math.min(side, vw / 2 - cx + side)));
+    };
+    window.addEventListener("kv:center", onCenter as EventListener);
+    return () => window.removeEventListener("kv:center", onCenter as EventListener);
+  }, []);
+  // 보이는 캔버스 중심을 자료 스토어에 알림(새 요소가 보이는 곳에 추가되게)
+  const setViewX = useMaterials((s) => s.setViewX);
+  useEffect(() => {
+    if (canvasW > 0) setViewX((SIDE - panX + vp.w / 2) / canvasW);
+  }, [panX, vp.w, SIDE, canvasW, setViewX]);
+  // 투핑거(휠) 팬 — non-passive 리스너로 기본 스크롤 막고 가로 이동
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const { side } = geomRef.current;
+      if (!side) return;
+      e.preventDefault();
+      const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      setPanX((p) => Math.max(-side, Math.min(side, p - d)));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+  // Space 팬 모드
+  useEffect(() => {
+    const isTyping = () => {
+      const a = document.activeElement as HTMLElement | null;
+      return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
+    };
+    const dn = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !isTyping()) { e.preventDefault(); setSpaceDown(true); (window as Window & { __kvSpace?: boolean }).__kvSpace = true; }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") { setSpaceDown(false); (window as Window & { __kvSpace?: boolean }).__kvSpace = false; }
+    };
+    window.addEventListener("keydown", dn);
+    window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", dn); window.removeEventListener("keyup", up); };
+  }, []);
+  // 팬 = 가운데(휠) 버튼 드래그 또는 Space+드래그. (좌클릭 드래그는 박스선택/해제)
+  const onCanvasDown = (e: React.PointerEvent) => {
+    if (e.button !== 1 && !spaceDown) return;
+    e.preventDefault();
+    panRef.current = { startX: e.clientX, base: panX, active: false };
+    setPanning(true);
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
+  };
+  const onCanvasMove = (e: React.PointerEvent) => {
+    const p = panRef.current;
+    if (!p) return;
+    const dx = e.clientX - p.startX;
+    if (!p.active && Math.abs(dx) > 3) p.active = true;
+    if (p.active) setPanX(clampPan(p.base + dx));
+  };
+  const onCanvasUp = (e: React.PointerEvent) => {
+    panRef.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    setPanning(false);
+  };
+  const panRight = () => setPanX((p) => clampPan(p - vp.w * 0.85));
 
   const onMute = () => {
     const was = ttsEnabled;
@@ -213,7 +308,9 @@ export function GameStage() {
 
   return (
     <StageSizeContext.Provider value={size}>
-      <div className="wrap">
+      <div className={`wrap${showToolbar ? " kv-has-rail" : ""}${spaceDown ? " kv-space" : ""}`}>
+        {/* 게임 전용 편집 LNB — 화면 가장 왼쪽(부모) 고정 컬럼. 보드 영역은 그 오른쪽. */}
+        {showToolbar && <GameEditRail />}
         {/* 교사 크롬 — 카테고리 접이식 툴바. 자리는 항상 예약(무대 안 밀림), 호버 시 버튼만 페이드인. */}
         {!isFs && (
           <div className={`chrome${showToolbar ? " is-on" : ""}`}>
@@ -276,50 +373,11 @@ export function GameStage() {
                 )}
               </div>
 
-              {/* 자료 — 게임 위에 즉흥으로 올리는 스티커·글자·그림(확장 활동) */}
-              <div className="kv-menu-wrap">
-                <button
-                  type="button"
-                  className={`kv-menu-btn${openMenu === "mat" ? " on" : ""}`}
-                  aria-haspopup="menu"
-                  aria-expanded={openMenu === "mat"}
-                  onClick={() => setOpenMenu(openMenu === "mat" ? null : "mat")}
-                >
-                  <span className="kv-btn-ic"><Icon name="plus" size={17} /> 자료</span>
-                </button>
-                {openMenu === "mat" && (
-                  <div className="kv-menu kv-menu-mat" role="menu">
-                    <div className="kv-menu-label">스티커</div>
-                    <div className="kv-emoji-row">
-                      {MAT_EMOJIS.map((em) => (
-                        <button key={em} type="button" className="kv-emoji-btn" aria-label={`스티커 ${em}`} onClick={() => addMaterial("emoji", em)}>
-                          {em}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="kv-menu-label">글자</div>
-                    <form
-                      className="kv-mat-textform"
-                      onSubmit={(ev) => {
-                        ev.preventDefault();
-                        const v = matText.trim();
-                        if (v) {
-                          addMaterial("text", v);
-                          setMatText("");
-                        }
-                      }}
-                    >
-                      <input value={matText} onChange={(e) => setMatText(e.target.value)} placeholder="글자 입력" aria-label="글자 자료 입력" />
-                      <button type="submit">추가</button>
-                    </form>
-                    <div className="kv-menu-label">그림</div>
-                    <label className="kv-mat-upload">
-                      <span className="kv-btn-ic"><Icon name="folder" size={15} /> 그림 올리기</span>
-                      <input type="file" accept="image/*" onChange={onUploadImage} hidden />
-                    </label>
-                  </div>
-                )}
-              </div>
+              {/* 업로드 — 이미지를 무대에 바로 올린다(텍스트·버튼·프레임은 좌측 편집 레일에서). */}
+              <label className="kv-menu-btn kv-upload-btn" title="이미지 업로드">
+                <span className="kv-btn-ic"><Icon name="upload" size={17} /> 업로드</span>
+                <input type="file" accept="image/*" onChange={onUploadImage} hidden />
+              </label>
 
               <div className="kv-toolbar-spacer" />
 
@@ -363,9 +421,9 @@ export function GameStage() {
                 <Icon name={isFs || isBoardFs ? "x" : "maximize"} size={18} />
               </button>
             </div>
-            {openMenu && <div className="kv-menu-backdrop" onClick={() => setOpenMenu(null)} aria-hidden />}
           </div>
         )}
+        {openMenu && !isFs && <div className="kv-menu-backdrop" onClick={() => setOpenMenu(null)} aria-hidden />}
 
         {/* 풀스크린 시 최소 플로팅 컨트롤(게임만 보이게 — 코너에 소리/나가기) */}
         {isFs && (
@@ -391,138 +449,158 @@ export function GameStage() {
           </div>
         )}
 
-        {/* 무대 — 이미지 드롭존(시드/자료) */}
-        <div className="stage-frame" onDragOver={(e) => e.preventDefault()} onDrop={onSeedDrop}>
-          <div className="stage" ref={stageRef}>
-            {/* 카메라 — 게임(섹션0) + 확장활동(오른쪽 섹션들)을 가로 레인으로 팬 */}
-            <div className="kv-camera" style={{ transform: `translateX(-${cam * 100}%)` }}>
-              {/* 섹션 0 — 게임 */}
-              <div className="kv-section">
-                <div className="blob a" />
-                <div className="blob b" />
-
-                {doc && mode === "edit" && <EditLayer />}
-
-                {doc && mode === "play" && (
-                  <>
-                    {unclaimed.map((node) => (
-                      <NodeRenderer
-                        key={node.id}
-                        node={node}
-                        binding={node.id === cueSlotId ? cueContent : undefined}
-                        reactSeq={node.id === cueSlotId ? cueReactSeq : undefined}
-                      />
-                    ))}
-                    {hasReveal && <RevealEffect />}
-                    {kind === "match-pair" || kind === "connect" ? (
-                      <MatchPair />
-                    ) : kind === "binary-choice" ? (
-                      <BinaryChoice />
-                    ) : kind === "flip-memory" ? (
-                      <FlipMemory />
-                    ) : kind === "order-sequence" ? (
-                      <OrderSequence />
-                    ) : (
-                      <TapTheRightOne />
+        {/* 무한 가로 보드 — 화면 전체가 보드. 게임은 그 위에 떠 있는 카드. 휠버튼/투핑거/Space로
+            보드 전체를 좌우로 팬한다. 카드 좌·우는 빈 보드(자유 확장활동). 자료는 캔버스 전체에. */}
+        <div className="kv-board-viewport" ref={viewportRef}>
+          <div
+            className={`kv-board-canvas${panning ? " kv-panning" : ""}${spaceDown ? " kv-grab" : ""}`}
+            style={{ width: vp.w ? `${canvasW}px` : "300%", height: "100%", transform: `translateX(${vp.w ? panX - SIDE : 0}px)` }}
+            onPointerDown={onCanvasDown}
+            onPointerMove={onCanvasMove}
+            onPointerUp={onCanvasUp}
+            onClick={() => setCardSel(false)}
+          >
+            {/* 게임 카드 — 보드 위에 떠 있는 프레임(선택 + 더블클릭 가운데정렬) */}
+            <div
+              className={`stage-frame kv-game-card${cardSel ? " selected" : ""}`}
+              style={{ position: "absolute", left: cardX, top: TOP_RESERVE, width: cardW || undefined, height: cardH || undefined }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={onSeedDrop}
+              onClick={(e) => { if (!(e.target as Element).closest("button, input")) { e.stopPropagation(); setCardSel(true); } }}
+              onDoubleClick={() => centerCanvasX(cardX + cardW / 2)}
+            >
+                <div className="stage" ref={stageRef}>
+                  <div className="kv-section">
+                    {/* 장식 블롭 — 빈 캔버스에서 편집을 시작하면(자료 추가) 깔끔하게 제거 */}
+                    {(doc || matCount === 0) && (
+                      <>
+                        <div className="blob a" />
+                        <div className="blob b" />
+                      </>
                     )}
-                  </>
-                )}
 
-                <div className={`banner${banner ? " show " + (banner.ok ? "ok" : "no") : ""}`}>
-                  <span aria-hidden>{banner?.ok ? "🎉" : "💪"}</span>
-                  <span>{banner?.text}</span>
-                </div>
+                    {doc && mode === "edit" && <EditLayer />}
 
-                <button type="button" className={`next${showNext ? " show" : ""}`} onClick={next}>
-                  다음 <span aria-hidden>→</span>
-                </button>
+                    {doc && mode === "play" && (
+                      <>
+                        {unclaimed.map((node) => (
+                          <NodeRenderer
+                            key={node.id}
+                            node={node}
+                            binding={node.id === cueSlotId ? cueContent : undefined}
+                            reactSeq={node.id === cueSlotId ? cueReactSeq : undefined}
+                          />
+                        ))}
+                        {hasReveal && <RevealEffect />}
+                        {kind === "match-pair" || kind === "connect" ? (
+                          <MatchPair />
+                        ) : kind === "binary-choice" ? (
+                          <BinaryChoice />
+                        ) : kind === "flip-memory" ? (
+                          <FlipMemory />
+                        ) : kind === "order-sequence" ? (
+                          <OrderSequence />
+                        ) : (
+                          <TapTheRightOne />
+                        )}
+                      </>
+                    )}
 
-                {/* 환영 화면 — 게임이 없을 때(데모 대신). 프롬프트/이미지 드래그로 만들기 시작 */}
-                {!doc && <WelcomeScreen />}
+                    <div className={`banner${banner ? " show " + (banner.ok ? "ok" : "no") : ""}`}>
+                      <span aria-hidden>{banner?.ok ? "🎉" : "💪"}</span>
+                      <span>{banner?.text}</span>
+                    </div>
 
-                {/* 시작 오버레이 (게임 있고 start 단계일 때만; 편집 모드 숨김) */}
-                <div className={`overlay${phase !== "start" || mode === "edit" || !doc ? " hide" : ""}`}>
-                  <div className="finish-emoji" aria-hidden>🐾</div>
-                  <h2 className="jua">{doc?.meta.title ?? "게임을 시작해요"}</h2>
-                  <p>{doc ? START_DESC[doc.meta.archetype] ?? "시작해볼까요?" : ""}</p>
-                  <button type="button" className="big-btn" onClick={start}>▶ 시작</button>
-                </div>
+                    <button type="button" className={`next${showNext ? " show" : ""}`} onClick={next}>
+                      다음 <span aria-hidden>→</span>
+                    </button>
 
-                {/* 완료 오버레이 */}
-                <div className={`overlay${phase !== "finished" ? " hide" : ""}`}>
-                  <div className="finish-emoji" aria-hidden>🎉</div>
-                  <h2 className="jua">참 잘했어요!</h2>
-                  <div className="finish-stars">
-                    {Array.from({ length: maxScore }).map((_, i) => (
-                      <span key={i} className={`star${i < score ? " on" : ""}`}>⭐</span>
-                    ))}
+                    {/* 환영 화면 — 게임이 없을 때(데모 대신). 프롬프트/이미지 드래그로 만들기 시작 */}
+                    {!doc && matCount === 0 && <WelcomeScreen />}
+
+                    {/* 시작 오버레이 (게임 있고 start 단계일 때만; 편집 모드 숨김) */}
+                    <div className={`overlay${phase !== "start" || mode === "edit" || !doc ? " hide" : ""}`}>
+                      <div className="finish-emoji" aria-hidden>🐾</div>
+                      <h2 className="jua">{doc?.meta.title ?? "게임을 시작해요"}</h2>
+                      <p>{doc ? START_DESC[doc.meta.archetype] ?? "시작해볼까요?" : ""}</p>
+                      <button type="button" className="big-btn" onClick={start}>▶ 시작</button>
+                    </div>
+
+                    {/* 완료 오버레이 — 끝나면 오른쪽 확장 보드로 안내 */}
+                    <div className={`overlay${phase !== "finished" ? " hide" : ""}`}>
+                      <div className="finish-emoji" aria-hidden>🎉</div>
+                      <h2 className="jua">참 잘했어요!</h2>
+                      <div className="finish-stars">
+                        {Array.from({ length: maxScore }).map((_, i) => (
+                          <span key={i} className={`star${i < score ? " on" : ""}`}>⭐</span>
+                        ))}
+                      </div>
+                      <p>{maxScore}개 중 {score}개 맞혔어요!</p>
+                      <div className="finish-actions">
+                        <button type="button" className="big-btn" onClick={restart}>↺ 다시 하기</button>
+                        <button type="button" className="extend-listen" onClick={panRight}>
+                          확장 활동 <span aria-hidden>→</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {mode === "edit" && (
+                      <div className="edit-hint" aria-hidden>
+                        ✏️ 끌어서 이동 · 모서리로 크기 · 방향키 미세이동
+                      </div>
+                    )}
                   </div>
-                  <p>
-                    {maxScore}개 중 {score}개 맞혔어요!
-                  </p>
-                  <button type="button" className="big-btn" onClick={restart}>↺ 다시 하기</button>
                 </div>
+            </div>
 
-                {mode === "edit" && (
-                  <div className="edit-hint" aria-hidden>
-                    ✏️ 끌어서 이동 · 모서리로 크기 · 방향키 미세이동
-                  </div>
-                )}
-              </div>
-
-              {/* 확장활동 섹션들 — 게임 오른쪽으로 펼쳐지는 레인(끊김없이 카메라 팬) */}
-              {doc &&
-                doc.extend.map((act, i) => {
-                  const m = EXTEND_META[act.type] ?? { emoji: "🌟", label: "확장활동" };
-                  const last = i + 1 >= doc.extend.length;
-                  return (
-                    <div className="kv-section kv-section-extend" key={i} style={{ left: `${(i + 1) * 100}%` }} role="group" aria-label="확장활동">
-                      <div className="extend-card">
+            {/* 오른쪽 빈 보드 — 자유 확장활동 공간(그냥 배경 + 옅은 안내). 게임 확장활동이 있으면 카드로 띄움 */}
+            {vp.w > 0 && (
+              doc && doc.extend.length > 0 ? (
+                <div className="kv-ext-float" style={{ position: "absolute", left: cardX + cardW + 56, top: 72, width: 320 }}>
+                  {doc.extend.map((act, i) => {
+                    const m = EXTEND_META[act.type] ?? { emoji: "🌟", label: "확장활동" };
+                    return (
+                      <div className="extend-card" key={i} role="group" aria-label="확장활동">
                         <div className="extend-top">
                           <span className="extend-kind">{m.emoji} {m.label}</span>
-                          <span className="extend-step">확장활동 {i + 1} / {doc.extend.length}</span>
+                          <span className="extend-step">{i + 1} / {doc.extend.length}</span>
                         </div>
                         <ul className="extend-prompts">
-                          {act.prompts.map((p, j) => (
-                            <li key={j}>{p}</li>
-                          ))}
+                          {act.prompts.map((p, j) => (<li key={j}>{p}</li>))}
                         </ul>
                         {act.nuri && act.nuri.length > 0 && (
                           <div className="extend-nuri" aria-label="누리과정 영역">
-                            {act.nuri.map((n) => (
-                              <span key={n} className="nuri-chip">🌱 {NURI_LABEL[n] ?? n}</span>
-                            ))}
+                            {act.nuri.map((n) => (<span key={n} className="nuri-chip">🌱 {NURI_LABEL[n] ?? n}</span>))}
                           </div>
                         )}
-                        <div className="extend-actions">
-                          <button type="button" className="extend-listen" onClick={() => { if (ttsEnabled) say(act.prompts.join("  ")); }}>
-                            <span className="kv-btn-ic"><Icon name="sound" size={15} /> 다시 듣기</span>
-                          </button>
-                          <button type="button" className="big-btn" onClick={nextExtend}>
-                            {last ? "마치기 ✓" : "다음 →"}
-                          </button>
-                        </div>
+                        <button type="button" className="extend-listen" onClick={() => { if (ttsEnabled) say(act.prompts.join("  ")); }}>
+                          <span className="kv-btn-ic"><Icon name="sound" size={15} /> 다시 듣기</span>
+                        </button>
                       </div>
-                    </div>
-                  );
-                })}
-            </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="kv-board-hint" style={{ position: "absolute", left: cardX + cardW + vp.w * 0.2, top: "50%", transform: "translateY(-50%)" }}>
+                  <div className="kv-board-hint-emoji" aria-hidden>🧩</div>
+                  <b>자유 확장 공간</b>
+                  <span>왼쪽 도구로 자료를 놓아 아이들과 이어서 놀아요</span>
+                </div>
+              )
+            )}
 
-            {/* 자료 레이어 — 카메라 밖(뷰포트 고정): 팬과 무관하게 항상 화면 위에서 추가/이동/삭제 */}
-            {doc && mode === "play" && <MaterialsLayer />}
+            {/* 자료/편집 레이어 — 캔버스 전체(게임+확장에 인터랙티브). 팬과 함께 이동. */}
+            {!isFs && (
+              <StageSizeContext.Provider value={canvasSize}>
+                <MaterialsLayer />
+              </StageSizeContext.Provider>
+            )}
           </div>
         </div>
 
-        {/* 뷰어 자체 프롬프트바는 두지 않는다 — 만들기는 보드 공통 프롬프트바가 담당한다
-            (임베드 소형 카드: 보드 바가 제어 / 풀스크린: 보드 바가 그 자리에 떠서 제어).
-            그림 출처·난이도·분량·분위기는 상단 ⚙️ 설정 메뉴에서 조절한다. */}
-
-        {!isEmbedded && (
-          <p className="note">
-            이 화면은 <code>InteractiveDoc</code> 하나로 플레이됩니다 — 게임 코드를 새로 짠 게 아니라
-            문서 → 런타임으로 렌더됩니다. (프로토: 이미지=이모지, 음성=브라우저 TTS, 모션=Motion 스프링.)
-          </p>
-        )}
+        {/* 하단 프롬프트바 — 단독 탭은 자체 바, 임베드/풀스크린은 보드 공통 바가 같은 동작을 한다.
+            요소 선택 후 입력 = 그 요소 편집(보드와 동일), 선택 없으면 게임 생성. */}
+        {!isEmbedded && !isFs && <GamePromptBar />}
       </div>
     </StageSizeContext.Provider>
   );

@@ -13,6 +13,7 @@ import { generateGame } from "../generate/orchestrator";
 import { useGame } from "./useGame";
 import { useGen, latestStep } from "./genProgress";
 import { useMaterials } from "./materials";
+import { applyEditIntent } from "./editIntent";
 
 /** iframe(보드 카드) 안에서 실행 중인지 — 단독 탭이면 false. */
 export const isEmbedded = typeof window !== "undefined" && window.parent !== window;
@@ -28,8 +29,13 @@ const useChromeStore = create<ChromeState>((set) => ({
 }));
 export const useChromeVisible = (): boolean => useChromeStore((s) => s.visible);
 
-/** 프롬프트(+드래그 시드) → 게임 생성(orchestrator). 진행은 useGen 채널로 스트리밍된다. */
+/**
+ * 보드 프롬프트바 입력 처리(임베드/풀스크린).
+ *  - 요소 선택 시: 그 요소 편집 시도(보드와 동일 감각). 성공하면 생성 안 함.
+ *  - 아니면 프롬프트 → 게임 생성(orchestrator). 진행은 useGen 채널로 스트리밍.
+ */
 async function generateFromPrompt(prompt: string): Promise<void> {
+  if (applyEditIntent(prompt).ok) return;
   await generateGame(prompt, { seedImages: useGen.getState().seeds });
 }
 

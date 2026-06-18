@@ -29,12 +29,15 @@ const rootStyle = {
   minHeight: "100%",
 } as CSSProperties;
 
+const isBoardFs = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("fs");
+
 export function App() {
   useGameEffects();
   useBoardBridge(); // 보드 메인 프롬프트바 → 게임 생성 + 교사 크롬 가시성(임베드 시)
 
+  const cls = ["kv-v2", isEmbedded && "kv-embed", isBoardFs && "kv-board-fs"].filter(Boolean).join(" ");
   return (
-    <div className={`kv-v2${isEmbedded ? " kv-embed" : ""}`} style={rootStyle}>
+    <div className={cls} style={rootStyle}>
       <GameStage />
     </div>
   );
