@@ -9,6 +9,7 @@ import {
   matchPairExample,
   revealAndCollectExample,
   orderSequenceExample,
+  patternNextExample,
   responsiveStateExample,
 } from "../schema/examples";
 import type { InteractiveDocInput } from "../schema/interactiveDoc";
@@ -142,6 +143,7 @@ export const FIXTURES: Record<string, { label: string; input: InteractiveDocInpu
   connect: { label: "🧩 관계 잇기", input: connectExample },
   flip: { label: "🃏 카드 뒤집기", input: flipMemoryExample },
   order: { label: "🌱 순서대로", input: orderSequenceExample },
+  pattern: { label: "🔵 패턴 잇기", input: patternNextExample },
   emotion: { label: "😊 마음 알기", input: responsiveStateExample },
 };
 

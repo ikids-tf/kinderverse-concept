@@ -49,6 +49,10 @@ export interface OrderSlot {
   orderIdx: number; // 정답 순서(0..n-1)
   status: "idle" | "locked" | "wrong";
 }
+export interface SeqItem {
+  slotId: string;
+  content: ContentBinding; // 정적 제시(패턴 잇기의 보여주는 수열)
+}
 export interface RevealView {
   coverId: string;
   hiddenId: string;
@@ -86,6 +90,9 @@ export interface GameStore {
   cueReactSeq: number;
   tapOptions: TapOption[];
   reveal: RevealView | null;
+
+  // pattern-next — 정적 수열 제시(patternSeq) + 보기는 tapOptions/tap 재사용
+  patternSeq: SeqItem[];
 
   // match-pair · connect (동일 메커니즘)
   matchLeft: MatchItem[];
@@ -177,6 +184,7 @@ interface RoundView {
   binaryStatus: { yes: OptStatus; no: OptStatus };
   flipCards: FlipCard[];
   orderSlots: OrderSlot[];
+  patternSeq: SeqItem[];
   question: string;
 }
 function emptyRound(): RoundView {
@@ -191,6 +199,7 @@ function emptyRound(): RoundView {
     binaryStatus: { yes: "idle", no: "idle" },
     flipCards: [],
     orderSlots: [],
+    patternSeq: [],
     question: "",
   };
 }
@@ -304,6 +313,23 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
     return { ...emptyRound(), orderSlots, question: "순서대로 눌러볼까요?" };
   }
 
+  if (it.kind === "pattern-next") {
+    const round = it.rounds[idx];
+    // 수열은 순서대로 정적 제시(셔플 안 함), 보기만 셔플 — 판정은 tap(=tap-the-right-one) 재사용.
+    const patternSeq: SeqItem[] = [];
+    it.sequenceSlotIds.forEach((slotId, i) => {
+      const c = round.sequence[i];
+      if (c) patternSeq.push({ slotId, content: c });
+    });
+    const shuffled = shuffle(round.options);
+    const tapOptions: TapOption[] = [];
+    it.optionSlotIds.forEach((slotId, i) => {
+      const o = shuffled[i];
+      if (o) tapOptions.push({ slotId, content: o.content, correct: o.correct, status: "idle" });
+    });
+    return { ...emptyRound(), patternSeq, tapOptions, question: "다음에 올 친구는 무엇일까요?" };
+  }
+
   // combine 등 미지원 — 빈 라운드.
   return emptyRound();
 }
@@ -339,6 +365,7 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
     flipMatched: 0,
     orderSlots: [],
     orderNext: 0,
+    patternSeq: [],
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -380,6 +407,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       flipMatched: 0,
       orderSlots: rv.orderSlots,
       orderNext: 0,
+      patternSeq: rv.patternSeq,
     });
     later(() => bump({ kind: "say", text: rv.question }), 350);
   };
@@ -430,6 +458,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     flipMatched: 0,
     orderSlots: [],
     orderNext: 0,
+    patternSeq: [],
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -744,6 +773,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         flipMatched: 0,
         orderSlots: [],
         orderNext: 0,
+        patternSeq: [],
       });
     },
 
