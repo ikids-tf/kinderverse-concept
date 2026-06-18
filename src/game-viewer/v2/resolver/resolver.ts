@@ -6,7 +6,10 @@
  * 부품은 콘텐츠 무관(직교) — 카테고리만 바꾸면 모든 게임이 새로 나온다.
  */
 import type { InteractiveDocInput } from "../schema/interactiveDoc";
-import { CATEGORIES, findCategory, type Category, type Item } from "./contentSets";
+import {
+  CATEGORIES, findCategory, SEQUENCES, findSequence,
+  type Category, type Item, type Sequence,
+} from "./contentSets";
 
 export type Archetype =
   | "tap-the-right-one"
@@ -15,11 +18,16 @@ export type Archetype =
   | "binary-choice"
   | "connect"
   | "categorize"
-  | "pattern-next";
+  | "pattern-next"
+  | "order-sequence";
+
+/** order-sequence는 카테고리가 아니라 순서형 콘텐츠를 쓴다(직교). */
+type CategoryArchetype = Exclude<Archetype, "order-sequence">;
 
 export interface Intent {
   category: Category;
   archetype?: Archetype; // 명시되면 추천 1순위로
+  sequence?: Sequence; // order-sequence일 때 쓸 순서형 콘텐츠
 }
 
 export interface Recommendation {
@@ -41,6 +49,14 @@ function shuffle<T>(a: readonly T[]): T[] {
 
 /** 프롬프트 → 의도. 카테고리를 못 찾으면 null(첫 카테고리로 폴백은 호출부에서). */
 export function parseIntent(prompt: string): Intent | null {
+  // order-sequence는 카테고리 없이 순서형 콘텐츠로 동작 — 먼저 검사.
+  if (/순서대로|순서|차례|자라는|커지는|작은\s*것부터|큰\s*것부터/.test(prompt)) {
+    return {
+      category: findCategory(prompt) ?? CATEGORIES[0],
+      archetype: "order-sequence",
+      sequence: findSequence(prompt) ?? SEQUENCES[0],
+    };
+  }
   const cat = findCategory(prompt);
   if (!cat) return null;
   let archetype: Archetype | undefined;
@@ -118,6 +134,13 @@ function patternSeqSlots(n: number): SlotInput[] {
   const w = Math.min(0.16, 0.8 / n);
   return Array.from({ length: n }, (_, i) => ({
     id: `q${i}`, type: "slot", role: "slot", transform: { x: (i + 1) / (n + 1), y: 0.36, w, h: 0.18 },
+  }));
+}
+/** order-sequence — 가운데 한 줄(셔플 배치될 자리). */
+function orderRowSlots(n: number): SlotInput[] {
+  const w = Math.min(0.2, 0.86 / n);
+  return Array.from({ length: n }, (_, i) => ({
+    id: `s${i}`, type: "slot", role: "slot", transform: { x: (i + 1) / (n + 1), y: 0.5, w, h: 0.3 },
   }));
 }
 
@@ -311,7 +334,22 @@ function assemblePatternNext(cat: Category, useImages: boolean, k: Knobs): Inter
   };
 }
 
-const ASSEMBLERS: Record<Archetype, (cat: Category, useImages: boolean, k: Knobs) => InteractiveDocInput> = {
+/** 순서 맞추기 — 순서형 콘텐츠(SEQUENCES)의 정답 순서를 steps로(런타임이 셔플). 카테고리 무관. */
+const ORDER_STEPS = { baby: 3, toddler: 4, senior: 5 } as const;
+function assembleOrderSequence(seq: Sequence, useImages: boolean, k: Knobs): InteractiveDocInput {
+  const n = Math.min(ORDER_STEPS[k.difficulty], seq.items.length);
+  const steps = seq.items.slice(0, n).map((it) => itemContent(it, useImages));
+  const slots = orderRowSlots(n);
+  return {
+    meta: { id: `gen_order_${seq.key}`, title: `${seq.label} 순서 맞추기`, archetype: "order-sequence", createdFrom: "prompt" },
+    settings: { difficulty: k.difficulty, length: 1, mood: k.mood },
+    stage: { nodes: slots },
+    interaction: { kind: "order-sequence", slotIds: slots.map((s) => s.id), rounds: [{ steps }] },
+    rewards: { confetti: "full" },
+  };
+}
+
+const ASSEMBLERS: Record<CategoryArchetype, (cat: Category, useImages: boolean, k: Knobs) => InteractiveDocInput> = {
   "tap-the-right-one": assembleTap,
   "match-pair": assembleMatch,
   "flip-memory": assembleFlip,
@@ -335,6 +373,7 @@ export function recommend(intent: Intent, opts: RecommendOpts = {}): Recommendat
     { archetype: "connect", title: `${cat.label} 관계 잇기`, emoji: "🧩" },
     { archetype: "categorize", title: `${cat.label} 분류 담기`, emoji: "🧺" },
     { archetype: "pattern-next", title: `${cat.label} 패턴 잇기`, emoji: "🔵" },
+    { archetype: "order-sequence", title: `${intent.sequence?.label ?? "순서"} 순서 맞추기`, emoji: "🪜" },
   ];
   const ordered = intent.archetype
     ? [...base.filter((b) => b.archetype === intent.archetype), ...base.filter((b) => b.archetype !== intent.archetype)]
@@ -342,7 +381,13 @@ export function recommend(intent: Intent, opts: RecommendOpts = {}): Recommendat
   // 카드는 3장 유지(요청 아키타입이 1순위로 앞에 옴).
   return ordered.slice(0, 3).map((b) => ({
     ...b,
-    build: () => ({ title: b.title, input: ASSEMBLERS[b.archetype](cat, useImages, knobs) }),
+    build: () => ({
+      title: b.title,
+      input:
+        b.archetype === "order-sequence"
+          ? assembleOrderSequence(intent.sequence ?? SEQUENCES[0], useImages, knobs)
+          : ASSEMBLERS[b.archetype](cat, useImages, knobs),
+    }),
   }));
 }
 

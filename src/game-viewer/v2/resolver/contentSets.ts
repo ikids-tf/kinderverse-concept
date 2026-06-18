@@ -130,3 +130,65 @@ export function findCategory(prompt: string): Category | null {
     null
   );
 }
+
+/** 순서형 콘텐츠(order-sequence용) — 카테고리와 직교. items는 '정답 순서'대로 둔다. */
+export interface Sequence {
+  key: string;
+  label: string;
+  keywords: string[];
+  /** 올바른 순서대로(런타임이 셔플 후 이 순서로 맞히게 함). */
+  items: Item[];
+}
+
+export const SEQUENCES: Sequence[] = [
+  {
+    key: "number",
+    label: "숫자",
+    keywords: ["숫자", "번호", "수 세기", "1234", "하나둘"],
+    items: [
+      { emoji: "1️⃣", label: "하나" },
+      { emoji: "2️⃣", label: "둘" },
+      { emoji: "3️⃣", label: "셋" },
+      { emoji: "4️⃣", label: "넷" },
+      { emoji: "5️⃣", label: "다섯" },
+    ],
+  },
+  {
+    key: "size",
+    label: "크기",
+    keywords: ["크기", "작은", "큰", "커지", "작아"],
+    items: [
+      { emoji: "🐭", label: "쥐" },
+      { emoji: "🐰", label: "토끼" },
+      { emoji: "🐶", label: "강아지" },
+      { emoji: "🐘", label: "코끼리" },
+    ],
+  },
+  {
+    key: "grow",
+    label: "자라기",
+    keywords: ["자라", "성장", "씨앗", "새싹"],
+    items: [
+      { emoji: "🌰", label: "씨앗" },
+      { emoji: "🌱", label: "새싹" },
+      { emoji: "🌿", label: "잎" },
+      { emoji: "🌷", label: "꽃" },
+      { emoji: "🍎", label: "열매" },
+    ],
+  },
+  {
+    key: "day",
+    label: "하루",
+    keywords: ["하루", "아침", "낮", "저녁", "밤", "시간 순"],
+    items: [
+      { emoji: "🌅", label: "아침" },
+      { emoji: "☀️", label: "낮" },
+      { emoji: "🌇", label: "저녁" },
+      { emoji: "🌙", label: "밤" },
+    ],
+  },
+];
+
+export function findSequence(prompt: string): Sequence | null {
+  return SEQUENCES.find((s) => s.keywords.some((k) => prompt.includes(k))) ?? null;
+}

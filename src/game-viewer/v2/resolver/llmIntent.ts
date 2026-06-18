@@ -8,11 +8,12 @@
  */
 import { callGateway } from "@/ai/client";
 import { extractJson } from "@/ai/json";
-import { CATEGORIES, type Category } from "./contentSets";
+import { CATEGORIES, SEQUENCES, findSequence, type Category } from "./contentSets";
 import type { Archetype, Intent } from "./resolver";
 
 const ARCHETYPES: readonly string[] = [
-  "tap-the-right-one", "match-pair", "flip-memory", "binary-choice", "connect", "categorize", "pattern-next",
+  "tap-the-right-one", "match-pair", "flip-memory", "binary-choice", "connect",
+  "categorize", "pattern-next", "order-sequence",
 ];
 
 function mapCategory(name: string): Category | null {
@@ -42,7 +43,7 @@ export async function llmParseIntent(prompt: string): Promise<Intent | null> {
           content:
             `요청: "${prompt}"\n` +
             `카테고리(key): ${cats}\n` +
-            "게임유형: tap-the-right-one(이름 맞추기) · match-pair(짝 맞추기) · flip-memory(카드 뒤집기) · binary-choice(OX 퀴즈) · connect(관계 잇기) · categorize(분류 담기) · pattern-next(패턴 잇기)\n" +
+            "게임유형: tap-the-right-one(이름 맞추기) · match-pair(짝 맞추기) · flip-memory(카드 뒤집기) · binary-choice(OX 퀴즈) · connect(관계 잇기) · categorize(분류 담기) · pattern-next(패턴 잇기) · order-sequence(순서 맞추기)\n" +
             'JSON만: { "category": "<key>", "archetype": "<게임유형 또는 빈문자열>" }',
         },
       ],
@@ -52,7 +53,10 @@ export async function llmParseIntent(prompt: string): Promise<Intent | null> {
     const obj = extractJson(res.text) as { category?: string; archetype?: string };
     const category = obj.category ? mapCategory(obj.category) : null;
     if (!category) return null;
-    return { category, archetype: mapArchetype(obj.archetype) };
+    const archetype = mapArchetype(obj.archetype);
+    // order-sequence면 순서형 콘텐츠도 골라 둔다(없으면 빌드 시 기본값).
+    const sequence = archetype === "order-sequence" ? (findSequence(prompt) ?? SEQUENCES[0]) : undefined;
+    return { category, archetype, sequence };
   } catch {
     return null;
   }
