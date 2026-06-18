@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, type PointerEvent as RPE } from "react";
 import { useStageSize } from "./stageSize";
 import { useGame } from "./useGame";
 import { useMaterials, type Material, type MaterialStyle } from "./materials";
+import { Icon } from "@/lib/icons";
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const clampWH = (v: number) => Math.max(0.06, Math.min(1, v));
@@ -294,20 +295,37 @@ function MaterialBox({ m, selected, sole, editing, screenW }: { m: Material; sel
           {m.value}
         </span>
       ) : m.kind === "frame" ? (
-        <div
-          className="kv-material-frame"
-          style={{ borderRadius: radius != null ? `${(radius * minPx) / 2}px` : undefined, borderColor: m.style?.bg }}
-        >
-          {m.value ? (
-            m.mediaKind === "video" ? (
-              <video src={m.value} muted loop autoPlay playsInline />
-            ) : (
-              <img src={m.value} alt="" draggable={false} />
-            )
-          ) : (
-            <span className="kv-frame-empty" aria-hidden>＋</span>
-          )}
-        </div>
+        // 이미지 카드 — My Board 이미지 카드와 동일한 룩(흰 카드+보더+그림자+팔레트 플레이스홀더+캡션).
+        <>
+          <div
+            className="kv-imgcard"
+            style={{ borderRadius: radius != null ? `${(radius * minPx) / 2}px` : undefined }}
+          >
+            <div className="kv-imgcard-media">
+              {m.value ? (
+                m.mediaKind === "video" ? (
+                  <video src={m.value} muted loop autoPlay playsInline />
+                ) : (
+                  <img src={m.value} alt="" draggable={false} />
+                )
+              ) : (
+                <button
+                  type="button"
+                  className="kv-imgcard-empty"
+                  title="이미지 넣기"
+                  aria-label="이미지 넣기"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <Icon name="studio" size={26} />
+                </button>
+              )}
+            </div>
+            <div className="kv-imgcard-cap"><span>이미지 카드</span></div>
+          </div>
+          {/* 파일 input은 비선택 상태에서도 플레이스홀더 클릭으로 동작하게 항상 렌더 */}
+          <input ref={fileRef} type="file" accept="image/*,video/*" hidden onChange={onFrameFile} />
+        </>
       ) : (
         <span className="kv-material-emoji" style={{ fontSize: emojiPx }}>{m.value}</span>
       )}
@@ -331,7 +349,6 @@ function MaterialBox({ m, selected, sole, editing, screenW }: { m: Material; sel
                 type="button" className="kv-frame-upload" title="미디어 넣기" aria-label="미디어 넣기"
                 onPointerDown={(e) => e.stopPropagation()} onClick={() => fileRef.current?.click()}
               >🖼</button>
-              <input ref={fileRef} type="file" accept="image/*,video/*" hidden onChange={onFrameFile} />
             </>
           )}
           {/* 바운드박스 — My Board와 동일: 모서리 4개 리사이즈 + 위쪽 회전 핸들(연결선). */}

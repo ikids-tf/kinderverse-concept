@@ -171,7 +171,8 @@ export function GameStage() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === "string") addMaterial("image", reader.result);
+      // 보드처럼 '이미지 카드'(frame)로 생성 — 흰 카드+캡션 UX 통일.
+      if (typeof reader.result === "string") addMaterial("frame", reader.result, { mediaKind: "image" });
       setOpenMenu(null);
     };
     reader.readAsDataURL(file);

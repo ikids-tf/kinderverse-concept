@@ -176,14 +176,31 @@
 }
 .kv-v2 .kv-material.fb-ok .kv-material-btn { box-shadow: 0 0 0 4px var(--ok-bd, #79C28E), var(--shadow-sm); }
 .kv-v2 .kv-material.fb-no .kv-material-btn { animation: kv-shake .4s ease-in-out; box-shadow: 0 0 0 4px var(--no-bd, #E8836B), var(--shadow-sm); }
-.kv-v2 .kv-material-frame {
-  width: 100%; height: 100%; display: grid; place-items: center; overflow: hidden;
-  border: 2.5px dashed rgba(120,92,60,.35);
+/* 이미지 카드(frame material) — My Board 이미지 카드와 동일한 룩.
+   흰 카드(--card) + 따뜻한 보더 + 그림자 + 팔레트 플레이스홀더 + "이미지 카드" 캡션. */
+.kv-v2 .kv-imgcard {
+  width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--card); border: 1px solid #E7DCCB; border-radius: var(--r-sm);
+  box-shadow: var(--shadow-sm);
 }
-.kv-v2 .kv-material-frame img, .kv-v2 .kv-material-frame video {
-  width: 100%; height: 100%; object-fit: cover; border-radius: inherit; filter: none;
+.kv-v2 .kv-imgcard-media { position: relative; flex: 1 1 auto; min-height: 0; }
+.kv-v2 .kv-imgcard-media img, .kv-v2 .kv-imgcard-media video {
+  width: 100%; height: 100%; object-fit: cover; display: block; filter: none;
 }
-.kv-v2 .kv-frame-empty { font-size: 200%; color: rgba(120,92,60,.4); line-height: 1; }
+.kv-v2 .kv-imgcard-empty {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  border: 0; background: none; cursor: pointer; color: rgba(120,92,60,.5);
+  transition: color .15s, background .15s;
+}
+.kv-v2 .kv-imgcard-empty:hover { color: var(--coral); background: rgba(242,115,62,.06); }
+.kv-v2 .kv-imgcard-cap {
+  flex: 0 0 auto; border-top: 1px solid #EFE6D9; padding: 7px 10px; background: var(--card);
+}
+.kv-v2 .kv-imgcard-cap span {
+  display: block; text-align: center; font-size: 12.5px; font-weight: 800; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--font-body, "Pretendard", -apple-system, sans-serif);
+}
 .kv-v2 .kv-frame-upload {
   position: absolute; top: -10px; left: -10px; width: 24px; height: 24px; border-radius: 50%;
   border: 2px solid #fff; background: var(--card); font-size: 12px; cursor: pointer;
