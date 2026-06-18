@@ -729,9 +729,19 @@ export function BoardCanvas() {
               cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h,
           );
           if (gv) {
+            // 드롭 지점(커서 클라이언트 좌표)과 화면상 크기를 함께 넘긴다 — 뷰어가 게임 프레임
+            // 위인지(편집 합류) 보드 위인지(실제 크기로 그대로 배치) 판정한다.
             window.dispatchEvent(
               new CustomEvent('kv:game-add-image', {
-                detail: { nodeId: gv.id, src: img.src, label: (img.data?.label as string) || '내 그림' },
+                detail: {
+                  nodeId: gv.id,
+                  src: img.src,
+                  label: (img.data?.label as string) || '내 그림',
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  screenW: img.w * zoom,
+                  screenH: img.h * zoom,
+                },
               }),
             );
             consumed = true; // 이동 커밋 스킵 → setDrag(null)로 이미지 제자리 복귀

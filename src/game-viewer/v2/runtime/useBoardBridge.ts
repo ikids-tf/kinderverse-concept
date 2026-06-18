@@ -12,7 +12,6 @@ import { create } from "zustand";
 import { generateGame } from "../generate/orchestrator";
 import { useGame } from "./useGame";
 import { useGen, latestStep } from "./genProgress";
-import { useMaterials } from "./materials";
 import { applyEditIntent } from "./editIntent";
 
 /** iframe(보드 카드) 안에서 실행 중인지 — 단독 탭이면 false. */
@@ -52,11 +51,9 @@ export function useBoardBridge(): void {
       if (!d || typeof d !== "object") return;
       if (d.type === "kv-game-create" && typeof d.prompt === "string") {
         void generateFromPrompt(d.prompt);
-      } else if (d.type === "kv-game-add-image" && typeof d.src === "string") {
-        // 게임 전(환영 화면)이면 '시드'(만들기 재료), 게임 중이면 '자료'로.
-        if (useGame.getState().doc) useMaterials.getState().add("image", d.src);
-        else useGen.getState().addSeed(d.src);
       }
+      // kv-game-add-image(보드 자료 드롭)는 GameStage가 처리한다 — 프레임/보드 판정에
+      // 무대·카드 기하가 필요하기 때문(드롭 지점·크기 기반 라우팅).
     };
     window.addEventListener("message", onMessage);
 

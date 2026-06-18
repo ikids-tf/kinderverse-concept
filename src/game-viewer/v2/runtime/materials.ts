@@ -43,6 +43,7 @@ export interface Material {
   correct?: boolean; // 버튼: 정답으로 표시(플레이 시 정답/오답 피드백)
   anim?: AnimKind; // 액션: 움직임
   mediaKind?: "image" | "video"; // 프레임: 담긴 미디어 종류
+  rot?: number; // 회전(도) — My Board와 동일한 바운드박스 회전 핸들
 }
 
 export interface Connection {

@@ -121,20 +121,42 @@ export function GameStage() {
   const knobs = useGen((s) => s.knobs);
   const setKnobs = useGen((s) => s.setKnobs);
 
-  // 뷰어에 이미지를 끌어다 놓으면: 게임 없을 땐 '시드'(만들기 재료), 게임 중엔 '자료'로.
+  // 보드에서 끌어온 자료를 '게임 프레임'에 떨궜을 때 — 확인 후 편집 합류(파괴 아님).
+  const [pendingDrop, setPendingDrop] = useState<{ src: string; label: string } | null>(null);
+
+  // 게임 카드(프레임)에 파일을 떨구면: 게임 있으면 확인 후 편집 합류, 없으면 '시드'.
   const onSeedDrop = (e: React.DragEvent) => {
     const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
     e.preventDefault();
-    files.forEach((f) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result !== "string") return;
-        if (useGame.getState().doc) addMaterial("image", reader.result);
-        else addSeed(reader.result);
-      };
-      reader.readAsDataURL(f);
-    });
+    e.stopPropagation(); // 보드 캔버스 onDrop으로 버블 막기(카드/보드 이중 처리 방지)
+    const f = files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return;
+      if (useGame.getState().doc) setPendingDrop({ src: reader.result, label: "내 그림" });
+      else addSeed(reader.result);
+    };
+    reader.readAsDataURL(f);
+  };
+  // 보드(프레임 밖)에 파일을 떨구면: 실제(원본) 크기로 그대로 배치.
+  const onBoardDrop = (e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    e.preventDefault();
+    const rect = viewportRef.current?.getBoundingClientRect();
+    const px = rect ? e.clientX - rect.left : 0;
+    const py = rect ? e.clientY - rect.top : 0;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = reader.result;
+      if (typeof src !== "string") return;
+      const im = new Image();
+      im.onload = () => placeBoardMaterial(src, px, py, im.naturalWidth, im.naturalHeight);
+      im.onerror = () => placeBoardMaterial(src, px, py);
+      im.src = src;
+    };
+    reader.readAsDataURL(files[0]);
   };
   const onUploadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -230,6 +252,65 @@ export function GameStage() {
   const panRef = useRef<{ startX: number; base: number; active: boolean } | null>(null);
   const geomRef = useRef({ side: 0, vw: 0 });
   geomRef.current = { side: SIDE, vw: vp.w };
+  // 드롭 라우팅용 최신 기하(게임 카드 화면 위치·캔버스 크기). 리스너 클로저에서 ref로 읽는다.
+  const dropGeomRef = useRef({ cardX: 0, cardW: 0, cardH: 0, top: 0, panX: 0, side: 0, vpH: 0, canvasW: 0 });
+  dropGeomRef.current = { cardX, cardW, cardH, top: TOP_RESERVE, panX, side: SIDE, vpH: vp.h, canvasW };
+
+  // 드롭 지점(뷰포트 로컬 px)이 떠 있는 게임 카드 위인지.
+  const isInCard = (px: number, py: number) => {
+    const g = dropGeomRef.current;
+    const left = g.cardX + (g.panX - g.side);
+    return px >= left && px <= left + g.cardW && py >= g.top && py <= g.top + g.cardH;
+  };
+  // 보드(프레임 밖)에 자료를 '실제 크기 그대로' 배치 — 드롭 지점 중심, 화면 px → 정규화.
+  const placeBoardMaterial = (src: string, px: number, py: number, screenW?: number, screenH?: number) => {
+    const g = dropGeomRef.current;
+    const cw = g.canvasW || 1;
+    const ch = g.vpH || 1;
+    const cx = Math.max(0.03, Math.min(0.97, (px - (g.panX - g.side)) / cw));
+    const cy = Math.max(0.05, Math.min(0.95, py / ch));
+    const w = screenW ? Math.max(0.05, Math.min(0.6, screenW / cw)) : 0.18;
+    const h = screenH ? Math.max(0.05, Math.min(0.85, screenH / ch)) : 0.18;
+    useMaterials.getState().add("image", src, { x: cx, y: cy, w, h });
+  };
+  // 게임 프레임 드롭 확인 → 편집 모드로 들어가 자료를 카드 중앙에 합류.
+  const confirmDrop = () => {
+    if (!pendingDrop) return;
+    setMode("edit");
+    const g = dropGeomRef.current;
+    const cw = g.canvasW || 1;
+    const ch = g.vpH || 1;
+    useMaterials.getState().add("image", pendingDrop.src, {
+      x: (g.cardX + g.cardW / 2) / cw,
+      y: (g.top + g.cardH / 2) / ch,
+      w: 0.3,
+      h: 0.3,
+    });
+    setPendingDrop(null);
+  };
+
+  // 보드(부모)에서 드롭한 자료 수신 — 프레임 위면 확인 후 편집 합류, 보드 위면 실제 크기 배치.
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data as
+        | { type?: string; src?: string; label?: string; x?: number; y?: number; screenW?: number; screenH?: number }
+        | null;
+      if (!d || d.type !== "kv-game-add-image" || typeof d.src !== "string") return;
+      const label = d.label || "내 그림";
+      const hasPt = typeof d.x === "number" && typeof d.y === "number";
+      // 좌표가 없으면(구버전 폴백) 게임 있으면 확인, 없으면 시드.
+      if (!hasPt || isInCard(d.x as number, d.y as number)) {
+        if (useGame.getState().doc) setPendingDrop({ src: d.src, label });
+        else useGen.getState().addSeed(d.src);
+      } else {
+        placeBoardMaterial(d.src, d.x as number, d.y as number, d.screenW, d.screenH);
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [cardSel, setCardSel] = useState(false); // 게임 프레임 선택 상태
   useEffect(() => { setPanX(0); }, [doc?.meta.id]);
   // 캔버스 x(px)를 화면 가로 중앙으로 — 더블클릭 포커스(요소 가운데 정렬)
@@ -459,6 +540,8 @@ export function GameStage() {
             onPointerMove={onCanvasMove}
             onPointerUp={onCanvasUp}
             onClick={() => setCardSel(false)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={onBoardDrop}
           >
             {/* 게임 카드 — 보드 위에 떠 있는 프레임(선택 + 더블클릭 가운데정렬) */}
             <div
@@ -547,6 +630,19 @@ export function GameStage() {
                     {mode === "edit" && (
                       <div className="edit-hint" aria-hidden>
                         ✏️ 끌어서 이동 · 모서리로 크기 · 방향키 미세이동
+                      </div>
+                    )}
+
+                    {/* 자료를 게임 프레임에 떨굼 → 화면을 가리고 확인. '넣기'면 편집 모드 합류. */}
+                    {pendingDrop && (
+                      <div className="kv-drop-confirm" role="dialog" aria-label="자료를 게임에 넣기">
+                        <img className="kv-drop-thumb" src={pendingDrop.src} alt="" />
+                        <h2 className="jua">이 자료를 게임 화면에 넣을까요?</h2>
+                        <p>넣으면 편집 모드로 들어가 자료를 자유롭게 옮길 수 있어요.</p>
+                        <div className="kv-drop-actions">
+                          <button type="button" className="big-btn" onClick={confirmDrop}>네, 넣기</button>
+                          <button type="button" className="kv-drop-cancel" onClick={() => setPendingDrop(null)}>취소</button>
+                        </div>
                       </div>
                     )}
                   </div>

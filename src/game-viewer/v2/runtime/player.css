@@ -123,7 +123,8 @@
   position: absolute; pointer-events: auto; cursor: grab; touch-action: none; user-select: none;
   display: grid; place-items: center;
 }
-.kv-v2 .kv-material.selected { outline: 2.5px dashed var(--coral); outline-offset: 3px; border-radius: var(--r-sm); cursor: grabbing; }
+/* 선택 = My Board와 동일한 실선 액센트 링 */
+.kv-v2 .kv-material.selected { outline: 2px solid var(--coral); outline-offset: 2px; border-radius: var(--r-sm); cursor: grabbing; }
 .kv-v2 .kv-material-emoji { line-height: 1; }
 .kv-v2 .kv-material-text {
   display: grid; place-items: center;
@@ -140,9 +141,20 @@
   border: 2px solid #fff; background: var(--no-bd); color: #fff; font-size: 12px; font-weight: 800; cursor: pointer;
   display: grid; place-items: center; box-shadow: var(--shadow-sm); pointer-events: auto; line-height: 1;
 }
-.kv-v2 .kv-material-handle {
-  position: absolute; right: -8px; bottom: -8px; width: 16px; height: 16px; border-radius: 50%;
-  background: var(--coral); border: 2px solid #fff; cursor: nwse-resize; touch-action: none;
+/* ── 바운드박스 핸들 — My Board SelectionHandles와 동일(흰 사각 모서리 + 원형 회전) ── */
+.kv-v2 .kv-mat-corner {
+  position: absolute; width: 12px; height: 12px; transform: translate(-50%, -50%);
+  background: var(--surface, #fff); border: 1.5px solid var(--coral); border-radius: 2px;
+  box-shadow: var(--shadow-sm); touch-action: none; z-index: 5; pointer-events: auto;
+}
+.kv-v2 .kv-mat-rotline {
+  position: absolute; left: 50%; top: -26px; width: 1.5px; height: 26px;
+  transform: translateX(-50%); background: var(--coral); opacity: 0.7; pointer-events: none; z-index: 5;
+}
+.kv-v2 .kv-mat-rot {
+  position: absolute; left: 50%; top: -26px; width: 13px; height: 13px; transform: translate(-50%, -50%);
+  background: var(--surface, #fff); border: 1.5px solid var(--coral); border-radius: 50%;
+  box-shadow: var(--shadow-sm); cursor: grab; touch-action: none; z-index: 5; pointer-events: auto;
 }
 
 /* ── 게임 전용 편집 요소: 버튼 · 프레임 ── */
@@ -504,6 +516,27 @@
 }
 .kv-v2 .big-btn:hover { transform: translateY(-2px) scale(1.02); }
 .kv-v2 .big-btn:focus-visible { outline: 4px solid rgba(255,158,125,.55); outline-offset: 3px; }
+/* 보드 자료를 게임 프레임에 떨궜을 때 — 화면을 가리는 확인 카드(파괴 아님, 합류 게이트) */
+.kv-v2 .kv-drop-confirm {
+  position: absolute; inset: 0; z-index: 52;
+  background: rgba(255,247,240,.94); backdrop-filter: blur(4px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 13px; text-align: center; padding: 20px; animation: kv-drop-in .18s ease;
+}
+@keyframes kv-drop-in { from { opacity: 0; } to { opacity: 1; } }
+.kv-v2 .kv-drop-thumb {
+  width: clamp(80px, 22%, 132px); height: clamp(80px, 22%, 132px); object-fit: contain;
+  background: #fff; border-radius: var(--r-md); border: 5px solid #fff; box-shadow: var(--shadow);
+}
+.kv-v2 .kv-drop-confirm h2 { font-family: var(--font-display, "Jua", sans-serif); font-size: clamp(20px, 4.4vw, 27px); margin: 0; color: var(--ink); }
+.kv-v2 .kv-drop-confirm p { margin: 0; color: var(--ink-soft); font-weight: 700; max-width: 360px; }
+.kv-v2 .kv-drop-actions { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.kv-v2 .kv-drop-cancel {
+  font: inherit; font-weight: 700; cursor: pointer; border: 2px solid #EBDFD2; background: var(--card);
+  color: var(--ink-soft); padding: 13px 22px; border-radius: 999px; box-shadow: var(--shadow-sm);
+}
+.kv-v2 .kv-drop-cancel:focus-visible { outline: 4px solid rgba(255,158,125,.5); outline-offset: 2px; }
+
 .kv-v2 .finish-emoji { font-size: 60px; }
 .kv-v2 .finish-stars { display: flex; gap: 8px; }
 .kv-v2 .finish-stars .star { font-size: 34px; }

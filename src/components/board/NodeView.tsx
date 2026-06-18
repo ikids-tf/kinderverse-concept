@@ -558,10 +558,27 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       targetWin()?.postMessage({ type: 'kv-game-create', prompt: d.prompt }, '*');
     };
     // 보드 이미지를 이 게임 뷰어 카드로 드롭(BoardCanvas가 kv:game-add-image 디스패치) → iframe에 전달.
+    // 드롭 지점을 iframe 로컬 좌표로 변환해 함께 넘긴다(뷰어가 프레임/보드 판정).
     const onAddImage = (e: Event) => {
-      const d = (e as CustomEvent).detail as { nodeId?: string; src?: string; label?: string } | null;
+      const d = (e as CustomEvent).detail as {
+        nodeId?: string; src?: string; label?: string;
+        clientX?: number; clientY?: number; screenW?: number; screenH?: number;
+      } | null;
       if (d?.nodeId !== node.id || !d.src) return;
-      targetWin()?.postMessage({ type: 'kv-game-add-image', src: d.src, label: d.label || '내 그림' }, '*');
+      const ifr = fsOpen ? fsFrameRef.current : embedFrameRef.current;
+      const rect = ifr?.getBoundingClientRect();
+      // 보드는 iframe을 줌으로 축소해 그린다 — 화면 px를 iframe '내부' 레이아웃 px로 환산
+      // (clientWidth/rect.width = 1/zoom). 좌표·크기 모두 같은 내부 좌표계로 보낸다.
+      const sx = ifr && rect && rect.width ? ifr.clientWidth / rect.width : 1;
+      const sy = ifr && rect && rect.height ? ifr.clientHeight / rect.height : 1;
+      const x = rect && typeof d.clientX === 'number' ? (d.clientX - rect.left) * sx : undefined;
+      const y = rect && typeof d.clientY === 'number' ? (d.clientY - rect.top) * sy : undefined;
+      const screenW = typeof d.screenW === 'number' ? d.screenW * sx : undefined;
+      const screenH = typeof d.screenH === 'number' ? d.screenH * sy : undefined;
+      targetWin()?.postMessage(
+        { type: 'kv-game-add-image', src: d.src, label: d.label || '내 그림', x, y, screenW, screenH },
+        '*',
+      );
     };
     // 뷰어(iframe) → 보드: 게임 생성 진행을 받아 보드 프롬프트바에 스트리밍 표시.
     let relaying = false;
@@ -783,6 +800,10 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
 
   const left = node.x + dx;
   const top = node.y + dy;
+  // 드래그 중인 카드는 다른 요소(특히 iframe 뷰어) '앞'에 떠서 끌리게 — iframe은 자체
+  // 스택 컨텍스트라 보통 위로 그려지므로, 끌리는 동안 높은 z-index로 들어올린다.
+  const dragging = dx !== 0 || dy !== 0;
+  const dragZ = dragging ? 9000 : undefined;
   const ring = selected ? 'ring-2 ring-accent' : 'ring-1 ring-transparent';
 
   const down = (e: React.PointerEvent) => {
@@ -1104,7 +1125,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         onPointerDown={down}
         onDoubleClick={dbl}
         className={`group/card absolute select-none overflow-hidden rounded-md ${bgRemoved ? '' : 'border border-border bg-surface shadow-sm'} ${ring}${idleCls}`}
-        style={{ left, top, width: node.w, ...radiusStyle(node), ...rootTransform(node), ...idleVars }}
+        style={{ left, top, width: node.w, zIndex: dragZ, ...radiusStyle(node), ...rootTransform(node), ...idleVars }}
       >
         <div className="relative" style={{ width: '100%', height: node.h }}>
           {node.loading ? (
@@ -1291,7 +1312,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               ? `border border-transparent bg-transparent ${bareVideo ? 'shadow-lg' : 'shadow-none'}${(is3d || bareVideo) && selected ? ' ' + ring : ''}`
               : `border border-border bg-surface shadow-lg ${ring}`
           }${idleCls}`}
-          style={{ left, top, width: node.w, height: node.h, ...rootTransform(node), ...idleVars }}
+          style={{ left, top, width: node.w, height: node.h, zIndex: dragZ, ...rootTransform(node), ...idleVars }}
         >
           <iframe
             ref={embedFrameRef}
@@ -1575,7 +1596,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           onPointerDown={down}
           onDoubleClick={dbl}
           className={`absolute z-10 flex select-none items-center justify-center rounded-2xl border-2 border-accent bg-accent px-t4 py-t3 text-center shadow-lg ${ring}`}
-          style={{ left, top, width: node.w, ...(node.autoH ? { minHeight: node.h } : { height: node.h }), ...rootTransform(node) }}
+          style={{ left, top, width: node.w, zIndex: dragZ, ...(node.autoH ? { minHeight: node.h } : { height: node.h }), ...rootTransform(node) }}
         >
           {editing ? (
             <textarea
@@ -1680,6 +1701,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               }
             : {}),
           ...(!isDoc && !srcLinks ? radiusStyle(node) : {}),
+          zIndex: dragZ,
           ...rootTransform(node),
         }}
       >
@@ -2051,6 +2073,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           ...fitW,
           ...(node.autoH ? { minHeight: node.h } : { height: node.h }),
           ...(boxKind ? radiusStyle(node) : {}),
+          zIndex: dragZ,
           ...rootTransform(node),
         }}
       >
@@ -2088,7 +2111,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       <div
         onPointerDown={down}
         className={`absolute ${COLOR_TEXT[node.color ?? (shapeKind === 'heart' ? 'accent-soft' : 'gold')] ?? 'text-surface-3'} ${ring} rounded-md`}
-        style={{ left, top, width: node.w, height: node.h, ...rootTransform(node) }}
+        style={{ left, top, width: node.w, height: node.h, zIndex: dragZ, ...rootTransform(node) }}
       >
         <svg viewBox="0 0 24 24" width="100%" height="100%" preserveAspectRatio="none" aria-hidden>
           <path d={SHAPE_PATHS[shapeKind]} fill="currentColor" stroke="var(--sand-line)" strokeWidth={0.5} />
@@ -2102,7 +2125,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     <div
       onPointerDown={down}
       className={`absolute border border-border ${shapeRadius} ${COLOR_BG[node.color ?? 'surface-3'] ?? 'bg-surface-3'} ${ring}`}
-      style={{ left, top, width: node.w, height: node.h, ...rootTransform(node) }}
+      style={{ left, top, width: node.w, height: node.h, zIndex: dragZ, ...rootTransform(node) }}
     >
       {node.locked && <LockBadge />}
     </div>

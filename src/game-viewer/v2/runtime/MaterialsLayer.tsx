@@ -14,10 +14,19 @@ import { useMaterials, type Material, type MaterialStyle } from "./materials";
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const clampWH = (v: number) => Math.max(0.06, Math.min(1, v));
-type Live = { x: number; y: number; w: number; h: number };
+type Live = { x: number; y: number; w: number; h: number; rot: number };
 type Drag =
-  | { px: number; py: number; base: Live; mode: "resize"; moved: boolean }
+  | { px: number; py: number; base: Live; mode: "resize"; moved: boolean; corner: number }
+  | { cx: number; cy: number; startAng: number; startRot: number; mode: "rotate"; moved: boolean }
   | { px: number; py: number; mode: "move"; moved: boolean; group: Record<string, { x: number; y: number }> };
+
+// My Board와 동일: 모서리(4) 핸들 — 0=좌상 1=우상 2=우하 3=좌하.
+const CORNERS: Array<{ l: string; t: string; cursor: string }> = [
+  { l: "0%", t: "0%", cursor: "nwse-resize" },
+  { l: "100%", t: "0%", cursor: "nesw-resize" },
+  { l: "100%", t: "100%", cursor: "nwse-resize" },
+  { l: "0%", t: "100%", cursor: "nesw-resize" },
+];
 
 const BG_SWATCHES = ["var(--coral)", "#FFD66B", "#9BD0F5", "#A7E0B5", "#F6B8D0", "#C9B8F2", "#FFFFFF", "#5B5750"];
 const FG_SWATCHES = ["#FFFFFF", "#5B5750", "var(--coral)"];
@@ -92,15 +101,35 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
   const connectFrom = useMaterials((s) => s.connectFrom);
   const pickConnect = useMaterials((s) => s.pickConnect);
   const drag = useRef<Drag | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const [live, setLive] = useState<Live | null>(null);
   const [hover, setHover] = useState(false);
   const [fb, setFb] = useState<"ok" | "no" | null>(null);
   const fbTimer = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const view = live ?? { x: m.x, y: m.y, w: m.w, h: m.h };
+  const view = live ?? { x: m.x, y: m.y, w: m.w, h: m.h, rot: m.rot ?? 0 };
   const canEdit = m.kind === "text" || m.kind === "button" || m.kind === "frame";
 
-  const down = (e: RPE<HTMLElement>, mode: "move" | "resize") => {
+  // 모서리 드래그 → 반대 모서리 고정 박스 리사이즈(회전 반영). My Board resizeBox와 동질.
+  const resizeFrom = (d: Extract<Drag, { mode: "resize" }>, e: { clientX: number; clientY: number }): Live => {
+    const ndx = (e.clientX - d.px) / sw;
+    const ndy = (e.clientY - d.py) / sh;
+    const rad = (d.base.rot * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const ldx = ndx * cos + ndy * sin; // 회전 좌표계(로컬)로 변환
+    const ldy = -ndx * sin + ndy * cos;
+    const sgnW = d.corner === 1 || d.corner === 2 ? 1 : -1; // 우측 모서리면 +
+    const sgnH = d.corner === 2 || d.corner === 3 ? 1 : -1; // 하단 모서리면 +
+    const w = clampWH(d.base.w + sgnW * ldx);
+    const h = clampWH(d.base.h + sgnH * ldy);
+    const lcx = (sgnW * (w - d.base.w)) / 2; // 중심 이동(로컬) — 반대 모서리 고정
+    const lcy = (sgnH * (h - d.base.h)) / 2;
+    const csx = lcx * cos - lcy * sin; // 다시 캔버스 좌표계로
+    const csy = lcx * sin + lcy * cos;
+    return { x: clamp01(d.base.x + csx), y: clamp01(d.base.y + csy), w, h, rot: d.base.rot };
+  };
+
+  const down = (e: RPE<HTMLElement>, mode: "move" | "resize", corner = 2) => {
     e.stopPropagation();
     if (connectMode && mode === "move") { pickConnect(m.id); return; }
     if (mode === "move" && e.shiftKey) { select(m.id, true); return; } // 누적선택(드래그 X)
@@ -109,25 +138,44 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
     const inGroup = st.selectedIds.includes(m.id) && st.selectedIds.length > 1;
     if (!inGroup) select(m.id);
     if (mode === "resize") {
-      drag.current = { px: e.clientX, py: e.clientY, base: { x: m.x, y: m.y, w: m.w, h: m.h }, mode: "resize", moved: false };
-      setLive({ x: m.x, y: m.y, w: m.w, h: m.h });
+      drag.current = { px: e.clientX, py: e.clientY, base: { x: m.x, y: m.y, w: m.w, h: m.h, rot: m.rot ?? 0 }, mode: "resize", moved: false, corner };
+      setLive({ x: m.x, y: m.y, w: m.w, h: m.h, rot: m.rot ?? 0 });
     } else {
       const ids = inGroup ? st.selectedIds : [m.id];
       const group: Record<string, { x: number; y: number }> = {};
       ids.forEach((id) => { const it = st.items.find((x) => x.id === id); if (it) group[id] = { x: it.x, y: it.y }; });
       drag.current = { px: e.clientX, py: e.clientY, mode: "move", moved: false, group };
-      if (!inGroup) setLive({ x: m.x, y: m.y, w: m.w, h: m.h });
+      if (!inGroup) setLive({ x: m.x, y: m.y, w: m.w, h: m.h, rot: m.rot ?? 0 });
     }
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
+  };
+  // 회전 핸들 — My Board rotate와 동일(중심 기준 각도, Shift=15° 스냅).
+  const rotateDown = (e: RPE<HTMLElement>) => {
+    e.stopPropagation();
+    select(m.id);
+    const r = boxRef.current?.getBoundingClientRect();
+    const cx = r ? r.left + r.width / 2 : e.clientX;
+    const cy = r ? r.top + r.height / 2 : e.clientY;
+    drag.current = { mode: "rotate", cx, cy, startAng: Math.atan2(e.clientY - cy, e.clientX - cx), startRot: m.rot ?? 0, moved: false };
+    setLive({ x: m.x, y: m.y, w: m.w, h: m.h, rot: m.rot ?? 0 });
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
   };
   const moveE = (e: RPE<HTMLElement>) => {
     const d = drag.current;
     if (!d || !sw || !sh) return;
+    if (d.mode === "rotate") {
+      const ang = Math.atan2(e.clientY - d.cy, e.clientX - d.cx);
+      let deg = d.startRot + ((ang - d.startAng) * 180) / Math.PI;
+      if (e.shiftKey) deg = Math.round(deg / 15) * 15;
+      d.moved = true;
+      setLive({ x: m.x, y: m.y, w: m.w, h: m.h, rot: deg });
+      return;
+    }
     const dx = (e.clientX - d.px) / sw;
     const dy = (e.clientY - d.py) / sh;
     if (Math.abs(dx) > 0.004 || Math.abs(dy) > 0.004) d.moved = true;
     if (d.mode === "resize") {
-      setLive({ ...d.base, w: clampWH(d.base.w + dx * 2), h: clampWH(d.base.h + dy * 2) });
+      setLive(resizeFrom(d, e));
     } else {
       const ids = Object.keys(d.group);
       if (ids.length > 1) {
@@ -136,7 +184,7 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
         setPositions(map);
       } else {
         const b = d.group[m.id];
-        if (b) setLive({ x: clamp01(b.x + dx), y: clamp01(b.y + dy), w: m.w, h: m.h });
+        if (b) setLive({ x: clamp01(b.x + dx), y: clamp01(b.y + dy), w: m.w, h: m.h, rot: m.rot ?? 0 });
       }
     }
   };
@@ -145,15 +193,23 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
     drag.current = null;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
     if (d && sw && sh) {
-      const dx = (e.clientX - d.px) / sw;
-      const dy = (e.clientY - d.py) / sh;
-      if (d.mode === "resize") {
-        update(m.id, { w: clampWH(d.base.w + dx * 2), h: clampWH(d.base.h + dy * 2) });
+      if (d.mode === "rotate") {
+        const ang = Math.atan2(e.clientY - d.cy, e.clientX - d.cx);
+        let deg = d.startRot + ((ang - d.startAng) * 180) / Math.PI;
+        if (e.shiftKey) deg = Math.round(deg / 15) * 15;
+        update(m.id, { rot: ((Math.round(deg) % 360) + 360) % 360 });
+      } else if (d.mode === "resize") {
+        const r = resizeFrom(d, e);
+        update(m.id, { x: r.x, y: r.y, w: r.w, h: r.h });
       } else if (Object.keys(d.group).length > 1) {
+        const dx = (e.clientX - d.px) / sw;
+        const dy = (e.clientY - d.py) / sh;
         const map: Record<string, { x: number; y: number }> = {};
         Object.keys(d.group).forEach((id) => (map[id] = { x: clamp01(d.group[id].x + dx), y: clamp01(d.group[id].y + dy) }));
         setPositions(map);
       } else {
+        const dx = (e.clientX - d.px) / sw;
+        const dy = (e.clientY - d.py) / sh;
         const b = d.group[m.id];
         if (b) update(m.id, { x: clamp01(b.x + dx), y: clamp01(b.y + dy) });
         if (!d.moved && m.kind === "button") {
@@ -186,7 +242,7 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
   const style: React.CSSProperties = {
     left: `${view.x * 100}%`, top: `${view.y * 100}%`,
     width: `${view.w * 100}%`, height: `${view.h * 100}%`,
-    transform: "translate(-50%,-50%)",
+    transform: `translate(-50%,-50%)${view.rot ? ` rotate(${view.rot}deg)` : ""}`,
   };
   const pxW = view.w * sw;
   const pxH = view.h * sh;
@@ -201,6 +257,7 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
 
   return (
     <div
+      ref={boxRef}
       data-mid={m.id}
       className={`kv-material kv-mat-${m.kind}${selected ? " selected" : ""}${editing ? " editing" : ""}${animCls}${fbCls}${pendingCls}`}
       style={style}
@@ -274,7 +331,23 @@ function MaterialBox({ m, selected, sole, editing }: { m: Material; selected: bo
               <input ref={fileRef} type="file" accept="image/*,video/*" hidden onChange={onFrameFile} />
             </>
           )}
-          <span className="kv-material-handle" onPointerDown={(e) => down(e, "resize")} onPointerMove={moveE} onPointerUp={up} />
+          {/* 바운드박스 — My Board와 동일: 모서리 4개 리사이즈 + 위쪽 회전 핸들(연결선). */}
+          <span className="kv-mat-rotline" aria-hidden />
+          <span
+            className="kv-mat-rot" title="회전 (드래그 · Shift=15°)"
+            onPointerDown={rotateDown} onPointerMove={moveE} onPointerUp={up}
+          />
+          {CORNERS.map((c, i) => (
+            <span
+              key={i}
+              className="kv-mat-corner"
+              title="크기 조절 (드래그)"
+              style={{ left: c.l, top: c.t, cursor: c.cursor }}
+              onPointerDown={(e) => down(e, "resize", i)}
+              onPointerMove={moveE}
+              onPointerUp={up}
+            />
+          ))}
         </>
       )}
 
