@@ -137,6 +137,31 @@ const silhouetteExample: InteractiveDocInput = {
   rewards: { confetti: "full" },
 };
 
+/* combine — 재료 모아 만들기(A+B→C). 예제가 없어 여기 인라인으로 둔다. */
+const combineExample: InteractiveDocInput = {
+  meta: { id: "ex_combine", title: "섞어서 만들기", archetype: "combine", createdFrom: "prompt" },
+  settings: { difficulty: "toddler", length: 1, mood: "lively" },
+  stage: {
+    nodes: [
+      { id: "g0", type: "slot", role: "slot", transform: { x: 0.2, y: 0.5, w: 0.2, h: 0.26 } },
+      { id: "g1", type: "slot", role: "slot", transform: { x: 0.46, y: 0.5, w: 0.2, h: 0.26 } },
+      { id: "res", type: "slot", role: "slot", transform: { x: 0.78, y: 0.5, w: 0.24, h: 0.3 } },
+    ],
+  },
+  interaction: {
+    kind: "combine",
+    ingredientSlotIds: ["g0", "g1"],
+    resultSlotId: "res",
+    rounds: [
+      {
+        ingredients: [{ content: { type: "emoji", emoji: "🥛" } }, { content: { type: "emoji", emoji: "🍓" } }],
+        result: { type: "emoji", emoji: "🥤" },
+      },
+    ],
+  },
+  rewards: { confetti: "full" },
+};
+
 export const FIXTURES: Record<string, { label: string; input: InteractiveDocInput }> = {
   animal: { label: "🐘 동물 맞추기", input: tapTheRightOneExample },
   silhouette: { label: "🌑 그림자 맞추기", input: silhouetteExample },
@@ -150,6 +175,7 @@ export const FIXTURES: Record<string, { label: string; input: InteractiveDocInpu
   categorize: { label: "🧺 분류 담기", input: categorizeExample },
   findit: { label: "🔍 숨은그림 찾기", input: findItExample },
   seqtap: { label: "🐸 콩콩 세기", input: sequenceTapExample },
+  combine: { label: "🥤 섞어 만들기", input: combineExample },
   emotion: { label: "😊 마음 알기", input: responsiveStateExample },
 };
 

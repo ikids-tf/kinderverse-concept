@@ -81,6 +81,13 @@ export interface SeqTapStep {
   hits: number;
   done: boolean;
 }
+export interface CombineIng {
+  slotId: string;
+  content: ContentBinding;
+  count: number; // 이 재료를 몇 번 넣어야 함(보통 1)
+  hits: number;
+  added: boolean;
+}
 export interface RevealView {
   coverId: string;
   hiddenId: string;
@@ -137,6 +144,11 @@ export interface GameStore {
   seqSteps: SeqTapStep[];
   seqIdx: number; // 현재 눌러야 할 자리
 
+  // combine — 재료를 모으면(A+B) 결과(C)가 나타남
+  combIngredients: CombineIng[];
+  combResult: { slotId: string; content: ContentBinding } | null;
+  combRevealed: boolean;
+
   // match-pair · connect (동일 메커니즘)
   matchLeft: MatchItem[];
   matchRight: MatchItem[];
@@ -174,6 +186,7 @@ export interface GameStore {
   catTap: (slotId: string) => void;
   findTap: (zoneId: string) => void;
   seqTap: (slotId: string) => void;
+  combTap: (slotId: string) => void;
   next: () => void;
   finish: () => void;
   enterExtend: (idx: number) => void;
@@ -239,6 +252,8 @@ interface RoundView {
   findZones: FindZone[];
   findList: FindStep[];
   seqSteps: SeqTapStep[];
+  combIngredients: CombineIng[];
+  combResult: { slotId: string; content: ContentBinding } | null;
   question: string;
 }
 function emptyRound(): RoundView {
@@ -259,6 +274,8 @@ function emptyRound(): RoundView {
     findZones: [],
     findList: [],
     seqSteps: [],
+    combIngredients: [],
+    combResult: null,
     question: "",
   };
 }
@@ -429,7 +446,18 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
     return { ...emptyRound(), seqSteps, question: "순서대로 콩콩 눌러볼까요?" };
   }
 
-  // combine 등 미지원 — 빈 라운드.
+  if (it.kind === "combine") {
+    const round = it.rounds[idx];
+    const combIngredients: CombineIng[] = [];
+    it.ingredientSlotIds.forEach((slotId, i) => {
+      const ing = round.ingredients[i];
+      if (ing) combIngredients.push({ slotId, content: ing.content, count: ing.count, hits: 0, added: false });
+    });
+    const combResult = { slotId: it.resultSlotId, content: round.result };
+    return { ...emptyRound(), combIngredients, combResult, question: "재료를 모아 만들어볼까요?" };
+  }
+
+  // 미지원 인터랙션 — 빈 라운드.
   return emptyRound();
 }
 
@@ -474,6 +502,9 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
     findIdx: 0,
     seqSteps: [],
     seqIdx: 0,
+    combIngredients: [],
+    combResult: null,
+    combRevealed: false,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -525,6 +556,9 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       findIdx: 0,
       seqSteps: rv.seqSteps,
       seqIdx: 0,
+      combIngredients: rv.combIngredients,
+      combResult: rv.combResult,
+      combRevealed: false,
     });
     later(() => bump({ kind: "say", text: rv.question }), 350);
   };
@@ -585,6 +619,9 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     findIdx: 0,
     seqSteps: [],
     seqIdx: 0,
+    combIngredients: [],
+    combResult: null,
+    combRevealed: false,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -962,6 +999,33 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       }
     },
 
+    combTap: (slotId) => {
+      const st = get();
+      if (st.busy || st.phase !== "playing") return;
+      const ing = st.combIngredients.find((g) => g.slotId === slotId);
+      if (!ing || ing.added) return;
+
+      const hits = ing.hits + 1;
+      if (hits < ing.count) {
+        // 같은 재료 더 넣어야 함.
+        set((s) => ({ combIngredients: s.combIngredients.map((g) => (g.slotId === slotId ? { ...g, hits } : g)) }));
+        bump({ kind: "say", text: String(hits) });
+        return;
+      }
+      // 이 재료 다 넣음
+      const next = st.combIngredients.map((g) => (g.slotId === slotId ? { ...g, hits, added: true } : g));
+      set({ combIngredients: next });
+      if (next.every((g) => g.added)) {
+        // 전부 모임 → 결과 등장(변신)
+        set({ busy: true, combRevealed: true, banner: { ok: true, text: "짠! 만들어졌어요" }, score: st.score + 1 });
+        bump({ kind: "confetti", originId: st.combResult?.slotId });
+        bump({ kind: "say", text: "딩동댕! 만들어졌어요" });
+        later(afterCorrect, 1100);
+      } else {
+        bump({ kind: "say", text: "좋아요!" });
+      }
+    },
+
     next: () => {
       enterRound(get().roundIdx + 1);
     },
@@ -1052,6 +1116,9 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         findIdx: 0,
         seqSteps: [],
         seqIdx: 0,
+        combIngredients: [],
+        combResult: null,
+        combRevealed: false,
       });
     },
 

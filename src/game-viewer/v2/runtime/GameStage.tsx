@@ -17,6 +17,7 @@ import { PatternNext } from "./interactions/PatternNext";
 import { Categorize } from "./interactions/Categorize";
 import { FindIt } from "./interactions/FindIt";
 import { SequenceTap } from "./interactions/SequenceTap";
+import { CombineGame } from "./interactions/CombineGame";
 import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
 import { GameEditRail } from "./editor/GameEditRail";
@@ -217,6 +218,10 @@ export function GameStage() {
       doc.stage.nodes.forEach((n) => { if (n.type === "zone") s.add(n.id); });
     }
     if (it.kind === "sequence-tap") (it.stepSlotIds ?? []).forEach((id) => s.add(id));
+    if (it.kind === "combine") {
+      it.ingredientSlotIds.forEach((id) => s.add(id));
+      s.add(it.resultSlotId);
+    }
     doc.effects.forEach((e) => {
       if (e.kind === "reveal") {
         s.add(e.coverNodeId);
@@ -608,6 +613,8 @@ export function GameStage() {
                           <FindIt />
                         ) : kind === "sequence-tap" ? (
                           <SequenceTap />
+                        ) : kind === "combine" ? (
+                          <CombineGame />
                         ) : (
                           <TapTheRightOne />
                         )}
