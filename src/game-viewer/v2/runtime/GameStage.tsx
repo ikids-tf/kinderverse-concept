@@ -15,6 +15,7 @@ import { FlipMemory } from "./interactions/FlipMemory";
 import { OrderSequence } from "./interactions/OrderSequence";
 import { PatternNext } from "./interactions/PatternNext";
 import { Categorize } from "./interactions/Categorize";
+import { FindIt } from "./interactions/FindIt";
 import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
 import { GameEditRail } from "./editor/GameEditRail";
@@ -209,6 +210,10 @@ export function GameStage() {
     if (it.kind === "categorize") {
       it.itemSlotIds.forEach((id) => s.add(id));
       it.bucketSlotIds.forEach((id) => s.add(id));
+    }
+    if (it.kind === "find-it") {
+      // zone 노드는 FindIt가 탭 타깃으로 그린다(NodeRenderer 플레이스홀더 중복 방지). scene은 비점유.
+      doc.stage.nodes.forEach((n) => { if (n.type === "zone") s.add(n.id); });
     }
     doc.effects.forEach((e) => {
       if (e.kind === "reveal") {
@@ -597,6 +602,8 @@ export function GameStage() {
                           <PatternNext />
                         ) : kind === "categorize" ? (
                           <Categorize />
+                        ) : kind === "find-it" ? (
+                          <FindIt />
                         ) : (
                           <TapTheRightOne />
                         )}

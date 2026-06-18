@@ -65,6 +65,15 @@ export interface CatBucket {
   index: number;
   status: OptStatus; // idle/correct/wrong (판정 플래시)
 }
+export interface FindZone {
+  zoneId: string;
+  found: boolean;
+  status: "idle" | "wrong";
+}
+export interface FindStep {
+  cue: ContentBinding; // 무엇을 찾을지
+  targetZoneId: string;
+}
 export interface RevealView {
   coverId: string;
   hiddenId: string;
@@ -112,6 +121,11 @@ export interface GameStore {
   catPick: string | null; // 현재 고른 아이템 slotId
   catDone: number;
 
+  // find-it — 장면 속 zone을 cue 순서대로 찾기
+  findZones: FindZone[];
+  findList: FindStep[];
+  findIdx: number; // 현재 찾는 차례
+
   // match-pair · connect (동일 메커니즘)
   matchLeft: MatchItem[];
   matchRight: MatchItem[];
@@ -147,6 +161,7 @@ export interface GameStore {
   flipTap: (slotId: string) => void;
   orderTap: (slotId: string) => void;
   catTap: (slotId: string) => void;
+  findTap: (zoneId: string) => void;
   next: () => void;
   finish: () => void;
   enterExtend: (idx: number) => void;
@@ -189,6 +204,7 @@ function maxScoreOf(doc: InteractiveDoc): number {
   if (it.kind === "flip-memory") return it.rounds.reduce((s, r) => s + r.faces.length, 0);
   if (it.kind === "order-sequence") return it.rounds.reduce((s, r) => s + r.steps.length, 0);
   if (it.kind === "categorize") return it.rounds.reduce((s, r) => s + r.items.length, 0);
+  if (it.kind === "find-it") return it.rounds.reduce((s, r) => s + r.finds.length, 0);
   return it.rounds.length; // tap-the-right-one · binary-choice · pattern-next · combine
 }
 
@@ -207,6 +223,8 @@ interface RoundView {
   patternSeq: SeqItem[];
   catItems: CatItem[];
   catBuckets: CatBucket[];
+  findZones: FindZone[];
+  findList: FindStep[];
   question: string;
 }
 function emptyRound(): RoundView {
@@ -224,6 +242,8 @@ function emptyRound(): RoundView {
     patternSeq: [],
     catItems: [],
     catBuckets: [],
+    findZones: [],
+    findList: [],
     question: "",
   };
 }
@@ -371,6 +391,18 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
     return { ...emptyRound(), catItems, catBuckets, question: "알맞은 곳에 담아볼까요?" };
   }
 
+  if (it.kind === "find-it") {
+    const round = it.rounds[idx];
+    const findList: FindStep[] = round.finds.map((f) => ({ cue: f.cue, targetZoneId: f.targetZoneId }));
+    // 장면의 모든 zone 노드를 탭 가능한 후보로(정답은 findList가 지정).
+    const findZones: FindZone[] = doc.stage.nodes
+      .filter((n) => n.type === "zone")
+      .map((n) => ({ zoneId: n.id, found: false, status: "idle" as const }));
+    const first = findList[0]?.cue;
+    const what = first ? (first.type === "text" ? first.text : first.type === "emoji" ? first.emoji : "그것") : "그것";
+    return { ...emptyRound(), findZones, findList, question: `${what}을(를) 찾아보세요` };
+  }
+
   // combine 등 미지원 — 빈 라운드.
   return emptyRound();
 }
@@ -411,6 +443,9 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
     catBuckets: [],
     catPick: null,
     catDone: 0,
+    findZones: [],
+    findList: [],
+    findIdx: 0,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -457,6 +492,9 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       catBuckets: rv.catBuckets,
       catPick: null,
       catDone: 0,
+      findZones: rv.findZones,
+      findList: rv.findList,
+      findIdx: 0,
     });
     later(() => bump({ kind: "say", text: rv.question }), 350);
   };
@@ -512,6 +550,9 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     catBuckets: [],
     catPick: null,
     catDone: 0,
+    findZones: [],
+    findList: [],
+    findIdx: 0,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -813,6 +854,47 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       }
     },
 
+    findTap: (zoneId) => {
+      const st = get();
+      if (st.busy || st.phase !== "playing") return;
+      const zone = st.findZones.find((z) => z.zoneId === zoneId);
+      if (!zone || zone.found) return;
+      const target = st.findList[st.findIdx]?.targetZoneId;
+
+      if (zoneId === target) {
+        // 찾음 → 표시, 점수, 다음 cue
+        set((s) => ({
+          findZones: s.findZones.map((z) => (z.zoneId === zoneId ? { ...z, found: true, status: "idle" } : z)),
+          score: s.score + 1,
+        }));
+        const nextIdx = st.findIdx + 1;
+        if (nextIdx >= st.findList.length) {
+          set({ busy: true, banner: { ok: true, text: "다 찾았어요!" } });
+          bump({ kind: "confetti", originId: zoneId });
+          bump({ kind: "say", text: "딩동댕! 다 찾았어요" });
+          later(afterCorrect, 900);
+        } else {
+          const nx = st.findList[nextIdx].cue;
+          const what = nx.type === "text" ? nx.text : nx.type === "emoji" ? nx.emoji : "그것";
+          set({ findIdx: nextIdx });
+          bump({ kind: "say", text: `찾았다! 이번엔 ${what}` });
+        }
+      } else {
+        // 빗나감 → 흔들고 리셋
+        set((s) => ({
+          banner: { ok: false, text: "거기엔 없어요!" },
+          findZones: s.findZones.map((z) => (z.zoneId === zoneId ? { ...z, status: "wrong" } : z)),
+        }));
+        bump({ kind: "say", text: "거기엔 없어요. 다시 찾아봐요" });
+        later(() => {
+          set((s) => ({
+            banner: s.banner && !s.banner.ok ? null : s.banner,
+            findZones: s.findZones.map((z) => (z.zoneId === zoneId && z.status === "wrong" ? { ...z, status: "idle" } : z)),
+          }));
+        }, 900);
+      }
+    },
+
     next: () => {
       enterRound(get().roundIdx + 1);
     },
@@ -898,6 +980,9 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         catBuckets: [],
         catPick: null,
         catDone: 0,
+        findZones: [],
+        findList: [],
+        findIdx: 0,
       });
     },
 

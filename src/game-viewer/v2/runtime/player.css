@@ -432,6 +432,25 @@
 .kv-v2 .opt.picked { border-color: var(--sky); background: #EAF3FD; }
 .kv-v2 .opt.locked { background: var(--ok-bg); border-color: var(--ok-bd); color: var(--ok-ink); }
 
+/* find-it — 찾기 지시 칩 + zone 탭 영역 */
+.kv-v2 .find-cue {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+  z-index: 6; padding: 8px 16px; border-radius: var(--r-pill);
+  background: var(--surface, #fff); border: 2px solid var(--coral);
+  color: var(--ink); font-family: var(--font-display, "Jua", sans-serif);
+  box-shadow: var(--shadow-sm); white-space: nowrap;
+}
+.kv-v2 .find-zone {
+  width: 100%; height: 100%; border-radius: var(--r-md);
+  border: 3px dashed rgba(120,120,120,.35); background: rgba(255,255,255,.06);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: clamp(20px, 6vw, 40px); color: var(--ok-ink, #2e7d32); transition: background .15s;
+}
+.kv-v2 .find-zone:hover:not(:disabled) { background: rgba(242,115,62,.12); border-color: var(--coral); }
+.kv-v2 .find-zone:focus-visible { outline: 4px solid rgba(255,158,125,.55); outline-offset: 2px; }
+.kv-v2 .find-zone.found { background: var(--ok-bg); border-color: var(--ok-bd); border-style: solid; cursor: default; }
+.kv-v2 .find-zone.wrong { background: var(--no-bg); border-color: var(--no-bd); }
+
 /* flip-memory 카드 (3D 플립) */
 .kv-v2 .flip-card {
   position: relative; width: 100%; height: 100%; padding: 0; border: none; background: none;
