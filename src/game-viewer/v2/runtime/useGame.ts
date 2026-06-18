@@ -74,6 +74,13 @@ export interface FindStep {
   cue: ContentBinding; // 무엇을 찾을지
   targetZoneId: string;
 }
+export interface SeqTapStep {
+  slotId: string;
+  content: ContentBinding;
+  count: number; // 이 자리를 몇 번 눌러야 완료(보통 1)
+  hits: number;
+  done: boolean;
+}
 export interface RevealView {
   coverId: string;
   hiddenId: string;
@@ -126,6 +133,10 @@ export interface GameStore {
   findList: FindStep[];
   findIdx: number; // 현재 찾는 차례
 
+  // sequence-tap — 스텝을 순서대로 터치해 세기(액터 연출)
+  seqSteps: SeqTapStep[];
+  seqIdx: number; // 현재 눌러야 할 자리
+
   // match-pair · connect (동일 메커니즘)
   matchLeft: MatchItem[];
   matchRight: MatchItem[];
@@ -162,6 +173,7 @@ export interface GameStore {
   orderTap: (slotId: string) => void;
   catTap: (slotId: string) => void;
   findTap: (zoneId: string) => void;
+  seqTap: (slotId: string) => void;
   next: () => void;
   finish: () => void;
   enterExtend: (idx: number) => void;
@@ -205,6 +217,7 @@ function maxScoreOf(doc: InteractiveDoc): number {
   if (it.kind === "order-sequence") return it.rounds.reduce((s, r) => s + r.steps.length, 0);
   if (it.kind === "categorize") return it.rounds.reduce((s, r) => s + r.items.length, 0);
   if (it.kind === "find-it") return it.rounds.reduce((s, r) => s + r.finds.length, 0);
+  if (it.kind === "sequence-tap") return it.rounds.reduce((s, r) => s + r.steps.length, 0);
   return it.rounds.length; // tap-the-right-one · binary-choice · pattern-next · combine
 }
 
@@ -225,6 +238,7 @@ interface RoundView {
   catBuckets: CatBucket[];
   findZones: FindZone[];
   findList: FindStep[];
+  seqSteps: SeqTapStep[];
   question: string;
 }
 function emptyRound(): RoundView {
@@ -244,6 +258,7 @@ function emptyRound(): RoundView {
     catBuckets: [],
     findZones: [],
     findList: [],
+    seqSteps: [],
     question: "",
   };
 }
@@ -403,6 +418,17 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
     return { ...emptyRound(), findZones, findList, question: `${what}을(를) 찾아보세요` };
   }
 
+  if (it.kind === "sequence-tap") {
+    const round = it.rounds[idx];
+    const slots = it.stepSlotIds ?? [];
+    const seqSteps: SeqTapStep[] = [];
+    slots.forEach((slotId, i) => {
+      const stp = round.steps[i];
+      if (stp) seqSteps.push({ slotId, content: stp.content, count: stp.count, hits: 0, done: false });
+    });
+    return { ...emptyRound(), seqSteps, question: "순서대로 콩콩 눌러볼까요?" };
+  }
+
   // combine 등 미지원 — 빈 라운드.
   return emptyRound();
 }
@@ -446,6 +472,8 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
     findZones: [],
     findList: [],
     findIdx: 0,
+    seqSteps: [],
+    seqIdx: 0,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -495,6 +523,8 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       findZones: rv.findZones,
       findList: rv.findList,
       findIdx: 0,
+      seqSteps: rv.seqSteps,
+      seqIdx: 0,
     });
     later(() => bump({ kind: "say", text: rv.question }), 350);
   };
@@ -553,6 +583,8 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     findZones: [],
     findList: [],
     findIdx: 0,
+    seqSteps: [],
+    seqIdx: 0,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -895,6 +927,41 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       }
     },
 
+    seqTap: (slotId) => {
+      const st = get();
+      if (st.busy || st.phase !== "playing") return;
+      const cur = st.seqSteps[st.seqIdx];
+      if (!cur || cur.slotId !== slotId || cur.done) return; // 현재 차례만 반응(순서대로)
+
+      // 액터(개구리 등) 점프 연출 — 매 탭마다.
+      const doc = st.doc;
+      const actorId = doc && doc.interaction.kind === "sequence-tap" ? doc.interaction.actorNodeId : undefined;
+      if (actorId) emitActor({ actorNodeId: actorId, outcome: "correct" });
+
+      const hits = cur.hits + 1;
+      const idx = st.seqIdx;
+      if (hits < cur.count) {
+        // 같은 자리 더 눌러야 함 — 카운트만 올림.
+        set((s) => ({ seqSteps: s.seqSteps.map((x, i) => (i === idx ? { ...x, hits } : x)) }));
+        bump({ kind: "say", text: String(hits) });
+        return;
+      }
+      // 이 자리 완료 → 다음으로
+      set((s) => ({
+        seqSteps: s.seqSteps.map((x, i) => (i === idx ? { ...x, hits, done: true } : x)),
+        seqIdx: idx + 1,
+        score: s.score + 1,
+      }));
+      if (idx + 1 >= st.seqSteps.length) {
+        set({ busy: true, banner: { ok: true, text: "다 했어요!" } });
+        bump({ kind: "confetti", originId: slotId });
+        bump({ kind: "say", text: "딩동댕! 다 셌어요" });
+        later(afterCorrect, 900);
+      } else {
+        bump({ kind: "say", text: String(idx + 2) });
+      }
+    },
+
     next: () => {
       enterRound(get().roundIdx + 1);
     },
@@ -983,6 +1050,8 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         findZones: [],
         findList: [],
         findIdx: 0,
+        seqSteps: [],
+        seqIdx: 0,
       });
     },
 
