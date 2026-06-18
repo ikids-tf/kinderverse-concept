@@ -14,6 +14,7 @@ import { BinaryChoice } from "./interactions/BinaryChoice";
 import { FlipMemory } from "./interactions/FlipMemory";
 import { OrderSequence } from "./interactions/OrderSequence";
 import { PatternNext } from "./interactions/PatternNext";
+import { Categorize } from "./interactions/Categorize";
 import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
 import { GameEditRail } from "./editor/GameEditRail";
@@ -204,6 +205,10 @@ export function GameStage() {
     if (it.kind === "pattern-next") {
       it.sequenceSlotIds.forEach((id) => s.add(id));
       it.optionSlotIds.forEach((id) => s.add(id));
+    }
+    if (it.kind === "categorize") {
+      it.itemSlotIds.forEach((id) => s.add(id));
+      it.bucketSlotIds.forEach((id) => s.add(id));
     }
     doc.effects.forEach((e) => {
       if (e.kind === "reveal") {
@@ -590,6 +595,8 @@ export function GameStage() {
                           <OrderSequence />
                         ) : kind === "pattern-next" ? (
                           <PatternNext />
+                        ) : kind === "categorize" ? (
+                          <Categorize />
                         ) : (
                           <TapTheRightOne />
                         )}

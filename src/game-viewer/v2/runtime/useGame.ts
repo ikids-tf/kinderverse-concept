@@ -53,6 +53,18 @@ export interface SeqItem {
   slotId: string;
   content: ContentBinding; // 정적 제시(패턴 잇기의 보여주는 수열)
 }
+export interface CatItem {
+  slotId: string;
+  content: ContentBinding;
+  bucket: number; // 정답 버킷 index
+  status: OptStatus; // idle/picked/locked/wrong
+}
+export interface CatBucket {
+  slotId: string;
+  content: ContentBinding;
+  index: number;
+  status: OptStatus; // idle/correct/wrong (판정 플래시)
+}
 export interface RevealView {
   coverId: string;
   hiddenId: string;
@@ -94,6 +106,12 @@ export interface GameStore {
   // pattern-next — 정적 수열 제시(patternSeq) + 보기는 tapOptions/tap 재사용
   patternSeq: SeqItem[];
 
+  // categorize — 아이템을 골라(catPick) 알맞은 버킷으로
+  catItems: CatItem[];
+  catBuckets: CatBucket[];
+  catPick: string | null; // 현재 고른 아이템 slotId
+  catDone: number;
+
   // match-pair · connect (동일 메커니즘)
   matchLeft: MatchItem[];
   matchRight: MatchItem[];
@@ -128,6 +146,7 @@ export interface GameStore {
   answerBinary: (value: boolean) => void;
   flipTap: (slotId: string) => void;
   orderTap: (slotId: string) => void;
+  catTap: (slotId: string) => void;
   next: () => void;
   finish: () => void;
   enterExtend: (idx: number) => void;
@@ -169,7 +188,8 @@ function maxScoreOf(doc: InteractiveDoc): number {
   if (it.kind === "connect") return it.rounds.reduce((s, r) => s + r.links.length, 0);
   if (it.kind === "flip-memory") return it.rounds.reduce((s, r) => s + r.faces.length, 0);
   if (it.kind === "order-sequence") return it.rounds.reduce((s, r) => s + r.steps.length, 0);
-  return it.rounds.length; // tap-the-right-one · binary-choice · combine
+  if (it.kind === "categorize") return it.rounds.reduce((s, r) => s + r.items.length, 0);
+  return it.rounds.length; // tap-the-right-one · binary-choice · pattern-next · combine
 }
 
 /** 한 라운드의 뷰 상태 슬라이스를 결정론적으로 조립(셔플 제외). */
@@ -185,6 +205,8 @@ interface RoundView {
   flipCards: FlipCard[];
   orderSlots: OrderSlot[];
   patternSeq: SeqItem[];
+  catItems: CatItem[];
+  catBuckets: CatBucket[];
   question: string;
 }
 function emptyRound(): RoundView {
@@ -200,6 +222,8 @@ function emptyRound(): RoundView {
     flipCards: [],
     orderSlots: [],
     patternSeq: [],
+    catItems: [],
+    catBuckets: [],
     question: "",
   };
 }
@@ -330,6 +354,23 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
     return { ...emptyRound(), patternSeq, tapOptions, question: "다음에 올 친구는 무엇일까요?" };
   }
 
+  if (it.kind === "categorize") {
+    const round = it.rounds[idx];
+    // 버킷은 주어진 순서 그대로(라벨 고정), 아이템만 셔플 배치.
+    const catBuckets: CatBucket[] = [];
+    it.bucketSlotIds.forEach((slotId, i) => {
+      const c = round.buckets[i];
+      if (c) catBuckets.push({ slotId, content: c, index: i, status: "idle" });
+    });
+    const shuffled = shuffle(round.items);
+    const catItems: CatItem[] = [];
+    it.itemSlotIds.forEach((slotId, i) => {
+      const e = shuffled[i];
+      if (e) catItems.push({ slotId, content: e.content, bucket: e.bucket, status: "idle" });
+    });
+    return { ...emptyRound(), catItems, catBuckets, question: "알맞은 곳에 담아볼까요?" };
+  }
+
   // combine 등 미지원 — 빈 라운드.
   return emptyRound();
 }
@@ -366,6 +407,10 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
     orderSlots: [],
     orderNext: 0,
     patternSeq: [],
+    catItems: [],
+    catBuckets: [],
+    catPick: null,
+    catDone: 0,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -408,6 +453,10 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       orderSlots: rv.orderSlots,
       orderNext: 0,
       patternSeq: rv.patternSeq,
+      catItems: rv.catItems,
+      catBuckets: rv.catBuckets,
+      catPick: null,
+      catDone: 0,
     });
     later(() => bump({ kind: "say", text: rv.question }), 350);
   };
@@ -459,6 +508,10 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     orderSlots: [],
     orderNext: 0,
     patternSeq: [],
+    catItems: [],
+    catBuckets: [],
+    catPick: null,
+    catDone: 0,
     sfx: null,
     mode: "play",
     selectedNodeId: null,
@@ -693,6 +746,73 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       }
     },
 
+    catTap: (slotId) => {
+      const st = get();
+      if (st.busy || st.phase !== "playing") return;
+
+      // 1) 아이템 탭 → 고르기/취소(한 번에 하나만 picked)
+      const item = st.catItems.find((i) => i.slotId === slotId);
+      if (item) {
+        if (item.status === "locked") return;
+        if (st.catPick === slotId) {
+          set((s) => ({ catPick: null, catItems: s.catItems.map((i) => (i.slotId === slotId ? { ...i, status: "idle" } : i)) }));
+        } else {
+          set((s) => ({
+            catPick: slotId,
+            catItems: s.catItems.map((i) =>
+              i.slotId === slotId ? { ...i, status: "picked" } : i.status === "picked" ? { ...i, status: "idle" } : i,
+            ),
+          }));
+        }
+        return;
+      }
+
+      // 2) 버킷 탭 → 판정(아이템을 먼저 골라야 동작)
+      const bucket = st.catBuckets.find((b) => b.slotId === slotId);
+      if (!bucket || !st.catPick) return;
+      const picked = st.catItems.find((i) => i.slotId === st.catPick);
+      if (!picked) return;
+
+      if (picked.bucket === bucket.index) {
+        // 정답 → 아이템 잠금, 버킷 잠깐 초록
+        const done = st.catDone + 1;
+        set((s) => ({
+          catItems: s.catItems.map((i) => (i.slotId === picked.slotId ? { ...i, status: "locked" } : i)),
+          catBuckets: s.catBuckets.map((b) => (b.slotId === bucket.slotId ? { ...b, status: "correct" } : b)),
+          catPick: null,
+          catDone: done,
+          score: s.score + 1,
+        }));
+        if (done >= st.catItems.length) {
+          set({ busy: true, banner: { ok: true, text: "다 담았어요!" } });
+          bump({ kind: "confetti" });
+          bump({ kind: "say", text: "딩동댕! 다 분류했어요" });
+          later(afterCorrect, 900);
+        } else {
+          bump({ kind: "say", text: "좋아요!" });
+          later(() => set((s) => ({
+            catBuckets: s.catBuckets.map((b) => (b.slotId === bucket.slotId && b.status === "correct" ? { ...b, status: "idle" } : b)),
+          })), 600);
+        }
+      } else {
+        // 오답 → 아이템·버킷 흔들고 리셋, 고르기 해제
+        set((s) => ({
+          banner: { ok: false, text: "다시 해볼까요?" },
+          catItems: s.catItems.map((i) => (i.slotId === picked.slotId ? { ...i, status: "wrong" } : i)),
+          catBuckets: s.catBuckets.map((b) => (b.slotId === bucket.slotId ? { ...b, status: "wrong" } : b)),
+          catPick: null,
+        }));
+        bump({ kind: "say", text: "다시 해볼까요?" });
+        later(() => {
+          set((s) => ({
+            banner: s.banner && !s.banner.ok ? null : s.banner,
+            catItems: s.catItems.map((i) => (i.slotId === picked.slotId && i.status === "wrong" ? { ...i, status: "idle" } : i)),
+            catBuckets: s.catBuckets.map((b) => (b.slotId === bucket.slotId && b.status === "wrong" ? { ...b, status: "idle" } : b)),
+          }));
+        }, 900);
+      }
+    },
+
     next: () => {
       enterRound(get().roundIdx + 1);
     },
@@ -774,6 +894,10 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         orderSlots: [],
         orderNext: 0,
         patternSeq: [],
+        catItems: [],
+        catBuckets: [],
+        catPick: null,
+        catDone: 0,
       });
     },
 

@@ -10,6 +10,7 @@ import {
   revealAndCollectExample,
   orderSequenceExample,
   patternNextExample,
+  categorizeExample,
   responsiveStateExample,
 } from "../schema/examples";
 import type { InteractiveDocInput } from "../schema/interactiveDoc";
@@ -144,6 +145,7 @@ export const FIXTURES: Record<string, { label: string; input: InteractiveDocInpu
   flip: { label: "🃏 카드 뒤집기", input: flipMemoryExample },
   order: { label: "🌱 순서대로", input: orderSequenceExample },
   pattern: { label: "🔵 패턴 잇기", input: patternNextExample },
+  categorize: { label: "🧺 분류 담기", input: categorizeExample },
   emotion: { label: "😊 마음 알기", input: responsiveStateExample },
 };
 
