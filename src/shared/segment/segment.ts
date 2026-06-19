@@ -59,17 +59,20 @@ export function segmentAt(id: string, x: number, y: number): Promise<{ mask: Uin
 }
 
 /** 여러 점(양성 label 1 = 추가 · 음성 label 0 = 빼기)으로 마스크를 정밀 조절한다.
- *  prefer: 'whole'=객체 전체(가장 큰 후보) · 'best'=신뢰도 최고(정밀 조절) · 'auto'=균형. */
+ *  prefer: 'whole'=객체 전체(가장 큰 후보) · 'best'=신뢰도 최고(정밀 조절) · 'auto'=균형.
+ *  cycle: 숫자를 주면 '재선택'으로, 같은 클릭점의 SAM 후보(전체/부분/세부)를 면적순으로 순환 선택한다
+ *  (prefer 무시). 0=가장 큰(전체) → 1,2…로 더 좁은 범위. '그 객체만' 잡힐 때까지 다시 누르는 용도. */
 export function segmentAtPoints(
   id: string,
   points: { x: number; y: number; label: number }[],
   prefer: 'whole' | 'best' | 'auto' = 'best',
+  cycle?: number,
 ): Promise<{ mask: Uint8Array; w: number; h: number }> {
   const w = getWorker();
   const reqId = 'seg' + ++seq;
   return new Promise((resolve, reject) => {
     pending.set(reqId, { resolve, reject });
-    w.postMessage({ type: 'points', id, reqId, points, prefer });
+    w.postMessage({ type: 'points', id, reqId, points, prefer, cycle });
   });
 }
 

@@ -55,7 +55,7 @@ interface Pt { x: number; y: number; label: number } // label 1=객체(추가), 
 // prefer: 후보 선택 전략 — 'whole'=객체 전체(가장 큰), 'best'=신뢰도 최고, 'auto'=균형(지우기 기본).
 type Prefer = 'whole' | 'best' | 'auto';
 
-async function decode(id: string, points: Pt[], prefer: Prefer = 'auto'): Promise<{ mask: Uint8Array; w: number; h: number }> {
+async function decode(id: string, points: Pt[], prefer: Prefer = 'auto', cycle?: number): Promise<{ mask: Uint8Array; w: number; h: number }> {
   if (!cur || cur.id !== id) throw new Error('not-prepared');
   if (points.length === 0) throw new Error('no-points');
   const { model, processor, emb, original_sizes, reshaped_input_sizes } = cur;
@@ -94,7 +94,13 @@ async function decode(id: string, points: Pt[], prefer: Prefer = 'auto'): Promis
   let best = -1;
   if (cands.length > 0) {
     const bestIou = Math.max(...cands.map((k) => iou[k] ?? 0));
-    if (prefer === 'whole') {
+    if (cycle != null) {
+      // '수정' 재선택 — 클릭을 포함한 후보(≤CAP)를 면적 내림차순으로 줄세워 cycle 인덱스로 순환 선택한다.
+      // 0=가장 큰(객체 전체) → 누를수록 더 좁은 부분/세부. SAM의 전체/부분/세부 마스크를 오가며
+      // '그 객체만' 잡히는 범위를 고를 수 있다.
+      const sorted = [...cands].sort((a, b) => areas[b] - areas[a]);
+      best = sorted[((cycle % sorted.length) + sorted.length) % sorted.length];
+    } else if (prefer === 'whole') {
       // 객체 분리 첫 선택 — 객체 '전체'를 원함. 신뢰도 바닥(최고-0.30, 최소 0.35) 이상인 후보 중
       // 가장 큰 것을 고른다 → 줄무늬/복합 객체(튜브 등)에서 한 조각이 아니라 전체가 잡힌다.
       const floor = Math.max(0.35, bestIou - 0.3);
@@ -144,7 +150,7 @@ self.onmessage = async (e: MessageEvent) => {
       const r = await decode(msg.id, [{ x: msg.x, y: msg.y, label: 1 }]);
       post({ type: 'mask', id: msg.id, reqId: msg.reqId, mask: r.mask, w: r.w, h: r.h }, [r.mask.buffer]);
     } else if (msg.type === 'points') {
-      const r = await decode(msg.id, msg.points as Pt[], (msg.prefer as Prefer) ?? 'best');
+      const r = await decode(msg.id, msg.points as Pt[], (msg.prefer as Prefer) ?? 'best', typeof msg.cycle === 'number' ? msg.cycle : undefined);
       post({ type: 'mask', id: msg.id, reqId: msg.reqId, mask: r.mask, w: r.w, h: r.h }, [r.mask.buffer]);
     }
   } catch (err: any) {

@@ -310,14 +310,14 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
   const extractMaskRef = useRef<{ mask: Uint8Array; w: number; h: number } | null>(null);
   const extractTileRef = useRef<HTMLCanvasElement | null>(null);
   const pointsRef = useRef<Pt[]>([]);
+  const cycleRef = useRef(0); // '수정' 재선택 — 같은 클릭점의 SAM 후보(전체/부분/세부)를 순환하는 인덱스.
   const [extractBox, setExtractBox] = useState<Box | null>(null);
-  const [adjusting, setAdjusting] = useState(false);
   const clearExtract = useCallback(() => {
     extractMaskRef.current = null;
     extractTileRef.current = null;
     pointsRef.current = [];
+    cycleRef.current = 0;
     setExtractBox(null);
-    setAdjusting(false);
   }, []);
 
   const node = useBoardStore.getState().nodes[nodeId];
@@ -446,9 +446,10 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     return segId;
   }, [nodeId]);
 
-  /** SAM 점들로 분리할 객체 마스크를 잡아 오버레이/박스를 갱신.
-   *  첫 선택(점 1개)은 'whole'로 객체 전체를, 정밀 조절(점 2+)은 'best'로 의도한 경계를 잡는다. */
-  const segmentExtract = useCallback(async (points: Pt[]) => {
+  /** SAM 점으로 분리할 객체 마스크를 잡아 오버레이/박스를 갱신.
+   *  첫 클릭(cycle 미지정)은 'whole'로 객체 전체를, '수정'(cycle 지정)은 같은 클릭점의
+   *  후보(전체/부분/세부)를 순환 재선택해 '그 객체만' 잡히는 범위를 고른다. */
+  const segmentExtract = useCallback(async (points: Pt[], cycle?: number) => {
     if (!workRef.current) return;
     setBusy(
       segPreparedRef.current === `${nodeId}:${segVersionRef.current}`
@@ -457,9 +458,8 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     );
     try {
       const segId = await ensurePrepared();
-      // 양성(추가) 점만 있으면 객체 전체를, 음성(빼기) 점이 섞이면 정밀 경계를 잡는다.
       const prefer = points.some((p) => p.label === 0) ? 'best' : 'whole';
-      const { mask, w, h } = await segmentAtPoints(segId, points, prefer);
+      const { mask, w, h } = await segmentAtPoints(segId, points, prefer, cycle);
       const box = maskBBox(mask, w, h);
       if (!box) { showToast('객체를 찾지 못했어요 — 다시 클릭해 보세요', 'error'); return; }
       extractMaskRef.current = { mask, w, h };
@@ -474,6 +474,13 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     }
   }, [ensurePrepared, nodeId, redraw]);
 
+  /** '수정' — 같은 클릭점에서 객체 범위를 한 단계 바꿔 다시 선택(전체↔부분↔세부 순환). */
+  const onReselect = useCallback(() => {
+    if (busy || pointsRef.current.length === 0) return;
+    cycleRef.current += 1;
+    void segmentExtract(pointsRef.current, cycleRef.current);
+  }, [busy, segmentExtract]);
+
   const onCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (busy) return;
     const view = viewRef.current;
@@ -484,15 +491,11 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     const y = Math.floor(((e.clientY - rect.top) / rect.height) * work.height);
     if (x < 0 || y < 0 || x >= work.width || y >= work.height) return;
 
-    // 객체 분리 — 첫 클릭=객체 선택, '수정' 모드에선 클릭=영역 추가 / Alt·Shift+클릭=영역 빼기.
+    // 객체 분리 — 클릭한 자리의 객체를 선택(전체). 범위 조정은 아래 '수정'으로 다시 선택한다.
     if (tool === 'extract') {
-      if (adjusting && pointsRef.current.length > 0) {
-        const label = e.altKey || e.shiftKey ? 0 : 1;
-        await segmentExtract([...pointsRef.current, { x, y, label }]);
-      } else {
-        setAdjusting(false);
-        await segmentExtract([{ x, y, label: 1 }]);
-      }
+      pointsRef.current = [{ x, y, label: 1 }];
+      cycleRef.current = 0;
+      await segmentExtract(pointsRef.current);
       return;
     }
 
@@ -798,12 +801,12 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
           className="flex items-center gap-t1 rounded-pill bg-fg/90 px-t1 py-t1 shadow-xl backdrop-blur-sm"
         >
           <button
-            className={`${btn} ${adjusting ? 'border-accent bg-accent text-on-accent' : 'border-transparent bg-surface text-fg-2 hover:text-accent'}`}
-            onClick={() => setAdjusting((v) => !v)}
+            className={`${btn} border-transparent bg-surface text-fg-2 hover:text-accent`}
+            onClick={onReselect}
             disabled={!!busy}
-            title="선택 영역을 정밀 조절: 클릭=영역 추가 · Alt(또는 Shift)+클릭=영역 빼기"
+            title="같은 자리에서 객체 범위를 바꿔 다시 선택해요 (다시 누를수록 전체↔부분↔세부) — '그 객체만' 잡힐 때 저장"
           >
-            {adjusting ? '✓ 조절 중' : '수정'}
+            수정
           </button>
           <button
             className={`${btn} border-none bg-accent text-on-accent hover:bg-accent-hover`}
@@ -817,9 +820,7 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
       )}
       <p onClick={(e) => e.stopPropagation()} className="px-t6 pb-t3 text-center text-xs text-on-dark/70">
         {tool === 'extract'
-          ? adjusting
-            ? '수정 중: 클릭 = 영역 추가 · Alt(또는 Shift)+클릭 = 영역 빼기 — 정확해지면 저장을 누르세요'
-            : '객체 분리: 분리할 객체를 클릭하면 AI가 마스킹합니다 · 아래 수정으로 정밀 조절 · 저장하면 보드에 따로 복사되고 원본은 배경으로 채워져요'
+          ? '객체 분리: 분리할 객체를 클릭하면 AI가 그 객체를 선택합니다 · 너무 많이/적게 잡히면 수정을 눌러 같은 자리에서 범위를 바꿔 다시 선택(전체↔부분) · 저장하면 보드에 따로 복사되고 원본은 배경으로 채워져요'
           : tool === 'ai'
             ? 'AI 객체 지우기: 지우려는 객체를 클릭하면 AI가 그 객체만 지우고 자리를 주변 배경으로 자연스럽게 메웁니다 (처음 한 번은 모델 준비로 잠시 걸려요) · ⌘Z 되돌리기'
             : '색 기반: 클릭한 곳과 같은 색 연결 영역을 투명하게 지웁니다 · 허용범위로 덜/더 지우기 · ⌘Z 되돌리기'}
