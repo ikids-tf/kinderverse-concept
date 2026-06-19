@@ -26,9 +26,11 @@ import { GamePromptBar } from "./GamePromptBar";
 import { MaterialsLayer } from "./MaterialsLayer";
 import { useMaterials } from "./materials";
 import { WelcomeScreen } from "./WelcomeScreen";
+import { GamePicker } from "./GamePicker";
+import { useSavedGames } from "./savedGames";
 import { useGen } from "./genProgress";
 import { StageSizeContext, type StageSize } from "./stageSize";
-import { FIXTURES, FIXTURE_KEYS, type ExampleKey } from "./fixtures";
+import { FIXTURES, FIXTURE_KEYS } from "./fixtures";
 import { useGame } from "./useGame";
 import { say, stopSay } from "./tts";
 import { useFullscreen } from "./useFullscreen";
@@ -104,7 +106,6 @@ export function GameStage() {
   const cueContent = useGame((s) => s.cueContent);
   const cueReactSeq = useGame((s) => s.cueReactSeq);
 
-  const loadExample = useGame((s) => s.loadExample);
   const start = useGame((s) => s.start);
   const next = useGame((s) => s.next);
   const restart = useGame((s) => s.restart);
@@ -116,6 +117,9 @@ export function GameStage() {
   const { isFs, toggle: toggleFs } = useFullscreen();
   const chromeVisible = useChromeVisible();
   const [openMenu, setOpenMenu] = useState<"play" | "set" | "mat" | null>(null);
+  // '놀이' 탭에서 고른 카테고리 — 설정 시 첫 화면(GamePicker: 기본 게임 + 만든 게임)이 뜬다.
+  const [pickCategory, setPickCategory] = useState<string | null>(null);
+  const savedGames = useSavedGames((s) => s.games); // 카테고리별 만든 게임 수(메뉴 배지)
   // 집중(플레이) 모드 — 교사 UI를 모두 숨기고 게임 프레임만 보여 아이가 게임에만 집중.
   const [focus, setFocus] = useState(false);
   const showToolbar = !isFs && !focus && chromeVisible;
@@ -443,21 +447,26 @@ export function GameStage() {
                 </button>
                 {openMenu === "play" && (
                   <div className="kv-menu" role="menu">
-                    {FIXTURE_KEYS.map((k) => (
-                      <button
-                        key={k}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={k === exampleKey}
-                        className={`kv-menu-item${k === exampleKey ? " on" : ""}`}
-                        onClick={() => {
-                          loadExample(k as ExampleKey);
-                          setOpenMenu(null);
-                        }}
-                      >
-                        {FIXTURES[k].label}
-                      </button>
-                    ))}
+                    {FIXTURE_KEYS.map((k) => {
+                      const mineCount = savedGames.filter((g) => g.category === k).length;
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          role="menuitem"
+                          aria-checked={k === exampleKey}
+                          className={`kv-menu-item${k === exampleKey ? " on" : ""}`}
+                          onClick={() => {
+                            // 바로 로드하지 않고 첫 화면(기본 게임 + 만든 게임)을 띄워 고르게 한다.
+                            setPickCategory(k);
+                            setOpenMenu(null);
+                          }}
+                        >
+                          {FIXTURES[k].label}
+                          {mineCount > 0 && <span className="kv-menu-count">{mineCount}</span>}
+                        </button>
+                      );
+                    })}
                     {isEmbedded && <div className="kv-menu-note">또는 보드 프롬프트바에 입력해 만들어요</div>}
                   </div>
                 )}
@@ -666,7 +675,10 @@ export function GameStage() {
                     </button>
 
                     {/* 환영 화면 — 게임이 없을 때(데모 대신). 프롬프트/이미지 드래그로 만들기 시작 */}
-                    {!doc && matCount === 0 && <WelcomeScreen />}
+                    {!doc && matCount === 0 && !pickCategory && <WelcomeScreen />}
+
+                    {/* 놀이 고르기 첫 화면 — '놀이' 탭에서 카테고리를 고르면 기본+만든 게임을 카드로 */}
+                    {pickCategory && <GamePicker category={pickCategory} onClose={() => setPickCategory(null)} />}
 
                     {/* 시작 오버레이 (게임 있고 start 단계일 때만; 편집 모드 숨김) */}
                     <div className={`overlay${phase !== "start" || mode === "edit" || !doc ? " hide" : ""}`}>

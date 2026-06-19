@@ -12,6 +12,7 @@ import { useGen } from "../runtime/genProgress";
 import { useAssetStore } from "../runtime/assetStore";
 import { setImageStyle } from "../providers/nanoBanana";
 import { buildEmotionGameFromImages, canBuildEmotionGame } from "./emotionFromImages";
+import { saveCreatedGame } from "../runtime/savedGames";
 
 /** 프롬프트가 '이미지로 만들어 달라'는 요청인지 — 기본은 이모지(생성 0), 요청 시에만 이미지 생성. */
 function wantsImages(text: string): boolean {
@@ -93,6 +94,7 @@ export async function generateGame(prompt: string, opts: GenerateOpts = {}): Pro
       const input = await buildEmotionGameFromImages(seeds, knobs);
       useGame.getState().loadDoc(input);
       useGame.getState().start();
+      saveCreatedGame(input); // 자동 저장(시드 사진 asset 스냅샷) → '놀이 > 마음 알기'에서 다시 플레이
       gen.pushStep("마음 알기 게임을 완성했어요! 🎉");
       return;
     }
@@ -126,6 +128,7 @@ export async function generateGame(prompt: string, opts: GenerateOpts = {}): Pro
     useGame.getState().start();
 
     await waitForSettle(labels);
+    saveCreatedGame(input); // 자동 저장(생성/시드 이미지 스냅샷) → '놀이' 탭에서 카테고리별로 다시 플레이
     gen.pushStep("완성했어요! 🎉");
   } catch {
     gen.pushStep("앗, 만들다가 문제가 생겼어요");
