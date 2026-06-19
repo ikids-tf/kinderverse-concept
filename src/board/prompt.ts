@@ -1,5 +1,5 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
 import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior } from './composer';
@@ -32,6 +32,11 @@ import type { RouteTarget } from '@/ai/contract';
 
 /** "이 스타일로 여러 대상을 '각각/다른 카드'로 그려줘" — 선택 이미지를 화풍 참조로 시리즈 생성하는 신호. */
 const STYLE_SERIES_RE = /각각|여러\s*가지|여러\s*개|여러\s*장|다른\s*(이미지\s*)?카드|새\s*(이미지\s*)?카드|별도\s*(의)?\s*카드|각\s*카드/;
+
+/** "이 이미지(들)로 ○○ 게임 만들어줘" — 선택 이미지를 게임 뷰어 시드로 보내는 신호.
+    게임/놀이/퀴즈/마음알기 어휘 + 생성 동사가 함께 있어야 게임 생성으로 본다(스타일 재생성과 구분). */
+const GAME_WORD_RE = /게임|놀이|퀴즈|마음\s*알기|맞추기|맞히기|마음\s*읽기/;
+const GAME_GEN_RE = /만들|만드|생성|제작|구성|꾸며|짜\s*줘|짜\b/;
 
 /** 입력 정규화(보수적) — 앞뒤 공백·따옴표 정리, 줄 안 공백 축약(줄바꿈은 보존).
     오타·자모분해 교정은 과교정으로 오인식 위험이 있어 넣지 않는다. */
@@ -354,6 +359,16 @@ export function handleBoardPrompt(text: string): boolean {
     STYLE_SERIES_RE.test(text) && /그려|그림|그릴|만들|생성|표현/.test(text)
   ) {
     void generateStyledSeriesFromImage(sel[0].id, text);
+    return true;
+  }
+
+  // 이미지(들) 선택 + "이 이미지로 ○○ 게임 만들어줘" → 게임 뷰어를 깔고 선택 이미지를 시드로
+  // 보내 그 자리에서 게임을 생성한다(감정 사진 → 마음알기 게임). 뷰어가 이미지를 분석해 조립.
+  // 일반 이미지 재생성(applyContentIntent)으로 새지 않도록 콘텐츠 분기보다 먼저 처리.
+  const gameImgs = sel.filter((n) => n.type === 'image' && n.src);
+  if (gameImgs.length > 0 && gameImgs.length === sel.length && GAME_WORD_RE.test(text) && GAME_GEN_RE.test(text)) {
+    spawnGameFromImages(gameImgs.map((n) => n.src as string), text);
+    showToast('고른 이미지로 게임을 만들고 있어요', 'success');
     return true;
   }
 

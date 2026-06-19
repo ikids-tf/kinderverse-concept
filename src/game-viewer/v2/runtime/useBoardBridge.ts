@@ -51,15 +51,23 @@ export function useBoardBridge(): void {
     (window as ChromeWindow).kvSetChrome = (show) => useChromeStore.getState().set(!!show);
 
     const onMessage = (e: MessageEvent) => {
-      const d = e.data as { type?: string; prompt?: string; src?: string; label?: string } | null;
+      const d = e.data as { type?: string; prompt?: string; src?: string; label?: string; seedImages?: string[] } | null;
       if (!d || typeof d !== "object") return;
       if (d.type === "kv-game-create" && typeof d.prompt === "string") {
+        // 보드에서 고른 이미지를 시드로 받으면(seedImages) 생성 전에 심는다 → 뷰어가 분석해
+        // 그 이미지로 게임을 만든다(감정 사진 → 마음알기). generateGame이 끝나며 시드 비움.
+        if (Array.isArray(d.seedImages) && d.seedImages.length) {
+          useGen.setState({ seeds: d.seedImages.filter((s) => typeof s === "string") });
+        }
         void generateFromPrompt(d.prompt);
       }
       // kv-game-add-image(보드 자료 드롭)는 GameStage가 처리한다 — 프레임/보드 판정에
       // 무대·카드 기하가 필요하기 때문(드롭 지점·크기 기반 라우팅).
     };
     window.addEventListener("message", onMessage);
+
+    // 보드(부모)에 앱 마운트를 알린다 → 갓 깐 게임 뷰어 카드로 버퍼된 생성 요청을 flush.
+    window.parent.postMessage({ type: "kv-game-ready" }, "*");
 
     // 생성 진행을 보드(부모)로 릴레이 → 보드 프롬프트바가 스트리밍 표시.
     const unsubGen = useGen.subscribe((s) => {

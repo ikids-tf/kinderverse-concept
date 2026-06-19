@@ -38,7 +38,7 @@ export interface Recommendation {
   build: () => { title: string; input: InteractiveDocInput };
 }
 
-function shuffle<T>(a: readonly T[]): T[] {
+export function shuffle<T>(a: readonly T[]): T[] {
   const r = a.slice();
   for (let i = r.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -79,7 +79,7 @@ export interface Knobs {
 }
 export const DEFAULT_KNOBS: Knobs = { difficulty: "toddler", length: "normal", mood: "lively" };
 
-const OPTION_COUNT = { baby: 2, toddler: 3, senior: 4 } as const; // 난이도 → 보기 수
+export const OPTION_COUNT = { baby: 2, toddler: 3, senior: 4 } as const; // 난이도 → 보기 수
 const TAP_ROUNDS = { short: 2, normal: 3, long: 5 } as const; // 분량 → 라운드 수
 const PAIR_COUNT = { baby: 2, toddler: 3, senior: 4 } as const; // 난이도 → 짝/카드 수
 
@@ -92,7 +92,7 @@ export interface RecommendOpts {
 
 type SlotInput = { id: string; type: "slot"; role: "option" | "slot"; transform: { x: number; y: number; w: number; h: number } };
 
-function optionSlots(n: number): SlotInput[] {
+export function optionSlots(n: number): SlotInput[] {
   // 칸 중심 간격 = 1/(n+1). 폭이 간격보다 크면 서로 겹치므로, 간격에서 여백(0.04)을 빼 겹침을
   // 막는다(상한 0.26). 예) n=3 → 폭 0.21로 25%/50%/75% 칸이 안 겹친다.
   const w = Math.min(0.26, 1 / (n + 1) - 0.04);

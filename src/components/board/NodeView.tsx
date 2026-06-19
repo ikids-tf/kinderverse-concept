@@ -8,6 +8,7 @@ import { SHAPE_PATHS } from '@/lib/shapes';
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { editTextCmd, captureNodes, pushRedesign, deleteNodesCmd } from '@/board/commands';
 import { runWorkflowStep, spawnWebViewer, type RunnerData, type StepKind } from '@/board/workflow';
+import { consumeGameCreate } from '@/board/gameHandoff';
 import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren } from '@/board/frames';
 import { alignFrameCmd } from '@/board/align';
 import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
@@ -230,6 +231,10 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const hide3dTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const embedFrameRef = useRef<HTMLIFrameElement>(null);
   const fsFrameRef = useRef<HTMLIFrameElement>(null); // 풀스크린 오버레이 iframe(영상 로드용)
+  // 갓 깐 게임 뷰어 카드로 보낼 생성 요청(prompt+시드)을 버퍼링 — iframe 앱이 'kv-game-ready'를
+  // 보내면 flush한다(로드 전 postMessage 유실 방지). 이미 준비된 뷰어는 즉시 보낸다.
+  const pendingGameCreate = useRef<{ prompt: string; seedImages?: string[] } | null>(null);
+  const gameViewerReady = useRef(false);
   const fsVideoSrcRef = useRef<string | null>(null); // 동영상 풀스크린 시 넘겨받은 현재 src(파일 재생용)
   // 풀스크린 열기 — 카드(또는 뷰어 iframe)의 화면 위치를 origin으로 잡아 그 자리에서 커지게 한다.
   const openFs = (el?: Element | null) => {
@@ -552,10 +557,20 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     if (!isGameViewer) return;
     // 풀스크린(포털)일 땐 포털 iframe(fsFrameRef)이 보이는 게임 → 그쪽으로 보낸다(이중 생성 방지).
     const targetWin = () => (fsOpen ? fsFrameRef.current : embedFrameRef.current)?.contentWindow;
+    // 버퍼된 생성 요청을 iframe에 전달(준비됐을 때만) — 준비 전이면 ready 핸드셰이크가 호출.
+    const flushCreate = () => {
+      const p = pendingGameCreate.current;
+      if (!p || !gameViewerReady.current) return;
+      targetWin()?.postMessage({ type: 'kv-game-create', prompt: p.prompt, seedImages: p.seedImages }, '*');
+      pendingGameCreate.current = null;
+    };
     const onCreate = (e: Event) => {
-      const d = (e as CustomEvent).detail as { nodeId?: string; prompt?: string } | null;
+      const d = (e as CustomEvent).detail as { nodeId?: string; prompt?: string; seedImages?: string[] } | null;
       if (d?.nodeId !== node.id || !d.prompt) return;
-      targetWin()?.postMessage({ type: 'kv-game-create', prompt: d.prompt }, '*');
+      // 시드(보드 이미지)가 있으면 ready 후 전달(갓 깐 뷰어). 없으면 즉시 전달도 시도(기존 뷰어).
+      pendingGameCreate.current = { prompt: d.prompt, seedImages: d.seedImages };
+      if (gameViewerReady.current) flushCreate();
+      else if (!d.seedImages?.length) targetWin()?.postMessage({ type: 'kv-game-create', prompt: d.prompt }, '*');
     };
     // 보드 이미지를 이 게임 뷰어 카드로 드롭(BoardCanvas가 kv:game-add-image 디스패치) → iframe에 전달.
     // 드롭 지점을 iframe 로컬 좌표로 변환해 함께 넘긴다(뷰어가 프레임/보드 판정).
@@ -585,6 +600,16 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     const onProgress = (e: MessageEvent) => {
       if (e.source !== embedFrameRef.current?.contentWindow && e.source !== fsFrameRef.current?.contentWindow) return;
       const d = e.data as { type?: string; active?: boolean; step?: string } | null;
+      // 뷰어 앱 마운트 알림 — 큐된/버퍼된 생성 요청(prompt+시드)을 이제 안전하게 전달한다.
+      if (d?.type === 'kv-game-ready') {
+        gameViewerReady.current = true;
+        if (!pendingGameCreate.current) {
+          const h = consumeGameCreate(node.id); // 갓 깐 카드: spawnGameFromImages가 큐잉한 요청
+          if (h) pendingGameCreate.current = { prompt: h.prompt, seedImages: h.seedImages };
+        }
+        flushCreate();
+        return;
+      }
       if (d?.type !== 'kv-game-progress') return;
       const b = useBoardStore.getState();
       if (d.active) {

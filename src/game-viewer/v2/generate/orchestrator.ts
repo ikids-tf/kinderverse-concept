@@ -11,10 +11,16 @@ import { useGame } from "../runtime/useGame";
 import { useGen } from "../runtime/genProgress";
 import { useAssetStore } from "../runtime/assetStore";
 import { setImageStyle } from "../providers/nanoBanana";
+import { buildEmotionGameFromImages, canBuildEmotionGame } from "./emotionFromImages";
 
 /** 프롬프트가 '이미지로 만들어 달라'는 요청인지 — 기본은 이모지(생성 0), 요청 시에만 이미지 생성. */
 function wantsImages(text: string): boolean {
   return /이미지|그림|사진|일러스트|삽화|캐릭터|그려|실사|픽사|3d/i.test(text);
+}
+
+/** 프롬프트가 '감정/마음 알기' 게임을 가리키는지 — 시드 사진을 표정 분석해 마음알기 게임으로. */
+function wantsEmotionGame(text: string): boolean {
+  return /감정|기분|표정|마음|정서|느낌|emotion|feeling/i.test(text);
 }
 
 /** 프롬프트의 화풍 요청 감지 — 없으면 null(기본 = 귀여운 3D 픽사). 요청 시 그 스타일로 생성. */
@@ -79,6 +85,18 @@ export async function generateGame(prompt: string, opts: GenerateOpts = {}): Pro
   try {
     gen.pushStep("주제를 살펴보고 있어요…");
     const knobs = opts.knobs ?? useGen.getState().knobs; // 설정 메뉴 노브 반영
+
+    // 보드에서 고른 사진 + '감정/마음 알기' 요청 → 각 사진의 표정을 분석해 마음알기(감정 맞추기)
+    // 게임으로 조립한다(고른 사진이 곧 단서, 정답 = 분석 감정). 결정론 리졸버 경로보다 우선.
+    if (seeds.length && wantsEmotionGame(text) && canBuildEmotionGame(seeds)) {
+      gen.pushStep("고른 사진의 표정을 살펴보고 있어요…");
+      const input = await buildEmotionGameFromImages(seeds, knobs);
+      useGame.getState().loadDoc(input);
+      useGame.getState().start();
+      gen.pushStep("마음 알기 게임을 완성했어요! 🎉");
+      return;
+    }
+
     // 기본은 이모지(생성 0) — 프롬프트가 '이미지로' 요청하거나 시드 그림이 있을 때만 이미지 생성.
     const useImages = wantsImages(text) || seeds.length > 0;
     setImageStyle(useImages ? detectStyle(text) : null); // 화풍: 요청 없으면 기본(귀여운 3D 픽사)
