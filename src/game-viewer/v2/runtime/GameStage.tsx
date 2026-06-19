@@ -742,8 +742,8 @@ export function GameStage() {
               ) : (
                 <div className="kv-board-hint" style={{ position: "absolute", left: cardX + cardW + vp.w * 0.2, top: "50%", transform: "translateY(-50%)" }}>
                   <div className="kv-board-hint-emoji" aria-hidden>🧩</div>
-                  <b>자유 확장 공간</b>
-                  <span>왼쪽 도구로 자료를 놓아 아이들과 이어서 놀아요</span>
+                  <b>놀이 확장</b>
+                  <span>이미지·스티커를 올려 아이들과 놀이를 이어가요</span>
                 </div>
               )
             )}

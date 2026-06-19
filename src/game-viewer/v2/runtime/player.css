@@ -120,12 +120,8 @@
 .kv-v2 .kv-menu-note { font-size: 12px; color: var(--ink-soft); padding: 7px 12px 3px; border-top: 1px dashed #EBDFD2; margin-top: 2px; }
 .kv-v2 .kv-menu-backdrop { position: fixed; inset: 0; z-index: 55; }
 
-/* 풀스크린 최소 컨트롤(게임만) + 임베드 시 보드 안내 힌트 */
+/* 풀스크린 최소 컨트롤(게임만) */
 .kv-v2 .kv-fs-bar { position: fixed; top: 14px; right: 14px; z-index: 70; display: flex; gap: 8px; }
-.kv-v2 .kv-board-hint {
-  margin: 14px auto 0; width: fit-content; text-align: center; font-size: 13px; font-weight: 700;
-  color: var(--ink-soft); background: var(--card); border: 2px dashed #EBDFD2; border-radius: 999px; padding: 9px 16px;
-}
 
 /* ── 자료(요소) 자유 레이어 — 교사가 게임 위에 즉흥으로 올리는 스티커·글자·그림 ── */
 .kv-v2 .kv-materials { position: absolute; inset: 0; z-index: 55; pointer-events: none; }
