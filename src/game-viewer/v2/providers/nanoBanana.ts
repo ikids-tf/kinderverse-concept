@@ -9,9 +9,20 @@ import { callGateway } from "@/ai/client";
 import type { ImageProvider, ImageAsset } from "./providers";
 import { assertNotChildMedia } from "./providers";
 
-const GAME_ITEM_STYLE =
-  "밝고 둥근 파스텔 유아 그림책 일러스트, 단 하나의 오브젝트만, 균일한 흰 배경, " +
-  "그림자·무늬·테두리·글자 없음, 또렷한 닫힌 외곽선, 화면 중앙 넉넉한 여백";
+// 기본 화풍 = 귀여운 3D 픽사 애니메이션. 프롬프트에 다른 스타일 요청이 있으면 setImageStyle로 교체.
+const DEFAULT_ITEM_STYLE =
+  "귀여운 3D 픽사 애니메이션 스타일, 둥글둥글하고 부드러운 입체 캐릭터, 매끈한 렌더링과 포근한 조명, " +
+  "단 하나의 오브젝트만, 균일한 흰 배경, 무늬·테두리·글자 없음, 화면 중앙 넉넉한 여백";
+
+let styleOverride: string | null = null;
+/** 게임 아이템 이미지 화풍 오버라이드 — 프롬프트에 다른 스타일 요청 시 지정. null이면 기본(귀여운 3D 픽사). */
+export function setImageStyle(style: string | null): void {
+  styleOverride = style && style.trim() ? style.trim() : null;
+}
+/** 현재 적용 화풍(오버라이드 우선, 없으면 기본 픽사 3D). */
+function itemStyle(): string {
+  return styleOverride ?? DEFAULT_ITEM_STYLE;
+}
 
 function slug(s: string): string {
   return s.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-가-힣]/g, "").slice(0, 24) || "x";
@@ -23,7 +34,7 @@ export class NanoBananaImageProvider implements ImageProvider {
       task: "image",
       provider: "auto",
       messages: [],
-      meta: { prompt: `${prompt} — ${GAME_ITEM_STYLE}`, caption: prompt },
+      meta: { prompt: `${prompt} — ${itemStyle()}`, caption: prompt },
     });
     if (!res.ok || !res.image) return [];
     return [{ assetId: slug(prompt), url: res.image, kind: "generated" }];
@@ -35,7 +46,7 @@ export class NanoBananaImageProvider implements ImageProvider {
       task: "image",
       provider: "auto",
       messages: [],
-      meta: { prompt: `${instruction} — ${GAME_ITEM_STYLE}`, caption: instruction },
+      meta: { prompt: `${instruction} — ${itemStyle()}`, caption: instruction },
     });
     return res.ok && res.image ? { assetId: slug(instruction), url: res.image, kind: "generated" } : asset;
   }

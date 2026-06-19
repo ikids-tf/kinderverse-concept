@@ -10,6 +10,22 @@ import type { ContentBindingInput, InteractiveDocInput } from "../schema/interac
 import { useGame } from "../runtime/useGame";
 import { useGen } from "../runtime/genProgress";
 import { useAssetStore } from "../runtime/assetStore";
+import { setImageStyle } from "../providers/nanoBanana";
+
+/** 프롬프트가 '이미지로 만들어 달라'는 요청인지 — 기본은 이모지(생성 0), 요청 시에만 이미지 생성. */
+function wantsImages(text: string): boolean {
+  return /이미지|그림|사진|일러스트|삽화|캐릭터|그려|실사|픽사|3d/i.test(text);
+}
+
+/** 프롬프트의 화풍 요청 감지 — 없으면 null(기본 = 귀여운 3D 픽사). 요청 시 그 스타일로 생성. */
+function detectStyle(text: string): string | null {
+  if (/수채화|워터\s*컬러|watercolor/i.test(text)) return "부드러운 수채화 일러스트";
+  if (/실사|포토|리얼|사실적|photo|real/i.test(text)) return "사실적인 실사 사진풍, 자연스러운 조명과 디테일";
+  if (/플랫|벡터|아이콘|flat|vector/i.test(text)) return "심플한 플랫 벡터 일러스트, 면 위주, 그림자 최소";
+  if (/(만화|카툰|cartoon|2d)/i.test(text) && !/(픽사|3d|입체)/i.test(text)) return "납작한 2D 카툰 일러스트, 두꺼운 외곽선";
+  if (/파스텔|그림책|크레용|손그림|동화|수묵/i.test(text)) return "포근한 파스텔 그림책 손그림 일러스트";
+  return null; // 기본 = 귀여운 3D 픽사
+}
 
 /** input에서 생성/소싱 대상 asset 라벨 수집 — assetStore.request 키와 동일 규칙. */
 function inputLabels(input: InteractiveDocInput): string[] {
@@ -63,7 +79,10 @@ export async function generateGame(prompt: string, opts: GenerateOpts = {}): Pro
   try {
     gen.pushStep("주제를 살펴보고 있어요…");
     const knobs = opts.knobs ?? useGen.getState().knobs; // 설정 메뉴 노브 반영
-    const cards = await recommendFromPromptAI(text || "동물", { useImages: true, knobs });
+    // 기본은 이모지(생성 0) — 프롬프트가 '이미지로' 요청하거나 시드 그림이 있을 때만 이미지 생성.
+    const useImages = wantsImages(text) || seeds.length > 0;
+    setImageStyle(useImages ? detectStyle(text) : null); // 화풍: 요청 없으면 기본(귀여운 3D 픽사)
+    const cards = await recommendFromPromptAI(text || "동물", { useImages, knobs });
     const top = cards[0];
     if (!top) {
       gen.pushStep("음… 무엇을 만들지 다시 알려주세요");
