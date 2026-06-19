@@ -492,10 +492,20 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
       if (attachments.length > 0) {
         const atts = attachments;
         setAttachments([]);
+        const imgAtts = atts.filter((a) => a.kind === 'image' && a.dataUrl);
+        // 이미지 첨부 + '생성' 요청 → 첨부를 '스타일 참조(이미지 프롬프트)'로 결과를 생성한다.
+        //   예) 이미지 첨부 + "웃고있는 여자 아이 그려줘" → 첨부 화풍으로 그 아이를 새 그림으로.
+        //   첨부 자체는 카드로 올리지 않고 입력으로만 소비. 생성 요청이 아니면 기존 동작(아래).
+        if (imgAtts.length > 0 && text && /그려|그림|그릴|만들|만드|생성|제작|뽑아|그려줘/.test(text)) {
+          void import('@/board/workflow').then((m) =>
+            m.generateFromReferenceImages(imgAtts.map((a) => a.dataUrl!), text),
+          );
+          return;
+        }
         void (async () => {
           const ids: string[] = [];
           const wf = await import('@/board/workflow');
-          const imgs = atts.filter((a) => a.kind === 'image' && a.dataUrl);
+          const imgs = imgAtts;
           if (imgs.length) {
             ids.push(
               ...wf.placeAssetsOnBoard(

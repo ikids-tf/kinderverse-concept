@@ -1210,6 +1210,71 @@ export async function generateStyledSeriesFromImage(sourceId: string, prompt: st
   }
 }
 
+/**
+ * 첨부(참조) 이미지를 '이미지 프롬프트(스타일 참조)'로 써서 지시 내용을 생성해 보드에 올린다.
+ * 프롬프트바에 이미지를 첨부하고 "웃고있는 여자 아이 그려줘" → 첨부 화풍으로 그 아이를 새 그림으로.
+ * '각각/여러가지'면 대상 목록을 뽑아 시리즈로, 아니면 지시 한 건을 1장으로. 화면 중앙에 그리드 배치.
+ * 첨부 이미지는 카드로 올리지 않는다(스타일 입력으로만 소비) — 결과 카드만 남긴다.
+ */
+export async function generateFromReferenceImages(refs: string[], prompt: string): Promise<void> {
+  const styleRefs = refs.filter((u) => typeof u === 'string' && u.startsWith('data:'));
+  const b = useBoardStore.getState();
+  b.beginGen();
+  b.setGenerating('🎨 첨부한 그림을 참고하고 있어요…');
+  try {
+    const series = /각각|여러\s*가지|여러\s*개|여러\s*장/.test(prompt);
+    const subj = prompt
+      .replace(/(이\s*스타일로|이\s*화풍으로|같은\s*(스타일|화풍)으?로|첨부(한)?\s*(이미지|그림|사진)(을|를|로|으로)?)/g, ' ')
+      .replace(/(그려\s*줘|그려|그림으로|그림|그릴|만들어\s*줘|만들|생성(해)?|제작|뽑아|해\s*줘|줘|주세요)/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    const items = (series ? await seriesSubjects(prompt, 6) : [subj || prompt.trim()]).filter(Boolean);
+    if (items.length === 0) { b.setGenerating('무엇을 그릴지 잘 모르겠어요'); await new Promise((r) => setTimeout(r, 1800)); return; }
+
+    // 화면 중앙 기준 그리드(최대 3열) — 참조는 입력일 뿐 카드로 올리지 않는다.
+    const c = viewportCenterBoardPoint();
+    const W = 260, H = 260, GAP = 28;
+    const cols = Math.min(items.length, 3), rows = Math.ceil(items.length / cols);
+    const x0 = Math.round(c.x - (cols * W + (cols - 1) * GAP) / 2);
+    const y0 = Math.round(c.y - (rows * H + (rows - 1) * GAP) / 2);
+    const ids: string[] = [];
+    items.forEach((it, i) => {
+      const col = i % cols, row = Math.floor(i / cols);
+      const id = newId('image');
+      b.addNodeRaw({
+        id, type: 'image',
+        x: x0 + col * (W + GAP), y: y0 + row * (H + GAP), w: W, h: H, autoH: true,
+        loading: true, text: it.slice(0, 40), data: { role: 'image' },
+      });
+      ids.push(id);
+    });
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      b.setGenerating(`🎨 '${it.slice(0, 18)}' 그리는 중… (${i + 1}/${items.length})`);
+      try {
+        const genPrompt =
+          `첨부한 그림과 똑같은 화풍·색감·선·질감·분위기로 '${it}'을(를) 분명하게 표현한 '새 그림' 한 장을 그려라. 첨부 그림을 그대로 편집하지 말고 같은 스타일의 새 그림. 단일 주체, 배경은 단순하게, 글자·테두리 없음. ${KV_ART_STYLE}`;
+        const meta = styleRefs.length ? { images: styleRefs, prompt: genPrompt, caption: it } : { prompt: genPrompt, caption: it };
+        const res = await callGateway({ task: 'image', provider: 'auto', messages: [], meta });
+        if (!useBoardStore.getState().nodes[ids[i]]) continue;
+        if (res.ok && res.image) {
+          useBoardStore.getState().updateNodeRaw(ids[i], { loading: false, src: res.image, text: it.slice(0, 40) });
+          if (!res.mocked) void saveAsset(it, 'image', res.image);
+        } else {
+          useBoardStore.getState().updateNodeRaw(ids[i], { loading: false });
+        }
+      } catch {
+        if (useBoardStore.getState().nodes[ids[i]]) useBoardStore.getState().updateNodeRaw(ids[i], { loading: false });
+      }
+    }
+    const live = ids.filter((id) => useBoardStore.getState().nodes[id]);
+    recordSpawnedNodes(live, '참조 그림 생성');
+    if (live.length) useBoardStore.getState().setSelection(live);
+  } finally {
+    useBoardStore.getState().endGen();
+  }
+}
+
 /** 동영상 플레이어(빈) 뷰어를 보드에 추가하고 id를 돌려준다. nearId가 있으면 그
     카드 오른쪽 옆에, 없으면 화면 중앙에. 카드 선택+"영상 만들어줘" 트리거가 쓴다. */
 export function spawnVideoPlayer(nearId?: string): string {
