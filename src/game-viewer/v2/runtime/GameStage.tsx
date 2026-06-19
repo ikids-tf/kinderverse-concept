@@ -6,7 +6,6 @@
  * 무대 픽셀 크기는 ResizeObserver로 재서 StageSizeContext로 내려준다(이모지/뽑힘거리 환산).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useStore } from "zustand";
 import { NodeRenderer } from "./NodeRenderer";
 import { TapTheRightOne } from "./interactions/TapTheRightOne";
 import { MatchPair } from "./interactions/MatchPair";
@@ -27,8 +26,7 @@ import { MaterialsLayer } from "./MaterialsLayer";
 import { useMaterials } from "./materials";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { GamePicker } from "./GamePicker";
-import { useSavedGames } from "./savedGames";
-import { editorUndo, editorRedo } from "./editorHistory";
+import { useSavedGames, saveWorkingGame, getWorkingGame, primeAssets } from "./savedGames";
 import { useGen } from "./genProgress";
 import { StageSizeContext, type StageSize } from "./stageSize";
 import { FIXTURES, FIXTURE_KEYS } from "./fixtures";
@@ -186,17 +184,35 @@ export function GameStage() {
     reader.readAsDataURL(file);
   };
 
-  // 에디터 undo/redo (zundo temporal) — 게임 doc + 자료 통합(editorHistory). 게임/모드 전환 시 초기화.
-  const undoG = useStore(useGame.temporal, (s) => s.pastStates.length > 0);
-  const undoM = useStore(useMaterials.temporal, (s) => s.pastStates.length > 0);
-  const redoG = useStore(useGame.temporal, (s) => s.futureStates.length > 0);
-  const redoM = useStore(useMaterials.temporal, (s) => s.futureStates.length > 0);
-  const canUndo = undoG || undoM;
-  const canRedo = redoG || redoM;
+  // 에디터 undo/redo 히스토리(zundo temporal) — 키보드 단축키(MaterialsLayer)가 쓴다. 게임/모드
+  // 전환 시 초기화(세션 단위). 상단 버튼은 제거됨(중복 정리) — 단축키 ⌘/Ctrl+Z·Shift+Z·Ctrl+Y 유지.
   useEffect(() => {
     useGame.temporal.getState().clear();
     useMaterials.temporal.getState().clear();
   }, [loadSeq, mode]);
+
+  // 저장 — 현재 게임(편집 포함)을 로컬에 저장(새로고침해도 남음). 단독 탭 로드 시 자동 복원.
+  const [justSaved, setJustSaved] = useState(false);
+  const onSaveGame = () => {
+    const d = useGame.getState().doc;
+    if (!d) return;
+    if (saveWorkingGame(d as never)) {
+      setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 1400);
+    }
+  };
+  // 단독 탭(임베드 아님) 첫 로드 시 저장해 둔 게임을 자동 복원 — "계속 테스트". 1회만.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || isEmbedded) return;
+    restoredRef.current = true;
+    if (useGame.getState().doc) return; // 이미 게임이 있으면 건드리지 않음
+    const w = getWorkingGame();
+    if (w) {
+      primeAssets(w.assets);
+      useGame.getState().loadDoc(w.doc as never);
+    }
+  }, []);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<StageSize>({ w: 0, h: 0 });
@@ -512,16 +528,18 @@ export function GameStage() {
 
               <div className="kv-toolbar-spacer" />
 
-              {/* 아이콘 클러스터 — 집중(플레이) / 소리 / 편집 / 풀스크린 */}
-              <button
-                type="button"
-                className="icon-btn kv-play-btn"
-                title="게임에 집중 (다른 건 숨기고 게임만 보기)"
-                aria-label="게임에 집중하기"
-                onClick={() => { setPanX(0); setOpenMenu(null); setFocus(true); }}
-              >
-                <Icon name="play" size={18} />
-              </button>
+              {/* 아이콘 클러스터 — 집중(플레이, 편집 중엔 숨김: 편집 토글이 플레이로 겸함) / 소리 / 편집 / 풀스크린 */}
+              {mode !== "edit" && (
+                <button
+                  type="button"
+                  className="icon-btn kv-play-btn"
+                  title="게임에 집중 (다른 건 숨기고 게임만 보기)"
+                  aria-label="게임에 집중하기"
+                  onClick={() => { setPanX(0); setOpenMenu(null); setFocus(true); }}
+                >
+                  <Icon name="play" size={18} />
+                </button>
+              )}
               <button
                 type="button"
                 className="icon-btn"
@@ -541,11 +559,18 @@ export function GameStage() {
               >
                 <Icon name={mode === "edit" ? "play" : "edit"} size={18} />
               </button>
+              {/* 저장 — 현재 게임(편집 포함)을 로컬에 저장. 새로고침해도 남아 계속 테스트 가능. */}
               {mode === "edit" && (
-                <>
-                  <button type="button" className="icon-btn" title="실행취소 (Ctrl+Z)" aria-label="실행취소" disabled={!canUndo} onClick={editorUndo}><Icon name="undo" size={18} /></button>
-                  <button type="button" className="icon-btn" title="다시실행 (Ctrl+Shift+Z)" aria-label="다시실행" disabled={!canRedo} onClick={editorRedo}><Icon name="redo" size={18} /></button>
-                </>
+                <button
+                  type="button"
+                  className={`icon-btn kv-save-btn${justSaved ? " saved" : ""}`}
+                  title="저장 (새로고침해도 남아요)"
+                  aria-label="저장"
+                  disabled={!doc}
+                  onClick={onSaveGame}
+                >
+                  <Icon name={justSaved ? "check" : "download"} size={18} />
+                </button>
               )}
               <button
                 type="button"

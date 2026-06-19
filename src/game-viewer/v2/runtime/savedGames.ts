@@ -113,21 +113,26 @@ export const useSavedGames = create<SavedGamesState>((set) => ({
     }),
 }));
 
-/** 방금 만든 게임을 라이브러리에 자동 저장 — 참조 asset(생성/시드 이미지) URL을 함께 스냅샷. */
+/** doc 참조 asset(생성/시드 이미지)의 현재 URL을 스냅샷 — 다시 열 때 그 그림 그대로 등장. */
+function snapshotAssets(input: InteractiveDocInput): Record<string, string> {
+  const map = useAssetStore.getState().map;
+  const assets: Record<string, string> = {};
+  for (const id of collectAssetIds(input)) {
+    const e = map[id];
+    if (e && e.status === "ready" && e.url) assets[id] = e.url;
+  }
+  return assets;
+}
+
+/** 방금 만든 게임을 라이브러리에 자동 저장 — 참조 asset URL을 함께 스냅샷. */
 export function saveCreatedGame(input: InteractiveDocInput): void {
   try {
-    const map = useAssetStore.getState().map;
-    const assets: Record<string, string> = {};
-    for (const id of collectAssetIds(input)) {
-      const e = map[id];
-      if (e && e.status === "ready" && e.url) assets[id] = e.url;
-    }
     useSavedGames.getState().save({
       id: `${input.meta?.id ?? "game"}_${Date.now()}`,
       title: input.meta?.title ?? "내 게임",
       category: categoryForDoc(input),
       doc: input,
-      assets,
+      assets: snapshotAssets(input),
       ts: Date.now(),
     });
   } catch {
@@ -135,12 +140,47 @@ export function saveCreatedGame(input: InteractiveDocInput): void {
   }
 }
 
-/** 저장된 게임을 다시 열기 전 — 스냅샷한 asset URL을 assetStore에 프라임(그 그림 그대로 등장). */
-export function primeSavedAssets(game: SavedGame): void {
-  if (!game.assets) return;
+/** asset URL 맵을 assetStore에 프라임(ready) — 저장본을 다시 열 때 그 그림 그대로. */
+export function primeAssets(assets?: Record<string, string>): void {
+  if (!assets || !Object.keys(assets).length) return;
   useAssetStore.setState((s) => {
     const map = { ...s.map };
-    for (const [k, url] of Object.entries(game.assets)) map[k] = { status: "ready", url };
+    for (const [k, url] of Object.entries(assets)) map[k] = { status: "ready", url };
     return { map };
   });
+}
+
+/** 저장된 게임을 다시 열기 전 — 스냅샷한 asset URL을 assetStore에 프라임. */
+export function primeSavedAssets(game: SavedGame): void {
+  primeAssets(game.assets);
+}
+
+/* ───────────────── 작업 중 게임(워킹 슬롯) — 저장 버튼이 쓰고, 새로고침 시 자동 복원 ──────────────── */
+const WORKING_KEY = "kv:working:v1";
+
+export interface WorkingGame {
+  doc: InteractiveDocInput;
+  assets: Record<string, string>;
+}
+
+/** 현재 게임(편집 포함)을 로컬에 저장 — 새로고침해도 남아 계속 테스트 가능. 실패 시 false. */
+export function saveWorkingGame(input: InteractiveDocInput): boolean {
+  try {
+    localStorage.setItem(WORKING_KEY, JSON.stringify({ doc: input, assets: snapshotAssets(input), ts: Date.now() }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 저장해 둔 작업 중 게임(있으면) — 단독 탭 로드 시 자동 복원용. */
+export function getWorkingGame(): WorkingGame | null {
+  try {
+    const raw = localStorage.getItem(WORKING_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as Partial<WorkingGame>;
+    return o && o.doc ? { doc: o.doc, assets: o.assets ?? {} } : null;
+  } catch {
+    return null;
+  }
 }

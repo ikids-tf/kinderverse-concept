@@ -509,6 +509,8 @@
 /* 직접 에디터(고급) */
 .kv-v2 .icon-btn.on { background: var(--coral); color: #fff; border-color: var(--coral); }
 .kv-v2 .icon-btn:disabled { opacity: 0.4; cursor: default; }
+/* 저장 버튼 — 저장 직후 잠깐 초록 체크로 '저장됨' 피드백 */
+.kv-v2 .icon-btn.kv-save-btn.saved { background: var(--ok-ink, #2Fae6b); color: #fff; border-color: var(--ok-ink, #2Fae6b); }
 .kv-v2 .edit-layer { position: absolute; inset: 0; z-index: 30; }
 /* 배경 선택됨 — 무대 안쪽 테두리로 '배경이 선택됨'을 표시 + 안내 배지 */
 .kv-v2 .edit-layer.bg-on { box-shadow: inset 0 0 0 3px var(--coral); border-radius: var(--r-md); }
