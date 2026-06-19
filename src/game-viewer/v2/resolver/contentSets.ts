@@ -120,6 +120,27 @@ export const CATEGORIES: Category[] = [
       { left: { emoji: "🧑‍🌾", label: "농부" }, right: { emoji: "🌾", label: "벼" } },
     ],
   },
+  {
+    // 감정/표정 — '감정 맞추기' 같은 정서 학습 놀이. 표정 이모지가 곧 단서라 시드가 또렷하고,
+    // tap(표정 보고 감정 고르기)·match·categorize 모두 자연스럽게 조립된다.
+    key: "emotion",
+    label: "감정",
+    keywords: ["감정", "기분", "표정", "마음", "정서", "느낌", "emotion", "feeling"],
+    items: [
+      { emoji: "😊", label: "기쁨" },
+      { emoji: "😢", label: "슬픔" },
+      { emoji: "😠", label: "화남" },
+      { emoji: "😲", label: "놀람" },
+      { emoji: "😨", label: "무서움" },
+      { emoji: "😴", label: "졸림" },
+    ],
+    relations: [
+      { left: { emoji: "😊", label: "기쁨" }, right: { emoji: "🎁", label: "선물" } },
+      { left: { emoji: "😢", label: "슬픔" }, right: { emoji: "💧", label: "눈물" } },
+      { left: { emoji: "😴", label: "졸림" }, right: { emoji: "🛏️", label: "침대" } },
+      { left: { emoji: "😨", label: "무서움" }, right: { emoji: "👻", label: "유령" } },
+    ],
+  },
 ];
 
 export function findCategory(prompt: string): Category | null {
