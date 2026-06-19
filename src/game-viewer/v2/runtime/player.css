@@ -529,9 +529,28 @@
   box-shadow: 0 0 0 4px rgba(255,158,125,.25); cursor: grabbing;
 }
 .kv-v2 .edit-badge {
-  position: absolute; top: -9px; left: 6px; font-size: 10px; font-weight: 700; color: #fff;
+  position: absolute; top: -9px; left: 6px; font-size: 10px; font-weight: 800; color: #fff;
   background: var(--coral); padding: 1px 7px; border-radius: 999px; pointer-events: none; white-space: nowrap;
 }
+/* 문제(단서)=코랄, 보기(답)=차분한 회갈색으로 구분 */
+.kv-v2 .edit-badge.is-option { background: #8B7A66; }
+/* 정답 슬롯 — 무대 안에서 또렷이 보이게 초록 테두리 + '정답' 배지 */
+.kv-v2 .edit-node.correct { border: 2.5px solid var(--ok-ink, #2Fae6b); background: rgba(56,193,114,.12); }
+.kv-v2 .edit-node.correct.selected { box-shadow: 0 0 0 4px rgba(56,193,114,.25); }
+.kv-v2 .edit-badge.is-correct { background: var(--ok-ink, #2Fae6b); }
+.kv-v2 .edit-correct-badge {
+  position: absolute; top: -10px; right: 6px; font-size: 10px; font-weight: 800; color: #fff;
+  background: var(--ok-ink, #2Fae6b); padding: 2px 8px; border-radius: 999px; pointer-events: none; white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(47,174,107,.4);
+}
+.kv-v2 .edit-correct-set {
+  position: absolute; top: -11px; right: 6px; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer;
+  color: var(--ink-soft); background: #fff; border: 1.5px solid #D9CcbC; padding: 2px 8px; border-radius: 999px;
+  white-space: nowrap; box-shadow: var(--shadow-sm); opacity: .55; transition: opacity .14s, color .14s, border-color .14s;
+}
+.kv-v2 .edit-node:hover .edit-correct-set, .kv-v2 .edit-node.selected .edit-correct-set { opacity: 1; }
+.kv-v2 .edit-correct-set:hover { color: var(--ok-ink, #2Fae6b); border-color: var(--ok-ink, #2Fae6b); }
+.kv-v2 .edit-correct-set:focus-visible { outline: 3px solid rgba(47,174,107,.45); outline-offset: 1px; opacity: 1; }
 .kv-v2 .edit-preview { font-size: 1.6rem; pointer-events: none; line-height: 1; }
 .kv-v2 .edit-preview-img { max-width: 84%; max-height: 84%; object-fit: contain; pointer-events: none; user-select: none; }
 .kv-v2 .edit-node.editable { cursor: text; }

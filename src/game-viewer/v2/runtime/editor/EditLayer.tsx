@@ -45,6 +45,26 @@ function previewOf(node: SceneNode, binding?: ContentBinding): Visual | null {
   return null;
 }
 
+/** 역할 배지를 교사 언어로 — 문제(단서)와 보기(답)를 또렷이 구분. */
+const ROLE_LABEL: Record<string, string> = { cue: "문제", option: "보기", prompt: "문제", slot: "칸" };
+function roleLabel(node: SceneNode): string {
+  return ROLE_LABEL[node.role ?? ""] ?? node.role ?? node.type;
+}
+
+/** 라운드0 기준 보기 슬롯과 정답 슬롯 집합(tap·pattern-next만 '정답' 개념). */
+function optionInfo(doc: InteractiveDoc): { options: Set<string>; correct: Set<string> } {
+  const options = new Set<string>();
+  const correct = new Set<string>();
+  const it = doc.interaction;
+  if (it.kind === "tap-the-right-one" || it.kind === "pattern-next") {
+    it.optionSlotIds.forEach((id, i) => {
+      options.add(id);
+      if (it.rounds[0].options[i]?.correct) correct.add(id);
+    });
+  }
+  return { options, correct };
+}
+
 type Live = { x: number; y: number; w: number; h: number };
 type DragState = { px: number; py: number; base: Live; mode: "move" | "resize" };
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
@@ -54,11 +74,16 @@ const clampWH = (v: number) => Math.max(0.05, Math.min(1, v));
  * 드래그 중엔 로컬 live 상태로만 그려(스토어 미접촉) 부드럽게 움직이고,
  * 릴리스(pointerup) 때 patchNodeTransform 으로 '한 번만' 커밋한다 → undo 1드래그=1스텝.
  */
-function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: ContentBinding; selected: boolean }) {
+function EditNodeBox({
+  node, binding, selected, isOption, isCorrect,
+}: {
+  node: SceneNode; binding?: ContentBinding; selected: boolean; isOption: boolean; isCorrect: boolean;
+}) {
   const { w: sw, h: sh } = useStageSize();
   const selectNode = useGame((s) => s.selectNode);
   const patch = useGame((s) => s.patchNodeTransform);
   const setContent = useGame((s) => s.setNodeContent);
+  const setCorrect = useGame((s) => s.setCorrectOption);
   const drag = useRef<DragState | null>(null);
   const [live, setLive] = useState<Live | null>(null);
   // 글자 직접 편집(더블클릭) — 답·단서의 텍스트를 그 자리에서 고친다. 이미지는 프롬프트로 교체.
@@ -121,7 +146,7 @@ function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: C
 
   return (
     <div
-      className={`edit-node${selected ? " selected" : ""}${editable ? " editable" : ""}`}
+      className={`edit-node${selected ? " selected" : ""}${editable ? " editable" : ""}${isCorrect ? " correct" : ""}`}
       style={transformStyle({ ...t, x: view.x, y: view.y, w: view.w, h: view.h })}
       onPointerDown={(e) => down(e, "move")}
       onPointerMove={move}
@@ -129,7 +154,23 @@ function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: C
       onDoubleClick={beginEdit}
       title={editable ? "더블클릭하면 글자 수정 · 프롬프트로 그림 교체" : undefined}
     >
-      <span className="edit-badge">{node.role ?? node.type}</span>
+      <span className={`edit-badge${isCorrect ? " is-correct" : isOption ? " is-option" : ""}`}>{roleLabel(node)}</span>
+      {/* 정답 표시/지정 — 보기(답) 슬롯에만. 정답이면 '✓ 정답', 아니면 누르면 정답으로 바꾼다. */}
+      {isOption && (
+        isCorrect ? (
+          <span className="edit-correct-badge" aria-label="정답">✓ 정답</span>
+        ) : (
+          <button
+            type="button"
+            className="edit-correct-set"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); setCorrect(node.id); }}
+            title="이 보기를 정답으로"
+          >
+            정답으로
+          </button>
+        )
+      )}
       {editing ? (
         <input
           className="edit-text-input"
@@ -191,6 +232,7 @@ export function EditLayer() {
 
   if (!doc) return null;
   const bindings = roundZeroBindings(doc);
+  const { options, correct } = optionInfo(doc);
   // 빈 곳(노드 아님) 클릭 = 배경 선택 → 프롬프트로 배경 이미지 생성 대상.
   return (
     <div className={`edit-layer${bgSelected ? " bg-on" : ""}`} onPointerDown={() => selectBg(true)}>
@@ -198,7 +240,14 @@ export function EditLayer() {
         <span className="edit-bg-badge" aria-live="polite">🖼 배경 선택됨 — 아래 프롬프트로 배경을 만들어 넣어요</span>
       )}
       {doc.stage.nodes.map((n) => (
-        <EditNodeBox key={n.id} node={n} binding={bindings[n.id]} selected={n.id === selectedNodeId} />
+        <EditNodeBox
+          key={n.id}
+          node={n}
+          binding={bindings[n.id]}
+          selected={n.id === selectedNodeId}
+          isOption={options.has(n.id)}
+          isCorrect={correct.has(n.id)}
+        />
       ))}
     </div>
   );

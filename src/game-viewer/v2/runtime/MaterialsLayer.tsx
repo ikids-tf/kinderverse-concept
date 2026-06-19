@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, type PointerEvent as RPE } from "react";
 import { useStageSize } from "./stageSize";
 import { useGame } from "./useGame";
 import { useMaterials, type Material, type MaterialStyle } from "./materials";
+import { editorUndo, editorRedo } from "./editorHistory";
 import { Icon } from "@/lib/icons";
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
@@ -455,15 +456,15 @@ function useBoardShortcuts() {
       const st = useMaterials.getState();
       const mod = e.metaKey || e.ctrlKey;
       if (e.key === "Escape") { st.select(null); st.setEditId(null); st.setConnectMode(false); return; }
-      // 실행취소 / 다시실행 (⌘/Ctrl+Z · ⌘/Ctrl+Shift+Z · Ctrl+Y)
+      // 실행취소 / 다시실행 (⌘/Ctrl+Z · ⌘/Ctrl+Shift+Z · Ctrl+Y) — 게임 doc + 자료 통합.
       if (mod && (e.key === "z" || e.key === "Z")) {
         e.preventDefault();
-        if (e.shiftKey) useMaterials.temporal.getState().redo();
-        else useMaterials.temporal.getState().undo();
+        if (e.shiftKey) editorRedo();
+        else editorUndo();
         st.select(null); st.setEditId(null);
         return;
       }
-      if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); useMaterials.temporal.getState().redo(); st.select(null); st.setEditId(null); return; }
+      if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); editorRedo(); st.select(null); st.setEditId(null); return; }
       if (e.key === "Delete" || e.key === "Backspace") { if (st.selectedIds.length) { e.preventDefault(); st.removeSelected(); } return; }
       if (mod && (e.key === "a" || e.key === "A")) { if (st.items.length) { e.preventDefault(); st.selectAll(); } return; }
       if (mod && (e.key === "d" || e.key === "D")) { if (st.selectedIds.length) { e.preventDefault(); st.duplicateSelected(); } return; }

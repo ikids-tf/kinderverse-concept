@@ -28,6 +28,7 @@ import { useMaterials } from "./materials";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { GamePicker } from "./GamePicker";
 import { useSavedGames } from "./savedGames";
+import { editorUndo, editorRedo } from "./editorHistory";
 import { useGen } from "./genProgress";
 import { StageSizeContext, type StageSize } from "./stageSize";
 import { FIXTURES, FIXTURE_KEYS } from "./fixtures";
@@ -94,6 +95,7 @@ const NURI_LABEL: Record<string, string> = {
 export function GameStage() {
   const doc = useGame((s) => s.doc);
   const exampleKey = useGame((s) => s.exampleKey);
+  const loadSeq = useGame((s) => s.loadSeq);
   const phase = useGame((s) => s.phase);
   const roundIdx = useGame((s) => s.roundIdx);
   const totalRounds = useGame((s) => s.totalRounds);
@@ -184,12 +186,17 @@ export function GameStage() {
     reader.readAsDataURL(file);
   };
 
-  // 에디터 undo/redo (zundo temporal). 게임/모드 전환 시 히스토리 초기화(세션 단위).
-  const canUndo = useStore(useGame.temporal, (s) => s.pastStates.length > 0);
-  const canRedo = useStore(useGame.temporal, (s) => s.futureStates.length > 0);
+  // 에디터 undo/redo (zundo temporal) — 게임 doc + 자료 통합(editorHistory). 게임/모드 전환 시 초기화.
+  const undoG = useStore(useGame.temporal, (s) => s.pastStates.length > 0);
+  const undoM = useStore(useMaterials.temporal, (s) => s.pastStates.length > 0);
+  const redoG = useStore(useGame.temporal, (s) => s.futureStates.length > 0);
+  const redoM = useStore(useMaterials.temporal, (s) => s.futureStates.length > 0);
+  const canUndo = undoG || undoM;
+  const canRedo = redoG || redoM;
   useEffect(() => {
     useGame.temporal.getState().clear();
-  }, [exampleKey, mode]);
+    useMaterials.temporal.getState().clear();
+  }, [loadSeq, mode]);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<StageSize>({ w: 0, h: 0 });
@@ -536,8 +543,8 @@ export function GameStage() {
               </button>
               {mode === "edit" && (
                 <>
-                  <button type="button" className="icon-btn" title="실행취소" aria-label="실행취소" disabled={!canUndo} onClick={() => useGame.temporal.getState().undo()}><Icon name="undo" size={18} /></button>
-                  <button type="button" className="icon-btn" title="다시실행" aria-label="다시실행" disabled={!canRedo} onClick={() => useGame.temporal.getState().redo()}><Icon name="redo" size={18} /></button>
+                  <button type="button" className="icon-btn" title="실행취소 (Ctrl+Z)" aria-label="실행취소" disabled={!canUndo} onClick={editorUndo}><Icon name="undo" size={18} /></button>
+                  <button type="button" className="icon-btn" title="다시실행 (Ctrl+Shift+Z)" aria-label="다시실행" disabled={!canRedo} onClick={editorRedo}><Icon name="redo" size={18} /></button>
                 </>
               )}
               <button

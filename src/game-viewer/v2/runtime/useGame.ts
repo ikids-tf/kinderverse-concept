@@ -106,6 +106,8 @@ export interface Sfx {
 export interface GameStore {
   doc: InteractiveDoc | null;
   exampleKey: ExampleKey | null;
+  /** 새 게임 로드마다 +1 — 편집 undo 히스토리 초기화 신호(로드는 같은 id여도 새 세션). */
+  loadSeq: number;
   phase: Phase;
   roundIdx: number;
   totalRounds: number;
@@ -200,6 +202,8 @@ export interface GameStore {
   setBackgroundImage: (assetId: string | null) => void;
   /** 편집: 선택 노드(슬롯)의 라운드0 콘텐츠를 교체(프롬프트로 만든 그림/글자 적용). */
   setNodeContent: (nodeId: string, content: ContentBinding) => void;
+  /** 편집: 보기 슬롯을 정답으로 지정(tap·pattern-next). 라운드0에서 그 보기만 correct=true. */
+  setCorrectOption: (nodeId: string) => void;
   patchNodeTransform: (id: string, patch: Partial<{ x: number; y: number; w: number; h: number }>) => void;
 }
 
@@ -589,6 +593,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
   return {
     doc: null,
     exampleKey: null,
+    loadSeq: 0,
     phase: "start",
     roundIdx: 0,
     totalRounds: 0,
@@ -635,13 +640,13 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
 
     loadExample: (key) => {
       clearTimers();
-      set(freshState(parseInteractiveDoc(FIXTURES[key].input), key));
+      set((s) => ({ ...freshState(parseInteractiveDoc(FIXTURES[key].input), key), loadSeq: s.loadSeq + 1 }));
     },
 
     loadDoc: (input, key = null) => {
       clearTimers();
       const doc = parseInteractiveDoc(input);
-      set(freshState(doc, key));
+      set((s) => ({ ...freshState(doc, key), loadSeq: s.loadSeq + 1 }));
       // 생성 이미지가 필요한 asset 콘텐츠가 있으면 비동기 시작(시드는 이미 이모지로 즉시 플레이).
       primeImages(doc);
     },
@@ -1174,6 +1179,21 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         if (ci >= 0) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, faces: r.faces.map((f, j) => (j === ci % r.faces.length ? content : f)) })) }; }
       }
       if (!changed) return;
+      set({ doc: { ...doc, interaction } });
+    },
+
+    setCorrectOption: (nodeId) => {
+      const doc = get().doc;
+      if (!doc) return;
+      const it = doc.interaction;
+      if (it.kind !== "tap-the-right-one" && it.kind !== "pattern-next") return;
+      const oi = it.optionSlotIds.indexOf(nodeId);
+      if (oi < 0) return;
+      const r0 = <T,>(rounds: readonly T[], mut: (r: T) => T): T[] => rounds.map((r, i) => (i === 0 ? mut(r) : r));
+      const interaction = {
+        ...it,
+        rounds: r0(it.rounds, (r) => ({ ...r, options: r.options.map((o, j) => ({ ...o, correct: j === oi })) })),
+      };
       set({ doc: { ...doc, interaction } });
     },
 
