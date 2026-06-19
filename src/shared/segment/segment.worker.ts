@@ -51,11 +51,21 @@ async function prepare(id: string, blob: Blob) {
   };
 }
 
-async function point(id: string, x: number, y: number): Promise<{ mask: Uint8Array; w: number; h: number }> {
+interface Pt { x: number; y: number; label: number } // label 1=객체(추가), 0=배경(빼기)
+
+async function decode(id: string, points: Pt[]): Promise<{ mask: Uint8Array; w: number; h: number }> {
   if (!cur || cur.id !== id) throw new Error('not-prepared');
+  if (points.length === 0) throw new Error('no-points');
   const { model, processor, emb, original_sizes, reshaped_input_sizes } = cur;
-  const pts = new (Tensor as any)('float32', [x, y], [1, 1, 1, 2]);
-  const lbl = new (Tensor as any)('int64', [1n], [1, 1, 1]);
+  const N = points.length;
+  const coords = new Float32Array(N * 2);
+  const labels = new BigInt64Array(N);
+  for (let i = 0; i < N; i++) { coords[i * 2] = points[i].x; coords[i * 2 + 1] = points[i].y; labels[i] = BigInt(points[i].label | 0); }
+  const pts = new (Tensor as any)('float32', coords, [1, 1, N, 2]);
+  const lbl = new (Tensor as any)('int64', labels, [1, 1, N]);
+  // 마스크 포함 검사의 기준점 = 마지막 '양성' 클릭(없으면 첫 점).
+  const anchor = [...points].reverse().find((p) => p.label === 1) ?? points[0];
+  const x = anchor.x, y = anchor.y;
   const out = await model({ ...emb, input_points: pts, input_labels: lbl });
   const masks = await processor.post_process_masks(out.pred_masks, original_sizes, reshaped_input_sizes);
   const m = masks[0]; // dims [1, nM, H, W]
@@ -81,11 +91,19 @@ async function point(id: string, x: number, y: number): Promise<{ mask: Uint8Arr
   if (cands.length === 0) for (let k = 0; k < nM; k++) if (areas[k] / per <= CAP) cands.push(k); // 폴백: 포함 후보 없음
   let best = -1;
   if (cands.length > 0) {
-    const bestIou = Math.max(...cands.map((k) => iou[k] ?? 0));
-    const MARGIN = 0.06; // 최고 IoU에서 이만큼 안쪽이면 '같은 품질'로 보고 더 큰 쪽을 허용
-    const strong = cands.filter((k) => (iou[k] ?? 0) >= bestIou - MARGIN);
-    let bestArea = -1;
-    for (const k of strong) if (areas[k] > bestArea) { bestArea = areas[k]; best = k; }
+    if (points.length > 1) {
+      // 정밀 조절(다중 포인트, 음성 포함) — '가장 큰 것'이 아니라 **신뢰도(IoU) 최고** 후보를 고른다.
+      // (양성/음성 점이 의도한 경계를 SAM이 가장 잘 반영한 마스크가 최고 IoU.)
+      let bi = -1;
+      for (const k of cands) if ((iou[k] ?? 0) > bi) { bi = iou[k] ?? 0; best = k; }
+    } else {
+      // 단일 클릭 — 최고 IoU 근접 후보 중 가장 큰 것(작은 객체 클릭 시 이웃 포함 방지).
+      const bestIou = Math.max(...cands.map((k) => iou[k] ?? 0));
+      const MARGIN = 0.06;
+      const strong = cands.filter((k) => (iou[k] ?? 0) >= bestIou - MARGIN);
+      let bestArea = -1;
+      for (const k of strong) if (areas[k] > bestArea) { bestArea = areas[k]; best = k; }
+    }
   }
   if (best < 0) best = 0;
 
@@ -115,7 +133,10 @@ self.onmessage = async (e: MessageEvent) => {
       await prepare(msg.id, msg.blob);
       post({ type: 'ready', id: msg.id });
     } else if (msg.type === 'point') {
-      const r = await point(msg.id, msg.x, msg.y);
+      const r = await decode(msg.id, [{ x: msg.x, y: msg.y, label: 1 }]);
+      post({ type: 'mask', id: msg.id, reqId: msg.reqId, mask: r.mask, w: r.w, h: r.h }, [r.mask.buffer]);
+    } else if (msg.type === 'points') {
+      const r = await decode(msg.id, msg.points as Pt[]);
       post({ type: 'mask', id: msg.id, reqId: msg.reqId, mask: r.mask, w: r.w, h: r.h }, [r.mask.buffer]);
     }
   } catch (err: any) {

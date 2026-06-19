@@ -58,6 +58,19 @@ export function segmentAt(id: string, x: number, y: number): Promise<{ mask: Uin
   });
 }
 
+/** 여러 점(양성 label 1 = 추가 · 음성 label 0 = 빼기)으로 마스크를 정밀 조절한다. */
+export function segmentAtPoints(
+  id: string,
+  points: { x: number; y: number; label: number }[],
+): Promise<{ mask: Uint8Array; w: number; h: number }> {
+  const w = getWorker();
+  const reqId = 'seg' + ++seq;
+  return new Promise((resolve, reject) => {
+    pending.set(reqId, { resolve, reject });
+    w.postMessage({ type: 'points', id, reqId, points });
+  });
+}
+
 /** 유휴 시 모델 미리 받기(선택). */
 export function warmupSegment(): void {
   getWorker();

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useBoardStore } from '@/store/boardStore';
-import { replaceImageCmd } from '@/board/commands';
+import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
+import { replaceImageCmd, addImageNodeCmd } from '@/board/commands';
 import { makeThumb, THUMB_MAX_W } from '@/board/imageLod';
 import { removeBackground, cleanupBackground } from '@/shared/background-removal';
-import { prepareSegment, segmentAt } from '@/shared/segment/segment';
+import { prepareSegment, segmentAt, segmentAtPoints } from '@/shared/segment/segment';
 import { saveAsset } from '@/board/assets';
 import { showToast } from '@/lib/toast';
 import { useZoomModal, type OriginRect } from './useZoomModal';
@@ -15,8 +15,66 @@ import { useZoomModal, type OriginRect } from './useZoomModal';
 
 const MAX_EDIT_EDGE = 1600; // 작업 해상도 상한(성능)
 
-// 'ai' = SAM으로 클릭한 객체를 통째로(맥락 기반) 지움 · 'color' = 같은 색 연결 영역(flood-fill).
-type Tool = 'ai' | 'color';
+// 'ai' = SAM으로 클릭한 객체를 통째로(맥락 기반) 지움 · 'color' = 같은 색 연결 영역(flood-fill)
+// · 'extract' = 객체 분리(클릭→마스킹→수정/저장으로 객체만 따로 복사 + 원본은 배경으로 채움).
+type Tool = 'ai' | 'color' | 'extract';
+type Pt = { x: number; y: number; label: number }; // SAM 정밀 조절 점(1=추가, 0=빼기)
+type Box = { x0: number; y0: number; x1: number; y1: number };
+
+/** 마스크의 바운딩 박스(작업 픽셀 좌표). 없으면 null. */
+function maskBBox(mask: Uint8Array, w: number, h: number): Box | null {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let p = 0; p < w * h; p++) {
+    if (!mask[p]) continue;
+    const x = p % w, y = (p / w) | 0;
+    if (x < x0) x0 = x; if (x > x1) x1 = x;
+    if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  return x1 < 0 ? null : { x0, y0, x1, y1 };
+}
+
+/** 선택 마스크를 '예쁘게' 보여줄 오버레이 타일 — 코랄 반투명 채움 + 또렷한 코랄 외곽선. */
+function buildOverlayTile(mask: Uint8Array, w: number, h: number): HTMLCanvasElement {
+  const tile = document.createElement('canvas');
+  tile.width = w; tile.height = h;
+  const ctx = tile.getContext('2d');
+  if (!ctx) return tile;
+  const od = ctx.createImageData(w, h);
+  const p = od.data;
+  for (let i = 0; i < w * h; i++) {
+    if (!mask[i]) continue;
+    const x = i % w, y = (i / w) | 0;
+    // 2px 외곽선(또렷하게) — 경계 픽셀 + 그 안쪽 1겹.
+    const edge1 =
+      x === 0 || x === w - 1 || y === 0 || y === h - 1 ||
+      !mask[i - 1] || !mask[i + 1] || !mask[i - w] || !mask[i + w];
+    const edge2 = !edge1 && (
+      (x > 1 && !mask[i - 2]) || (x < w - 2 && !mask[i + 2]) ||
+      (y > 1 && !mask[i - 2 * w]) || (y < h - 2 && !mask[i + 2 * w]));
+    p[i * 4] = 242; p[i * 4 + 1] = 115; p[i * 4 + 2] = 62;
+    p[i * 4 + 3] = edge1 ? 255 : edge2 ? 200 : 104; // 외곽선=또렷, 내부=선명한 코랄 틴트
+  }
+  ctx.putImageData(od, 0, 0);
+  return tile;
+}
+
+/** 마스크 영역만 잘라 투명 배경 PNG 캔버스로(분리 객체). box=작업 픽셀 좌표. */
+function buildObjectCanvas(work: HTMLCanvasElement, mask: Uint8Array, w: number, box: Box): HTMLCanvasElement {
+  const bw = box.x1 - box.x0 + 1, bh = box.y1 - box.y0 + 1;
+  const out = document.createElement('canvas');
+  out.width = bw; out.height = bh;
+  const octx = out.getContext('2d');
+  const wctx = work.getContext('2d');
+  if (!octx || !wctx) return out;
+  const src = wctx.getImageData(box.x0, box.y0, bw, bh);
+  const sd = src.data;
+  for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) {
+    const mi = (box.y0 + yy) * w + (box.x0 + xx);
+    if (!mask[mi]) sd[(yy * bw + xx) * 4 + 3] = 0; // 객체 밖은 투명
+  }
+  octx.putImageData(src, 0, 0);
+  return out;
+}
 
 /** 작업 캔버스를 PNG Blob으로(세그먼트 임베딩 입력용). */
 function canvasToBlob(cv: HTMLCanvasElement): Promise<Blob> {
@@ -219,6 +277,20 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
   const segPreparedRef = useRef<string | null>(null);
   const bumpWork = () => { segVersionRef.current++; };
 
+  // 객체 분리(extract) — 선택 마스크 + 예쁜 오버레이 + 정밀 조절 점 + 바운딩박스.
+  const extractMaskRef = useRef<{ mask: Uint8Array; w: number; h: number } | null>(null);
+  const extractTileRef = useRef<HTMLCanvasElement | null>(null);
+  const pointsRef = useRef<Pt[]>([]);
+  const [extractBox, setExtractBox] = useState<Box | null>(null);
+  const [adjusting, setAdjusting] = useState(false);
+  const clearExtract = useCallback(() => {
+    extractMaskRef.current = null;
+    extractTileRef.current = null;
+    pointsRef.current = [];
+    setExtractBox(null);
+    setAdjusting(false);
+  }, []);
+
   const node = useBoardStore.getState().nodes[nodeId];
   const caption = (node?.text || '이미지').split('\n')[0].slice(0, 40) || '이미지';
 
@@ -234,6 +306,9 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     if (!ctx) return;
     ctx.clearRect(0, 0, view.width, view.height);
     ctx.drawImage(work, 0, 0);
+    // 객체 분리 선택 오버레이(있으면) — 작업 이미지 위에 코랄 마스크.
+    const tile = extractTileRef.current;
+    if (tile && tile.width === view.width && tile.height === view.height) ctx.drawImage(tile, 0, 0);
   }, []);
 
   // 지워질 영역을 잠깐 '로딩되듯' 코랄로 펄스 표시(선택 피드백) 후 resolve. 끝나면 호출부가 지운다.
@@ -297,6 +372,13 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // 창 크기 변동 시 객체 분리 컨트롤 위치 재계산.
+  useEffect(() => {
+    const onResize = () => force((n) => n + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   const pushUndo = () => {
     const work = workRef.current;
     if (!work) return;
@@ -335,6 +417,32 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     return segId;
   }, [nodeId]);
 
+  /** SAM 점들로 분리할 객체 마스크를 잡아 오버레이/박스를 갱신. points 1개=첫 선택, 2+=정밀 조절. */
+  const segmentExtract = useCallback(async (points: Pt[]) => {
+    if (!workRef.current) return;
+    setBusy(
+      segPreparedRef.current === `${nodeId}:${segVersionRef.current}`
+        ? 'AI가 객체를 분석하고 있어요…'
+        : 'AI 준비 중… (처음 한 번은 모델 다운로드로 시간이 걸려요)',
+    );
+    try {
+      const segId = await ensurePrepared();
+      const { mask, w, h } =
+        points.length > 1 ? await segmentAtPoints(segId, points) : await segmentAt(segId, points[0].x, points[0].y);
+      const box = maskBBox(mask, w, h);
+      if (!box) { showToast('객체를 찾지 못했어요 — 다시 클릭해 보세요', 'error'); return; }
+      extractMaskRef.current = { mask, w, h };
+      extractTileRef.current = buildOverlayTile(mask, w, h);
+      pointsRef.current = points;
+      setExtractBox(box);
+      redraw();
+    } catch {
+      showToast('AI 분할에 실패했어요', 'error');
+    } finally {
+      setBusy(null);
+    }
+  }, [ensurePrepared, nodeId, redraw]);
+
   const onCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (busy) return;
     const view = viewRef.current;
@@ -344,6 +452,18 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     const x = Math.floor(((e.clientX - rect.left) / rect.width) * work.width);
     const y = Math.floor(((e.clientY - rect.top) / rect.height) * work.height);
     if (x < 0 || y < 0 || x >= work.width || y >= work.height) return;
+
+    // 객체 분리 — 첫 클릭=객체 선택, '수정' 모드에선 클릭=영역 추가 / Alt·Shift+클릭=영역 빼기.
+    if (tool === 'extract') {
+      if (adjusting && pointsRef.current.length > 0) {
+        const label = e.altKey || e.shiftKey ? 0 : 1;
+        await segmentExtract([...pointsRef.current, { x, y, label }]);
+      } else {
+        setAdjusting(false);
+        await segmentExtract([{ x, y, label: 1 }]);
+      }
+      return;
+    }
 
     if (tool === 'color') {
       pushUndo();
@@ -431,6 +551,55 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     }
   };
 
+  /** 저장 — 분리 객체를 보드에 별도 복사 + 원본은 그 자리를 배경으로 메운다(인페인팅). */
+  const onSaveExtract = async () => {
+    const work = workRef.current;
+    const m = extractMaskRef.current;
+    const box = extractBox;
+    if (!work || !m || !box || busy) return;
+    setBusy('객체를 분리하고 있어요…');
+    try {
+      // 1) 분리 객체 PNG(투명 배경) — 보드에 따로 올릴 이미지.
+      const objUrl = buildObjectCanvas(work, m.mask, m.w, box).toDataURL('image/png');
+      // 2) 원본 구멍을 주변 배경으로 자연스럽게 메우고(인페인팅) 원본 노드에 적용(보드 ⌘Z 복원).
+      inpaintByMask(work, m.mask, m.w, m.h);
+      redraw();
+      const baseUrl = work.toDataURL('image/png');
+      let baseThumb: string | null = null;
+      try { baseThumb = await makeThumb(baseUrl, THUMB_MAX_W, true); } catch { baseThumb = null; }
+      const orig = useBoardStore.getState().nodes[nodeId];
+      const od = { ...(orig?.data ?? {}), thumb: baseThumb ?? '' };
+      replaceImageCmd(nodeId, baseUrl, od, '객체 분리(배경 채움)');
+      // 3) 분리 객체를 원본 오른쪽에 새 이미지 노드로(컷아웃처럼 bgRemoved).
+      if (orig) {
+        const bw = box.x1 - box.x0 + 1, bh = box.y1 - box.y0 + 1;
+        const ow = Math.max(48, Math.round((orig.w * bw) / work.width));
+        const oh = Math.max(48, Math.round((orig.h * bh) / work.height));
+        let objThumb: string | null = null;
+        try { objThumb = await makeThumb(objUrl, THUMB_MAX_W, true); } catch { objThumb = null; }
+        const node: BoardNode = {
+          id: newId('image'),
+          type: 'image',
+          x: Math.round(orig.x + orig.w + 24),
+          y: Math.round(orig.y),
+          w: ow,
+          h: oh,
+          src: objUrl,
+          text: `${caption} 분리`,
+          data: { label: `${caption} 분리`, bgRemoved: true, thumb: objThumb ?? '' },
+        };
+        addImageNodeCmd(node, '객체 분리');
+        void saveAsset(`${caption} 분리`, 'image', objUrl, caption);
+      }
+      showToast('객체를 분리했어요 — 보드에 따로 복사됐어요', 'success');
+      requestClose();
+    } catch {
+      showToast('객체 분리에 실패했어요', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const onDownload = () => {
     const work = workRef.current;
     if (!work) return;
@@ -469,6 +638,18 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     'inline-flex items-center gap-t1 rounded-pill border px-t3 py-t2 text-sm font-medium transition-colors duration-150 ease-soft';
   const toolBtn = (active: boolean) =>
     `${btn} ${active ? 'border-accent bg-accent text-on-accent' : 'border-border bg-surface text-fg-2 hover:border-accent hover:text-accent'}`;
+  const pickTool = (t: Tool) => { setTool(t); if (t !== 'extract') clearExtract(); };
+
+  // 객체 분리 — 수정/저장 버튼 위치(선택 박스 아래) 계산: 작업 픽셀 → 화면 좌표.
+  const view = viewRef.current;
+  const rect = view?.getBoundingClientRect();
+  const extractUi =
+    tool === 'extract' && extractBox && rect && view
+      ? {
+          left: rect.left + ((extractBox.x0 + extractBox.x1) / 2 / view.width) * rect.width,
+          top: rect.top + (extractBox.y1 / view.height) * rect.height + 10,
+        }
+      : null;
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 120 }}>
@@ -491,10 +672,13 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
         className="flex flex-wrap items-center gap-t2 px-t6 py-t3"
       >
         <span className="mr-t2 max-w-[16ch] truncate font-display text-base font-semibold text-on-dark">{caption} 편집</span>
-        <button className={toolBtn(tool === 'ai')} onClick={() => setTool('ai')} title="클릭한 객체를 AI가 통째로 지우고, 그 자리를 주변 배경으로 자연스럽게 채웁니다">
+        <button className={toolBtn(tool === 'ai')} onClick={() => pickTool('ai')} title="클릭한 객체를 AI가 통째로 지우고, 그 자리를 주변 배경으로 자연스럽게 채웁니다">
           <Eraser /> AI 객체 지우기
         </button>
-        <button className={toolBtn(tool === 'color')} onClick={() => setTool('color')} title="클릭한 곳과 같은 색 영역(연결)을 지웁니다">
+        <button className={toolBtn(tool === 'extract')} onClick={() => pickTool('extract')} title="객체를 클릭하면 AI가 마스킹합니다. 수정으로 정밀 조절, 저장하면 객체만 보드에 따로 복사하고 원본 자리는 배경으로 채웁니다">
+          <SeparateIcon /> 객체 분리
+        </button>
+        <button className={toolBtn(tool === 'color')} onClick={() => pickTool('color')} title="클릭한 곳과 같은 색 영역(연결)을 지웁니다">
           색 기반
         </button>
         {tool === 'color' && (
@@ -566,10 +750,39 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
           </div>
         )}
       </div>
+      {/* 객체 분리 — 선택 객체 아래에 뜨는 수정/저장 컨트롤 */}
+      {extractUi && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{ position: 'fixed', left: extractUi.left, top: extractUi.top, transform: 'translateX(-50%)', zIndex: 130 }}
+          className="flex items-center gap-t1 rounded-pill bg-fg/90 px-t1 py-t1 shadow-xl backdrop-blur-sm"
+        >
+          <button
+            className={`${btn} ${adjusting ? 'border-accent bg-accent text-on-accent' : 'border-transparent bg-surface text-fg-2 hover:text-accent'}`}
+            onClick={() => setAdjusting((v) => !v)}
+            disabled={!!busy}
+            title="선택 영역을 정밀 조절: 클릭=영역 추가 · Alt(또는 Shift)+클릭=영역 빼기"
+          >
+            {adjusting ? '✓ 조절 중' : '수정'}
+          </button>
+          <button
+            className={`${btn} border-none bg-accent text-on-accent hover:bg-accent-hover`}
+            onClick={() => void onSaveExtract()}
+            disabled={!!busy}
+            title="객체만 보드에 따로 복사하고, 원본 자리는 배경으로 채웁니다"
+          >
+            저장
+          </button>
+        </div>
+      )}
       <p onClick={(e) => e.stopPropagation()} className="px-t6 pb-t3 text-center text-xs text-on-dark/70">
-        {tool === 'ai'
-          ? 'AI 객체 지우기: 지우려는 객체를 클릭하면 AI가 그 객체만 지우고 자리를 주변 배경으로 자연스럽게 메웁니다 (처음 한 번은 모델 준비로 잠시 걸려요) · ⌘Z 되돌리기'
-          : '색 기반: 클릭한 곳과 같은 색 연결 영역을 투명하게 지웁니다 · 허용범위로 덜/더 지우기 · ⌘Z 되돌리기'}
+        {tool === 'extract'
+          ? adjusting
+            ? '수정 중: 클릭 = 영역 추가 · Alt(또는 Shift)+클릭 = 영역 빼기 — 정확해지면 저장을 누르세요'
+            : '객체 분리: 분리할 객체를 클릭하면 AI가 마스킹합니다 · 아래 수정으로 정밀 조절 · 저장하면 보드에 따로 복사되고 원본은 배경으로 채워져요'
+          : tool === 'ai'
+            ? 'AI 객체 지우기: 지우려는 객체를 클릭하면 AI가 그 객체만 지우고 자리를 주변 배경으로 자연스럽게 메웁니다 (처음 한 번은 모델 준비로 잠시 걸려요) · ⌘Z 되돌리기'
+            : '색 기반: 클릭한 곳과 같은 색 연결 영역을 투명하게 지웁니다 · 허용범위로 덜/더 지우기 · ⌘Z 되돌리기'}
       </p>
       </div>
     </div>
@@ -604,6 +817,15 @@ function UndoIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M3 7v6h6" /><path d="M3 13a9 9 0 1 0 3-7.7L3 8" />
+    </svg>
+  );
+}
+function SeparateIcon() {
+  // 객체를 떼어내는 느낌 — 두 카드가 분리되는 모양.
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="7" width="10" height="13" rx="2" />
+      <path d="M16 4h3a2 2 0 0 1 2 2v9" strokeDasharray="3 3" />
     </svg>
   );
 }
