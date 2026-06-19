@@ -394,7 +394,8 @@
   <input id="file" type="file" accept="video/*" hidden />
 
   <div class="stage" id="stage">
-    <video id="v" playsinline loop></video>
+    <!-- preload=auto: 정지 상태에서도 첫 프레임(포스터)이 보이도록 충분히 미리 받는다. -->
+    <video id="v" playsinline loop preload="auto"></video>
 
     <div id="empty">
       <span class="clap">🎬</span>
@@ -492,7 +493,10 @@
       v.src = objectUrl;
       document.body.classList.add('loaded');
       window.kvSetTitle((f.name || '').replace(/\.[^.]+$/, '')); // 헤더 제목 = 파일명(확장자 제외)
-      v.play().catch(() => { /* 자동재생 차단 시 — 중앙 ▶로 시작 */ });
+      // 기본값 = 정지. 자동재생하지 않고 첫 프레임만 보여준다 → 중앙 ▶(또는 카드 재생 버튼) 클릭 시 재생.
+      v.pause();
+      document.body.classList.add('paused');
+      postState();
     }
     file.addEventListener('change', (e) => loadFile(e.target.files && e.target.files[0]));
 
@@ -778,8 +782,10 @@
       v.src = u;
       document.body.classList.add('loaded');
       if (name) window.kvSetTitle(name);
+      // 기본값 = 정지. 생성·딥링크 영상도 자동재생하지 않고 ▶ 클릭 시 재생한다.
+      v.pause();
+      document.body.classList.add('paused');
       postState();
-      v.play().catch(() => {});
     };
 
     // ── 상단 헤더 제목 — ?title= 쿼리로 주입(부모가 카드 제목을 넘긴다). 외부에서
