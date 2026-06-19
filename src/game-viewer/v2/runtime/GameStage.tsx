@@ -123,6 +123,7 @@ export function GameStage() {
   // 자료(요소) — 게임 위에 즉흥으로 올리는 스티커·글자·그림.
   const addMaterial = useMaterials((s) => s.add);
   const matCount = useMaterials((s) => s.items.length);
+  const matItems = useMaterials((s) => s.items); // 확장 공간 점유 판정용(위치 필요)
   const addSeed = useGen((s) => s.addSeed);
   const sourceMode = useGen((s) => s.sourceMode);
   const setSourceMode = useGen((s) => s.setSourceMode);
@@ -271,6 +272,9 @@ export function GameStage() {
   const cardX = SIDE + (vp.w - cardW) / 2; // 캔버스 내 게임 카드 위치(가운데 화면)
   const canvasW = SIDE * 2 + vp.w; // 좌 빈보드 + 화면 + 우 빈보드 = 3화면
   const canvasSize = useMemo<StageSize>(() => ({ w: canvasW, h: vp.h }), [canvasW, vp.h]);
+  // 확장 공간(게임 카드 오른쪽)에 자료(이미지·요소)가 하나라도 놓이면 placeholder 안내를 숨긴다.
+  // 자료 x는 캔버스(3화면) 정규화 → px로 환산해 카드 오른쪽 끝보다 오른쪽이면 확장 공간 점유.
+  const extensionOccupied = canvasW > 0 && matItems.some((m) => m.x * canvasW > cardX + cardW);
   const clampPan = (v: number) => Math.max(-SIDE, Math.min(SIDE, v));
 
   const [panX, setPanX] = useState(0);
@@ -739,7 +743,7 @@ export function GameStage() {
                     );
                   })}
                 </div>
-              ) : (
+              ) : extensionOccupied ? null : (
                 <div className="kv-board-hint" style={{ position: "absolute", left: cardX + cardW + vp.w * 0.2, top: "50%", transform: "translateY(-50%)" }}>
                   <div className="kv-board-hint-emoji" aria-hidden>🧩</div>
                   <b>놀이 확장</b>
