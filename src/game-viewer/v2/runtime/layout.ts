@@ -24,12 +24,33 @@ export function radiusStyle(style?: Style): CSSProperties {
   return typeof style?.cornerRadius === "number" ? { borderRadius: style.cornerRadius } : {};
 }
 
-/** 노드 style.crop → 이미지 크롭 스타일(object-fit:cover + scale·pan). 없으면 빈 객체. */
-export function cropImgStyle(style?: Style): CSSProperties {
-  const c = style?.crop;
+export type Crop = NonNullable<Style["crop"]>;
+
+/**
+ * 페이지(라운드)별 크롭을 고른다 — 해당 라운드 값 우선, 없으면 공통 crop(레거시)으로 폴백.
+ * 같은 슬롯이라도 페이지마다 다른 그림이 오므로 스케일/위치를 페이지마다 따로 둔다.
+ */
+export function resolveCrop(style: Style | undefined, round: number): Crop | undefined {
+  return style?.cropByRound?.[String(round)] ?? style?.crop;
+}
+
+/**
+ * crop → 이미지 크롭 스타일. crop 이 있으면 프레임을 cover 로 채우고(잘림은 컨테이너
+ * overflow:hidden 이 담당), scale·pan 을 transform 으로 얹는다. 없으면 빈 객체(기본 contain).
+ * → 이미지 '크기'는 프레임과 따로 키울 수 있고, 키운 만큼 프레임 영역에서 잘린다.
+ */
+export function cropImgStyle(c?: Crop): CSSProperties {
+  if (!c) return {};
+  const base: CSSProperties = { width: "100%", height: "100%", objectFit: "cover" };
+  if (c.scale === 1 && !c.x && !c.y) return base;
+  return { ...base, transform: `scale(${c.scale}) translate(${(c.x ?? 0) * 100}%, ${(c.y ?? 0) * 100}%)` };
+}
+
+/**
+ * crop → 이모지/글자 등 비-이미지 콘텐츠의 확대·이동 transform.
+ * 이미지처럼 '콘텐츠만' 프레임과 따로 키우고, 키운 만큼 프레임(overflow:hidden)에서 잘리게 한다.
+ */
+export function cropContentStyle(c?: Crop): CSSProperties {
   if (!c || (c.scale === 1 && !c.x && !c.y)) return {};
-  return {
-    objectFit: "cover",
-    transform: `scale(${c.scale}) translate(${(c.x ?? 0) * 100}%, ${(c.y ?? 0) * 100}%)`,
-  };
+  return { transform: `scale(${c.scale}) translate(${(c.x ?? 0) * 100}%, ${(c.y ?? 0) * 100}%)` };
 }

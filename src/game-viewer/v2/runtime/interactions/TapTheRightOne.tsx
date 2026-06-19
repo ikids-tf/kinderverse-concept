@@ -7,6 +7,7 @@ import { useGame } from "../useGame";
 import type { SceneNode } from "../../schema/interactiveDoc";
 
 const EMPTY: SceneNode[] = [];
+const EMPTY_IDS: string[] = [];
 
 export function TapTheRightOne() {
   const doc = useGame((s) => s.doc);
@@ -15,6 +16,9 @@ export function TapTheRightOne() {
   const roundIdx = useGame((s) => s.roundIdx);
   const tap = useGame((s) => s.tap);
   const nodes = doc?.stage.nodes ?? EMPTY;
+  // 편집 대상 슬롯 = 셔플 전 '정본' 슬롯(optionSlotIds[optionIdx]). 그래야 더블클릭한 보기의 내용을
+  // (셔플된 자리가 아니라) 그 보기 자체로 편집한다. tap(채점)은 셔플된 표시 슬롯(opt.slotId)을 쓴다.
+  const optionSlotIds = doc?.interaction.kind === "tap-the-right-one" ? doc.interaction.optionSlotIds : EMPTY_IDS;
 
   return (
     <>
@@ -31,6 +35,7 @@ export function TapTheRightOne() {
             disabled={busy || opt.status === "locked"}
             enterName="drop"
             onClick={() => tap(opt.slotId)}
+            nodeId={optionSlotIds[opt.optionIdx] ?? opt.slotId}
           />
         );
       })}

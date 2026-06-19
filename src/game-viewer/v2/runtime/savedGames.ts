@@ -140,6 +140,22 @@ export function saveCreatedGame(input: InteractiveDocInput): void {
   }
 }
 
+/** 기존 '내 놀이'를 같은 id로 덮어써 갱신(없으면 추가). 편집 중인 내 놀이를 저장할 때 새 항목을 만들지 않는다. */
+export function updateSavedGame(id: string, input: InteractiveDocInput): void {
+  try {
+    useSavedGames.getState().save({
+      id,
+      title: input.meta?.title ?? "내 게임",
+      category: categoryForDoc(input),
+      doc: input,
+      assets: snapshotAssets(input),
+      ts: Date.now(),
+    });
+  } catch {
+    /* 저장 실패는 무시 */
+  }
+}
+
 /** asset URL 맵을 assetStore에 프라임(ready) — 저장본을 다시 열 때 그 그림 그대로. */
 export function primeAssets(assets?: Record<string, string>): void {
   if (!assets || !Object.keys(assets).length) return;
@@ -183,4 +199,63 @@ export function getWorkingGame(): WorkingGame | null {
   } catch {
     return null;
   }
+}
+
+/* ───────────────── 기본 게임 편집본(오버라이드) — 기본 게임을 고쳐 저장하면 '기본도 바뀐다' ──────────────── */
+// 기본 게임(FIXTURES)은 코드 상수라 그 자체를 바꿀 수 없다. 대신 키별 편집본을 로컬에 두고,
+// loadExample이 기본값 대신 이 편집본을 연다. 새 '내 놀이'를 만들지 않고 그 기본 게임이 바뀐다.
+const BASE_KEY = "kv:base:v1";
+
+export interface BaseOverride {
+  doc: InteractiveDocInput;
+  assets: Record<string, string>;
+}
+type BaseMap = Record<string, BaseOverride>;
+
+function loadBaseMap(): BaseMap {
+  try {
+    const raw = localStorage.getItem(BASE_KEY);
+    const o = raw ? JSON.parse(raw) : {};
+    return o && typeof o === "object" && !Array.isArray(o) ? (o as BaseMap) : {};
+  } catch {
+    return {};
+  }
+}
+function persistBaseMap(map: BaseMap): void {
+  try {
+    localStorage.setItem(BASE_KEY, JSON.stringify(map));
+  } catch {
+    /* 용량 초과 등 — 인메모리 유지(플레이 방해 0) */
+  }
+}
+
+interface BaseOverridesState {
+  map: BaseMap;
+  /** 기본 게임(FIXTURES 키)의 편집본을 저장 — 다음에 그 기본 게임을 열면 이게 뜬다. */
+  saveOverride: (key: string, input: InteractiveDocInput) => void;
+  /** 기본 게임을 원래(코드 기본값)대로 되돌린다. */
+  clearOverride: (key: string) => void;
+}
+
+export const useBaseOverrides = create<BaseOverridesState>((set) => ({
+  map: loadBaseMap(),
+  saveOverride: (key, input) =>
+    set((s) => {
+      const map = { ...s.map, [key]: { doc: input, assets: snapshotAssets(input) } };
+      persistBaseMap(map);
+      return { map };
+    }),
+  clearOverride: (key) =>
+    set((s) => {
+      if (!(key in s.map)) return s;
+      const map = { ...s.map };
+      delete map[key];
+      persistBaseMap(map);
+      return { map };
+    }),
+}));
+
+/** 기본 게임 편집본(있으면) — loadExample이 코드 기본값 대신 이걸 연다. */
+export function getBaseOverride(key: string): BaseOverride | null {
+  return useBaseOverrides.getState().map[key] ?? null;
 }

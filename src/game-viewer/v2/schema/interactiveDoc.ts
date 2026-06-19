@@ -75,20 +75,26 @@ export const AssetRef = z.object({
   styleLock: z.boolean().default(false),
 });
 
+/** 이미지/콘텐츠 크롭 — scale≥1 확대, x·y 는 정규화(-0.5..0.5) 패닝. object-fit:cover 위에 적용. */
+export const CropBox = z.object({
+  scale: z.number().min(1).default(1),
+  x: z.number().default(0),
+  y: z.number().default(0),
+});
+
 export const Style = z
   .object({
     cornerRadius: z.number().min(0).default(24),
     shadow: z.boolean().default(true),
     tint: z.string().optional(), // theme 팔레트 토큰
     fontRole: z.enum(["display", "body"]).optional(),
-    /** 이미지 크롭(편집) — scale≥1 확대, x·y 는 정규화(-0.5..0.5) 패닝. object-fit:cover 위에 적용. */
-    crop: z
-      .object({
-        scale: z.number().min(1).default(1),
-        x: z.number().default(0),
-        y: z.number().default(0),
-      })
-      .optional(),
+    /** 공통 크롭(레거시·기본값). 슬롯은 라운드(페이지) 공유라 이 값은 모든 페이지에 적용된다. */
+    crop: CropBox.optional(),
+    /**
+     * 페이지(라운드)별 크롭 — 키는 라운드 인덱스 문자열. 같은 슬롯이라도 페이지마다 다른 그림이
+     * 오므로 스케일/위치도 페이지마다 따로 조절한다. 해당 페이지 값이 없으면 crop(공통)으로 폴백.
+     */
+    cropByRound: z.record(z.string(), CropBox).optional(),
   })
   .partial();
 

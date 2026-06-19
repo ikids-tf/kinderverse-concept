@@ -11,6 +11,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { generateGame } from "../generate/orchestrator";
 import { setBackgroundFromPrompt } from "../generate/background";
+import { setNodeContentFromPrompt } from "../generate/nodeContent";
 import { useGen, latestStep } from "./genProgress";
 import { applyEditIntent } from "./editIntent";
 import { useGame } from "./useGame";
@@ -38,6 +39,9 @@ async function generateFromPrompt(prompt: string): Promise<void> {
   // 0) 배경 선택(편집) → 프롬프트로 배경 이미지 생성
   const g = useGame.getState();
   if (g.bgSelected && g.mode === "edit") { await setBackgroundFromPrompt(prompt); return; }
+  // 0.5) 게임 요소(슬롯) 선택(편집) → 프롬프트로 '그 자리'에 그림을 생성·적용.
+  //      기본 게임도 동일 — 새 게임을 만들지 않고 선택한 프레임의 이미지만 바꾼다.
+  if (g.mode === "edit" && g.selectedNodeId) { await setNodeContentFromPrompt(g.selectedNodeId, prompt); return; }
   if (applyEditIntent(prompt).ok) return;
   await generateGame(prompt, { seedImages: useGen.getState().seeds });
 }
@@ -77,9 +81,23 @@ export function useBoardBridge(): void {
       );
     });
 
+    // 플레이/편집 모드를 보드로 알린다 → 보드가 플레이 중엔 하단 프롬프트바를 숨긴다.
+    // playing = 게임이 로드된 채 'play' 모드(아이 대면). 편집/만들기(빈 화면)에선 false.
+    let lastPlaying: boolean | null = null;
+    const postMode = () => {
+      const g = useGame.getState();
+      const playing = g.mode === "play" && !!g.doc;
+      if (playing === lastPlaying) return;
+      lastPlaying = playing;
+      window.parent.postMessage({ type: "kv-game-mode", playing }, "*");
+    };
+    postMode();
+    const unsubMode = useGame.subscribe(postMode);
+
     return () => {
       window.removeEventListener("message", onMessage);
       unsubGen();
+      unsubMode();
       delete (window as ChromeWindow).kvSetChrome;
     };
   }, []);

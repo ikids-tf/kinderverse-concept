@@ -20,13 +20,15 @@ import { CombineGame } from "./interactions/CombineGame";
 import { StageBackground } from "./StageBackground";
 import { RevealEffect } from "./effects/RevealEffect";
 import { EditLayer } from "./editor/EditLayer";
+import { PageNav } from "./editor/PageNav";
+import { InlineEditContext } from "./editContext";
 import { GameEditRail } from "./editor/GameEditRail";
 import { GamePromptBar } from "./GamePromptBar";
 import { MaterialsLayer } from "./MaterialsLayer";
 import { useMaterials } from "./materials";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { GamePicker } from "./GamePicker";
-import { useSavedGames, saveWorkingGame, getWorkingGame, primeAssets } from "./savedGames";
+import { useSavedGames, saveWorkingGame, getWorkingGame, primeAssets, useBaseOverrides, updateSavedGame } from "./savedGames";
 import { useGen } from "./genProgress";
 import { StageSizeContext, type StageSize } from "./stageSize";
 import { FIXTURES, FIXTURE_KEYS } from "./fixtures";
@@ -93,6 +95,7 @@ const NURI_LABEL: Record<string, string> = {
 export function GameStage() {
   const doc = useGame((s) => s.doc);
   const exampleKey = useGame((s) => s.exampleKey);
+  const savedGameId = useGame((s) => s.savedGameId);
   const loadSeq = useGame((s) => s.loadSeq);
   const phase = useGame((s) => s.phase);
   const roundIdx = useGame((s) => s.roundIdx);
@@ -109,6 +112,8 @@ export function GameStage() {
   const start = useGame((s) => s.start);
   const next = useGame((s) => s.next);
   const restart = useGame((s) => s.restart);
+  const stop = useGame((s) => s.stop);
+  const enterExtend = useGame((s) => s.enterExtend);
   const toggleTts = useGame((s) => s.toggleTts);
   const mode = useGame((s) => s.mode);
   const setMode = useGame((s) => s.setMode);
@@ -192,11 +197,18 @@ export function GameStage() {
   }, [loadSeq, mode]);
 
   // 저장 — 현재 게임(편집 포함)을 로컬에 저장(새로고침해도 남음). 단독 탭 로드 시 자동 복원.
+  // 기본 게임을 편집한 경우(exampleKey 있음)엔 그 '기본 게임 자체'도 갱신 → 다시 열면 이 편집본이 뜬다
+  // (새 '내 놀이'를 만들지 않고 기본이 바뀐다).
   const [justSaved, setJustSaved] = useState(false);
   const onSaveGame = () => {
-    const d = useGame.getState().doc;
+    const st = useGame.getState();
+    const d = st.doc;
     if (!d) return;
-    if (saveWorkingGame(d as never)) {
+    // 내 놀이를 편집 중이면 그 항목 갱신(새로 안 만듦) · 기본 게임이면 그 기본을 갱신 · 그 외엔 작업 슬롯만.
+    if (st.savedGameId) updateSavedGame(st.savedGameId, d as never);
+    else if (st.exampleKey) useBaseOverrides.getState().saveOverride(st.exampleKey, d as never);
+    const ok = saveWorkingGame(d as never);
+    if (ok || st.savedGameId || st.exampleKey) {
       setJustSaved(true);
       window.setTimeout(() => setJustSaved(false), 1400);
     }
@@ -213,6 +225,15 @@ export function GameStage() {
       useGame.getState().loadDoc(w.doc as never);
     }
   }, []);
+
+  // 자동 저장(단독 탭) — 수정/생성으로 doc이 바뀔 때마다 잠시 후 로컬 작업 슬롯에 기록한다.
+  // 저장 버튼을 누르지 않아도 새로고침하면 마지막 편집 상태가 위 복원 effect로 그대로 돌아온다.
+  // (드래그/크롭처럼 연속으로 바뀌어도 디바운스로 마지막 한 번만 저장. 임베드는 보드가 영속을 관리.)
+  useEffect(() => {
+    if (isEmbedded || !restoredRef.current || !doc) return;
+    const id = window.setTimeout(() => { saveWorkingGame(doc as never); }, 600);
+    return () => window.clearTimeout(id);
+  }, [doc]);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<StageSize>({ w: 0, h: 0 });
@@ -564,7 +585,7 @@ export function GameStage() {
                 <button
                   type="button"
                   className={`icon-btn kv-save-btn${justSaved ? " saved" : ""}`}
-                  title="저장 (새로고침해도 남아요)"
+                  title={justSaved ? "저장됐어요" : savedGameId ? "저장 — 이 '내 놀이'가 갱신됩니다" : exampleKey ? "저장 — 이 기본 게임이 이 편집본으로 바뀝니다" : "저장 (새로고침해도 남아요)"}
                   aria-label="저장"
                   disabled={!doc}
                   onClick={onSaveGame}
@@ -661,9 +682,10 @@ export function GameStage() {
                     {doc && <StageBackground />}
 
                     {doc && mode === "edit" && <EditLayer />}
+                    {doc && mode === "edit" && <PageNav />}
 
                     {doc && mode === "play" && (
-                      <>
+                      <InlineEditContext.Provider value={showToolbar}>
                         {unclaimed.map((node) => (
                           <NodeRenderer
                             key={node.id}
@@ -694,7 +716,7 @@ export function GameStage() {
                         ) : (
                           <TapTheRightOne />
                         )}
-                      </>
+                      </InlineEditContext.Provider>
                     )}
 
                     <div className={`banner${banner ? " show " + (banner.ok ? "ok" : "no") : ""}`}>
@@ -732,7 +754,14 @@ export function GameStage() {
                       <p>{maxScore}개 중 {score}개 맞혔어요!</p>
                       <div className="finish-actions">
                         <button type="button" className="big-btn" onClick={restart}>↺ 다시 하기</button>
-                        <button type="button" className="extend-listen" onClick={panRight}>
+                        <button type="button" className="finish-quit" onClick={() => { stop(); setFocus(false); }}>
+                          ✕ 그만하기
+                        </button>
+                        <button
+                          type="button"
+                          className="extend-listen"
+                          onClick={() => { if (doc && doc.extend.length > 0) enterExtend(0); panRight(); }}
+                        >
                           확장 활동 <span aria-hidden>→</span>
                         </button>
                       </div>
@@ -806,8 +835,9 @@ export function GameStage() {
         </div>
 
         {/* 하단 프롬프트바 — 단독 탭은 자체 바, 임베드/풀스크린은 보드 공통 바가 같은 동작을 한다.
-            요소 선택 후 입력 = 그 요소 편집(보드와 동일), 선택 없으면 게임 생성. */}
-        {!isEmbedded && !isFs && !focus && <GamePromptBar />}
+            요소 선택 후 입력 = 그 요소 편집(보드와 동일), 선택 없으면 게임 생성.
+            게임 플레이 중(게임 로드 + play 모드)엔 숨긴다 — 편집 모드/만들기(빈 화면)에서만 노출. */}
+        {!isEmbedded && !isFs && !focus && !(mode === "play" && !!doc) && <GamePromptBar />}
       </div>
     </StageSizeContext.Provider>
   );

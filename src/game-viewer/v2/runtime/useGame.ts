@@ -19,6 +19,7 @@ import type { ContentBinding, InteractiveDoc, InteractiveDocInput } from "../sch
 import { FIXTURES, type ExampleKey } from "./fixtures";
 import { answerEmoji } from "./content";
 import { primeImages } from "./assetStore";
+import { getBaseOverride, primeAssets } from "./savedGames";
 import { emitActor } from "./riveBus";
 
 export type Phase = "start" | "playing" | "extend" | "finished";
@@ -30,6 +31,8 @@ export interface TapOption {
   content: ContentBinding;
   correct: boolean;
   status: OptStatus;
+  /** 라운드 options 배열에서의 원래 인덱스(셔플 전) — 편집 시 셔플된 자리 대신 정본 슬롯을 찾는 데 쓴다. */
+  optionIdx: number;
 }
 export interface MatchItem {
   slotId: string;
@@ -106,6 +109,8 @@ export interface Sfx {
 export interface GameStore {
   doc: InteractiveDoc | null;
   exampleKey: ExampleKey | null;
+  /** 편집 중인 '내 놀이' id(있으면) — 저장 시 새로 만들지 않고 이 항목을 갱신한다. 기본 게임이면 null. */
+  savedGameId: string | null;
   /** 새 게임 로드마다 +1 — 편집 undo 히스토리 초기화 신호(로드는 같은 id여도 새 세션). */
   loadSeq: number;
   phase: Phase;
@@ -177,9 +182,13 @@ export interface GameStore {
   mode: "play" | "edit";
   selectedNodeId: string | null;
   bgSelected: boolean; // 편집 모드에서 '배경'을 선택했는지(프롬프트로 배경 생성 대상)
+  /** 편집 중인 라운드(페이지) 인덱스 — 편집 미리보기·콘텐츠 수정 대상(play의 roundIdx와 별개). */
+  editRoundIdx: number;
+  /** 일반 화면 더블클릭 편집 → 편집 레이어가 이 노드의 글자 편집을 자동으로 연다(1회 소비). */
+  autoEditNodeId: string | null;
 
   loadExample: (key: ExampleKey) => void;
-  loadDoc: (input: InteractiveDocInput, key?: ExampleKey | null) => void;
+  loadDoc: (input: InteractiveDocInput, key?: ExampleKey | null, savedId?: string | null) => void;
   start: () => void;
   tap: (slotId: string) => void;
   matchTap: (side: Side, slotId: string) => void;
@@ -195,18 +204,33 @@ export interface GameStore {
   enterExtend: (idx: number) => void;
   nextExtend: () => void;
   restart: () => void;
+  /** 그만하기 — 게임을 멈추고 시작(인트로) 화면으로 되돌린다(점수·진행 초기화). */
+  stop: () => void;
   toggleTts: () => void;
   setMode: (mode: "play" | "edit") => void;
   selectNode: (id: string | null) => void;
   selectBg: (v: boolean) => void;
   setBackgroundImage: (assetId: string | null) => void;
-  /** 편집: 선택 노드(슬롯)의 라운드0 콘텐츠를 교체(프롬프트로 만든 그림/글자 적용). */
-  setNodeContent: (nodeId: string, content: ContentBinding) => void;
-  /** 편집: 보기 슬롯을 정답으로 지정(tap·pattern-next). 라운드0에서 그 보기만 correct=true. */
+  /** 편집: 선택 노드(슬롯) 콘텐츠를 교체(프롬프트로 만든 그림/글자 적용). roundIdx 미지정 시 현재 편집 페이지.
+   *  비동기 생성이 끝나는 시점엔 편집 페이지가 바뀌어 있을 수 있어, 호출부가 제출 시점 페이지를 넘긴다. */
+  setNodeContent: (nodeId: string, content: ContentBinding, roundIdx?: number) => void;
+  /** 편집: 보기 슬롯을 정답으로 지정(tap·pattern-next). 현재 편집 페이지에서 그 보기만 correct=true. */
   setCorrectOption: (nodeId: string) => void;
   patchNodeTransform: (id: string, patch: Partial<{ x: number; y: number; w: number; h: number }>) => void;
   /** 편집: 노드 style 병합(모서리 라운드·크롭 등). doc 교체라 undo 가능. */
   setNodeStyle: (id: string, patch: Partial<NonNullable<SceneNode["style"]>>) => void;
+  /** 편집: 특정 페이지(라운드)의 크롭만 설정 — 같은 슬롯이라도 페이지마다 따로 조절. */
+  setNodeCrop: (id: string, round: number, crop: { scale: number; x: number; y: number }) => void;
+  /** 편집: 편집할 페이지(라운드) 선택(범위 클램프). */
+  setEditRound: (idx: number) => void;
+  /** 편집: 현재 페이지(라운드)를 복제해 다음에 새 페이지를 추가하고 그 페이지로 이동. */
+  addRound: () => void;
+  /** 편집: 현재 페이지(라운드) 삭제(최소 1개는 유지). */
+  removeRound: () => void;
+  /** 일반(플레이) 화면에서 노드를 더블클릭 → 편집 레이어로 들어가 그 노드(보던 페이지) 편집을 바로 연다. */
+  editNodeInline: (nodeId: string) => void;
+  /** 자동 편집 대상 설정/해제(편집 레이어가 소비 후 null). */
+  setAutoEditNode: (id: string | null) => void;
 }
 
 /* ── 타이머 관리 (라운드 시퀀싱) ── */
@@ -243,6 +267,19 @@ function maxScoreOf(doc: InteractiveDoc): number {
   if (it.kind === "find-it") return it.rounds.reduce((s, r) => s + r.finds.length, 0);
   if (it.kind === "sequence-tap") return it.rounds.reduce((s, r) => s + r.steps.length, 0);
   return it.rounds.length; // tap-the-right-one · binary-choice · pattern-next · combine
+}
+
+/** 모든 인터랙션 변형은 rounds 배열을 가진다 — 라운드(페이지) 배열만 교체해 새 인터랙션을 만든다(kind 보존). */
+function withRounds(
+  it: InteractiveDoc["interaction"],
+  fn: (rounds: unknown[]) => unknown[],
+): InteractiveDoc["interaction"] {
+  const src = (it as unknown as { rounds: readonly unknown[] }).rounds;
+  return { ...(it as object), rounds: fn([...src]) } as InteractiveDoc["interaction"];
+}
+/** 라운드(페이지) 깊은 복제 — 라운드는 순수 데이터(콘텐츠 바인딩)라 JSON 복제로 충분·안전. */
+function cloneRound(r: unknown): unknown {
+  return JSON.parse(JSON.stringify(r));
 }
 
 /** 한 라운드의 뷰 상태 슬라이스를 결정론적으로 조립(셔플 제외). */
@@ -317,11 +354,12 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
 
   if (it.kind === "tap-the-right-one") {
     const round = it.rounds[idx];
-    const shuffled = shuffle(round.options);
+    // 셔플하되 원래 인덱스(optionIdx)를 함께 옮겨, 편집 시 셔플된 자리가 아닌 정본 슬롯을 찾을 수 있게 한다.
+    const shuffled = shuffle(round.options.map((o, oi) => ({ o, oi })));
     const tapOptions: TapOption[] = [];
     it.optionSlotIds.forEach((slotId, i) => {
-      const o = shuffled[i];
-      if (o) tapOptions.push({ slotId, content: o.content, correct: o.correct, status: "idle" });
+      const e = shuffled[i];
+      if (e) tapOptions.push({ slotId, content: e.o.content, correct: e.o.correct, status: "idle", optionIdx: e.oi });
     });
 
     const revealEff = doc.effects.find((e) => e.kind === "reveal");
@@ -408,11 +446,11 @@ function buildRound(doc: InteractiveDoc, idx: number): RoundView {
       const c = round.sequence[i];
       if (c) patternSeq.push({ slotId, content: c });
     });
-    const shuffled = shuffle(round.options);
+    const shuffled = shuffle(round.options.map((o, oi) => ({ o, oi })));
     const tapOptions: TapOption[] = [];
     it.optionSlotIds.forEach((slotId, i) => {
-      const o = shuffled[i];
-      if (o) tapOptions.push({ slotId, content: o.content, correct: o.correct, status: "idle" });
+      const e = shuffled[i];
+      if (e) tapOptions.push({ slotId, content: e.o.content, correct: e.o.correct, status: "idle", optionIdx: e.oi });
     });
     return { ...emptyRound(), patternSeq, tapOptions, question: "다음에 올 친구는 무엇일까요?" };
   }
@@ -477,6 +515,7 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
   return {
     doc,
     exampleKey: key,
+    savedGameId: null,
     phase: "start",
     roundIdx: 0,
     totalRounds: doc.interaction.rounds.length,
@@ -520,6 +559,8 @@ function freshState(doc: InteractiveDoc, key: ExampleKey | null): Partial<GameSt
     mode: "play",
     selectedNodeId: null,
     bgSelected: false,
+    editRoundIdx: 0,
+    autoEditNodeId: null,
   };
 }
 
@@ -595,6 +636,7 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
   return {
     doc: null,
     exampleKey: null,
+    savedGameId: null,
     loadSeq: 0,
     phase: "start",
     roundIdx: 0,
@@ -639,16 +681,25 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     mode: "play",
     selectedNodeId: null,
     bgSelected: false,
+    editRoundIdx: 0,
+    autoEditNodeId: null,
 
     loadExample: (key) => {
+      // 기본 게임 편집본(오버라이드)이 있으면 코드 기본값 대신 그걸 연다 — '기본이 바뀐' 상태로.
+      const override = getBaseOverride(key);
+      if (override) {
+        primeAssets(override.assets);
+        get().loadDoc(override.doc, key);
+        return;
+      }
       clearTimers();
       set((s) => ({ ...freshState(parseInteractiveDoc(FIXTURES[key].input), key), loadSeq: s.loadSeq + 1 }));
     },
 
-    loadDoc: (input, key = null) => {
+    loadDoc: (input, key = null, savedId = null) => {
       clearTimers();
       const doc = parseInteractiveDoc(input);
-      set((s) => ({ ...freshState(doc, key), loadSeq: s.loadSeq + 1 }));
+      set((s) => ({ ...freshState(doc, key), savedGameId: savedId, loadSeq: s.loadSeq + 1 }));
       // 생성 이미지가 필요한 asset 콘텐츠가 있으면 비동기 시작(시드는 이미 이모지로 즉시 플레이).
       primeImages(doc);
     },
@@ -1045,15 +1096,10 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
     },
 
     finish: () => {
-      const doc = get().doc;
-      set({ busy: true, showNext: false, banner: null });
+      // 마지막 라운드를 마치면 완료 화면을 띄운다(다시하기·그만하기·확장활동 선택).
+      // 확장활동은 자동으로 넘기지 않고 '확장 활동' 버튼을 눌러 들어간다(enterExtend).
+      set({ busy: false, showNext: false, banner: null, phase: "finished" });
       bump({ kind: "say", text: "참 잘했어요!" });
-      // 끊김없이 확장활동으로 이어진다(게임=도입, 확장=본체). 확장 없으면 종료.
-      if (doc && doc.extend.length > 0) {
-        later(() => get().enterExtend(0), 1400);
-      } else {
-        set({ phase: "finished" });
-      }
     },
 
     enterExtend: (idx) => {
@@ -1082,7 +1128,17 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
 
     restart: () => {
       const key = get().exampleKey;
-      if (key) get().loadExample(key);
+      if (key) { get().loadExample(key); return; }
+      // 생성/편집 게임(예제 키 없음) — 점수·진행 초기화 후 처음부터 다시 재생.
+      clearTimers();
+      set({ phase: "playing", roundIdx: 0, score: 0, banner: null, showNext: false });
+      enterRound(0);
+    },
+
+    // 그만하기 — 게임을 멈추고 시작(인트로) 화면으로. 점수·진행 초기화(다시 ▶ 시작 가능).
+    stop: () => {
+      clearTimers();
+      set({ phase: "start", roundIdx: 0, score: 0, banner: null, showNext: false });
     },
 
     toggleTts: () => {
@@ -1103,7 +1159,10 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         showNext: false,
         selectedNodeId: null,
         bgSelected: false,
+        editRoundIdx: 0,
+        autoEditNodeId: null,
         roundIdx: 0,
+        totalRounds: doc ? doc.interaction.rounds.length : 0,
         score: 0,
         maxScore: doc ? maxScoreOf(doc) : 0,
         cueSlotId: null,
@@ -1155,30 +1214,31 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       set({ doc: { ...doc, stage: { ...doc.stage, background } } });
     },
 
-    // 선택 노드(슬롯)의 라운드0 콘텐츠를 교체 — 편집에서 프롬프트로 만든 그림/글자를 그 자리에 적용.
-    // 라운드0은 편집 미리보기에 보이는 라운드(EditLayer.roundZeroBindings와 동일 매핑). doc 교체라 undo 가능.
-    setNodeContent: (nodeId, content) => {
+    // 선택 노드(슬롯)의 현재 편집 페이지(editRoundIdx) 콘텐츠를 교체 — 프롬프트로 만든 그림/글자를 적용.
+    // 편집 미리보기에 보이는 페이지(EditLayer.roundBindings와 동일 매핑). doc 교체라 undo 가능.
+    setNodeContent: (nodeId, content, roundIdx) => {
       const doc = get().doc;
       if (!doc) return;
       const it = doc.interaction;
-      const r0 = <T,>(rounds: readonly T[], mut: (r: T) => T): T[] => rounds.map((r, i) => (i === 0 ? mut(r) : r));
+      const ri = roundIdx ?? get().editRoundIdx;
+      const rAt = <T,>(rounds: readonly T[], mut: (r: T) => T): T[] => rounds.map((r, i) => (i === ri ? mut(r) : r));
       let changed = false;
       let interaction = it;
       if (it.kind === "tap-the-right-one") {
         const oi = it.optionSlotIds.indexOf(nodeId);
-        if (nodeId === it.cueSlotId) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, cue: content })) }; }
-        else if (oi >= 0) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => (r.options[oi] ? { ...r, options: r.options.map((o, j) => (j === oi ? { ...o, content } : o)) } : r)) }; }
+        if (nodeId === it.cueSlotId) { changed = true; interaction = { ...it, rounds: rAt(it.rounds, (r) => ({ ...r, cue: content })) }; }
+        else if (oi >= 0) { changed = true; interaction = { ...it, rounds: rAt(it.rounds, (r) => (r.options[oi] ? { ...r, options: r.options.map((o, j) => (j === oi ? { ...o, content } : o)) } : r)) }; }
       } else if (it.kind === "binary-choice") {
-        if (nodeId === it.promptSlotId) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, prompt: content })) }; }
+        if (nodeId === it.promptSlotId) { changed = true; interaction = { ...it, rounds: rAt(it.rounds, (r) => ({ ...r, prompt: content })) }; }
       } else if (it.kind === "match-pair") {
         const li = it.leftSlotIds.indexOf(nodeId), ri = it.rightSlotIds.indexOf(nodeId);
-        if (li >= 0 || ri >= 0) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, pairs: r.pairs.map((p, j) => (li >= 0 && j === li ? { ...p, left: content } : ri >= 0 && j === ri ? { ...p, right: content } : p)) })) }; }
+        if (li >= 0 || ri >= 0) { changed = true; interaction = { ...it, rounds: rAt(it.rounds, (r) => ({ ...r, pairs: r.pairs.map((p, j) => (li >= 0 && j === li ? { ...p, left: content } : ri >= 0 && j === ri ? { ...p, right: content } : p)) })) }; }
       } else if (it.kind === "connect") {
         const li = it.leftSlotIds.indexOf(nodeId), ri = it.rightSlotIds.indexOf(nodeId);
-        if (li >= 0 || ri >= 0) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, links: r.links.map((p, j) => (li >= 0 && j === li ? { ...p, left: content } : ri >= 0 && j === ri ? { ...p, right: content } : p)) })) }; }
+        if (li >= 0 || ri >= 0) { changed = true; interaction = { ...it, rounds: rAt(it.rounds, (r) => ({ ...r, links: r.links.map((p, j) => (li >= 0 && j === li ? { ...p, left: content } : ri >= 0 && j === ri ? { ...p, right: content } : p)) })) }; }
       } else if (it.kind === "flip-memory") {
         const ci = it.cardSlotIds.indexOf(nodeId);
-        if (ci >= 0) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, faces: r.faces.map((f, j) => (j === ci % r.faces.length ? content : f)) })) }; }
+        if (ci >= 0) { changed = true; interaction = { ...it, rounds: rAt(it.rounds, (r) => ({ ...r, faces: r.faces.map((f, j) => (j === ci % r.faces.length ? content : f)) })) }; }
       }
       if (!changed) return;
       set({ doc: { ...doc, interaction } });
@@ -1191,10 +1251,11 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       if (it.kind !== "tap-the-right-one" && it.kind !== "pattern-next") return;
       const oi = it.optionSlotIds.indexOf(nodeId);
       if (oi < 0) return;
-      const r0 = <T,>(rounds: readonly T[], mut: (r: T) => T): T[] => rounds.map((r, i) => (i === 0 ? mut(r) : r));
+      const ri = get().editRoundIdx;
+      const rAt = <T,>(rounds: readonly T[], mut: (r: T) => T): T[] => rounds.map((r, i) => (i === ri ? mut(r) : r));
       const interaction = {
         ...it,
-        rounds: r0(it.rounds, (r) => ({ ...r, options: r.options.map((o, j) => ({ ...o, correct: j === oi })) })),
+        rounds: rAt(it.rounds, (r) => ({ ...r, options: r.options.map((o, j) => ({ ...o, correct: j === oi })) })),
       };
       set({ doc: { ...doc, interaction } });
     },
@@ -1224,6 +1285,100 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       );
       set({ doc: { ...doc, stage: { ...doc.stage, nodes } } });
     },
+
+    setNodeCrop: (id, round, crop) => {
+      const doc = get().doc;
+      if (!doc) return;
+      const key = String(round);
+      const nodes = doc.stage.nodes.map((n) => {
+        if (n.id !== id) return n;
+        const style = { ...(n.style ?? {}) };
+        style.cropByRound = { ...(style.cropByRound ?? {}), [key]: crop };
+        return { ...n, style };
+      });
+      set({ doc: { ...doc, stage: { ...doc.stage, nodes } } });
+    },
+
+    setEditRound: (idx) => {
+      const doc = get().doc;
+      const n = doc ? doc.interaction.rounds.length : 0;
+      if (!n) return;
+      set({
+        editRoundIdx: Math.max(0, Math.min(n - 1, Math.floor(idx))),
+        selectedNodeId: null,
+        bgSelected: false,
+      });
+    },
+
+    // 현재 페이지(라운드)를 복제해 '맨 끝'에 추가하고 그 페이지로 이동 — "다른 동물 한 장 더"의 시작점.
+    // ⚠️ 끝에 붙인다(중간 삽입 ❌). 크롭은 라운드 '인덱스'로 저장(style.cropByRound)되므로, 중간에
+    //    끼워 넣으면 뒤 페이지들의 인덱스가 밀려 다른 페이지의 크기/위치가 어긋난다. 끝 추가는 기존
+    //    인덱스를 그대로 보존한다. 복제라 어떤 인터랙션 종류든 스키마상 유효한 라운드가 보장된다.
+    addRound: () => {
+      const doc = get().doc;
+      if (!doc) return;
+      const idx = get().editRoundIdx;
+      const rounds = doc.interaction.rounds;
+      const src = rounds[idx] ?? rounds[rounds.length - 1];
+      const interaction = withRounds(doc.interaction, (rs) => {
+        rs.push(cloneRound(src));
+        return rs;
+      });
+      const newDoc = { ...doc, interaction };
+      set({
+        doc: newDoc,
+        editRoundIdx: interaction.rounds.length - 1, // 맨 끝(새로 추가된) 페이지로 이동
+        totalRounds: interaction.rounds.length,
+        maxScore: maxScoreOf(newDoc),
+        selectedNodeId: null,
+        bgSelected: false,
+      });
+    },
+
+    removeRound: () => {
+      const doc = get().doc;
+      if (!doc) return;
+      const rounds = doc.interaction.rounds;
+      if (rounds.length <= 1) return; // 최소 1개 유지(스키마 rounds.min(1))
+      const idx = get().editRoundIdx;
+      const interaction = withRounds(doc.interaction, (rs) => {
+        rs.splice(idx, 1);
+        return rs;
+      });
+      // 삭제로 idx 이후 라운드 인덱스가 1씩 당겨짐 → 노드별 cropByRound 키도 재정렬(크롭이 다른 페이지로 어긋나지 않게).
+      const nodes = doc.stage.nodes.map((n) => {
+        const cbr = n.style?.cropByRound;
+        if (!cbr) return n;
+        const next: Record<string, { scale: number; x: number; y: number }> = {};
+        for (const k of Object.keys(cbr)) {
+          const i = Number(k);
+          if (i === idx) continue;                       // 삭제된 페이지의 크롭 제거
+          next[i > idx ? String(i - 1) : k] = cbr[k];    // 뒤 페이지는 한 칸 당김
+        }
+        return { ...n, style: { ...(n.style ?? {}), cropByRound: next } };
+      });
+      const newDoc = { ...doc, interaction, stage: { ...doc.stage, nodes } };
+      set({
+        doc: newDoc,
+        editRoundIdx: Math.min(idx, interaction.rounds.length - 1),
+        totalRounds: interaction.rounds.length,
+        maxScore: maxScoreOf(newDoc),
+        selectedNodeId: null,
+        bgSelected: false,
+      });
+    },
+
+    // 일반(플레이) 화면에서 문제·보기를 더블클릭 → 편집 레이어로 들어가 그 노드의 글자 편집을 바로 연다.
+    // '보던 페이지'(roundIdx)를 그대로 편집하도록 editRoundIdx에 옮겨 담는다(setMode가 0으로 리셋하므로 뒤에 설정).
+    editNodeInline: (nodeId) => {
+      const st = get();
+      if (!st.doc) return;
+      const round = Math.max(0, Math.min(st.roundIdx, st.doc.interaction.rounds.length - 1));
+      st.setMode("edit");
+      set({ editRoundIdx: round, selectedNodeId: nodeId, autoEditNodeId: nodeId });
+    },
+
+    setAutoEditNode: (id) => set({ autoEditNodeId: id }),
   };
 }, {
   // 에디터 undo/redo — doc(노드 transform)만 추적, doc 객체가 바뀔 때만 기록(equality).

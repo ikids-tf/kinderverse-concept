@@ -573,6 +573,15 @@
 .kv-v2 .edit-crop-btn:hover { color: var(--coral); border-color: var(--coral); }
 .kv-v2 .edit-crop-btn.on { color: #fff; background: var(--coral); border-color: var(--coral); }
 .kv-v2 .edit-crop-btn:focus-visible { outline: 3px solid rgba(255,158,125,.5); outline-offset: 1px; }
+/* 이미지 크기 핸들 — 좌상단 안쪽. 프레임(우하단 핸들)과 '따로' 이미지만 확대/축소. */
+.kv-v2 .edit-imgscale-handle {
+  position: absolute; top: 9px; left: 9px; z-index: 2;
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; line-height: 1; color: #fff; background: var(--coral);
+  border: 2px solid #fff; box-shadow: var(--shadow-sm); cursor: ns-resize; user-select: none;
+}
+.kv-v2 .edit-imgscale-handle:hover { filter: brightness(1.05); }
 /* 모서리 라운드 핸들 — 우상단 안쪽(마이보드 이미지 카드처럼) */
 .kv-v2 .edit-radius-handle {
   position: absolute; top: 9px; right: 9px; z-index: 2; width: 16px; height: 16px; border-radius: 50%;
@@ -594,6 +603,35 @@
   background: rgba(87,75,62,.86); color: #fff; font-size: 12.5px; font-weight: 700;
   padding: 7px 14px; border-radius: 999px; pointer-events: none; white-space: nowrap;
 }
+
+/* 편집: 페이지(라운드) 이동·추가·삭제 — 무대 상단 중앙에 떠 있는 교사 바. */
+.kv-v2 .edit-pagenav {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 46;
+  display: flex; align-items: center; gap: 5px;
+  background: rgba(255,255,255,.96); border: 1.5px solid #E0D3C4; border-radius: 999px;
+  padding: 5px 7px; box-shadow: var(--shadow-sm);
+}
+.kv-v2 .edit-pagenav button {
+  display: inline-flex; align-items: center; gap: 4px; font: inherit; font-weight: 800; cursor: pointer;
+  border: none; background: transparent; color: var(--ink-soft); border-radius: 999px;
+  transition: background .14s, color .14s, opacity .14s, filter .14s;
+}
+.kv-v2 .edit-pagenav button:disabled { opacity: .3; cursor: default; }
+.kv-v2 .edit-pagenav button:focus-visible { outline: 3px solid rgba(242,115,62,.4); outline-offset: 1px; }
+.kv-v2 .pagenav-arrow { width: 30px; height: 30px; justify-content: center; }
+.kv-v2 .pagenav-arrow:hover:not(:disabled) { background: rgba(242,115,62,.12); color: var(--coral); }
+.kv-v2 .pagenav-count { font-size: 13px; font-weight: 800; color: var(--ink-soft); padding: 0 4px; white-space: nowrap; }
+.kv-v2 .pagenav-count b { color: var(--coral); }
+.kv-v2 .pagenav-sep { width: 1.5px; height: 20px; background: #E0D3C4; border-radius: 1px; margin: 0 2px; }
+.kv-v2 .pagenav-add { font-size: 13px; padding: 6px 12px; color: #fff; background: var(--coral); }
+.kv-v2 .pagenav-add:hover { filter: brightness(1.05); }
+.kv-v2 .pagenav-del { width: 30px; height: 30px; justify-content: center; }
+.kv-v2 .pagenav-del:hover:not(:disabled) { background: rgba(214,90,90,.14); color: var(--no-ink, #d65a5a); }
+
+/* 일반(미리보기) 화면에서 더블클릭으로 바로 고칠 수 있는 문제·보기 — 교사 화면에서만 붙는다. */
+.kv-v2 .kv-editable { cursor: pointer; }
+.kv-v2 .photo.kv-editable:hover { outline: 2.5px dashed var(--coral); outline-offset: 4px; }
+.kv-v2 .opt.kv-editable:hover { outline: 2.5px dashed var(--coral); outline-offset: 3px; }
 
 /* 피드백 배너 */
 .kv-v2 .banner {
@@ -694,6 +732,29 @@
 .kv-v2 .kv-picker-thumb.has-img { background: #fff; border-radius: 14px; border: 4px solid #fff; box-shadow: var(--shadow-sm); overflow: hidden; }
 .kv-v2 .kv-picker-thumb.has-img img { width: 100%; height: 100%; object-fit: cover; }
 .kv-v2 .kv-picker-title { font-weight: 800; color: var(--ink); font-size: 14px; line-height: 1.25; }
+/* 기본 게임 편집본 되돌리기 — 기본 카드 우상단 작은 칩(카드 클릭과 분리). */
+.kv-v2 .kv-picker-reset {
+  position: absolute; top: 7px; right: 7px; font-size: 10.5px; font-weight: 800; cursor: pointer;
+  color: var(--ink-soft); background: #fff; border: 1.5px solid #E0D3C4; border-radius: 999px; padding: 2px 7px;
+  white-space: nowrap; box-shadow: var(--shadow-sm); transition: color .14s, border-color .14s;
+}
+.kv-v2 .kv-picker-reset:hover { color: var(--coral); border-color: var(--coral); }
+.kv-v2 .kv-picker-reset:focus-visible { outline: 3px solid rgba(242,115,62,.45); outline-offset: 1px; }
+/* 내 놀이 삭제 — 카드 우상단 작은 ✕(카드 클릭과 분리). */
+.kv-v2 .kv-picker-del {
+  position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; display: grid; place-items: center;
+  font-size: 12px; font-weight: 900; line-height: 1; cursor: pointer; color: var(--ink-soft);
+  background: #fff; border: 1.5px solid #E0D3C4; border-radius: 999px; box-shadow: var(--shadow-sm);
+  opacity: 0; transition: opacity .14s, color .14s, border-color .14s;
+}
+.kv-v2 .kv-picker-card:hover .kv-picker-del,
+.kv-v2 .kv-picker-card:focus-within .kv-picker-del { opacity: 1; }
+.kv-v2 .kv-picker-del:hover { color: var(--no-ink, #d65a5a); border-color: var(--no-ink, #d65a5a); }
+.kv-v2 .kv-picker-del:focus-visible { opacity: 1; outline: 3px solid rgba(214,90,90,.45); outline-offset: 1px; }
+/* 새로 만들기 카드 — 점선 + 큰 + 기호. */
+.kv-v2 .kv-picker-add { border-style: dashed; border-color: #E0D3C4; background: transparent; justify-content: center; }
+.kv-v2 .kv-picker-add:hover { border-color: var(--coral); background: #FFF6EE; }
+.kv-v2 .kv-picker-add .kv-picker-thumb { color: var(--coral); font-weight: 800; }
 .kv-v2 .kv-picker-empty { margin: 4px 0 0; color: var(--ink-soft); font-weight: 700; font-size: 13px; }
 /* '놀이' 메뉴 항목의 만든-게임 수 배지 */
 .kv-v2 .kv-menu-item { display: flex; align-items: center; gap: 8px; }
@@ -743,6 +804,13 @@
   color: var(--ink-soft); padding: 12px 16px; border-radius: 999px; box-shadow: var(--shadow-sm);
 }
 .kv-v2 .extend-listen:focus-visible { outline: 4px solid rgba(255,158,125,.5); outline-offset: 2px; }
+/* 그만하기 — 완료 화면의 차분한 보조 버튼(다시하기=강조, 확장=이동과 구분) */
+.kv-v2 .finish-quit {
+  font: inherit; font-weight: 700; cursor: pointer; border: 2px solid #EBDFD2; background: transparent;
+  color: var(--ink-soft); padding: 12px 16px; border-radius: 999px;
+}
+.kv-v2 .finish-quit:hover { border-color: var(--coral); color: var(--coral); }
+.kv-v2 .finish-quit:focus-visible { outline: 4px solid rgba(255,158,125,.5); outline-offset: 2px; }
 
 /* 프롬프트 진입 + 추천 카드 (Resolver) */
 .kv-v2 .prompt-entry { max-width: 860px; margin: 16px auto 0; padding: 0 16px; }
