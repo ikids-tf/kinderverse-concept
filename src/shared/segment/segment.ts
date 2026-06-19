@@ -58,16 +58,18 @@ export function segmentAt(id: string, x: number, y: number): Promise<{ mask: Uin
   });
 }
 
-/** 여러 점(양성 label 1 = 추가 · 음성 label 0 = 빼기)으로 마스크를 정밀 조절한다. */
+/** 여러 점(양성 label 1 = 추가 · 음성 label 0 = 빼기)으로 마스크를 정밀 조절한다.
+ *  prefer: 'whole'=객체 전체(가장 큰 후보) · 'best'=신뢰도 최고(정밀 조절) · 'auto'=균형. */
 export function segmentAtPoints(
   id: string,
   points: { x: number; y: number; label: number }[],
+  prefer: 'whole' | 'best' | 'auto' = 'best',
 ): Promise<{ mask: Uint8Array; w: number; h: number }> {
   const w = getWorker();
   const reqId = 'seg' + ++seq;
   return new Promise((resolve, reject) => {
     pending.set(reqId, { resolve, reject });
-    w.postMessage({ type: 'points', id, reqId, points });
+    w.postMessage({ type: 'points', id, reqId, points, prefer });
   });
 }
 

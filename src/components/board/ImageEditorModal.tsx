@@ -52,7 +52,7 @@ function buildOverlayTile(mask: Uint8Array, w: number, h: number): HTMLCanvasEle
       (x > 1 && !mask[i - 2]) || (x < w - 2 && !mask[i + 2]) ||
       (y > 1 && !mask[i - 2 * w]) || (y < h - 2 && !mask[i + 2 * w]));
     p[i * 4] = 242; p[i * 4 + 1] = 115; p[i * 4 + 2] = 62;
-    p[i * 4 + 3] = edge1 ? 255 : edge2 ? 200 : 104; // 외곽선=또렷, 내부=선명한 코랄 틴트
+    p[i * 4 + 3] = edge1 ? 255 : edge2 ? 230 : 150; // 외곽선=또렷, 내부=면을 채워 '선택됨'을 또렷이
   }
   ctx.putImageData(od, 0, 0);
   return tile;
@@ -417,7 +417,8 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     return segId;
   }, [nodeId]);
 
-  /** SAM 점들로 분리할 객체 마스크를 잡아 오버레이/박스를 갱신. points 1개=첫 선택, 2+=정밀 조절. */
+  /** SAM 점들로 분리할 객체 마스크를 잡아 오버레이/박스를 갱신.
+   *  첫 선택(점 1개)은 'whole'로 객체 전체를, 정밀 조절(점 2+)은 'best'로 의도한 경계를 잡는다. */
   const segmentExtract = useCallback(async (points: Pt[]) => {
     if (!workRef.current) return;
     setBusy(
@@ -427,8 +428,9 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     );
     try {
       const segId = await ensurePrepared();
-      const { mask, w, h } =
-        points.length > 1 ? await segmentAtPoints(segId, points) : await segmentAt(segId, points[0].x, points[0].y);
+      // 양성(추가) 점만 있으면 객체 전체를, 음성(빼기) 점이 섞이면 정밀 경계를 잡는다.
+      const prefer = points.some((p) => p.label === 0) ? 'best' : 'whole';
+      const { mask, w, h } = await segmentAtPoints(segId, points, prefer);
       const box = maskBBox(mask, w, h);
       if (!box) { showToast('객체를 찾지 못했어요 — 다시 클릭해 보세요', 'error'); return; }
       extractMaskRef.current = { mask, w, h };

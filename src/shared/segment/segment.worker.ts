@@ -52,8 +52,10 @@ async function prepare(id: string, blob: Blob) {
 }
 
 interface Pt { x: number; y: number; label: number } // label 1=객체(추가), 0=배경(빼기)
+// prefer: 후보 선택 전략 — 'whole'=객체 전체(가장 큰), 'best'=신뢰도 최고, 'auto'=균형(지우기 기본).
+type Prefer = 'whole' | 'best' | 'auto';
 
-async function decode(id: string, points: Pt[]): Promise<{ mask: Uint8Array; w: number; h: number }> {
+async function decode(id: string, points: Pt[], prefer: Prefer = 'auto'): Promise<{ mask: Uint8Array; w: number; h: number }> {
   if (!cur || cur.id !== id) throw new Error('not-prepared');
   if (points.length === 0) throw new Error('no-points');
   const { model, processor, emb, original_sizes, reshaped_input_sizes } = cur;
@@ -91,14 +93,20 @@ async function decode(id: string, points: Pt[]): Promise<{ mask: Uint8Array; w: 
   if (cands.length === 0) for (let k = 0; k < nM; k++) if (areas[k] / per <= CAP) cands.push(k); // 폴백: 포함 후보 없음
   let best = -1;
   if (cands.length > 0) {
-    if (points.length > 1) {
+    const bestIou = Math.max(...cands.map((k) => iou[k] ?? 0));
+    if (prefer === 'whole') {
+      // 객체 분리 첫 선택 — 객체 '전체'를 원함. 신뢰도 바닥(최고-0.30, 최소 0.35) 이상인 후보 중
+      // 가장 큰 것을 고른다 → 줄무늬/복합 객체(튜브 등)에서 한 조각이 아니라 전체가 잡힌다.
+      const floor = Math.max(0.35, bestIou - 0.3);
+      let bestArea = -1;
+      for (const k of cands) if ((iou[k] ?? 0) >= floor && areas[k] > bestArea) { bestArea = areas[k]; best = k; }
+      if (best < 0) { let ba = -1; for (const k of cands) if (areas[k] > ba) { ba = areas[k]; best = k; } } // 폴백: 그냥 가장 큰 것
+    } else if (prefer === 'best') {
       // 정밀 조절(다중 포인트, 음성 포함) — '가장 큰 것'이 아니라 **신뢰도(IoU) 최고** 후보를 고른다.
-      // (양성/음성 점이 의도한 경계를 SAM이 가장 잘 반영한 마스크가 최고 IoU.)
       let bi = -1;
       for (const k of cands) if ((iou[k] ?? 0) > bi) { bi = iou[k] ?? 0; best = k; }
     } else {
-      // 단일 클릭 — 최고 IoU 근접 후보 중 가장 큰 것(작은 객체 클릭 시 이웃 포함 방지).
-      const bestIou = Math.max(...cands.map((k) => iou[k] ?? 0));
+      // 단일 클릭(지우기) — 최고 IoU 근접 후보 중 가장 큰 것(작은 객체 클릭 시 이웃 포함 방지).
       const MARGIN = 0.06;
       const strong = cands.filter((k) => (iou[k] ?? 0) >= bestIou - MARGIN);
       let bestArea = -1;
@@ -136,7 +144,7 @@ self.onmessage = async (e: MessageEvent) => {
       const r = await decode(msg.id, [{ x: msg.x, y: msg.y, label: 1 }]);
       post({ type: 'mask', id: msg.id, reqId: msg.reqId, mask: r.mask, w: r.w, h: r.h }, [r.mask.buffer]);
     } else if (msg.type === 'points') {
-      const r = await decode(msg.id, msg.points as Pt[]);
+      const r = await decode(msg.id, msg.points as Pt[], (msg.prefer as Prefer) ?? 'best');
       post({ type: 'mask', id: msg.id, reqId: msg.reqId, mask: r.mask, w: r.w, h: r.h }, [r.mask.buffer]);
     }
   } catch (err: any) {
