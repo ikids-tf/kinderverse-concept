@@ -81,6 +81,14 @@ export const Style = z
     shadow: z.boolean().default(true),
     tint: z.string().optional(), // theme 팔레트 토큰
     fontRole: z.enum(["display", "body"]).optional(),
+    /** 이미지 크롭(편집) — scale≥1 확대, x·y 는 정규화(-0.5..0.5) 패닝. object-fit:cover 위에 적용. */
+    crop: z
+      .object({
+        scale: z.number().min(1).default(1),
+        x: z.number().default(0),
+        y: z.number().default(0),
+      })
+      .optional(),
   })
   .partial();
 
@@ -553,3 +561,4 @@ export type ContentBinding = z.infer<typeof ContentBinding>;
 export type ContentBindingInput = z.input<typeof ContentBinding>;
 export type AssetRef = z.infer<typeof AssetRef>;
 export type PresetName = z.infer<typeof PresetName>;
+export type Style = z.infer<typeof Style>;

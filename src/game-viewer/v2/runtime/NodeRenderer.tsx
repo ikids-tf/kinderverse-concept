@@ -15,8 +15,9 @@ import { registerNode } from "./nodeRegistry";
 import { useGame } from "./useGame";
 import { useAssetUrl } from "./assetStore";
 import { RiveActor } from "./RiveActor";
-import { transformStyle } from "./layout";
+import { transformStyle, radiusStyle, cropImgStyle } from "./layout";
 import type { MoodKey } from "../theme";
+import type { Style } from "../schema/interactiveDoc";
 
 type Transform = SceneNode["transform"];
 
@@ -41,8 +42,8 @@ export function Positioned(props: {
   );
 }
 
-/** 이모지/텍스트/이미지 비주얼을 노드 크기에 맞춰 렌더. */
-export function VisualBox({ visual, t }: { visual: Visual; t: Transform }) {
+/** 이모지/텍스트/이미지 비주얼을 노드 크기에 맞춰 렌더. style.crop 이 있으면 이미지에 적용. */
+export function VisualBox({ visual, t, style }: { visual: Visual; t: Transform; style?: Style }) {
   const { w: sw, h: sh } = useStageSize();
   const nodeW = t.w * sw;
   const nodeH = t.h * sh;
@@ -53,7 +54,8 @@ export function VisualBox({ visual, t }: { visual: Visual; t: Transform }) {
   const genUrl = useAssetUrl(visual.assetKey);
   const imageUrl = visual.imageUrl ?? genUrl;
   if (imageUrl) {
-    return <img src={imageUrl} alt="" style={silhouette ? { filter: "brightness(0)" } : undefined} />;
+    const imgStyle = { ...cropImgStyle(style), ...(silhouette ? { filter: "brightness(0)" } : {}) };
+    return <img src={imageUrl} alt="" style={Object.keys(imgStyle).length ? imgStyle : undefined} />;
   }
   if (visual.emoji) {
     const base = Math.min(nodeW, nodeH) * 0.62;
@@ -101,8 +103,8 @@ export function PhotoNode(props: {
           transition={ent?.transition}
         >
           <motion.div className="node-inner" animate={idl?.animate} transition={idl?.transition}>
-            <div className="photo">
-              <VisualBox visual={visual} t={node.transform} />
+            <div className="photo" style={radiusStyle(node.style)}>
+              <VisualBox visual={visual} t={node.transform} style={node.style} />
             </div>
           </motion.div>
         </motion.div>

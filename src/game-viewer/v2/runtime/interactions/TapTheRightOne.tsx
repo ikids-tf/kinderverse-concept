@@ -27,6 +27,7 @@ export function TapTheRightOne() {
             content={opt.content}
             status={opt.status}
             t={node.transform}
+            style={node.style}
             disabled={busy || opt.status === "locked"}
             enterName="drop"
             onClick={() => tap(opt.slotId)}

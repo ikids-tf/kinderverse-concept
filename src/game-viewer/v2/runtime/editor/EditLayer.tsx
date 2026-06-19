@@ -5,8 +5,8 @@
  * 콘텐츠 교체/대화 편집은 기본 경로(M2 Resolver) 담당 — 여긴 정밀 레이아웃 전용(99% 교사는 안 봄).
  * 각 노드는 라운드0 콘텐츠 미리보기 + 역할 배지로 표시한다.
  */
-import { useEffect, useRef, useState, type PointerEvent as RPE } from "react";
-import { transformStyle } from "../layout";
+import { useEffect, useRef, useState, type PointerEvent as RPE, type WheelEvent as RWE } from "react";
+import { transformStyle, radiusStyle, cropImgStyle } from "../layout";
 import { resolveVisual, type Visual } from "../content";
 import { useStageSize } from "../stageSize";
 import { useGame } from "../useGame";
@@ -84,25 +84,44 @@ function EditNodeBox({
   const patch = useGame((s) => s.patchNodeTransform);
   const setContent = useGame((s) => s.setNodeContent);
   const setCorrect = useGame((s) => s.setCorrectOption);
+  const setStyle = useGame((s) => s.setNodeStyle);
   const drag = useRef<DragState | null>(null);
   const [live, setLive] = useState<Live | null>(null);
   // 글자 직접 편집(더블클릭) — 답·단서의 텍스트를 그 자리에서 고친다. 이미지는 프롬프트로 교체.
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  // 크롭 모드 — 켜면 박스 이동 대신 이미지를 끌어 위치/줌(휠) 조절(object-fit:cover 위).
+  const [cropMode, setCropMode] = useState(false);
+  const cropDrag = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
 
   const t = node.transform;
+  const cur = node.style?.crop ?? { scale: 1, x: 0, y: 0 };
   const view: Live = live ?? { x: t.x, y: t.y, w: t.w, h: t.h };
 
   const down = (e: RPE<HTMLElement>, mode: "move" | "resize") => {
     if (editing) return; // 글자 편집 중엔 드래그 금지
     e.stopPropagation();
     selectNode(node.id);
+    // 크롭 모드: 박스를 옮기지 않고 이미지를 패닝(crop.x/y) — 박스 폭 대비 비율로.
+    if (cropMode && mode === "move") {
+      cropDrag.current = { px: e.clientX, py: e.clientY, x: cur.x, y: cur.y };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
+      return;
+    }
     const base: Live = { x: t.x, y: t.y, w: t.w, h: t.h };
     drag.current = { px: e.clientX, py: e.clientY, base, mode };
     setLive(base);
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
   };
   const move = (e: RPE<HTMLElement>) => {
+    const cd = cropDrag.current;
+    if (cd) {
+      const nodeW = Math.max(1, t.w * sw), nodeH = Math.max(1, t.h * sh);
+      const nx = Math.max(-0.5, Math.min(0.5, cd.x + (e.clientX - cd.px) / nodeW));
+      const ny = Math.max(-0.5, Math.min(0.5, cd.y + (e.clientY - cd.py) / nodeH));
+      setStyle(node.id, { crop: { scale: cur.scale, x: nx, y: ny } });
+      return;
+    }
     const d = drag.current;
     if (!d || !sw || !sh) return;
     const dx = (e.clientX - d.px) / sw;
@@ -112,6 +131,11 @@ function EditNodeBox({
     else setLive({ ...b, w: clampWH(b.w + dx * 2), h: clampWH(b.h + dy * 2) }); // 중심정렬→양쪽
   };
   const up = (e: RPE<HTMLElement>) => {
+    if (cropDrag.current) {
+      cropDrag.current = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      return;
+    }
     const d = drag.current;
     drag.current = null;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
@@ -124,11 +148,36 @@ function EditNodeBox({
     }
     setLive(null);
   };
+  // 크롭 줌 — 휠로 scale 조절(1.0~3.0). 크롭 모드일 때만.
+  const onWheel = (e: RWE<HTMLElement>) => {
+    if (!cropMode) return;
+    e.stopPropagation();
+    const next = Math.max(1, Math.min(3, cur.scale + (e.deltaY < 0 ? 0.12 : -0.12)));
+    setStyle(node.id, { crop: { scale: next, x: cur.x, y: cur.y } });
+  };
 
   const vis = previewOf(node, binding);
   const imgUrl = useAssetUrl(vis?.assetKey); // 프롬프트로 만든 그림이 준비되면 미리보기도 그림으로
+  const isImage = !!imgUrl;
   // 콘텐츠 슬롯(답·단서·짝 등)과 텍스트 노드만 글자 편집 허용 — 장식/빈 슬롯은 제외.
   const editable = !!binding || node.type === "text";
+
+  // 모서리 라운드 드래그(우상단 안쪽) — ↙ 둥글게 / ↗ 각지게. setNodeStyle(cornerRadius).
+  const radiusDown = (e: RPE<HTMLElement>) => {
+    e.stopPropagation();
+    selectNode(node.id);
+    const sx = e.clientX, sy = e.clientY;
+    const nodePx = Math.min(t.w * sw, t.h * sh);
+    const maxR = Math.max(0, nodePx / 2);
+    const r0 = Math.min(typeof node.style?.cornerRadius === "number" ? node.style.cornerRadius : 16, maxR);
+    const mv = (ev: PointerEvent) => {
+      const d = ((sx - ev.clientX) + (ev.clientY - sy)) / 2;
+      setStyle(node.id, { cornerRadius: Math.round(Math.max(0, Math.min(maxR, r0 + d))) });
+    };
+    const upR = () => { window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", upR); };
+    window.addEventListener("pointermove", mv);
+    window.addEventListener("pointerup", upR);
+  };
 
   const beginEdit = (e: RPE<HTMLElement>) => {
     if (!editable) return;
@@ -146,13 +195,14 @@ function EditNodeBox({
 
   return (
     <div
-      className={`edit-node${selected ? " selected" : ""}${editable ? " editable" : ""}${isCorrect ? " correct" : ""}`}
+      className={`edit-node${selected ? " selected" : ""}${editable ? " editable" : ""}${isCorrect ? " correct" : ""}${cropMode ? " cropping" : ""}`}
       style={transformStyle({ ...t, x: view.x, y: view.y, w: view.w, h: view.h })}
       onPointerDown={(e) => down(e, "move")}
       onPointerMove={move}
       onPointerUp={up}
+      onWheel={onWheel}
       onDoubleClick={beginEdit}
-      title={editable ? "더블클릭하면 글자 수정 · 프롬프트로 그림 교체" : undefined}
+      title={cropMode ? "끌어서 위치 · 휠로 확대/축소" : editable ? "더블클릭하면 글자 수정 · 프롬프트로 그림 교체" : undefined}
     >
       <span className={`edit-badge${isCorrect ? " is-correct" : isOption ? " is-option" : ""}`}>{roleLabel(node)}</span>
       {/* 정답 표시/지정 — 보기(답) 슬롯에만. 정답이면 '✓ 정답', 아니면 누르면 정답으로 바꾼다. */}
@@ -188,10 +238,40 @@ function EditNodeBox({
         />
       ) : (
         vis && (imgUrl
-          ? <img className="edit-preview-img" src={imgUrl} alt="" draggable={false} />
+          ? (
+            <div className="edit-img-wrap" style={radiusStyle(node.style)}>
+              <img
+                className={`edit-preview-img${cropMode || node.style?.crop ? " cropped" : ""}`}
+                src={imgUrl}
+                alt=""
+                draggable={false}
+                style={cropImgStyle(node.style)}
+              />
+            </div>
+          )
           : <span className="edit-preview">{vis.emoji ?? vis.text}</span>)
       )}
-      {selected && !editing && (
+      {/* 이미지 노드 편집 컨트롤 — 크롭 토글(좌하단 안쪽) + 모서리 라운드 핸들(우상단 안쪽). */}
+      {selected && !editing && isImage && (
+        <>
+          <button
+            type="button"
+            className={`edit-crop-btn${cropMode ? " on" : ""}`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); setCropMode((v) => !v); }}
+            title="크롭 (켜고 끌어 위치·휠로 확대)"
+          >
+            {cropMode ? "완료" : "✂ 크롭"}
+          </button>
+          <span
+            className="edit-radius-handle"
+            onPointerDown={radiusDown}
+            onDoubleClick={(e) => e.stopPropagation()}
+            title="모서리 라운드 (드래그: ↙ 둥글게 · ↗ 각지게)"
+          />
+        </>
+      )}
+      {selected && !editing && !cropMode && (
         <span
           className="edit-handle"
           onPointerDown={(e) => down(e, "resize")}

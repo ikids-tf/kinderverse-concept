@@ -205,6 +205,8 @@ export interface GameStore {
   /** 편집: 보기 슬롯을 정답으로 지정(tap·pattern-next). 라운드0에서 그 보기만 correct=true. */
   setCorrectOption: (nodeId: string) => void;
   patchNodeTransform: (id: string, patch: Partial<{ x: number; y: number; w: number; h: number }>) => void;
+  /** 편집: 노드 style 병합(모서리 라운드·크롭 등). doc 교체라 undo 가능. */
+  setNodeStyle: (id: string, patch: Partial<NonNullable<SceneNode["style"]>>) => void;
 }
 
 /* ── 타이머 관리 (라운드 시퀀싱) ── */
@@ -1211,6 +1213,15 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         if (patch.h !== undefined) tr.h = cwh(patch.h);
         return { ...n, transform: tr };
       });
+      set({ doc: { ...doc, stage: { ...doc.stage, nodes } } });
+    },
+
+    setNodeStyle: (id, patch) => {
+      const doc = get().doc;
+      if (!doc) return;
+      const nodes = doc.stage.nodes.map((n) =>
+        n.id === id ? { ...n, style: { ...(n.style ?? {}), ...patch } } : n,
+      );
       set({ doc: { ...doc, stage: { ...doc.stage, nodes } } });
     },
   };

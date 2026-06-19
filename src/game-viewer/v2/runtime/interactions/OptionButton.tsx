@@ -8,8 +8,9 @@ import { motion, useAnimationControls, useReducedMotion } from "motion/react";
 import { Positioned, VisualBox } from "../NodeRenderer";
 import { resolveVisual } from "../content";
 import { entrance, reaction } from "../presets";
+import { radiusStyle } from "../layout";
 import { useGame, type OptStatus } from "../useGame";
-import type { ContentBinding, SceneNode } from "../../schema/interactiveDoc";
+import type { ContentBinding, SceneNode, Style } from "../../schema/interactiveDoc";
 import type { MoodKey } from "../../theme";
 
 type Transform = SceneNode["transform"];
@@ -22,11 +23,12 @@ export function OptionButton(props: {
   content: ContentBinding;
   status: OptStatus;
   t: Transform;
+  style?: Style;
   disabled: boolean;
   enterName: "drop" | "pop";
   onClick: () => void;
 }) {
-  const { content, status, t, disabled, enterName, onClick } = props;
+  const { content, status, t, style, disabled, enterName, onClick } = props;
   const reduced = !!useReducedMotion();
   const controls = useAnimationControls();
   const mood = useGame((s) => (s.doc?.settings.mood ?? "lively") as MoodKey);
@@ -56,11 +58,12 @@ export function OptionButton(props: {
         <motion.button
           type="button"
           className={`opt ${STATUS_CLASS[status]}`}
+          style={radiusStyle(style)}
           animate={controls}
           disabled={disabled}
           onClick={onClick}
         >
-          <VisualBox visual={resolveVisual(content)} t={t} />
+          <VisualBox visual={resolveVisual(content)} t={t} style={style} />
         </motion.button>
       </motion.div>
     </Positioned>
