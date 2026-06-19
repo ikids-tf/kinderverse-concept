@@ -4,6 +4,7 @@ import { replaceImageCmd, addImageNodeCmd } from '@/board/commands';
 import { makeThumb, THUMB_MAX_W } from '@/board/imageLod';
 import { removeBackground, cleanupBackground } from '@/shared/background-removal';
 import { prepareSegment, segmentAt, segmentAtPoints } from '@/shared/segment/segment';
+import { inpaintPatch } from '@/shared/inpaint/patchInpaint';
 import { saveAsset } from '@/board/assets';
 import { showToast } from '@/lib/toast';
 import { useZoomModal, type OriginRect } from './useZoomModal';
@@ -58,7 +59,33 @@ function buildOverlayTile(mask: Uint8Array, w: number, h: number): HTMLCanvasEle
   return tile;
 }
 
-/** 마스크 영역만 잘라 투명 배경 PNG 캔버스로(분리 객체). box=작업 픽셀 좌표. */
+/** 1px 침식(4-이웃) — 경계의 배경 프린지를 한 겹 깎는다. */
+function erode1(m: Uint8Array, w: number, h: number): Uint8Array {
+  const o = new Uint8Array(w * h);
+  for (let p = 0; p < w * h; p++) {
+    if (!m[p]) continue;
+    const x = p % w, y = (p / w) | 0;
+    if ((x > 0 && !m[p - 1]) || (x < w - 1 && !m[p + 1]) || (y > 0 && !m[p - w]) || (y < h - 1 && !m[p + w])) continue;
+    o[p] = 1;
+  }
+  return o;
+}
+/** 반경1 박스 블러(0..1) — 마스크 경계를 부드럽게(안티에일리어스 알파). */
+function softEdge(m: Uint8Array, w: number, h: number): Float32Array {
+  const o = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let s = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+      s += m[yy * w + xx]; n++;
+    }
+    o[y * w + x] = n ? s / n : 0;
+  }
+  return o;
+}
+
+/** 마스크 영역만 잘라 투명 배경 PNG 캔버스로(분리 객체) — 경계 페더링으로 깔끔하게.
+ *  매팅 모델 정제가 실패할 때의 폴백. box=작업 픽셀 좌표. */
 function buildObjectCanvas(work: HTMLCanvasElement, mask: Uint8Array, w: number, box: Box): HTMLCanvasElement {
   const bw = box.x1 - box.x0 + 1, bh = box.y1 - box.y0 + 1;
   const out = document.createElement('canvas');
@@ -66,12 +93,13 @@ function buildObjectCanvas(work: HTMLCanvasElement, mask: Uint8Array, w: number,
   const octx = out.getContext('2d');
   const wctx = work.getContext('2d');
   if (!octx || !wctx) return out;
+  // bbox 영역 마스크 → 침식(프린지 제거) → 부드러운 알파(안티에일리어스).
+  const m = new Uint8Array(bw * bh);
+  for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) m[yy * bw + xx] = mask[(box.y0 + yy) * w + (box.x0 + xx)] ? 1 : 0;
+  const soft = softEdge(erode1(m, bw, bh), bw, bh);
   const src = wctx.getImageData(box.x0, box.y0, bw, bh);
   const sd = src.data;
-  for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) {
-    const mi = (box.y0 + yy) * w + (box.x0 + xx);
-    if (!mask[mi]) sd[(yy * bw + xx) * 4 + 3] = 0; // 객체 밖은 투명
-  }
+  for (let i = 0; i < bw * bh; i++) sd[i * 4 + 3] = Math.round(sd[i * 4 + 3] * soft[i]);
   octx.putImageData(src, 0, 0);
   return out;
 }
@@ -559,12 +587,13 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     const m = extractMaskRef.current;
     const box = extractBox;
     if (!work || !m || !box || busy) return;
-    setBusy('객체를 분리하고 있어요…');
+    setBusy('객체를 정밀하게 분리하고 있어요…');
     try {
-      // 1) 분리 객체 PNG(투명 배경) — 보드에 따로 올릴 이미지.
+      // 1) 분리 객체 PNG — 경계 페더링(침식+안티에일리어스)으로 헤일로 없이 깔끔하게.
       const objUrl = buildObjectCanvas(work, m.mask, m.w, box).toDataURL('image/png');
-      // 2) 원본 구멍을 주변 배경으로 자연스럽게 메우고(인페인팅) 원본 노드에 적용(보드 ⌘Z 복원).
-      inpaintByMask(work, m.mask, m.w, m.h);
+      // 2) 원본 구멍을 배경 분석으로 채움 — PatchMatch 멀티스케일(주변 텍스처 복제로 타일·격자
+      //    까지 자연스럽게). 실패 시 push-pull 확산으로 폴백.
+      if (!inpaintPatch(work, m.mask, m.w, m.h)) inpaintByMask(work, m.mask, m.w, m.h);
       redraw();
       const baseUrl = work.toDataURL('image/png');
       let baseThumb: string | null = null;
