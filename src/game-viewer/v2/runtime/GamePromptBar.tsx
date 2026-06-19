@@ -10,6 +10,7 @@ import { Icon } from "@/lib/icons";
 import { applyEditIntent } from "./editIntent";
 import { generateGame } from "../generate/orchestrator";
 import { setBackgroundFromPrompt } from "../generate/background";
+import { setNodeContentFromPrompt } from "../generate/nodeContent";
 import { useGen } from "./genProgress";
 import { useMaterials } from "./materials";
 import { useGame } from "./useGame";
@@ -22,6 +23,7 @@ export function GamePromptBar() {
   const selectedId = useMaterials((s) => s.selectedId);
   const hasSel = !!selectedId && useMaterials.getState().items.some((m) => m.id === selectedId);
   const bgSel = useGame((s) => s.bgSelected && s.mode === "edit");
+  const nodeSel = useGame((s) => s.mode === "edit" && !!s.selectedNodeId); // 게임 요소(슬롯) 선택
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -46,6 +48,23 @@ export function GamePromptBar() {
       }
       return;
     }
+    // 0.5) 게임 요소(슬롯) 선택(편집) → 프롬프트로 그 자리 그림을 생성해 적용
+    {
+      const g = useGame.getState();
+      if (g.mode === "edit" && g.selectedNodeId) {
+        const nodeId = g.selectedNodeId;
+        setText("");
+        setBusy(true);
+        flash("선택한 자리에 그림을 그리고 있어요…");
+        try {
+          const ok = await setNodeContentFromPrompt(nodeId, t);
+          flash(ok ? "그림을 넣었어요!" : "생성에 실패했어요");
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
+    }
     // 1) 선택 요소 편집 시도
     const r = applyEditIntent(t);
     if (r.ok) { setText(""); flash(r.msg); return; }
@@ -67,7 +86,7 @@ export function GamePromptBar() {
     <div className="kv-gpbar-wrap">
       {toast && <div className="kv-gpbar-toast">{toast}</div>}
       <form className="kv-gpbar" onSubmit={submit}>
-        <span className="kv-gpbar-ic" aria-hidden><Icon name={bgSel ? "studio" : hasSel ? "edit" : "sparkle"} size={18} /></span>
+        <span className="kv-gpbar-ic" aria-hidden><Icon name={bgSel ? "studio" : nodeSel ? "studio" : hasSel ? "edit" : "sparkle"} size={18} /></span>
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -75,9 +94,11 @@ export function GamePromptBar() {
           placeholder={
             bgSel
               ? "배경 이미지를 만들어요…  예) 숲속 · 바닷속 · 우주 · 꽃밭"
-              : hasSel
-                ? "선택한 요소에 명령…  예) 빨갛게 · 글자 사과로 · 통통 튀게 · 정답"
-                : "무엇이든 만들어 보세요…  예) 동물 이름 맞추기 · 과일 짝 맞추기"
+              : nodeSel
+                ? "선택한 자리에 넣을 그림을 말해요…  예) 사자 · 기쁜 얼굴 · 빨간 사과"
+                : hasSel
+                  ? "선택한 요소에 명령…  예) 빨갛게 · 글자 사과로 · 통통 튀게 · 정답"
+                  : "무엇이든 만들어 보세요…  예) 동물 이름 맞추기 · 과일 짝 맞추기"
           }
           aria-label="게임 명령 입력"
         />

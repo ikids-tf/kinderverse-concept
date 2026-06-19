@@ -10,6 +10,7 @@ import { transformStyle } from "../layout";
 import { resolveVisual, type Visual } from "../content";
 import { useStageSize } from "../stageSize";
 import { useGame } from "../useGame";
+import { useAssetUrl } from "../assetStore";
 import type { ContentBinding, InteractiveDoc, SceneNode } from "../../schema/interactiveDoc";
 
 /** 라운드0 콘텐츠를 슬롯에 매핑(셔플 없음 — 편집 미리보기용). */
@@ -95,6 +96,7 @@ function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: C
   };
 
   const vis = previewOf(node, binding);
+  const imgUrl = useAssetUrl(vis?.assetKey); // 프롬프트로 만든 그림이 준비되면 미리보기도 그림으로
   return (
     <div
       className={`edit-node${selected ? " selected" : ""}`}
@@ -104,7 +106,9 @@ function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: C
       onPointerUp={up}
     >
       <span className="edit-badge">{node.role ?? node.type}</span>
-      {vis && <span className="edit-preview">{vis.emoji ?? vis.text}</span>}
+      {vis && (imgUrl
+        ? <img className="edit-preview-img" src={imgUrl} alt="" draggable={false} />
+        : <span className="edit-preview">{vis.emoji ?? vis.text}</span>)}
       {selected && (
         <span
           className="edit-handle"

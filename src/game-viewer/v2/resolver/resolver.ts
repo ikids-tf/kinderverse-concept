@@ -93,7 +93,9 @@ export interface RecommendOpts {
 type SlotInput = { id: string; type: "slot"; role: "option" | "slot"; transform: { x: number; y: number; w: number; h: number } };
 
 function optionSlots(n: number): SlotInput[] {
-  const w = Math.min(0.26, 0.92 / n);
+  // 칸 중심 간격 = 1/(n+1). 폭이 간격보다 크면 서로 겹치므로, 간격에서 여백(0.04)을 빼 겹침을
+  // 막는다(상한 0.26). 예) n=3 → 폭 0.21로 25%/50%/75% 칸이 안 겹친다.
+  const w = Math.min(0.26, 1 / (n + 1) - 0.04);
   return Array.from({ length: n }, (_, i) => ({
     id: `opt${i}`, type: "slot", role: "option", transform: { x: (i + 1) / (n + 1), y: 0.82, w, h: 0.18 },
   }));

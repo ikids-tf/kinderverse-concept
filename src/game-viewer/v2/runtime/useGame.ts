@@ -198,6 +198,8 @@ export interface GameStore {
   selectNode: (id: string | null) => void;
   selectBg: (v: boolean) => void;
   setBackgroundImage: (assetId: string | null) => void;
+  /** 편집: 선택 노드(슬롯)의 라운드0 콘텐츠를 교체(프롬프트로 만든 그림/글자 적용). */
+  setNodeContent: (nodeId: string, content: ContentBinding) => void;
   patchNodeTransform: (id: string, patch: Partial<{ x: number; y: number; w: number; h: number }>) => void;
 }
 
@@ -1144,6 +1146,35 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
           })
         : undefined;
       set({ doc: { ...doc, stage: { ...doc.stage, background } } });
+    },
+
+    // 선택 노드(슬롯)의 라운드0 콘텐츠를 교체 — 편집에서 프롬프트로 만든 그림/글자를 그 자리에 적용.
+    // 라운드0은 편집 미리보기에 보이는 라운드(EditLayer.roundZeroBindings와 동일 매핑). doc 교체라 undo 가능.
+    setNodeContent: (nodeId, content) => {
+      const doc = get().doc;
+      if (!doc) return;
+      const it = doc.interaction;
+      const r0 = <T,>(rounds: readonly T[], mut: (r: T) => T): T[] => rounds.map((r, i) => (i === 0 ? mut(r) : r));
+      let changed = false;
+      let interaction = it;
+      if (it.kind === "tap-the-right-one") {
+        const oi = it.optionSlotIds.indexOf(nodeId);
+        if (nodeId === it.cueSlotId) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, cue: content })) }; }
+        else if (oi >= 0) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => (r.options[oi] ? { ...r, options: r.options.map((o, j) => (j === oi ? { ...o, content } : o)) } : r)) }; }
+      } else if (it.kind === "binary-choice") {
+        if (nodeId === it.promptSlotId) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, prompt: content })) }; }
+      } else if (it.kind === "match-pair") {
+        const li = it.leftSlotIds.indexOf(nodeId), ri = it.rightSlotIds.indexOf(nodeId);
+        if (li >= 0 || ri >= 0) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, pairs: r.pairs.map((p, j) => (li >= 0 && j === li ? { ...p, left: content } : ri >= 0 && j === ri ? { ...p, right: content } : p)) })) }; }
+      } else if (it.kind === "connect") {
+        const li = it.leftSlotIds.indexOf(nodeId), ri = it.rightSlotIds.indexOf(nodeId);
+        if (li >= 0 || ri >= 0) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, links: r.links.map((p, j) => (li >= 0 && j === li ? { ...p, left: content } : ri >= 0 && j === ri ? { ...p, right: content } : p)) })) }; }
+      } else if (it.kind === "flip-memory") {
+        const ci = it.cardSlotIds.indexOf(nodeId);
+        if (ci >= 0) { changed = true; interaction = { ...it, rounds: r0(it.rounds, (r) => ({ ...r, faces: r.faces.map((f, j) => (j === ci % r.faces.length ? content : f)) })) }; }
+      }
+      if (!changed) return;
+      set({ doc: { ...doc, interaction } });
     },
 
     patchNodeTransform: (id, patch) => {

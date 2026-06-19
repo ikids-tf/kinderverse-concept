@@ -533,6 +533,7 @@
   background: var(--coral); padding: 1px 7px; border-radius: 999px; pointer-events: none; white-space: nowrap;
 }
 .kv-v2 .edit-preview { font-size: 1.6rem; pointer-events: none; line-height: 1; }
+.kv-v2 .edit-preview-img { max-width: 84%; max-height: 84%; object-fit: contain; pointer-events: none; user-select: none; }
 .kv-v2 .edit-handle {
   position: absolute; right: -8px; bottom: -8px; width: 16px; height: 16px; border-radius: 50%;
   background: var(--coral); border: 2px solid #fff; cursor: nwse-resize; touch-action: none;
