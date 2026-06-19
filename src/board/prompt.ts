@@ -1,5 +1,5 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
 import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior } from './composer';
@@ -29,6 +29,9 @@ import { PAGE_ACTIONS } from '@/ai/actions';
 import { buildAgentContext } from '@/ai/context';
 import { showToast } from '@/lib/toast';
 import type { RouteTarget } from '@/ai/contract';
+
+/** "이 스타일로 여러 대상을 '각각/다른 카드'로 그려줘" — 선택 이미지를 화풍 참조로 시리즈 생성하는 신호. */
+const STYLE_SERIES_RE = /각각|여러\s*가지|여러\s*개|여러\s*장|다른\s*(이미지\s*)?카드|새\s*(이미지\s*)?카드|별도\s*(의)?\s*카드|각\s*카드/;
 
 /** 입력 정규화(보수적) — 앞뒤 공백·따옴표 정리, 줄 안 공백 축약(줄바꿈은 보존).
     오타·자모분해 교정은 과교정으로 오인식 위험이 있어 넣지 않는다. */
@@ -341,6 +344,16 @@ export function handleBoardPrompt(text: string): boolean {
   const bgTargets = sel.filter((n) => n.type === 'image' && n.src);
   if (bgTargets.length > 0 && BG_REMOVE_RE.test(text)) {
     bgTargets.forEach((n) => void removeBgFromNode(n.id));
+    return true;
+  }
+
+  // 이미지 1장 선택 + "이 스타일로 여러가지 ~ 각각/다른 카드에 그려줘" → 선택 카드는 그대로 두고,
+  // 그 화풍을 참조해 지시한 각 대상을 '새 이미지 카드'로 추가한다(in-place 재생성 아님).
+  if (
+    sel.length === 1 && sel[0].type === 'image' && sel[0].src &&
+    STYLE_SERIES_RE.test(text) && /그려|그림|그릴|만들|생성|표현/.test(text)
+  ) {
+    void generateStyledSeriesFromImage(sel[0].id, text);
     return true;
   }
 

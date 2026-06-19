@@ -1095,6 +1095,121 @@ export async function generateActivityImages(sourceId: string): Promise<void> {
   useBoardStore.getState().endGen();
 }
 
+/** "여러 그림을 각각 그려줘" 요청에서 각각 그릴 대상의 짧은 목록을 뽑는다(LLM 우선, 사전 폴백). */
+async function seriesSubjects(prompt: string, max: number): Promise<string[]> {
+  try {
+    const res = await callGateway({
+      task: 'list-subjects', tier: 'low', provider: 'auto', responseFormat: 'json',
+      system: "교사의 '여러 그림을 각각 그려줘' 요청에서 '각각 그릴 대상'의 짧은 한국어 단어 목록을 뽑아라. JSON 배열만 출력. 요청 범주에 맞게.",
+      messages: [{ role: 'user', content: `요청: "${prompt}"\n각각 그릴 대상을 짧은 한국어로 최대 ${max}개. 예) 여러가지 감정 → ["기쁨","슬픔","화남","놀람","무서움"] · 여러 동물 → ["사자","토끼","펭귄"]. JSON 배열만:` }],
+      maxTokens: 200,
+    });
+    if (res.ok && !res.mocked && res.text) {
+      const m = res.text.match(/\[[\s\S]*\]/);
+      if (m) {
+        const arr = JSON.parse(m[0]) as unknown[];
+        const items = arr.map((x) => String(x).trim()).filter((x) => x.length >= 1 && x.length <= 20);
+        if (items.length) return items.slice(0, max);
+      }
+    }
+  } catch { /* 폴백 */ }
+  // 폴백 — 흔한 범주 사전(LLM 미가용/실패 시).
+  const has = (re: RegExp) => re.test(prompt);
+  let list: string[] = [];
+  if (has(/감정|기분|표정|마음|느낌|정서/)) list = ['기쁨', '슬픔', '화남', '놀람', '무서움', '졸림'];
+  else if (has(/동물/)) list = ['사자', '코끼리', '토끼', '펭귄', '곰', '원숭이'];
+  else if (has(/과일/)) list = ['사과', '바나나', '딸기', '포도', '귤', '수박'];
+  else if (has(/채소|야채/)) list = ['당근', '감자', '양파', '옥수수', '토마토', '브로콜리'];
+  else if (has(/사계절|계절/)) list = ['봄', '여름', '가을', '겨울'];
+  else if (has(/색깔|색|컬러/)) list = ['빨강', '주황', '노랑', '초록', '파랑', '보라'];
+  else if (has(/직업/)) list = ['경찰', '소방관', '의사', '요리사', '선생님', '농부'];
+  else if (has(/날씨/)) list = ['맑음', '비', '눈', '구름', '바람', '천둥'];
+  return list.slice(0, max);
+}
+
+/** http(s) URL을 data URI로(스타일 참조 입력용). data:면 그대로, 실패하면 원본 반환. */
+async function toDataUri(src: string): Promise<string> {
+  if (src.startsWith('data:')) return src;
+  try {
+    const blob = await (await fetch(src)).blob();
+    return await new Promise<string>((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result));
+      fr.onerror = rej;
+      fr.readAsDataURL(blob);
+    });
+  } catch { return src; }
+}
+
+/**
+ * 선택한 이미지를 '화풍 참조'로, 지시한 여러 대상을 각각 '새 이미지 카드'로 그린다(원본은 그대로).
+ * "이 스타일로 여러가지 감정을 각각 다른 카드에 그려줘" 같은 요청 — in-place 재생성이 아니라 카드 추가.
+ * 원본 오른쪽에 그리드로 자리(스피너)를 먼저 깔고, 대상마다 참조 이미지+지시로 1장씩 채운다.
+ */
+export async function generateStyledSeriesFromImage(sourceId: string, prompt: string): Promise<void> {
+  const b = useBoardStore.getState();
+  const source = b.nodes[sourceId];
+  if (!source || source.type !== 'image' || !source.src) return;
+  b.beginGen();
+  b.setGenerating('🎨 요청을 살펴보고 있어요…');
+  try {
+    const items = await seriesSubjects(prompt, 6);
+    if (items.length === 0) {
+      b.setGenerating('무엇을 각각 그릴지 잘 모르겠어요 — 예) "여러 감정", "동물 5가지"');
+      await new Promise((r) => setTimeout(r, 2000));
+      return;
+    }
+    const styleSrc = await toDataUri(source.src);
+    const styleTopic = (source.text ?? '').trim() || String(source.data?.title ?? '').trim();
+
+    // 원본 오른쪽에 그리드(최대 3열)로 빈 카드 먼저 — 자리 확보 + 진행 표시.
+    const sb = worldBox(source);
+    const W = Math.min(320, Math.max(180, Math.round(source.w) || 240));
+    const H = Math.min(320, Math.max(180, Math.round(source.h) || 240));
+    const GAP = 28;
+    const cols = Math.min(items.length, 3);
+    const x0 = Math.round(sb.x + sb.w + 40);
+    const y0 = Math.round(sb.y);
+    const ids: string[] = [];
+    items.forEach((it, i) => {
+      const col = i % cols, row = Math.floor(i / cols);
+      const id = newId('image');
+      b.addNodeRaw({
+        id, type: 'image',
+        x: x0 + col * (W + GAP), y: y0 + row * (H + GAP), w: W, h: H, autoH: true,
+        loading: true, text: it.slice(0, 40), data: { role: 'image' },
+      });
+      ids.push(id);
+    });
+
+    // 대상마다 '참조 이미지와 같은 화풍'으로 새 그림 1장(원본은 입력으로만 — 수정하지 않음).
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      b.setGenerating(`🎨 '${it}' 그리는 중… (${i + 1}/${items.length})`);
+      try {
+        const genPrompt =
+          `첨부한 그림과 똑같은 화풍·색감·선·질감·구도로 '${it}'${styleTopic ? ` (${styleTopic} 같은 화풍)` : ''}을(를) 분명하게 표현한 '새 그림' 한 장을 그려라. 단일 주체, 배경은 단순하게, 글자·테두리 없음. ${KV_ART_STYLE}`;
+        const meta = styleSrc.startsWith('data:')
+          ? { images: [styleSrc], prompt: genPrompt, caption: it }
+          : { prompt: genPrompt, caption: it };
+        const res = await callGateway({ task: 'image', provider: 'auto', messages: [], meta });
+        if (!useBoardStore.getState().nodes[ids[i]]) continue; // 사용자가 지운 경우
+        if (res.ok && res.image) {
+          useBoardStore.getState().updateNodeRaw(ids[i], { loading: false, src: res.image, text: it.slice(0, 40) });
+          if (!res.mocked) void saveAsset(it, 'image', res.image, styleTopic || undefined);
+        } else {
+          useBoardStore.getState().updateNodeRaw(ids[i], { loading: false });
+        }
+      } catch {
+        if (useBoardStore.getState().nodes[ids[i]]) useBoardStore.getState().updateNodeRaw(ids[i], { loading: false });
+      }
+    }
+    recordSpawnedNodes(ids.filter((id) => useBoardStore.getState().nodes[id]), '스타일 시리즈 그림');
+  } finally {
+    useBoardStore.getState().endGen();
+  }
+}
+
 /** 동영상 플레이어(빈) 뷰어를 보드에 추가하고 id를 돌려준다. nearId가 있으면 그
     카드 오른쪽 옆에, 없으면 화면 중앙에. 카드 선택+"영상 만들어줘" 트리거가 쓴다. */
 export function spawnVideoPlayer(nearId?: string): string {
