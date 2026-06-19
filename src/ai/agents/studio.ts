@@ -23,7 +23,8 @@ function system(ctx?: string): string {
 /* Shared art-style descriptors (Design Director — style-locked illustration, P3).
    Appended to every image prompt so a frame's generated art is tonally cohesive. */
 export const KV_ART_STYLE =
-  '밝고 따뜻한 유아 그림책 일러스트 스타일, 부드러운 파스텔 색감, 둥근 형태, 단순하고 깔끔한 배경, 한 장면·단일 주제, 유아가 무서워할 요소 없음, 이미지 안에 글자·숫자·문자 절대 없음';
+  '밝고 따뜻한 유아 그림책 일러스트 스타일, 부드러운 파스텔 색감, 둥근 형태, 단순하고 깔끔한 배경, 한 장면·단일 주제, 유아가 무서워할 요소 없음, 이미지 안에 글자·숫자·문자 절대 없음. ' +
+  '주인공(아이·인물·동물·사물)은 몸 전체가 프레임 안에 온전히 들어오게 그린다 — 머리 끝부터 발끝(또는 사물의 맨 아래)까지 다 보이게 하고, 화면 위·아래·양옆 가장자리에서 넉넉히 떨어뜨려 어느 방향으로도 잘리지 않게 한다. 특히 아래쪽이 프레임에 닿아 발·다리·하단이 잘리지 않도록 주체를 약간 작게 배치하고 발밑에 여백을 둔다(클로즈업·과한 확대 금지).';
 export const KV_COLORING_STYLE =
   '유아용 흑백 색칠 도안, 굵고 선명한 윤곽선, 색과 음영 없음, 깨끗한 흰 배경, 닫힌 면으로 칠하기 쉬운 큰 영역, 이미지 안에 글자·숫자 없음';
 /* 투명 컷아웃용 — "투명 배경에 ○○ 그려줘". 누끼(RMBG)가 한 번에 깨끗이 떨어지도록
