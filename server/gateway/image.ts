@@ -92,16 +92,82 @@ export async function generateImage(
   }
 }
 
-/* ---------- Element detection (레이어 분리: 이미지 → 요소 경계상자) ---------- */
-
-/** Gemini vision model for object detection. Flash supports image input + boxes. */
-const DEFAULT_DETECT_MODEL = 'gemini-2.5-flash';
+/* ---------- Image editing (이미지+프롬프트 → 이미지: 인페인팅·변형) ---------- */
 
 function parseDataUri(uri: string): { mime: string; data: string } | null {
   const m = /^data:([^;]+);base64,(.*)$/s.exec(uri);
   if (!m) return null;
   return { mime: m[1], data: m[2] };
 }
+
+interface EditImageOpts {
+  geminiKey?: string;
+  model?: string;
+  prompt: string;
+  caption: string;
+  /** 입력 이미지(들) data URI — 예: [원본, 채울영역 마스크]. 첫 장이 기준 이미지. */
+  images: string[];
+}
+
+/** 입력 이미지(들) + 프롬프트로 편집 이미지를 생성(나노바나나/Gemini 이미지 모델은 이미지 입력 편집 지원).
+    객체 제거 인페인팅 등에 사용. 키 없거나 유효 입력 없으면 placeholder(real=false). */
+export async function editImage(
+  opts: EditImageOpts,
+): Promise<{ image: string; real: boolean; detail?: string }> {
+  const model = opts.model || DEFAULT_IMAGE_MODEL;
+  if (!opts.geminiKey) {
+    return { image: placeholderImage(opts.caption), real: false, detail: 'no GEMINI_API_KEY' };
+  }
+  const parts: Array<{ inlineData: { mimeType: string; data: string } } | { text: string }> = [];
+  for (const uri of opts.images) {
+    const p = parseDataUri(uri);
+    if (p) parts.push({ inlineData: { mimeType: p.mime, data: p.data } });
+  }
+  if (parts.length === 0) {
+    return { image: placeholderImage(opts.caption), real: false, detail: 'no valid input image' };
+  }
+  parts.push({ text: opts.prompt });
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model,
+    )}:generateContent?key=${encodeURIComponent(opts.geminiKey)}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return {
+        image: placeholderImage(opts.caption),
+        real: false,
+        detail: `gemini ${model} HTTP ${res.status}: ${body.slice(0, 200)}`,
+      };
+    }
+    const data = (await res.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType: string; data: string } }> } }>;
+    };
+    const part = data.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
+    if (part?.inlineData) {
+      return { image: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`, real: true };
+    }
+    return { image: placeholderImage(opts.caption), real: false, detail: `${model}: no inlineData in response` };
+  } catch (e) {
+    return {
+      image: placeholderImage(opts.caption),
+      real: false,
+      detail: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/* ---------- Element detection (레이어 분리: 이미지 → 요소 경계상자) ---------- */
+
+/** Gemini vision model for object detection. Flash supports image input + boxes. */
+const DEFAULT_DETECT_MODEL = 'gemini-2.5-flash';
 
 /** Offline mock — a 2×2 grid of regions so 레이어 분리 stays runnable without a key. */
 function mockRegions(): DetectedRegion[] {

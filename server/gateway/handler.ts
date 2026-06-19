@@ -25,7 +25,7 @@ import {
   mockAgentStep,
   type LaneStepMeta,
 } from './mock';
-import { generateImage, detectImageElements, askImage } from './image';
+import { generateImage, editImage, detectImageElements, askImage } from './image';
 import { synthSpeech } from './tts';
 
 export interface GatewayConfig {
@@ -75,7 +75,25 @@ export async function handleGatewayRequest(
 
   // ---- Image task: dedicated plugin (real when configured, else placeholder). ----
   if (req.task === 'image') {
-    const meta = (req.meta ?? {}) as { prompt?: string; caption?: string; aspectRatio?: string };
+    const meta = (req.meta ?? {}) as {
+      prompt?: string;
+      caption?: string;
+      aspectRatio?: string;
+      images?: string[];
+      image?: string;
+    };
+    // 입력 이미지가 있으면 편집(인페인팅·변형) 경로, 없으면 텍스트→이미지 생성.
+    const imgs = meta.images ?? (meta.image ? [meta.image] : undefined);
+    if (imgs && imgs.length > 0) {
+      const { image, real, detail } = await editImage({
+        geminiKey: config.geminiKey,
+        model: config.imageModel,
+        prompt: meta.prompt ?? '이미지를 자연스럽게 편집',
+        caption: meta.caption ?? '편집',
+        images: imgs,
+      });
+      return { ok: true, image, mocked: !real, error: real ? undefined : detail };
+    }
     const { image, real, detail } = await generateImage({
       geminiKey: config.geminiKey,
       model: config.imageModel,

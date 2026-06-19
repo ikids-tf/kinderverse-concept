@@ -5,6 +5,7 @@ import { makeThumb, THUMB_MAX_W } from '@/board/imageLod';
 import { removeBackground, cleanupBackground } from '@/shared/background-removal';
 import { prepareSegment, segmentAt, segmentAtPoints } from '@/shared/segment/segment';
 import { inpaintPatch } from '@/shared/inpaint/patchInpaint';
+import { aiInpaintFill } from '@/shared/inpaint/aiInpaint';
 import { saveAsset } from '@/board/assets';
 import { showToast } from '@/lib/toast';
 import { useZoomModal, type OriginRect } from './useZoomModal';
@@ -590,10 +591,18 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     setBusy('객체를 정밀하게 분리하고 있어요…');
     try {
       // 1) 분리 객체 PNG — 경계 페더링(침식+안티에일리어스)으로 헤일로 없이 깔끔하게.
+      //    (인페인팅 전, 원본이 온전할 때 객체 픽셀을 먼저 떠 둔다.)
       const objUrl = buildObjectCanvas(work, m.mask, m.w, box).toDataURL('image/png');
-      // 2) 원본 구멍을 배경 분석으로 채움 — PatchMatch 멀티스케일(주변 텍스처 복제로 타일·격자
-      //    까지 자연스럽게). 실패 시 push-pull 확산으로 폴백.
-      if (!inpaintPatch(work, m.mask, m.w, m.h)) inpaintByMask(work, m.mask, m.w, m.h);
+      // 2) 원본 구멍을 '기존 배경과 연속되게' 채움.
+      //    ① 생성형 AI(나노바나나) — 모델이 그라데이션·물결까지 이어 그려 고스트 없이 메운다.
+      //    ② 키 없음/실패 시 PatchMatch 멀티스케일(주변 텍스처 복제) → ③ push-pull 확산.
+      setBusy('AI가 배경을 자연스럽게 채우고 있어요… (몇 초 걸려요)');
+      let filled = false;
+      try { filled = await aiInpaintFill(work, m.mask, m.w, m.h, { caption }); } catch { filled = false; }
+      if (!filled) {
+        setBusy('주변 배경으로 자리를 채우고 있어요…');
+        if (!inpaintPatch(work, m.mask, m.w, m.h)) inpaintByMask(work, m.mask, m.w, m.h);
+      }
       redraw();
       const baseUrl = work.toDataURL('image/png');
       let baseThumb: string | null = null;
