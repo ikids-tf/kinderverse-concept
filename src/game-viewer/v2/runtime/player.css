@@ -534,6 +534,13 @@
 }
 .kv-v2 .edit-preview { font-size: 1.6rem; pointer-events: none; line-height: 1; }
 .kv-v2 .edit-preview-img { max-width: 84%; max-height: 84%; object-fit: contain; pointer-events: none; user-select: none; }
+.kv-v2 .edit-node.editable { cursor: text; }
+/* 답·단서 글자 직접 편집(더블클릭) — 슬롯 안에서 바로 타이핑 */
+.kv-v2 .edit-text-input {
+  width: 86%; font: inherit; font-size: 1.15rem; font-weight: 800; text-align: center; color: var(--ink);
+  background: #fff; border: 2px solid var(--coral); border-radius: var(--r-sm); padding: 6px 8px;
+  box-shadow: 0 4px 12px rgba(255,158,125,.3); outline: none; user-select: text;
+}
 .kv-v2 .edit-handle {
   position: absolute; right: -8px; bottom: -8px; width: 16px; height: 16px; border-radius: 50%;
   background: var(--coral); border: 2px solid #fff; cursor: nwse-resize; touch-action: none;

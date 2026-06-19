@@ -58,13 +58,18 @@ function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: C
   const { w: sw, h: sh } = useStageSize();
   const selectNode = useGame((s) => s.selectNode);
   const patch = useGame((s) => s.patchNodeTransform);
+  const setContent = useGame((s) => s.setNodeContent);
   const drag = useRef<DragState | null>(null);
   const [live, setLive] = useState<Live | null>(null);
+  // 글자 직접 편집(더블클릭) — 답·단서의 텍스트를 그 자리에서 고친다. 이미지는 프롬프트로 교체.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
 
   const t = node.transform;
   const view: Live = live ?? { x: t.x, y: t.y, w: t.w, h: t.h };
 
   const down = (e: RPE<HTMLElement>, mode: "move" | "resize") => {
+    if (editing) return; // 글자 편집 중엔 드래그 금지
     e.stopPropagation();
     selectNode(node.id);
     const base: Live = { x: t.x, y: t.y, w: t.w, h: t.h };
@@ -97,19 +102,55 @@ function EditNodeBox({ node, binding, selected }: { node: SceneNode; binding?: C
 
   const vis = previewOf(node, binding);
   const imgUrl = useAssetUrl(vis?.assetKey); // 프롬프트로 만든 그림이 준비되면 미리보기도 그림으로
+  // 콘텐츠 슬롯(답·단서·짝 등)과 텍스트 노드만 글자 편집 허용 — 장식/빈 슬롯은 제외.
+  const editable = !!binding || node.type === "text";
+
+  const beginEdit = (e: RPE<HTMLElement>) => {
+    if (!editable) return;
+    e.stopPropagation();
+    e.preventDefault();
+    selectNode(node.id);
+    setDraft(vis?.text ?? "");
+    setEditing(true);
+  };
+  const commitEdit = () => {
+    setEditing(false);
+    const txt = draft.trim();
+    if (txt) setContent(node.id, { type: "text", text: txt }); // 답/단서를 텍스트로 교체(이미지였어도 글자로)
+  };
+
   return (
     <div
-      className={`edit-node${selected ? " selected" : ""}`}
+      className={`edit-node${selected ? " selected" : ""}${editable ? " editable" : ""}`}
       style={transformStyle({ ...t, x: view.x, y: view.y, w: view.w, h: view.h })}
       onPointerDown={(e) => down(e, "move")}
       onPointerMove={move}
       onPointerUp={up}
+      onDoubleClick={beginEdit}
+      title={editable ? "더블클릭하면 글자 수정 · 프롬프트로 그림 교체" : undefined}
     >
       <span className="edit-badge">{node.role ?? node.type}</span>
-      {vis && (imgUrl
-        ? <img className="edit-preview-img" src={imgUrl} alt="" draggable={false} />
-        : <span className="edit-preview">{vis.emoji ?? vis.text}</span>)}
-      {selected && (
+      {editing ? (
+        <input
+          className="edit-text-input"
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
+            else if (e.key === "Escape") { e.preventDefault(); setEditing(false); }
+          }}
+          onBlur={commitEdit}
+          aria-label="답 글자 수정"
+        />
+      ) : (
+        vis && (imgUrl
+          ? <img className="edit-preview-img" src={imgUrl} alt="" draggable={false} />
+          : <span className="edit-preview">{vis.emoji ?? vis.text}</span>)
+      )}
+      {selected && !editing && (
         <span
           className="edit-handle"
           onPointerDown={(e) => down(e, "resize")}

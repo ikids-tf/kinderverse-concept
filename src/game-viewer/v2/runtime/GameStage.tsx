@@ -708,7 +708,7 @@ export function GameStage() {
 
                     {mode === "edit" && (
                       <div className="edit-hint" aria-hidden>
-                        ✏️ 끌어서 이동 · 모서리로 크기 · 방향키 미세이동
+                        ✏️ 끌어서 이동 · 모서리로 크기 · 더블클릭 글자수정 · 프롬프트로 그림교체
                       </div>
                     )}
 
