@@ -104,6 +104,36 @@
   cursor: pointer;
 }
 
+/* 편집 모드 — 동작 있는 요소 호버 시 가운데 ▶ 미리보기 버튼(클릭=동작 확인). */
+.kv-inode .ic-preview-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ic-coral);
+  font-size: 18px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 14px rgba(87, 75, 62, 0.25);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+.kv-inode[data-mode='edit'] .ic-el:hover .ic-preview-play {
+  opacity: 1;
+  pointer-events: auto;
+}
+.kv-inode .ic-preview-play:hover {
+  background: var(--ic-coral);
+  color: #fff;
+}
+
 /* 빈 캔버스 안내 */
 .kv-inode .ic-empty {
   position: absolute;

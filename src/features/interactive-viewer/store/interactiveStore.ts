@@ -66,18 +66,27 @@ export function newDocId(): string {
 interface InteractiveState {
   /** 열린/미리보기 중인 문서 캐시(docId → doc). */
   docs: Record<string, InteractiveNode>;
-  /** docId 보장 — 캐시→localStorage→기본 생성(생성 시 즉시 영속화). */
+  /** per-doc undo/redo 스택(편집 히스토리). */
+  past: Record<string, InteractiveNode[]>;
+  future: Record<string, InteractiveNode[]>;
+  /** docId 보장 — 캐시→localStorage→기본 생성(생성 시 즉시 영속화). 히스토리에 안 남음. */
   ensure: (docId: string) => InteractiveNode;
   /** 현재 캐시 값(없으면 undefined). */
   peek: (docId: string) => InteractiveNode | undefined;
-  /** 문서 갱신 — 캐시 + localStorage 동시 반영. */
-  update: (docId: string, doc: InteractiveNode) => void;
-  /** 함수형 갱신(현재 문서 기반). */
+  /** 함수형 갱신 — 히스토리에 기록(undo 가능) + localStorage 반영. */
   mutate: (docId: string, fn: (doc: InteractiveNode) => InteractiveNode) => void;
+  undo: (docId: string) => void;
+  redo: (docId: string) => void;
+  canUndo: (docId: string) => boolean;
+  canRedo: (docId: string) => boolean;
 }
+
+const HISTORY_MAX = 50;
 
 export const useInteractiveStore = create<InteractiveState>((set, get) => ({
   docs: {},
+  past: {},
+  future: {},
   ensure: (docId) => {
     const cached = get().docs[docId];
     if (cached) return cached;
@@ -87,14 +96,42 @@ export const useInteractiveStore = create<InteractiveState>((set, get) => ({
     return loaded;
   },
   peek: (docId) => get().docs[docId],
-  update: (docId, doc) => {
-    set((s) => ({ docs: { ...s.docs, [docId]: doc } }));
-    saveInteractiveNode(doc);
-  },
-  mutate: (docId, fn) => {
-    const cur = get().docs[docId] ?? get().ensure(docId);
-    const next = fn(cur);
-    set((s) => ({ docs: { ...s.docs, [docId]: next } }));
-    saveInteractiveNode(next);
-  },
+  mutate: (docId, fn) =>
+    set((s) => {
+      const cur = s.docs[docId];
+      if (!cur) return s;
+      const next = fn(cur);
+      saveInteractiveNode(next);
+      const past = [...(s.past[docId] ?? []), cur];
+      if (past.length > HISTORY_MAX) past.shift();
+      return { docs: { ...s.docs, [docId]: next }, past: { ...s.past, [docId]: past }, future: { ...s.future, [docId]: [] } };
+    }),
+  undo: (docId) =>
+    set((s) => {
+      const p = s.past[docId] ?? [];
+      const cur = s.docs[docId];
+      if (!p.length || !cur) return s;
+      const prev = p[p.length - 1];
+      saveInteractiveNode(prev);
+      return {
+        docs: { ...s.docs, [docId]: prev },
+        past: { ...s.past, [docId]: p.slice(0, -1) },
+        future: { ...s.future, [docId]: [cur, ...(s.future[docId] ?? [])] },
+      };
+    }),
+  redo: (docId) =>
+    set((s) => {
+      const f = s.future[docId] ?? [];
+      const cur = s.docs[docId];
+      if (!f.length || !cur) return s;
+      const nxt = f[0];
+      saveInteractiveNode(nxt);
+      return {
+        docs: { ...s.docs, [docId]: nxt },
+        future: { ...s.future, [docId]: f.slice(1) },
+        past: { ...s.past, [docId]: [...(s.past[docId] ?? []), cur] },
+      };
+    }),
+  canUndo: (docId) => (get().past[docId]?.length ?? 0) > 0,
+  canRedo: (docId) => (get().future[docId]?.length ?? 0) > 0,
 }));

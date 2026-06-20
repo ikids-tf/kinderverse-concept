@@ -58,7 +58,7 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
       const kind = d.kind;
       const srcUrl = d.src;
       void (async () => {
-        const ref = await urlToAssetRef(srcUrl, 'board-copy');
+        const ref = await urlToAssetRef(srcUrl, 'teacher-upload');
         const el =
           kind === 'video'
             ? makeVideoElement(ref, 'board-copy', at, { w: cw, h: ch })

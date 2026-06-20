@@ -1,6 +1,6 @@
 /**
  * 풀스크린 저작/재생 오버레이 — 편집↔재생 토글, 저작 툴바(자료 추가·배경), 인스펙터,
- * 외부 파일 드롭, 배경제거, 교체 대상 고르기. 보드 카드의 ZoomOverlay 안에 마운트된다.
+ * 외부 파일 드롭, 배경제거, 교체 대상 고르기, 다중 선택. 보드 카드의 ZoomOverlay 안에 마운트.
  *
  * 🔴 토큰 분리: 크롬(툴바·인스펙터·상단바)=Milray(Tailwind 유틸). 캔버스/재생=파스텔
  *    (.kv-inode, InteractiveStage 내부). 재생 모드에선 저작 툴바·인스펙터를 숨긴다.
@@ -20,7 +20,10 @@ import {
   urlToAssetRef,
   withElementAdded,
 } from '../runtime/assetIngest';
-import type { Behavior } from '../schema/interactiveNode';
+import type { Behavior, ElementNode, InteractiveNode } from '../schema/interactiveNode';
+
+/** 요소 클립보드(⌘C/⌘V) — 다중 복사 지원, 오버레이 인스턴스 간 공유(세션 한정). */
+let elementClipboard: ElementNode[] | null = null;
 
 const PASTEL_BGS: Array<{ token: string; color: string }> = [
   { token: 'pastel.cream', color: '#fff7f0' },
@@ -39,14 +42,24 @@ const chromeBtn =
   'rounded-pill border border-border bg-surface/95 px-3 py-1.5 text-sm font-semibold text-fg shadow-sm transition-colors hover:border-accent hover:text-accent';
 const chromeBtnAccent =
   'rounded-pill bg-accent px-3 py-1.5 text-sm font-bold text-on-accent shadow-sm transition-colors hover:bg-accent-strong';
-const tbBtn = 'rounded-pill px-2.5 py-1.5 text-sm font-semibold text-fg-2 transition-colors hover:bg-accent hover:text-on-accent';
+const tbBtn = 'flex h-10 w-10 items-center justify-center rounded-pill text-base font-semibold text-fg-2 transition-colors hover:bg-accent hover:text-on-accent';
+
+/** 여러 클론을 한 문서에 누적 추가(한 mutate). */
+function addClones(d: InteractiveNode, clones: ElementNode[]): InteractiveNode {
+  return clones.reduce((acc, cl) => withElementAdded(acc, cl), d);
+}
+function cloneOf(el: ElementNode): ElementNode {
+  return { ...el, id: newId('el'), transform: { ...el.transform, x: el.transform.x + 24, y: el.transform.y + 24 } };
+}
 
 export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Props) {
   const doc = useInteractiveStore((s) => s.docs[docId]);
   const ensure = useInteractiveStore((s) => s.ensure);
   const mutate = useInteractiveStore((s) => s.mutate);
+  const undo = useInteractiveStore((s) => s.undo);
+  const redo = useInteractiveStore((s) => s.redo);
   const [mode, setMode] = useState<'play' | 'edit'>(initialMode);
-  const [selectedElId, setSelectedElId] = useState<string | null>(null);
+  const [selectedElIds, setSelectedElIds] = useState<string[]>([]);
   const [resetNonce, setResetNonce] = useState(0);
   const [picker, setPicker] = useState<null | { for: 'add' | 'swap' }>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -55,6 +68,107 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   useEffect(() => {
     ensure(docId);
   }, [docId, ensure]);
+
+  // 노드 단축키 — capture+stopImmediatePropagation으로 보드 단축키(bubble)보다 먼저 가로챈다.
+  // 실행취소/다시실행/전체선택/붙여넣기는 선택 없이도, 나머지(삭제·복제·복사·이동)는 선택 요소 전부 대상.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (mode !== 'edit') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const m = e.metaKey || e.ctrlKey;
+      const k = e.key.toLowerCase();
+      const allEls = () => useInteractiveStore.getState().docs[docId]?.elements ?? [];
+      // ── 실행취소 / 다시실행 ──
+      if (m && k === 'z') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.shiftKey) redo(docId);
+        else undo(docId);
+        return;
+      }
+      if (m && k === 'y') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        redo(docId);
+        return;
+      }
+      // ── 전체 선택 ──
+      if (m && k === 'a') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setSelectedElIds(allEls().map((x) => x.id));
+        return;
+      }
+      // ── 붙여넣기(선택 불필요, 다중) ──
+      if (m && k === 'v') {
+        if (elementClipboard && elementClipboard.length) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          const clones = elementClipboard.map(cloneOf);
+          mutate(docId, (d) => addClones(d, clones));
+          setSelectedElIds(clones.map((c) => c.id));
+        }
+        return;
+      }
+      // ── 이하 선택 요소 전부 대상 ──
+      if (!selectedElIds.length) return;
+      const ids = new Set(selectedElIds);
+      if (m && k === 'c') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const els = allEls().filter((x) => ids.has(x.id));
+        if (els.length) elementClipboard = JSON.parse(JSON.stringify(els)) as ElementNode[];
+        return;
+      }
+      if (m && k === 'd') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const clones = allEls().filter((x) => ids.has(x.id)).map(cloneOf);
+        if (clones.length) {
+          mutate(docId, (d) => addClones(d, clones));
+          setSelectedElIds(clones.map((c) => c.id));
+        }
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        mutate(docId, (d) => ({
+          ...d,
+          elements: d.elements.filter((x) => !ids.has(x.id)),
+          behaviors: d.behaviors.filter((b) => !ids.has(b.target)),
+          connections: d.connections.filter((c) => !ids.has(c.from) && !ids.has(c.to)),
+        }));
+        setSelectedElIds([]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        setSelectedElIds([]);
+        return;
+      }
+      if (e.key.startsWith('Arrow')) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const step = e.shiftKey ? 20 : 4;
+        let dx = 0;
+        let dy = 0;
+        if (e.key === 'ArrowLeft') dx = -step;
+        else if (e.key === 'ArrowRight') dx = step;
+        else if (e.key === 'ArrowUp') dy = -step;
+        else if (e.key === 'ArrowDown') dy = step;
+        mutate(docId, (d) => ({
+          ...d,
+          elements: d.elements.map((z) =>
+            ids.has(z.id) ? { ...z, transform: { ...z.transform, x: Math.round(z.transform.x + dx), y: Math.round(z.transform.y + dy) } } : z,
+          ),
+        }));
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [mode, selectedElIds, docId, mutate, undo, redo]);
 
   if (!doc) {
     return <div className="absolute inset-0 grid place-items-center text-fg-2">불러오는 중…</div>;
@@ -68,11 +182,27 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
       behaviors: [...d.behaviors.filter((b) => !(b.target === elId && b.trigger === 'tap')), ...(beh ? [beh] : [])],
     }));
 
-  const moveElement = (elId: string, x: number, y: number) =>
+  const moveElements = (ids: string[], dx: number, dy: number) => {
+    const set = new Set(ids);
     mutate(docId, (d) => ({
       ...d,
-      elements: d.elements.map((e) => (e.id === elId ? { ...e, transform: { ...e.transform, x, y } } : e)),
+      elements: d.elements.map((e) => (set.has(e.id) ? { ...e, transform: { ...e.transform, x: e.transform.x + dx, y: e.transform.y + dy } } : e)),
     }));
+  };
+
+  const resizeElement = (elId: string, patch: { x: number; y: number; w: number; h: number }) =>
+    mutate(docId, (d) => ({
+      ...d,
+      elements: d.elements.map((e) => (e.id === elId ? { ...e, transform: { ...e.transform, ...patch } } : e)),
+    }));
+
+  const duplicateElement = (elId: string) => {
+    const el = doc.elements.find((e) => e.id === elId);
+    if (!el) return;
+    const clone = cloneOf(el);
+    mutate(docId, (d) => withElementAdded(d, clone));
+    setSelectedElIds([clone.id]);
+  };
 
   const editText = (elId: string, text: string) =>
     mutate(docId, (d) => ({ ...d, elements: d.elements.map((e) => (e.id === elId ? { ...e, text } : e)) }));
@@ -84,7 +214,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
       behaviors: d.behaviors.filter((b) => b.target !== elId),
       connections: d.connections.filter((c) => c.from !== elId && c.to !== elId),
     }));
-    setSelectedElId(null);
+    setSelectedElIds([]);
   };
 
   const setBackground = (token: string) =>
@@ -97,7 +227,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   ) => {
     const el = makeImageElement(ref, origin, at, doc.canvas.size);
     mutate(docId, (d) => withElementAdded(d, el));
-    setSelectedElId(el.id);
+    setSelectedElIds([el.id]);
   };
 
   const onFile = async (file: File) => {
@@ -121,6 +251,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
 
   const onPick = async (pick: AssetPick) => {
     const forSwap = picker?.for === 'swap';
+    const swapTarget = selectedElIds.length === 1 ? selectedElIds[0] : null;
     setPicker(null);
     setBusy('자료 넣는 중…');
     try {
@@ -128,10 +259,10 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
         pick.kind === 'file'
           ? await fileToAssetRef(pick.file, 'teacher-upload')
           : await urlToAssetRef(pick.asset.url, 'teacher-upload');
-      if (forSwap && selectedElId) {
-        setBehaviorFor(selectedElId, {
+      if (forSwap && swapTarget) {
+        setBehaviorFor(swapTarget, {
           id: newId('beh'),
-          target: selectedElId,
+          target: swapTarget,
           trigger: 'tap',
           action: 'swap',
           params: { to: ref, mode: 'image' },
@@ -145,15 +276,16 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   };
 
   const removeBg = async () => {
-    if (!selectedElId) return;
-    const el = doc.elements.find((e) => e.id === selectedElId);
+    const id = selectedElIds.length === 1 ? selectedElIds[0] : null;
+    if (!id) return;
+    const el = doc.elements.find((e) => e.id === id);
     if (!el || !el.src) return;
     setBusy('배경 지우는 중… (처음엔 모델 다운로드로 시간이 걸려요)');
     try {
       const next = await removeBgFromAssetRef(el.src);
       mutate(docId, (d) => ({
         ...d,
-        elements: d.elements.map((e) => (e.id === el.id ? { ...e, src: next } : e)),
+        elements: d.elements.map((e) => (e.id === id ? { ...e, src: next } : e)),
       }));
     } catch {
       setBusy('배경 제거에 실패했어요 — 원본을 유지합니다');
@@ -166,19 +298,19 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   const addText = () => {
     const el = makeTextElement('글자', center());
     mutate(docId, (d) => withElementAdded(d, el));
-    setSelectedElId(el.id);
+    setSelectedElIds([el.id]);
   };
   const addShape = () => {
     const el = makeShapeElement(center());
     mutate(docId, (d) => withElementAdded(d, el));
-    setSelectedElId(el.id);
+    setSelectedElIds([el.id]);
   };
 
   const toggleMode = () =>
     setMode((m) => {
       const next = m === 'edit' ? 'play' : 'edit';
       if (next === 'play') setResetNonce((n) => n + 1);
-      else setSelectedElId(null);
+      else setSelectedElIds([]);
       return next;
     });
 
@@ -186,7 +318,22 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
     <div className="absolute inset-0 flex flex-col" style={{ background: 'var(--bg-deep)' }}>
       {/* 상단 크롬 */}
       <div className="flex items-center justify-between gap-2 p-3">
-        <span className="rounded-pill bg-surface px-3 py-1.5 text-sm font-bold text-fg shadow-sm">{doc.title}</span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-pill bg-surface px-3 py-1.5 text-sm font-bold text-fg shadow-sm">{doc.title}</span>
+          {mode === 'edit' && (
+            <>
+              <button onClick={() => undo(docId)} className={chromeBtn} title="실행취소 (⌘/Ctrl+Z)">
+                ↩
+              </button>
+              <button onClick={() => redo(docId)} className={chromeBtn} title="다시실행 (⌘/Ctrl+⇧Z)">
+                ↪
+              </button>
+              {selectedElIds.length > 1 && (
+                <span className="rounded-pill bg-accent-soft px-3 py-1.5 text-sm font-semibold text-fg">{selectedElIds.length}개 선택</span>
+              )}
+            </>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {mode === 'play' && (
             <button onClick={() => setResetNonce((n) => n + 1)} className={chromeBtn}>
@@ -202,50 +349,57 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
         </div>
       </div>
 
-      {/* 본문 — 캔버스 + (편집 시) 인스펙터 */}
-      <div className="flex min-h-0 flex-1 gap-3 px-3 pb-16">
+      {/* 본문 — 캔버스 + (편집·단일선택 시) 인스펙터. 좌측 툴바 레일 공간을 위해 pl-20. */}
+      <div className="flex min-h-0 flex-1 gap-3 pb-4 pl-20 pr-3">
         <div className="relative min-w-0 flex-1 overflow-hidden rounded-2xl">
           <InteractiveStage
             doc={doc}
             mode={mode}
-            selectedElId={selectedElId}
-            onSelectEl={setSelectedElId}
-            onMoveElement={moveElement}
+            selectedElIds={selectedElIds}
+            onSelectEls={setSelectedElIds}
+            onMoveElements={moveElements}
+            onResizeElement={resizeElement}
+            onDuplicateElement={duplicateElement}
+            onRemoveElement={removeElement}
             onDropFiles={onDropFiles}
             resetNonce={resetNonce}
           />
         </div>
-        {mode === 'edit' && selectedElId && (
+        {mode === 'edit' && selectedElIds.length === 1 && (
           <Inspector
             doc={doc}
-            elId={selectedElId}
-            onSetBehavior={(b) => setBehaviorFor(selectedElId, b)}
+            elId={selectedElIds[0]}
+            onSetBehavior={(b) => setBehaviorFor(selectedElIds[0], b)}
             onAddSwap={() => setPicker({ for: 'swap' })}
             onRemoveBg={removeBg}
-            onEditText={(t) => editText(selectedElId, t)}
-            onRemoveElement={() => removeElement(selectedElId)}
+            onEditText={(t) => editText(selectedElIds[0], t)}
+            onRemoveElement={() => removeElement(selectedElIds[0])}
             busy={busy}
           />
         )}
       </div>
 
-      {/* 저작 툴바(재생 모드에선 숨김) */}
+      {/* 저작 툴바 — 마이보드식 좌측 세로 레일(재생 모드에선 숨김). 클릭 시 노드 내부 요소로 추가. */}
       {mode === 'edit' && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-          <div className="pointer-events-auto flex items-center gap-1 rounded-pill border border-border bg-surface/95 px-2 py-1.5 shadow-md backdrop-blur">
-            <button onClick={() => fileRef.current?.click()} className={tbBtn}>
-              📷 사진
+        <div className="pointer-events-none absolute left-4 top-1/2 flex -translate-y-1/2">
+          <div className="pointer-events-auto flex flex-col items-center gap-1 rounded-pill border border-border bg-surface/95 p-1.5 shadow-md backdrop-blur">
+            <button onClick={() => setSelectedElIds([])} title="선택 해제" className={tbBtn}>
+              ↖
             </button>
-            <button onClick={() => setPicker({ for: 'add' })} className={tbBtn}>
-              🗂 보관함
+            <span className="my-0.5 h-px w-6 bg-border" />
+            <button onClick={() => fileRef.current?.click()} title="사진 추가(파일)" className={tbBtn}>
+              📷
             </button>
-            <button onClick={addText} className={tbBtn}>
-              가 글자
+            <button onClick={() => setPicker({ for: 'add' })} title="보관함에서 추가" className={tbBtn}>
+              🗂
             </button>
-            <button onClick={addShape} className={tbBtn}>
-              ⬛ 도형
+            <button onClick={addText} title="글자 추가" className={tbBtn}>
+              가
             </button>
-            <span className="mx-1 h-5 w-px bg-border" />
+            <button onClick={addShape} title="도형 추가" className={tbBtn}>
+              ⬛
+            </button>
+            <span className="my-0.5 h-px w-6 bg-border" />
             {PASTEL_BGS.map((b) => (
               <button
                 key={b.token}
