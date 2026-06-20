@@ -66,6 +66,9 @@ export async function saveAsset(
   videoAssetId?: string,
 ): Promise<void> {
   if (!url || !caption.trim()) return;
+  // 플레이스홀더(생성 실패 '개념' SVG 자리표시)는 저장하지 않는다 — 깨진 그림이 보관함에 고착돼
+  // 다음 로드마다 재사용되는 것을 막는다. 생성 이미지는 래스터(PNG)라 image의 SVG=플레이스홀더.
+  if (kind === 'image' && url.startsWith('data:image/svg')) return;
   const lib = await load();
   const k = norm(caption);
   const arr = lib[k] ?? (lib[k] = []);

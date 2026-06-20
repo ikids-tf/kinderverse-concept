@@ -11,6 +11,7 @@ import { create } from "zustand";
 import type { InteractiveDocInput } from "../schema/interactiveDoc";
 import { FIXTURES } from "./fixtures";
 import { useAssetStore } from "./assetStore";
+import { isPlaceholderImage } from "../generate/gallery";
 
 const LS_KEY = "kv:games:v1";
 const CAP = 24; // 최근 N개만 보관
@@ -119,7 +120,8 @@ function snapshotAssets(input: InteractiveDocInput): Record<string, string> {
   const assets: Record<string, string> = {};
   for (const id of collectAssetIds(input)) {
     const e = map[id];
-    if (e && e.status === "ready" && e.url) assets[id] = e.url;
+    // 플레이스홀더(생성 실패 자리표시)는 스냅샷하지 않는다 → 다시 열 때 보관함/생성으로 새로 채운다.
+    if (e && e.status === "ready" && e.url && !isPlaceholderImage(e.url)) assets[id] = e.url;
   }
   return assets;
 }
@@ -161,7 +163,8 @@ export function primeAssets(assets?: Record<string, string>): void {
   if (!assets || !Object.keys(assets).length) return;
   useAssetStore.setState((s) => {
     const map = { ...s.map };
-    for (const [k, url] of Object.entries(assets)) map[k] = { status: "ready", url };
+    // 플레이스홀더는 프라임하지 않는다 → assetStore가 보관함/생성으로 실제 이미지를 채우게 둔다.
+    for (const [k, url] of Object.entries(assets)) if (!isPlaceholderImage(url)) map[k] = { status: "ready", url };
     return { map };
   });
 }

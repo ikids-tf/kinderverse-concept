@@ -9,7 +9,7 @@ import { createImageProvider } from "../providers/providers";
 import { CATEGORIES } from "../resolver/contentSets";
 import type { ContentBinding, InteractiveDoc } from "../schema/interactiveDoc";
 import { useGen } from "./genProgress";
-import { findGalleryImage } from "../generate/gallery";
+import { findGalleryImage, isPlaceholderImage } from "../generate/gallery";
 import { saveAsset } from "@/board/assets";
 
 const LABELS = new Set(CATEGORIES.flatMap((c) => c.items.map((it) => it.label)));
@@ -55,7 +55,8 @@ export const useAssetStore = create<AssetState>((set, get) => ({
         step(`‘${key}’ 새로 그리는 중…`);
         const imgs = await provider.generate(prompt);
         const raw = imgs[0]?.url;
-        if (!raw) {
+        if (!raw || isPlaceholderImage(raw)) {
+          // 생성 실패(게이트웨이 플레이스홀더 포함) → 캐시/보관함 저장 안 함(깨진 그림 고착 방지).
           put({ status: "error" });
           return;
         }

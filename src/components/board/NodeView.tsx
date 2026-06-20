@@ -203,8 +203,6 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const [fsOpen, setFsOpen] = useState(false);
   // 게임 뷰어 풀스크린: 확대 애니가 끝난 뒤에 하단 보드 프롬프트바를 띄운다(부드럽게).
   const [fsBarReady, setFsBarReady] = useState(false);
-  // 게임이 '플레이' 모드면(아이 대면) 하단 프롬프트바를 숨긴다 — 게임(iframe)이 kv-game-mode로 알려줌.
-  const [gamePlaying, setGamePlaying] = useState(false);
   // 풀스크린이 '그 카드 위치'에서 커지도록 origin(카드 화면 사각형)을 기억한다.
   const [fsOrigin, setFsOrigin] = useState<OriginRect | null>(null);
   const fsOverlayRef = useRef<ZoomOverlayHandle | null>(null);
@@ -274,7 +272,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   const isGameViewer = embedStr.includes('game-viewer');
   // 게임 뷰어 풀스크린: 확대 애니(≈240ms)가 끝난 뒤 보드 프롬프트바를 띄운다.
   useEffect(() => {
-    if (!fsOpen || !isGameViewer) { setFsBarReady(false); setGamePlaying(false); return; }
+    if (!fsOpen || !isGameViewer) { setFsBarReady(false); return; }
     const t = setTimeout(() => setFsBarReady(true), 280);
     return () => clearTimeout(t);
   }, [fsOpen, isGameViewer]);
@@ -612,8 +610,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         flushCreate();
         return;
       }
-      // 게임 모드 알림 — 플레이 모드(아이 대면)면 풀스크린 하단 프롬프트바를 숨긴다.
-      if (d?.type === 'kv-game-mode') { setGamePlaying(!!(d as { playing?: boolean }).playing); return; }
+      // 게임 모드 알림 — 풀스크린은 교사 작업 화면이라 플레이 중에도 프롬프트바를 항상 둔다(무시).
+      if (d?.type === 'kv-game-mode') return;
       if (d?.type !== 'kv-game-progress') return;
       const b = useBoardStore.getState();
       if (d.active) {
@@ -1604,7 +1602,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               )}
               {/* 게임 뷰어 풀스크린 — 확대 애니가 끝난 뒤 보드 공통 프롬프트바를 포털 안 하단에
                   '아래로 내려오며' 띄운다(게임 섹션은 제자리). 선택과 무관하게 이 게임으로 라우팅. */}
-              {isGameViewer && fsBarReady && !gamePlaying && (
+              {isGameViewer && fsBarReady && (
                 <div className="kv-fsbar-enter">
                   <PromptBar />
                 </div>

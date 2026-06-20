@@ -30,6 +30,7 @@ import { useMaterials } from "./materials";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { GamePicker } from "./GamePicker";
 import { useSavedGames, saveWorkingGame, getWorkingGame, primeAssets, useBaseOverrides, updateSavedGame } from "./savedGames";
+import { useAssetStore } from "./assetStore";
 import { useGen } from "./genProgress";
 import { StageSizeContext, type StageSize } from "./stageSize";
 import { FIXTURES, FIXTURE_KEYS } from "./fixtures";
@@ -215,27 +216,35 @@ export function GameStage() {
       window.setTimeout(() => setJustSaved(false), 1400);
     }
   };
-  // 단독 탭(임베드 아님) 첫 로드 시 저장해 둔 게임을 자동 복원 — "계속 테스트". 1회만.
+  // 저장해 둔 게임을 자동 복원 — 단독 탭 + 보드 풀스크린 포털(교사 작업 화면). 1회만.
+  // 작은 임베드 카드는 환영 화면·드래그 시딩 흐름을 유지하려 복원하지 않는다.
+  const canPersist = !isEmbedded || isBoardFs;
   const restoredRef = useRef(false);
   useEffect(() => {
-    if (restoredRef.current || isEmbedded) return;
+    if (restoredRef.current) return;
     restoredRef.current = true;
+    if (!canPersist) return;
     if (useGame.getState().doc) return; // 이미 게임이 있으면 건드리지 않음
     const w = getWorkingGame();
     if (w) {
       primeAssets(w.assets);
       useGame.getState().loadDoc(w.doc as never);
     }
-  }, []);
+  }, [canPersist]);
 
-  // 자동 저장(단독 탭) — 수정/생성으로 doc이 바뀔 때마다 잠시 후 로컬 작업 슬롯에 기록한다.
-  // 저장 버튼을 누르지 않아도 새로고침하면 마지막 편집 상태가 위 복원 effect로 그대로 돌아온다.
-  // (드래그/크롭처럼 연속으로 바뀌어도 디바운스로 마지막 한 번만 저장. 임베드는 보드가 영속을 관리.)
+  // 자동 저장 — '한 번 뜬 이미지'를 고정한다. doc이 바뀔 때 + 자산(보관함/생성)이 늦게 해석돼
+  // 들어올 때(비동기 스왑)도 작업 슬롯에 스냅샷한다 → 새로고침/재진입 시 같은 그림이 그대로 복원.
+  // (연속 변경은 디바운스로 마지막 한 번만. 작은 임베드 카드는 보드가 영속을 관리하므로 제외.)
   useEffect(() => {
-    if (isEmbedded || !restoredRef.current || !doc) return;
-    const id = window.setTimeout(() => { saveWorkingGame(doc as never); }, 600);
-    return () => window.clearTimeout(id);
-  }, [doc]);
+    if (!canPersist || !restoredRef.current) return;
+    const save = () => { const d = useGame.getState().doc; if (d) saveWorkingGame(d as never); };
+    let t = doc ? window.setTimeout(save, 600) : undefined;
+    const unsub = useAssetStore.subscribe(() => {
+      if (t) window.clearTimeout(t);
+      t = window.setTimeout(save, 600);
+    });
+    return () => { if (t) window.clearTimeout(t); unsub(); };
+  }, [doc, canPersist]);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<StageSize>({ w: 0, h: 0 });
@@ -391,7 +400,6 @@ export function GameStage() {
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [cardSel, setCardSel] = useState(false); // 게임 프레임 선택 상태
   useEffect(() => { setPanX(0); }, [doc?.meta.id]);
