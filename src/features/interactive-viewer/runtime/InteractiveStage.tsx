@@ -49,7 +49,12 @@ export function InteractiveStage({
 }: Props) {
   const cw = doc.canvas.size.w;
   const ch = doc.canvas.size.h;
-  const { ref: stageBoxRef, scale } = useStageFit(cw, ch, preview ? 6 : 24);
+  const { ref: stageBoxRef, scale, box } = useStageFit(cw, ch, preview ? 6 : 24);
+  // 캔버스는 좌상단 고정(justify/align-self start, origin top-left) → 스케일이 무대 밖으로
+  // 수축되지 않게. 무대 안에서 가운데로 오도록 translate를 직접 계산해 적용(거대 박스를
+  // grid가 중앙정렬 못 하는 문제 회피).
+  const tx = Math.max(0, (box.w - cw * scale) / 2);
+  const ty = Math.max(0, (box.h - ch * scale) / 2);
   const canvasRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const innerRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -188,7 +193,7 @@ export function InteractiveStage({
           style={{
             width: cw,
             height: ch,
-            transform: `scale(${scale})`,
+            transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
             background: isAssetRef(doc.canvas.background) ? undefined : bgColor(doc.canvas.background),
           }}
         >

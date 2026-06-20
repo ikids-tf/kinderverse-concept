@@ -44,7 +44,8 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
         | { nodeId?: string; kind?: 'image' | 'video'; src?: string; clientX?: number; clientY?: number }
         | null;
       if (!d || d.nodeId !== node.id || !d.src || (d.kind !== 'image' && d.kind !== 'video')) return;
-      // 캔버스(.ic-canvas)의 화면 사각형 + 논리 크기로 클라이언트 좌표 → 논리 좌표 환산(스케일 무관).
+      // 클라이언트 좌표 → 논리(캔버스) 좌표. .ic-canvas의 실제 화면 사각형(logical 0..cw를 덮음)
+      // 비율로 환산 — 어떤 transform(보드 줌·fit scale)이 걸려 있어도 정확하다.
       const canvasEl = cardRef.current?.querySelector('.ic-canvas') as HTMLElement | null;
       const cur = useInteractiveStore.getState().docs[docId];
       if (!canvasEl || !cur) return;

@@ -33,7 +33,12 @@
 }
 .kv-inode .ic-canvas {
   position: relative;
-  transform-origin: center center;
+  /* 좌상단 고정 + origin top-left — 거대(1280×800) 캔버스를 grid가 중앙정렬 못 해
+     offsetLeft=0가 되는데, origin center면 스케일이 무대 밖으로 수축돼 카드를 벗어난다.
+     좌상단 기준으로 두고 InteractiveStage가 translate로 가운데 정렬한다. */
+  justify-self: start;
+  align-self: start;
+  transform-origin: top left;
   border-radius: var(--ic-r);
   overflow: hidden;
   background: var(--ic-cream);
