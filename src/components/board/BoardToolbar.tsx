@@ -160,6 +160,8 @@ interface PresetItem {
   swatch: React.ReactNode;
   /** 패널의 기본 타입 대신 다른 노드 타입으로 생성(예: 프레임 패널의 GLB 뷰어 카드). */
   nodeType?: NodeType;
+  /** 준비 중(기능 미연결) — 버튼만 보이고 클릭해도 노드를 만들지 않는다('준비 중' 배지). */
+  comingSoon?: boolean;
 }
 interface PresetSection {
   label?: string;
@@ -411,6 +413,18 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
               </svg>
             ),
           },
+          {
+            id: 'interactive', label: '인터랙티브', desc: '탭·드래그로 반응하는 인터랙티브 카드',
+            nodeType: 'sticky',
+            patch: {},
+            comingSoon: true,
+            swatch: (
+              <svg viewBox="0 0 24 24" width={19} height={19} className="text-accent" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M9 9l5.5 12 1.7-5.2L21 14.3 9 9z" />
+                <path d="M5 5l1 1.4M5.2 11l1.4-.6M11 5.2l-.6 1.4" />
+              </svg>
+            ),
+          },
         ],
       },
     ],
@@ -572,12 +586,18 @@ export function BoardToolbar() {
                       {sec.items.map((p) => (
                         <button
                           key={p.id}
-                          onClick={() => addPreset(t.id, p)}
-                          className="flex items-center gap-t3 rounded-md px-t2 py-t2 text-left transition-colors duration-150 ease-soft hover:bg-surface-2"
+                          onClick={() => { if (!p.comingSoon) addPreset(t.id, p); }}
+                          disabled={p.comingSoon}
+                          className={`flex items-center gap-t3 rounded-md px-t2 py-t2 text-left transition-colors duration-150 ease-soft ${p.comingSoon ? 'cursor-default opacity-60' : 'hover:bg-surface-2'}`}
                         >
                           <span className="flex h-7 w-8 shrink-0 items-center justify-center">{p.swatch}</span>
                           <span className="min-w-0 leading-tight">
-                            <span className="block text-sm font-medium text-fg">{p.label}</span>
+                            <span className="flex items-center gap-1.5 text-sm font-medium text-fg">
+                              {p.label}
+                              {p.comingSoon && (
+                                <span className="rounded-pill bg-surface-2 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-fg-muted">준비 중</span>
+                              )}
+                            </span>
                             <span className="block truncate text-overline text-fg-muted">{p.desc}</span>
                           </span>
                         </button>

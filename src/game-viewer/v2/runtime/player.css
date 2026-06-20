@@ -39,8 +39,15 @@
 .kv-v2 .kv-board-hint-emoji { font-size: 40px; line-height: 1; opacity: .8; }
 .kv-v2 .kv-board-hint b { font-family: var(--font-display, "Jua", sans-serif); font-size: 18px; color: var(--ink); }
 .kv-v2 .kv-board-hint span { font-size: 13px; font-weight: 600; }
-.kv-v2 .kv-ext-float { display: flex; flex-direction: column; gap: 14px; }
+/* 확장활동 기본 배치 = 게임 오른쪽으로 가로 나란히(행). 보드가 가로로 자라는 흐름과 일치. */
+.kv-v2 .kv-ext-float { display: flex; flex-direction: row; align-items: flex-start; flex-wrap: nowrap; gap: 40px; }
 .kv-v2 .kv-ext-float .extend-card { width: 320px; }
+/* 확장활동 카드 자유 이동 — 카드 본문은 끌어서 옮기고(grab), 안의 버튼은 그대로 동작. */
+.kv-v2 .kv-ext-drag { cursor: grab; will-change: transform; }
+.kv-v2 .kv-ext-drag:active { cursor: grabbing; }
+.kv-v2 .kv-ext-drag.dragging { position: relative; z-index: 50; }
+.kv-v2 .kv-ext-drag.dragging .extend-card { box-shadow: var(--shadow-reward, 0 16px 40px rgba(0,0,0,.18)); }
+.kv-v2 .kv-ext-drag button, .kv-v2 .kv-ext-drag a { cursor: pointer; }
 .kv-v2 .finish-actions { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
 
 /* ── 교사 크롬 ── */

@@ -145,6 +145,31 @@ export function GameStage() {
   // 보드에서 끌어온 자료를 '게임 프레임'에 떨궜을 때 — 확인 후 편집 합류(파괴 아님).
   const [pendingDrop, setPendingDrop] = useState<{ src: string; label: string } | null>(null);
 
+  // 확장활동 카드 자유 이동 — 카드별 드래그 오프셋(px). 게임이 바뀌면 초기화(세션 단위).
+  const [extPos, setExtPos] = useState<Record<number, { dx: number; dy: number }>>({});
+  const [extDragI, setExtDragI] = useState<number | null>(null); // 드래그 중인 카드(앞으로 띄움)
+  const extDragRef = useRef<{ i: number; sx: number; sy: number; bx: number; by: number } | null>(null);
+  const onExtDown = (i: number) => (e: React.PointerEvent) => {
+    // 카드 안 버튼/링크(영상 만들기·다시 듣기 등)는 드래그가 아니라 그 동작.
+    if ((e.target as Element).closest("button, a, input, textarea")) return;
+    e.stopPropagation();
+    const base = extPos[i] ?? { dx: 0, dy: 0 };
+    extDragRef.current = { i, sx: e.clientX, sy: e.clientY, bx: base.dx, by: base.dy };
+    setExtDragI(i);
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
+  };
+  const onExtMove = (e: React.PointerEvent) => {
+    const d = extDragRef.current;
+    if (!d) return;
+    setExtPos((p) => ({ ...p, [d.i]: { dx: d.bx + (e.clientX - d.sx), dy: d.by + (e.clientY - d.sy) } }));
+  };
+  const onExtUp = (e: React.PointerEvent) => {
+    if (!extDragRef.current) return;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    extDragRef.current = null;
+    setExtDragI(null);
+  };
+
   // 게임 카드(프레임)에 파일을 떨구면: 게임 있으면 확인 후 편집 합류, 없으면 '시드'.
   const onSeedDrop = (e: React.DragEvent) => {
     const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
@@ -402,7 +427,7 @@ export function GameStage() {
     return () => window.removeEventListener("message", onMsg);
   }, []);
   const [cardSel, setCardSel] = useState(false); // 게임 프레임 선택 상태
-  useEffect(() => { setPanX(0); }, [doc?.meta.id]);
+  useEffect(() => { setPanX(0); setExtPos({}); }, [doc?.meta.id]);
   // 캔버스 x(px)를 화면 가로 중앙으로 — 더블클릭 포커스(요소 가운데 정렬)
   const centerCanvasX = (cx: number) => { if (vp.w) setPanX(clampPan(vp.w / 2 - cx + SIDE)); };
   useEffect(() => {
@@ -802,41 +827,57 @@ export function GameStage() {
             {/* 오른쪽 빈 보드 — 자유 확장활동 공간(그냥 배경 + 옅은 안내). 게임 확장활동이 있으면 카드로 띄움 */}
             {vp.w > 0 && !focus && (
               doc && doc.extend.length > 0 ? (
-                <div className="kv-ext-float" style={{ position: "absolute", left: cardX + cardW + 56, top: 72, width: 320 }}>
+                <div className="kv-ext-float" style={{ position: "absolute", left: cardX + cardW + 56, top: 72 }}>
                   {doc.extend.map((act, i) => {
                     const m = EXTEND_META[act.type] ?? { emoji: "🌟", label: "확장활동" };
+                    const off = extPos[i] ?? { dx: 0, dy: 0 };
+                    // 카드별 자유 드래그 래퍼 — 보드 위에서 끌어 옮긴다(transform 오프셋, 레이아웃 미영향).
+                    const dragProps = {
+                      className: `kv-ext-drag${extDragI === i ? " dragging" : ""}`,
+                      style: {
+                        transform: off.dx || off.dy ? `translate(${off.dx}px, ${off.dy}px)` : undefined,
+                        touchAction: "none" as const,
+                      },
+                      onPointerDown: onExtDown(i),
+                      onPointerMove: onExtMove,
+                      onPointerUp: onExtUp,
+                      title: "끌어서 옮겨요",
+                    };
                     // 동물 영상 카드 — 게임 동물을 각각 Veo 이미지→영상으로(교사 클릭 온디맨드).
                     if (act.type === "watch-video") {
                       return (
-                        <VideoExtendCard
-                          key={i}
-                          act={act}
-                          index={i}
-                          total={doc.extend.length}
-                          ttsEnabled={ttsEnabled}
-                          say={say}
-                          meta={m}
-                          nuriLabel={NURI_LABEL}
-                        />
+                        <div key={i} {...dragProps}>
+                          <VideoExtendCard
+                            act={act}
+                            index={i}
+                            total={doc.extend.length}
+                            ttsEnabled={ttsEnabled}
+                            say={say}
+                            meta={m}
+                            nuriLabel={NURI_LABEL}
+                          />
+                        </div>
                       );
                     }
                     return (
-                      <div className="extend-card" key={i} role="group" aria-label="확장활동">
-                        <div className="extend-top">
-                          <span className="extend-kind">{m.emoji} {m.label}</span>
-                          <span className="extend-step">{i + 1} / {doc.extend.length}</span>
-                        </div>
-                        <ul className="extend-prompts">
-                          {act.prompts.map((p, j) => (<li key={j}>{p}</li>))}
-                        </ul>
-                        {act.nuri && act.nuri.length > 0 && (
-                          <div className="extend-nuri" aria-label="누리과정 영역">
-                            {act.nuri.map((n) => (<span key={n} className="nuri-chip">🌱 {NURI_LABEL[n] ?? n}</span>))}
+                      <div key={i} {...dragProps}>
+                        <div className="extend-card" role="group" aria-label="확장활동">
+                          <div className="extend-top">
+                            <span className="extend-kind">{m.emoji} {m.label}</span>
+                            <span className="extend-step">{i + 1} / {doc.extend.length}</span>
                           </div>
-                        )}
-                        <button type="button" className="extend-listen" onClick={() => { if (ttsEnabled) say(act.prompts.join("  ")); }}>
-                          <span className="kv-btn-ic"><Icon name="sound" size={15} /> 다시 듣기</span>
-                        </button>
+                          <ul className="extend-prompts">
+                            {act.prompts.map((p, j) => (<li key={j}>{p}</li>))}
+                          </ul>
+                          {act.nuri && act.nuri.length > 0 && (
+                            <div className="extend-nuri" aria-label="누리과정 영역">
+                              {act.nuri.map((n) => (<span key={n} className="nuri-chip">🌱 {NURI_LABEL[n] ?? n}</span>))}
+                            </div>
+                          )}
+                          <button type="button" className="extend-listen" onClick={() => { if (ttsEnabled) say(act.prompts.join("  ")); }}>
+                            <span className="kv-btn-ic"><Icon name="sound" size={15} /> 다시 듣기</span>
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
