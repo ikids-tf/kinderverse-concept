@@ -57,7 +57,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   }, [docId, ensure]);
 
   if (!doc) {
-    return <div className="absolute inset-0 grid place-items-center text-on-dark">불러오는 중…</div>;
+    return <div className="absolute inset-0 grid place-items-center text-fg-2">불러오는 중…</div>;
   }
 
   const center = () => ({ x: doc.canvas.size.w / 2, y: doc.canvas.size.h / 2 });
@@ -183,7 +183,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
     });
 
   return (
-    <div className="absolute inset-0 flex flex-col" style={{ background: 'rgba(20,19,17,.95)' }}>
+    <div className="absolute inset-0 flex flex-col" style={{ background: 'var(--bg-deep)' }}>
       {/* 상단 크롬 */}
       <div className="flex items-center justify-between gap-2 p-3">
         <span className="rounded-pill bg-surface px-3 py-1.5 text-sm font-bold text-fg shadow-sm">{doc.title}</span>

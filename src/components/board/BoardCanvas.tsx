@@ -8,6 +8,7 @@ import { nearestMotionSlot } from '@/board/motionGeometry';
 import { mindMapSubtree } from '@/board/composer';
 import { regenImageCard, genTextCard, spawnVideoPlayer, activityTextForVideo } from '@/board/workflow';
 import { generateVideoForViewer } from '@/board/video';
+import { getVideoAsset } from '@/board/videoAssets';
 import { useUIStore } from '@/store/uiStore';
 import { showToast } from '@/lib/toast';
 import { frameMoveSet, rebindFrameMembership, frameOfPoint } from '@/board/frames';
@@ -713,38 +714,65 @@ export function BoardCanvas() {
       const zoom = useBoardStore.getState().viewport.zoom;
       const dx = (e.clientX - st.startX) / zoom;
       const dy = (e.clientY - st.startY) / zoom;
-      // 이미지 카드 한 장을 게임 뷰어 카드 위로 드롭 → 그 그림을 게임 재료로 넘기고 이동은 취소(제자리로).
+      // 자료 카드 한 장을 다른 카드 위로 드롭 → 그 자료를 넘기고 이동은 취소(제자리로).
       let consumed = false;
       if (st.dragIds.length === 1) {
         const b0 = useBoardStore.getState();
-        const img = b0.nodes[st.dragIds[0]];
-        if (img && img.type === 'image' && img.src) {
-          const cx = img.x + dx + img.w / 2;
-          const cy = img.y + dy + img.h / 2;
-          const gv = Object.values(b0.nodes).find(
-            (n) =>
-              n.id !== img.id &&
-              typeof n.data?.embed === 'string' &&
-              n.data.embed.includes('game-viewer') &&
-              cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h,
-          );
-          if (gv) {
-            // 드롭 지점(커서 클라이언트 좌표)과 화면상 크기를 함께 넘긴다 — 뷰어가 게임 프레임
-            // 위인지(편집 합류) 보드 위인지(실제 크기로 그대로 배치) 판정한다.
-            window.dispatchEvent(
-              new CustomEvent('kv:game-add-image', {
-                detail: {
-                  nodeId: gv.id,
-                  src: img.src,
-                  label: (img.data?.label as string) || '내 그림',
-                  clientX: e.clientX,
-                  clientY: e.clientY,
-                  screenW: img.w * zoom,
-                  screenH: img.h * zoom,
-                },
-              }),
+        const src = b0.nodes[st.dragIds[0]];
+        if (src) {
+          const cx = src.x + dx + src.w / 2;
+          const cy = src.y + dy + src.h / 2;
+          const within = (n: BoardNode) =>
+            n.id !== src.id && cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h;
+          // 1) 이미지 → 게임 뷰어 카드(기존 동작)
+          if (src.type === 'image' && src.src) {
+            const gv = Object.values(b0.nodes).find(
+              (n) => typeof n.data?.embed === 'string' && n.data.embed.includes('game-viewer') && within(n),
             );
-            consumed = true; // 이동 커밋 스킵 → setDrag(null)로 이미지 제자리 복귀
+            if (gv) {
+              // 드롭 지점(커서 클라이언트 좌표)과 화면상 크기를 함께 넘긴다 — 뷰어가 게임 프레임
+              // 위인지(편집 합류) 보드 위인지(실제 크기로 그대로 배치) 판정한다.
+              window.dispatchEvent(
+                new CustomEvent('kv:game-add-image', {
+                  detail: {
+                    nodeId: gv.id,
+                    src: src.src,
+                    label: (src.data?.label as string) || '내 그림',
+                    clientX: e.clientX,
+                    clientY: e.clientY,
+                    screenW: src.w * zoom,
+                    screenH: src.h * zoom,
+                  },
+                }),
+              );
+              consumed = true; // 이동 커밋 스킵 → 제자리 복귀
+            }
+          }
+          // 2) 자료(이미지·동영상) → 인터랙티브 노드: 드롭 지점에 요소로 추가(원본은 보드에 남음).
+          //    3D(glb)는 인터랙티브 런타임에 요소 종류가 없어 아직 미지원.
+          if (!consumed) {
+            const inode = Object.values(b0.nodes).find((n) => n.type === 'interactive' && within(n));
+            if (inode) {
+              const emit = (kind: 'image' | 'video', assetSrc: string) =>
+                window.dispatchEvent(
+                  new CustomEvent('kv:inode-add-asset', {
+                    detail: { nodeId: inode.id, kind, src: assetSrc, clientX: e.clientX, clientY: e.clientY },
+                  }),
+                );
+              if (src.type === 'image' && src.src) {
+                emit('image', src.src);
+                consumed = true;
+              } else if (
+                src.type === 'sticky' &&
+                typeof src.data?.embed === 'string' &&
+                src.data.embed.includes('video-player') &&
+                typeof src.data?.videoAssetId === 'string'
+              ) {
+                const vid = src.data.videoAssetId;
+                void getVideoAsset(vid).then((s) => { if (s) emit('video', s); });
+                consumed = true;
+              }
+            }
           }
         }
       }

@@ -83,6 +83,25 @@ export function makeImageElement(
   };
 }
 
+/** 동영상 요소 — 16:9 박스(자연 크기 못 읽음)로 캔버스 ~40% 폭에 맞춰 중심 배치. */
+export function makeVideoElement(
+  ref: AssetRef,
+  origin: ElementOrigin,
+  at: { x: number; y: number },
+  canvas: { w: number; h: number },
+): ElementNode {
+  const w = Math.round(canvas.w * 0.4);
+  const h = Math.round(w * (9 / 16));
+  return {
+    id: newId('el'),
+    kind: 'video',
+    src: ref,
+    origin,
+    assetKind: ref.assetKind,
+    transform: { x: Math.round(at.x - w / 2), y: Math.round(at.y - h / 2), w, h, rotation: 0, z: 0 },
+  };
+}
+
 /** 글자 요소. */
 export function makeTextElement(text: string, at: { x: number; y: number }): ElementNode {
   const w = 360;

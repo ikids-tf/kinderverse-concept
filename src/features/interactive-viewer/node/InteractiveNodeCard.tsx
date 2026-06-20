@@ -11,6 +11,7 @@ import type { BoardNode } from '@/store/boardStore';
 import { useInteractiveStore } from '../store/interactiveStore';
 import { InteractiveStage } from '../runtime/InteractiveStage';
 import { InteractiveOverlay } from '../authoring/InteractiveOverlay';
+import { urlToAssetRef, makeImageElement, makeVideoElement, withElementAdded } from '../runtime/assetIngest';
 
 interface Props {
   node: BoardNode;
@@ -26,12 +27,47 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
   const docId = (node.data?.docId as string | undefined) ?? '';
   const doc = useInteractiveStore((s) => (docId ? s.docs[docId] : undefined));
   const ensure = useInteractiveStore((s) => s.ensure);
+  const mutate = useInteractiveStore((s) => s.mutate);
   const cardRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<null | { mode: 'play' | 'edit'; origin: OriginRect | null }>(null);
 
   useEffect(() => {
     if (docId) ensure(docId);
   }, [docId, ensure]);
+
+  // 보드 자료(이미지·동영상)를 이 인터랙티브 노드 위에 드롭 → 드롭한 위치에 요소로 추가.
+  // BoardCanvas가 드롭을 감지해 kv:inode-add-asset(커서 클라이언트 좌표)을 쏜다.
+  useEffect(() => {
+    if (!docId) return;
+    const onAdd = (e: Event) => {
+      const d = (e as CustomEvent).detail as
+        | { nodeId?: string; kind?: 'image' | 'video'; src?: string; clientX?: number; clientY?: number }
+        | null;
+      if (!d || d.nodeId !== node.id || !d.src || (d.kind !== 'image' && d.kind !== 'video')) return;
+      // 캔버스(.ic-canvas)의 화면 사각형 + 논리 크기로 클라이언트 좌표 → 논리 좌표 환산(스케일 무관).
+      const canvasEl = cardRef.current?.querySelector('.ic-canvas') as HTMLElement | null;
+      const cur = useInteractiveStore.getState().docs[docId];
+      if (!canvasEl || !cur) return;
+      const rect = canvasEl.getBoundingClientRect();
+      const cw = cur.canvas.size.w;
+      const ch = cur.canvas.size.h;
+      const lx = rect.width ? ((d.clientX ?? rect.left) - rect.left) * (cw / rect.width) : cw / 2;
+      const ly = rect.height ? ((d.clientY ?? rect.top) - rect.top) * (ch / rect.height) : ch / 2;
+      const at = { x: Math.max(0, Math.min(cw, lx)), y: Math.max(0, Math.min(ch, ly)) };
+      const kind = d.kind;
+      const srcUrl = d.src;
+      void (async () => {
+        const ref = await urlToAssetRef(srcUrl, 'board-copy');
+        const el =
+          kind === 'video'
+            ? makeVideoElement(ref, 'board-copy', at, { w: cw, h: ch })
+            : makeImageElement(ref, 'board-copy', at, { w: cw, h: ch });
+        mutate(docId, (doc2) => withElementAdded(doc2, el));
+      })();
+    };
+    window.addEventListener('kv:inode-add-asset', onAdd as EventListener);
+    return () => window.removeEventListener('kv:inode-add-asset', onAdd as EventListener);
+  }, [docId, node.id, mutate]);
 
   const openOverlay = (mode: 'play' | 'edit') => {
     const r = cardRef.current?.getBoundingClientRect();
