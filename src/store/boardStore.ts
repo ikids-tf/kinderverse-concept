@@ -7,7 +7,7 @@ import { linkedComponent } from '@/board/links';
    here are RAW (no history); board/commands.ts wraps them as undoable Commands
    and pushes to historyStore (SKILL §6.2). Kept separate from the history module. */
 
-export type NodeType = 'sticky' | 'text' | 'shape' | 'image' | 'frame' | 'runner' | 'motion';
+export type NodeType = 'sticky' | 'text' | 'shape' | 'image' | 'frame' | 'runner' | 'motion' | 'interactive';
 
 export interface BoardNode {
   id: string;

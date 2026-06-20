@@ -25,6 +25,7 @@ import { getVideoAsset, saveVideoAsset } from '@/board/videoAssets';
 import { saveAsset } from '@/board/assets';
 import { isEditableTarget } from '@/hooks/useKeyboardShortcuts';
 import { MotionPathNode } from './MotionPathNode';
+import { InteractiveNodeCard } from '@/features/interactive-viewer/node/InteractiveNodeCard';
 import { PromptBar } from '@/components/PromptBar';
 import { useUIStore } from '@/store/uiStore';
 
@@ -916,6 +917,22 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         presenting={presenting}
         onPointerDown={onPointerDown}
       />
+    );
+  }
+
+  /* ---------- interactive: 네이티브 인터렉티브 노드(파스텔 캔버스 + 풀스크린 저작/재생) ---------- */
+  if (node.type === 'interactive') {
+    return (
+      <div
+        ref={cardRef}
+        onPointerDown={down}
+        className={`group/card absolute select-none overflow-hidden rounded-md border border-border bg-surface shadow-sm ${ring}`}
+        style={{ left, top, width: node.w, zIndex: dragZ, ...radiusStyle(node), ...rootTransform(node) }}
+      >
+        <InteractiveNodeCard node={node} height={node.h} selected={selected} presenting={presenting} />
+        {selected && !node.locked && <RadiusHandle node={node} />}
+        {node.locked && <LockBadge />}
+      </div>
     );
   }
 

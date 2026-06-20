@@ -1,0 +1,130 @@
+/* 인터렉티브 노드 — 캔버스/요소 스타일.
+   🔴 .kv-inode 안쪽(캔버스·재생)은 아동 대면 파스텔(콘텐츠 토큰) — CLAUDE §8/§2.1
+      면제 대상. 앱 Milray 토큰을 콘텐츠에 적용하지 않는다. 저작 크롬(툴바·인스펙터)은
+      .kv-inode 밖에서 Milray(Tailwind 유틸)로 그린다 — 섞지 않는다. */
+
+.kv-inode {
+  /* 파스텔 콘텐츠 토큰(게임뷰어 theme.ts와 동렬) */
+  --ic-bg: #fff7f0;
+  --ic-bg-peach: #fde9dd;
+  --ic-cream: #fff7f0;
+  --ic-coral: #ff9e7d;
+  --ic-mint: #8fd9c3;
+  --ic-sky: #cfe8f7;
+  --ic-ink: #574b3e; /* 부드러운 갈색 — 검정 금지 */
+  --ic-ink-soft: #8a7a68;
+  --ic-r: 22px;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ic-bg);
+  color: var(--ic-ink);
+  font-family: 'Pretendard', 'Hanken Grotesk', system-ui, sans-serif;
+  touch-action: none;
+}
+
+/* 논리 캔버스(고정 좌표계) — 부모 박스에 등비로 맞춰 transform: scale 으로 축소. */
+.kv-inode .ic-stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.kv-inode .ic-canvas {
+  position: relative;
+  transform-origin: center center;
+  border-radius: var(--ic-r);
+  overflow: hidden;
+  background: var(--ic-cream);
+  box-shadow: 0 8px 30px rgba(87, 75, 62, 0.12);
+}
+.kv-inode .ic-canvas-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* 요소 */
+.kv-inode .ic-el {
+  position: absolute;
+  user-select: none;
+  -webkit-user-select: none;
+  will-change: transform;
+}
+.kv-inode .ic-el img,
+.kv-inode .ic-el video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+.kv-inode .ic-el .ic-text {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-weight: 800;
+  line-height: 1.15;
+  word-break: keep-all;
+}
+.kv-inode .ic-el .ic-shape {
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
+  background: var(--ic-mint);
+}
+
+/* 편집 모드 — 선택/호버 표시 + 이동 커서 */
+.kv-inode[data-mode='edit'] .ic-el {
+  cursor: grab;
+}
+.kv-inode[data-mode='edit'] .ic-el:hover {
+  outline: 2px dashed rgba(255, 158, 125, 0.7);
+  outline-offset: 2px;
+}
+.kv-inode[data-mode='edit'] .ic-el.is-selected {
+  outline: 3px solid var(--ic-coral);
+  outline-offset: 2px;
+}
+
+/* 재생 모드 — 동작이 걸린 요소는 탭 가능 손끝 표시 */
+.kv-inode[data-mode='play'] .ic-el.is-playable {
+  cursor: pointer;
+}
+
+/* 빈 캔버스 안내 */
+.kv-inode .ic-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 16px;
+  color: var(--ic-ink-soft);
+  font-weight: 700;
+  pointer-events: none;
+}
+
+/* 외부 파일 드래그 오버 — 드롭 지점 강조 */
+.kv-inode.is-dropping::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 3px dashed var(--ic-coral);
+  border-radius: var(--ic-r);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* WAAPI 애니메이션은 런타임에서 지속시간을 줄인다(behaviors.ts) */
+  .kv-inode .ic-el {
+    will-change: auto;
+  }
+}

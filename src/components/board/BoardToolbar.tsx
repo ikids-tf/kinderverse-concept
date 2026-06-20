@@ -94,6 +94,18 @@ const GAME_VIEWER_PATCH: Partial<BoardNode> = {
   data: { embed: '/game-viewer.html', title: '놀이 만들기' },
 };
 
+/** 인터렉티브 노드 — 네이티브 보드 노드(iframe 아님). 교사가 자료를 배치하고 탭하면
+    움직임/교체가 일어나게 저작, 풀스크린 단독 재생. 카드 안쪽은 파스텔(아이 대면,
+    .kv-inode) — Milray 미적용. 저작 단위 InteractiveNode는 data.docId로 참조(스키마:
+    src/features/interactive-viewer/schema). 카드 비율은 논리 캔버스(1280×800=1.6)에 맞춤. */
+const INTERACTIVE_VIEWER_PATCH: Partial<BoardNode> = {
+  w: 360,
+  h: 225,
+  autoH: false,
+  text: '인터랙티브',
+  data: { title: '인터랙티브' },
+};
+
 /* 문서 폼 — 각 유아교육 양식의 A4 문서 스캐폴드(data.doc 마크다운). 교사가 그대로
    프린트하거나, 선택 후 프롬프트로 채워(에이전트) 완성한다. 빈 양식이 보드에 바로 놓인다. */
 const DOC_TEMPLATES: Array<{ id: string; label: string; desc: string; text: string }> = [
@@ -415,9 +427,8 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
           },
           {
             id: 'interactive', label: '인터랙티브', desc: '탭·드래그로 반응하는 인터랙티브 카드',
-            nodeType: 'sticky',
-            patch: {},
-            comingSoon: true,
+            nodeType: 'interactive',
+            patch: INTERACTIVE_VIEWER_PATCH,
             swatch: (
               <svg viewBox="0 0 24 24" width={19} height={19} className="text-accent" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M9 9l5.5 12 1.7-5.2L21 14.3 9 9z" />
@@ -531,6 +542,10 @@ export function BoardToolbar() {
     const data = patch.data as Record<string, unknown> | undefined;
     if (data && typeof data.embed === 'string' && data.embed.startsWith('/slides-viewer.html')) {
       patch = { ...patch, data: { ...data, embed: `/slides-viewer.html?id=${newId('deck')}` } };
+    }
+    // 인터렉티브 노드 — 인스턴스마다 고유 docId로 InteractiveNode 문서를 분리한다.
+    if (p.nodeType === 'interactive') {
+      patch = { ...patch, data: { ...(data ?? {}), docId: newId('inode') } };
     }
     addPresetNodeCmd(p.nodeType ?? fallback, c.x, c.y, patch, `${p.label} 추가`);
     setFly(null);
