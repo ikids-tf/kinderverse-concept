@@ -434,6 +434,11 @@
   display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
 .kv-v2 .photo img { width: 100%; height: 100%; object-fit: contain; }
+/* 교사용 이미지 호버 액션(편집·다운로드·풀스크린) — 마이보드처럼 노드 호버 시 나타난다.
+   버튼 자체 모양은 Milray Tailwind 유틸리티(chrome.css)로 칠해진다(교사 크롬). */
+.kv-v2 .kv-img-actions { opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+.kv-v2 .node:hover .kv-img-actions,
+.kv-v2 .node:focus-within .kv-img-actions { opacity: 1; pointer-events: auto; }
 .kv-v2 .emoji { line-height: 1; user-select: none; }
 .kv-v2 .soil {
   width: 100%; height: 100%; border-radius: 26px 26px 18px 18px;
@@ -804,6 +809,43 @@
   color: var(--ink-soft); padding: 12px 16px; border-radius: 999px; box-shadow: var(--shadow-sm);
 }
 .kv-v2 .extend-listen:focus-visible { outline: 4px solid rgba(255,158,125,.5); outline-offset: 2px; }
+
+/* ── 확장활동 '동물 영상' 카드 — 동물별 타일(포스터 + 영상 만들기/재생) ── */
+.kv-v2 .kv-vid-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 2px 0 4px; }
+.kv-v2 .kv-vid-tile {
+  position: relative; aspect-ratio: 16 / 10; border-radius: var(--r-sm);
+  overflow: hidden; background: var(--bg-sky); box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; justify-content: center;
+}
+.kv-v2 .kv-vid-poster { width: 100%; height: 100%; object-fit: cover; }
+.kv-v2 .kv-vid-poster.kv-vid-noimg { font-size: 30px; opacity: .7; display: grid; place-items: center; }
+.kv-v2 .kv-vid-el { width: 100%; height: 100%; object-fit: cover; background: #000; }
+.kv-v2 .kv-vid-play {
+  position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
+  display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12px; font-weight: 800;
+  cursor: pointer; border: none; color: var(--ink); background: rgba(255,255,255,.92);
+  padding: 7px 12px; border-radius: 999px; box-shadow: var(--shadow-sm); white-space: nowrap;
+}
+.kv-v2 .kv-vid-play:hover { background: var(--coral); color: #fff; }
+.kv-v2 .kv-vid-play-ic { font-size: 11px; }
+.kv-v2 .kv-vid-busy {
+  position: absolute; inset: 0; display: flex; flex-direction: column; gap: 7px;
+  align-items: center; justify-content: center; text-align: center;
+  background: rgba(255,247,240,.82); color: var(--ink-soft); font-size: 11px; font-weight: 700; padding: 6px;
+}
+.kv-v2 .kv-vid-spin {
+  width: 22px; height: 22px; border-radius: 999px;
+  border: 3px solid rgba(255,158,125,.35); border-top-color: var(--coral); animation: kv-spin .8s linear infinite;
+}
+@keyframes kv-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .kv-v2 .kv-vid-spin { animation-duration: 2.4s; } }
+.kv-v2 .kv-vid-err { position: absolute; left: 0; right: 0; bottom: 22px; font-size: 10px; color: var(--no-ink); padding: 0 6px; text-align: center; }
+.kv-v2 .kv-vid-label {
+  position: absolute; left: 6px; bottom: 5px; font-size: 12px; font-weight: 800; color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,.55); pointer-events: none;
+}
+.kv-v2 .kv-vid-el ~ .kv-vid-label { left: 8px; bottom: 30px; }
+
 /* 그만하기 — 완료 화면의 차분한 보조 버튼(다시하기=강조, 확장=이동과 구분) */
 .kv-v2 .finish-quit {
   font: inherit; font-weight: 700; cursor: pointer; border: 2px solid #EBDFD2; background: transparent;

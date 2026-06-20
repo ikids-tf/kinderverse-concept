@@ -16,6 +16,7 @@ import { useGame } from "./useGame";
 import { useCanInlineEdit } from "./editContext";
 import { useAssetUrl } from "./assetStore";
 import { RiveActor } from "./RiveActor";
+import { ImageHoverActions } from "./ImageHoverActions";
 import { transformStyle, radiusStyle, cropImgStyle, cropContentStyle, resolveCrop } from "./layout";
 import type { MoodKey } from "../theme";
 import type { Style } from "../schema/interactiveDoc";
@@ -89,6 +90,9 @@ export function PhotoNode(props: {
   const editInline = useGame((s) => s.editNodeInline);
   const anim = node.animation;
   const prev = useRef(0);
+  // 실제 이미지가 떠 있으면(생성/시드 url) 교사용 호버 액션(편집·다운로드·풀스크린)을 얹는다.
+  const genUrl = useAssetUrl(visual.assetKey);
+  const imageUrl = visual.imageUrl ?? genUrl;
 
   useEffect(() => {
     if (reactSeq && reactSeq !== prev.current) {
@@ -122,6 +126,16 @@ export function PhotoNode(props: {
           </motion.div>
         </motion.div>
       </motion.div>
+      {/* 교사용 호버 액션 — 애니 래퍼 밖(흔들리지 않게), 노드 호버 시 표시(마이보드와 동일). */}
+      {imageUrl && (
+        <ImageHoverActions
+          src={imageUrl}
+          caption={visual.assetKey && !visual.assetKey.startsWith("__") ? visual.assetKey : (visual.text || "그림")}
+          assetKey={visual.assetKey}
+          nodeId={node.id}
+          roundIdx={roundIdx}
+        />
+      )}
     </Positioned>
   );
 }

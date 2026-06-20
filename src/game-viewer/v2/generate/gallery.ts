@@ -6,15 +6,16 @@
 import { searchAssets } from "@/board/assets";
 
 /** 라벨(예: "사자")로 보관함에서 가장 잘 맞는 이미지 url을 찾는다. 없으면 null.
-    배경제거(누끼)된 자산을 우선("(배경제거)" 태그) — 게임 카드에 깔끔하게 얹힌다. */
+    🔴 배경 제거(누끼) 자산은 게임 단서로 쓰지 않는다 — 배경 유지본(전체)만 사용(사용자 지시).
+    누끼본만 있으면 null을 반환해 새로 생성(배경 유지)하게 한다. */
 export async function findGalleryImage(label: string): Promise<string | null> {
   const q = label.trim();
   if (!q) return null;
   try {
     const hits = await searchAssets(q, ["image", "도안"]);
-    if (!hits.length) return null;
-    const cut = hits.find((a) => /배경제거|누끼/.test(a.tag));
-    return (cut ?? hits[0]).url || null;
+    const full = hits.filter((a) => !/배경제거|누끼/.test(a.tag));
+    if (!full.length) return null;
+    return full[0].url || null;
   } catch {
     return null;
   }

@@ -290,7 +290,20 @@ function surroundingMostlyTransparent(work: HTMLCanvasElement, mask: Uint8Array,
   return tot > 0 && trans / tot > 0.6;
 }
 
-export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; onClose: () => void; origin?: OriginRect | null }) {
+/** 편집 대상 어댑터 — 보드 노드(nodeId) 대신 임의 소스(게임 자산 등)를 편집할 때.
+ *  nodeId 경로(보드)와 둘 중 하나만 쓴다. onApply가 편집 결과(PNG dataURL)를 반영한다. */
+export interface EditTarget {
+  /** 편집할 이미지 원본(data URL 또는 URL). */
+  src: string;
+  /** 캡션/파일명(없으면 '이미지'). */
+  caption?: string;
+  /** 객체 분리(보드에 새 노드 추가)를 허용할지 — 보드 카드만 true. 게임 자산은 false. */
+  allowExtract?: boolean;
+  /** 적용 — 편집 결과(PNG dataURL)를 호출부가 반영(보드 노드 교체 / 게임 자산 스왑). */
+  onApply: (url: string) => void | Promise<void>;
+}
+
+export function ImageEditorModal({ nodeId, target, onClose, origin }: { nodeId?: string; target?: EditTarget; onClose: () => void; origin?: OriginRect | null }) {
   // 카드 위치에서 커지며 열리고 닫을 때 그 위치로 작아진다 + 배경 조작 차단.
   const { requestClose, onContentTransitionEnd, contentStyle, backdropStyle } = useZoomModal(origin, onClose);
   const viewRef = useRef<HTMLCanvasElement | null>(null); // 화면 표시용
@@ -320,8 +333,11 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     setExtractBox(null);
   }, []);
 
-  const node = useBoardStore.getState().nodes[nodeId];
-  const caption = (node?.text || '이미지').split('\n')[0].slice(0, 40) || '이미지';
+  // 편집 소스: target(임의 소스) 우선, 없으면 보드 노드(nodeId). src는 초기 로드 effect에서 직접 읽는다.
+  const boardNode = nodeId ? useBoardStore.getState().nodes[nodeId] : undefined;
+  const caption = ((target?.caption ?? boardNode?.text) || '이미지').split('\n')[0].slice(0, 40) || '이미지';
+  const allowExtract = target ? !!target.allowExtract : true; // 객체 분리는 보드 카드만
+  const segKey = nodeId ?? 'kv-edit'; // SAM 임베딩 캐시 키 접두
 
   const redraw = useCallback(() => {
     const work = workRef.current;
@@ -375,9 +391,9 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
   // 초기 로드
   useEffect(() => {
     let alive = true;
-    const n = useBoardStore.getState().nodes[nodeId];
-    if (!n?.src) { onClose(); return; }
-    drawUrlToCanvas(n.src)
+    const s = target?.src ?? (nodeId ? useBoardStore.getState().nodes[nodeId]?.src : undefined);
+    if (!s) { onClose(); return; }
+    drawUrlToCanvas(s)
       .then((cv) => {
         if (!alive) return;
         workRef.current = cv;
@@ -438,13 +454,13 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
   const ensurePrepared = useCallback(async () => {
     const work = workRef.current;
     if (!work) throw new Error('no work');
-    const segId = `${nodeId}:${segVersionRef.current}`;
+    const segId = `${segKey}:${segVersionRef.current}`;
     if (segPreparedRef.current === segId) return segId;
     const blob = await canvasToBlob(work);
     await prepareSegment(segId, blob);
     segPreparedRef.current = segId;
     return segId;
-  }, [nodeId]);
+  }, [segKey]);
 
   /** SAM 점으로 분리할 객체 마스크를 잡아 오버레이/박스를 갱신.
    *  첫 클릭(cycle 미지정)은 'whole'로 객체 전체를, '수정'(cycle 지정)은 같은 클릭점의
@@ -452,7 +468,7 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
   const segmentExtract = useCallback(async (points: Pt[], cycle?: number) => {
     if (!workRef.current) return;
     setBusy(
-      segPreparedRef.current === `${nodeId}:${segVersionRef.current}`
+      segPreparedRef.current === `${segKey}:${segVersionRef.current}`
         ? 'AI가 객체를 분석하고 있어요…'
         : 'AI 준비 중… (처음 한 번은 모델 다운로드로 시간이 걸려요)',
     );
@@ -472,7 +488,7 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     } finally {
       setBusy(null);
     }
-  }, [ensurePrepared, nodeId, redraw]);
+  }, [ensurePrepared, segKey, redraw]);
 
   /** '수정' — 같은 클릭점에서 객체 범위를 한 단계 바꿔 다시 선택(전체↔부분↔세부 순환). */
   const onReselect = useCallback(() => {
@@ -512,7 +528,7 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     //  · 주변에 배경이 있으면 인페인팅으로 자연스럽게 메우고,
     //  · 이미 배경이 없는(투명) 컷아웃의 섬 객체면 투명하게 삭제한다(검은 얼룩 방지).
     setBusy(
-      segPreparedRef.current === `${nodeId}:${segVersionRef.current}`
+      segPreparedRef.current === `${segKey}:${segVersionRef.current}`
         ? 'AI가 객체를 분석하고 있어요…'
         : 'AI 준비 중… (처음 한 번은 모델 다운로드로 시간이 걸려요)',
     );
@@ -590,7 +606,7 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     const work = workRef.current;
     const m = extractMaskRef.current;
     const box = extractBox;
-    if (!work || !m || !box || busy) return;
+    if (!work || !m || !box || busy || !nodeId) return; // 객체 분리는 보드 노드만
     setBusy('객체를 정밀하게 분리하고 있어요…');
     try {
       // 1) 분리 객체 PNG — 경계 페더링(침식+안티에일리어스)으로 헤일로 없이 깔끔하게.
@@ -663,6 +679,13 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
     setBusy('적용 중…');
     try {
       const url = work.toDataURL('image/png');
+      // 임의 소스(게임 자산 등) — 호출부가 결과를 반영(자산 스왑).
+      if (target) {
+        await target.onApply(url);
+        requestClose();
+        return;
+      }
+      if (!nodeId) { requestClose(); return; }
       let thumb: string | null = null;
       try { thumb = await makeThumb(url, THUMB_MAX_W, true); } catch { thumb = null; }
       const n = useBoardStore.getState().nodes[nodeId];
@@ -696,11 +719,13 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 120 }}>
-      {/* 배경 — 페이드 인/아웃 + 클릭 닫기(배경 조작은 useZoomModal이 차단) */}
+      {/* 배경 — 어둡게(풀스크린 뷰어와 동일한 딤) + 페이드 인/아웃 + 클릭 닫기.
+          🔴 색은 인라인 rgba로 고정 — 토큰 알파(bg-fg/80)는 게임뷰어 크롬(preflight 제외)에서
+             제대로 적용되지 않아 배경이 비쳐 보이던 문제 해결(ImageFullscreen과 동일 처리). */}
       <div
         onClick={requestClose}
-        className="absolute inset-0 bg-fg/80 backdrop-blur-sm"
-        style={backdropStyle}
+        className="absolute inset-0"
+        style={{ background: 'rgba(20,19,17,.82)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', ...backdropStyle }}
       />
       {/* 본문 — 카드 위치에서 커지고/작아진다 */}
       <div
@@ -718,9 +743,11 @@ export function ImageEditorModal({ nodeId, onClose, origin }: { nodeId: string; 
         <button className={toolBtn(tool === 'ai')} onClick={() => pickTool('ai')} title="클릭한 객체를 AI가 통째로 지우고, 그 자리를 주변 배경으로 자연스럽게 채웁니다">
           <Eraser /> AI 객체 지우기
         </button>
-        <button className={toolBtn(tool === 'extract')} onClick={() => pickTool('extract')} title="객체를 클릭하면 AI가 마스킹합니다. 수정으로 정밀 조절, 저장하면 객체만 보드에 따로 복사하고 원본 자리는 배경으로 채웁니다">
-          <SeparateIcon /> 객체 분리
-        </button>
+        {allowExtract && (
+          <button className={toolBtn(tool === 'extract')} onClick={() => pickTool('extract')} title="객체를 클릭하면 AI가 마스킹합니다. 수정으로 정밀 조절, 저장하면 객체만 보드에 따로 복사하고 원본 자리는 배경으로 채웁니다">
+            <SeparateIcon /> 객체 분리
+          </button>
+        )}
         <button className={toolBtn(tool === 'color')} onClick={() => pickTool('color')} title="클릭한 곳과 같은 색 영역(연결)을 지웁니다">
           색 기반
         </button>

@@ -25,6 +25,7 @@ import { InlineEditContext } from "./editContext";
 import { GameEditRail } from "./editor/GameEditRail";
 import { GamePromptBar } from "./GamePromptBar";
 import { MaterialsLayer } from "./MaterialsLayer";
+import { VideoExtendCard } from "./VideoExtendCard";
 import { useMaterials } from "./materials";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { GamePicker } from "./GamePicker";
@@ -82,6 +83,7 @@ const EXTEND_META: Record<string, { emoji: string; label: string }> = {
   "name-create": { emoji: "✏️", label: "이름 짓고 만들기" },
   "connect-apply": { emoji: "🔗", label: "생활에 연결하기" },
   "move-express": { emoji: "🤸", label: "몸으로 표현하기" },
+  "watch-video": { emoji: "🎬", label: "동물 영상" },
 };
 /* 누리과정 영역 → 한글 라벨 (카피 불가능한 교육 메타데이터). */
 const NURI_LABEL: Record<string, string> = {
@@ -795,6 +797,21 @@ export function GameStage() {
                 <div className="kv-ext-float" style={{ position: "absolute", left: cardX + cardW + 56, top: 72, width: 320 }}>
                   {doc.extend.map((act, i) => {
                     const m = EXTEND_META[act.type] ?? { emoji: "🌟", label: "확장활동" };
+                    // 동물 영상 카드 — 게임 동물을 각각 Veo 이미지→영상으로(교사 클릭 온디맨드).
+                    if (act.type === "watch-video") {
+                      return (
+                        <VideoExtendCard
+                          key={i}
+                          act={act}
+                          index={i}
+                          total={doc.extend.length}
+                          ttsEnabled={ttsEnabled}
+                          say={say}
+                          meta={m}
+                          nuriLabel={NURI_LABEL}
+                        />
+                      );
+                    }
                     return (
                       <div className="extend-card" key={i} role="group" aria-label="확장활동">
                         <div className="extend-top">

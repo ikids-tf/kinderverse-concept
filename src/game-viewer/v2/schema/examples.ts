@@ -4,7 +4,12 @@
  */
 import type { InteractiveDocInput } from "./interactiveDoc";
 
-/* 1) 누구일까 동물 맞추기 (M0 핵심 부품) */
+/* 1) 누구일까 동물 맞추기 (M0 핵심 부품 · 코드에 박힌 기본 게임)
+   각 페이지(라운드)의 단서 = 동물 라벨 asset. assetId가 contentSets의 라벨이라
+   loadDoc→primeImages가 생성을 요청 → assetStore가 실제 이미지(기본 3D 픽사풍)를
+   그려 스왑한다(이모지 SVG는 생성 전 잠깐의 시드일 뿐, 곧 그림으로 대체. 배경 제거 미적용).
+   🔴 기본 4마리: 코끼리·토끼·펭귄·원숭이 — 보기 텍스트도 이 넷 안에서만 고른다.
+      이 정의는 '로컬 저장본'이 아니라 코드(이 fixture)가 출처다(loadExample이 그대로 로드). */
 export const tapTheRightOneExample: InteractiveDocInput = {
   meta: {
     id: "ex_animal_guess",
@@ -12,7 +17,7 @@ export const tapTheRightOneExample: InteractiveDocInput = {
     archetype: "tap-the-right-one",
     createdFrom: "drop",
   },
-  settings: { difficulty: "toddler", length: 2, mood: "lively", optionCount: 3 },
+  settings: { difficulty: "toddler", length: 4, mood: "lively", optionCount: 3 },
   stage: {
     background: { colorRole: "pastel.cream" },
     nodes: [
@@ -28,25 +33,43 @@ export const tapTheRightOneExample: InteractiveDocInput = {
     optionSlotIds: ["opt0", "opt1", "opt2"],
     rounds: [
       {
-        cue: { type: "asset", asset: { assetId: "asset_elephant", cutout: "ready" } },
+        cue: { type: "asset", asset: { assetId: "코끼리" } },
         options: [
           { content: { type: "text", text: "코끼리" }, correct: true },
           { content: { type: "text", text: "토끼" } },
-          { content: { type: "text", text: "강아지" } },
+          { content: { type: "text", text: "펭귄" } },
         ],
       },
       {
-        cue: { type: "asset", asset: { assetId: "asset_cat", cutout: "ready" } },
+        cue: { type: "asset", asset: { assetId: "토끼" } },
         options: [
-          { content: { type: "text", text: "펭귄" } },
-          { content: { type: "text", text: "고양이" }, correct: true },
+          { content: { type: "text", text: "원숭이" } },
+          { content: { type: "text", text: "토끼" }, correct: true },
           { content: { type: "text", text: "코끼리" } },
+        ],
+      },
+      {
+        cue: { type: "asset", asset: { assetId: "펭귄" } },
+        options: [
+          { content: { type: "text", text: "펭귄" }, correct: true },
+          { content: { type: "text", text: "원숭이" } },
+          { content: { type: "text", text: "토끼" } },
+        ],
+      },
+      {
+        cue: { type: "asset", asset: { assetId: "원숭이" } },
+        options: [
+          { content: { type: "text", text: "코끼리" } },
+          { content: { type: "text", text: "원숭이" }, correct: true },
+          { content: { type: "text", text: "펭귄" } },
         ],
       },
     ],
   },
   extend: [
-    { type: "discuss", prompts: ["이 동물은 어디에 살까요?", "무엇을 먹을까요?"], nuri: ["nature-inquiry", "communication"], laneX: 1.1 },
+    { type: "discuss", prompts: ["이 동물은 어디에 살까요?", "무엇을 먹을까요?", "어떤 소리를 낼까요?"], nuri: ["nature-inquiry", "communication"], laneX: 1.1 },
+    // 동물 영상 — 게임에 나온 네 동물을 각각 짧은 영상으로(교사가 카드에서 만들기 → 그 동물 이미지가 움직임).
+    { type: "watch-video", prompts: ["동물들이 어떻게 움직이는지 영상으로 함께 봐요"], subjects: ["코끼리", "토끼", "펭귄", "원숭이"], nuri: ["nature-inquiry"], laneX: 2.2 },
   ],
   rewards: { confetti: "full" },
 };

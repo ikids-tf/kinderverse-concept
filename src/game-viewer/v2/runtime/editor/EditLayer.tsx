@@ -5,7 +5,7 @@
  * 콘텐츠 교체/대화 편집은 기본 경로(M2 Resolver) 담당 — 여긴 정밀 레이아웃 전용(99% 교사는 안 봄).
  * 각 노드는 라운드0 콘텐츠 미리보기 + 역할 배지로 표시한다.
  */
-import { useEffect, useRef, useState, type PointerEvent as RPE, type WheelEvent as RWE } from "react";
+import { useEffect, useRef, useState, type MouseEvent as RME, type PointerEvent as RPE, type WheelEvent as RWE } from "react";
 import { transformStyle, radiusStyle, cropImgStyle, cropContentStyle, resolveCrop } from "../layout";
 import { resolveVisual, type Visual } from "../content";
 import { useStageSize } from "../stageSize";
@@ -222,7 +222,7 @@ function EditNodeBox({
     window.addEventListener("pointerup", upS);
   };
 
-  const beginEdit = (e: RPE<HTMLElement>) => {
+  const beginEdit = (e: RME<HTMLElement>) => {
     if (!editable) return;
     e.stopPropagation();
     selectNode(node.id);

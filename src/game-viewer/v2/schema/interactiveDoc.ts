@@ -368,11 +368,14 @@ export const NuriArea = z.enum([
  * 채점 아님. 별도 페이지가 아니라 레인 위 다음 구간.
  */
 export const ExtendActivity = z.object({
-  type: z.enum(["discuss", "story", "name-create", "connect-apply", "move-express"]),
+  type: z.enum(["discuss", "story", "name-create", "connect-apply", "move-express", "watch-video"]),
   prompts: z.array(z.string()).min(1), // 교사 진행 질문/지시 (아이 눈높이, TTS로도 읽힘)
   tts: z.boolean().default(true),
   nuri: z.array(NuriArea).optional(),
   laneX: z.number().min(0).optional(), // play 오른쪽 레인 시작 x(>1 권장). 카메라가 여기로 팬.
+  // watch-video 전용 — 영상으로 만들 대상 라벨(게임 단서와 동일: "코끼리"…). 교사 클릭 시
+  // 그 라벨의 생성 이미지를 첫 프레임으로 Veo 이미지→영상 생성(고비용·수 분이라 온디맨드).
+  subjects: z.array(z.string()).optional(),
   // DEFERRED: response?: "none"|"draw"|"voice"|"choice" — 아이 응답 수집(후속, 프라이버시)
 });
 

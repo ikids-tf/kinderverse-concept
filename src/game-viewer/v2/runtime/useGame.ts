@@ -15,7 +15,7 @@ import { temporal } from "zundo";
 import {
   parseInteractiveDoc,
 } from "../schema/parse";
-import type { ContentBinding, InteractiveDoc, InteractiveDocInput } from "../schema/interactiveDoc";
+import type { ContentBinding, InteractiveDoc, InteractiveDocInput, SceneNode } from "../schema/interactiveDoc";
 import { FIXTURES, type ExampleKey } from "./fixtures";
 import { answerEmoji } from "./content";
 import { primeImages } from "./assetStore";
@@ -693,7 +693,10 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
         return;
       }
       clearTimers();
-      set((s) => ({ ...freshState(parseInteractiveDoc(FIXTURES[key].input), key), loadSeq: s.loadSeq + 1 }));
+      const doc = parseInteractiveDoc(FIXTURES[key].input);
+      set((s) => ({ ...freshState(doc, key), loadSeq: s.loadSeq + 1 }));
+      // 기본 게임도 asset 라벨(예: "코끼리")이면 생성 시작 — 이모지 시드 즉시 플레이 후 그림으로 스왑.
+      primeImages(doc);
     },
 
     loadDoc: (input, key = null, savedId = null) => {
@@ -1252,11 +1255,11 @@ export const useGame = create<GameStore>()(temporal((set, get) => {
       const oi = it.optionSlotIds.indexOf(nodeId);
       if (oi < 0) return;
       const ri = get().editRoundIdx;
-      const rAt = <T,>(rounds: readonly T[], mut: (r: T) => T): T[] => rounds.map((r, i) => (i === ri ? mut(r) : r));
-      const interaction = {
-        ...it,
-        rounds: rAt(it.rounds, (r) => ({ ...r, options: r.options.map((o, j) => ({ ...o, correct: j === oi })) })),
-      };
+      // 라운드 모양(tap=cue / pattern=sequence)이 달라 판별 유니온을 좁혀야 안전 — kind별로 분기해 라운드 타입을 고정.
+      const interaction =
+        it.kind === "tap-the-right-one"
+          ? { ...it, rounds: it.rounds.map((r, i) => (i === ri ? { ...r, options: r.options.map((o, j) => ({ ...o, correct: j === oi })) } : r)) }
+          : { ...it, rounds: it.rounds.map((r, i) => (i === ri ? { ...r, options: r.options.map((o, j) => ({ ...o, correct: j === oi })) } : r)) };
       set({ doc: { ...doc, interaction } });
     },
 

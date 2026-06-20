@@ -5,7 +5,7 @@
  * 같은 키(아이템 라벨)는 재생성 0(세션 캐시). 키 없으면 게이트웨이가 플레이스홀더를 준다.
  */
 import { create } from "zustand";
-import { createImageProvider, createCutoutProvider } from "../providers/providers";
+import { createImageProvider } from "../providers/providers";
 import { CATEGORIES } from "../resolver/contentSets";
 import type { ContentBinding, InteractiveDoc } from "../schema/interactiveDoc";
 import { useGen } from "./genProgress";
@@ -14,7 +14,8 @@ import { saveAsset } from "@/board/assets";
 
 const LABELS = new Set(CATEGORIES.flatMap((c) => c.items.map((it) => it.label)));
 const provider = createImageProvider();
-const cutout = createCutoutProvider(); // 온디바이스 RMBG (생성→누끼)
+// 🔴 자동 배경 제거(누끼) 미적용 — 게임 이미지는 생성된 배경을 그대로 둔다(사용자 지시).
+//    배경 제거가 필요하면 교사가 이미지 편집(호버 버튼)에서 직접 한다.
 
 type Entry = { status: "pending" | "ready" | "error"; url?: string };
 interface AssetState {
@@ -50,7 +51,7 @@ export const useAssetStore = create<AssetState>((set, get) => ({
             return;
           }
         }
-        // 2) 생성(모두 생성 또는 보관함 우선의 미스분) → 누끼 → 보관함 저장.
+        // 2) 생성(모두 생성 또는 보관함 우선의 미스분) → 그대로 보관함 저장(누끼 미적용).
         step(`‘${key}’ 새로 그리는 중…`);
         const imgs = await provider.generate(prompt);
         const raw = imgs[0]?.url;
@@ -58,17 +59,8 @@ export const useAssetStore = create<AssetState>((set, get) => ({
           put({ status: "error" });
           return;
         }
-        put({ status: "ready", url: raw }); // 1차 스왑: 이모지 → 생성(흰 배경)
-        let finalUrl = raw;
-        try {
-          step(`‘${key}’ 배경 지우는 중…`);
-          const cut = await cutout.cutout(raw);
-          finalUrl = cut.url;
-          put({ status: "ready", url: finalUrl }); // 2차: 투명 누끼로 교체
-        } catch {
-          /* 누끼 실패 시 생성 원본 유지 */
-        }
-        void saveAsset(`${key} (배경제거)`, "image", finalUrl, key); // 다음엔 보관함에서 재사용
+        put({ status: "ready", url: raw }); // 이모지 시드 → 생성 이미지(배경 그대로 유지)
+        void saveAsset(`${key} (생성)`, "image", raw, key); // 다음엔 보관함에서 재사용(배경 유지본)
       } catch {
         put({ status: "error" });
       }

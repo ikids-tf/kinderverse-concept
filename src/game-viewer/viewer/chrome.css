@@ -1,0 +1,12 @@
+/* 게임 뷰어 '교사 크롬'용 Milray 스타일 — 이미지 편집 모달·풀스크린·호버 액션 버튼 전용.
+   ------------------------------------------------------------------
+   🔴 @tailwind base(preflight) 는 의도적으로 제외한다. 전역 리셋이 없으므로 아이 대면
+      게임 콘텐츠(.kv-v2, 자체 파스텔 토큰을 인라인으로 주입)는 전혀 영향받지 않고,
+      body 포털로 뜨는 교사용 편집 모달/풀스크린만 :root의 Milray 토큰 + Tailwind
+      유틸리티로 마이보드와 동일하게 칠해진다(CLAUDE §2/§8: 교사 크롬 = Milray 유지).
+   - tokens.css = Milray CSS 변수(:root) + 폰트. .kv-v2 가 같은 이름 변수를 인라인으로
+     덮어쓰므로 게임 화면 색은 그대로 파스텔. */
+@import "../../styles/tokens.css";
+
+@tailwind components;
+@tailwind utilities;

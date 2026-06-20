@@ -271,6 +271,35 @@ export async function cleanupBackground(
     }
   }
 
+  // ── 내부 구멍 메우기(imfill) — 매트가 반짝이·질감을 배경으로 오인해 '객체 안에' 만든
+  //    투명 점/구멍을 복원한다(사용자 보고: 객체 내부가 조금씩 뚫림). 표준 hole-filling:
+  //    테두리에서 투명 영역을 따라 '도달하는' 픽셀만 진짜 바깥 배경으로 두고, 에워싸여
+  //    도달하지 못하는 투명 픽셀(=내부 구멍)만 불투명(255)으로 되살린다.
+  //      · 외곽의 부드러운 반투명(안티에일리어스)은 바깥에 닿아 그대로 보존된다.
+  //      · RGB는 원본이 살아 있어 알파만 올리면 객체 표면이 자연스럽게 드러난다.
+  //    (도넛처럼 '진짜로 뚫린' 내부 공간은 드물어 — 그런 자산은 되돌리기로 대응.)
+  {
+    const T = 128; // 전경 판정 임계(이 미만 = 배경/구멍 후보)
+    const reached = new Uint8Array(N); // 테두리에서 투명영역을 따라 도달한 '진짜 바깥 배경'
+    let sp = 0;
+    const seed = (p: number) => {
+      if (!reached[p] && data[p * 4 + 3] < T) { reached[p] = 1; stack[sp++] = p; }
+    };
+    for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + (w - 1)); }
+    while (sp > 0) {
+      const p = stack[--sp];
+      const x = p % w, y = (p / w) | 0;
+      if (x > 0) seed(p - 1);
+      if (x < w - 1) seed(p + 1);
+      if (y > 0) seed(p - w);
+      if (y < h - 1) seed(p + w);
+    }
+    for (let p = 0; p < N; p++) {
+      if (data[p * 4 + 3] < T && !reached[p]) data[p * 4 + 3] = 255; // 에워싸인 구멍 → 불투명 복원
+    }
+  }
+
   ctx.putImageData(img, 0, 0);
   const dataUrl = await new Promise<string>((res, rej) =>
     canvas.toBlob((b) => {
