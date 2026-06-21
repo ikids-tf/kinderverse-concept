@@ -15,7 +15,9 @@ export const SlideRenderer: FC<{
   pageNumber?: number;
   /** 현재 선택(다중 블록 + eyebrow). 없으면 빈 선택. */
   selected?: Selection;
-}> = ({ slide, theme, editable, h, pageNumber, selected }) => {
+  /** 썸네일(레일) 렌더 — 인터렉티브 슬라이드를 정적 미리보기로(버튼·자동재생 없음). */
+  thumbnail?: boolean;
+}> = ({ slide, theme, editable, h, pageNumber, selected, thumbnail }) => {
   const Cmp = LAYOUT_COMPONENTS[slide.layout] ?? LAYOUT_COMPONENTS.title;
   return (
     <div
@@ -26,7 +28,7 @@ export const SlideRenderer: FC<{
       data-bg={slide.background ? '1' : undefined}
     >
       <SlideBg background={slide.background} />
-      <Cmp slide={slide} theme={theme} editable={editable} h={h} selected={selected ?? NO_SELECTION} />
+      <Cmp slide={slide} theme={theme} editable={editable} h={h} selected={selected ?? NO_SELECTION} thumbnail={thumbnail} />
       {slide.number && pageNumber ? (
         <span className="slide-number">{String(pageNumber).padStart(2, '0')}</span>
       ) : null}

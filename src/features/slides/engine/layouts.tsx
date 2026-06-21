@@ -71,6 +71,8 @@ export interface LayoutProps {
   h: EditHandlers;
   /** 현재 선택(다중 블록 + eyebrow). */
   selected: Selection;
+  /** 썸네일 렌더(인터렉티브 슬라이드를 정적으로). 대부분 레이아웃은 무시. */
+  thumbnail?: boolean;
 }
 
 /* ── 블록 조회 헬퍼 ───────────────────────────────────────────────────── */

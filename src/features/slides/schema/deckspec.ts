@@ -125,6 +125,8 @@ export interface Slide {
   speakerNote?: string;
   /** layout==='interactive' 전용 — 재생할 인터렉티브 노드 docId(localStorage 'kv:inodes:v1'). 수업 모드. */
   nodeId?: string;
+  /** layout==='interactive' 전용 — 활동 진행 방식. 'teacher'(기본)=교사 수동, 'onComplete'=완료 시 자동으로 다음 장. */
+  advance?: 'teacher' | 'onComplete';
 }
 
 export interface DeckSpec {

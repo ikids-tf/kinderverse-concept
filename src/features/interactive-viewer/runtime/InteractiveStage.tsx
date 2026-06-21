@@ -101,6 +101,8 @@ interface Props {
   /** 포트 떼어내기로 연결 끝을 다른 요소로 옮김(한 undo 단계). */
   onRelinkConnection?: (id: string, from: string, to: string) => void;
   onDropFiles?: (files: File[], at: { x: number; y: number }) => void;
+  /** 활동 완료(이야기 마지막·순서 게임 완료) — 수업 슬라이드 자동 넘김 등에 사용. */
+  onComplete?: () => void;
   /** play 리셋/모드 전환 시 애니메이션·교체 상태 원복. */
   resetNonce?: number;
   /** 미리보기 — 상호작용 차단(보드 카드 썸네일). */
@@ -122,6 +124,7 @@ export function InteractiveStage({
   onRemoveConnection,
   onRelinkConnection,
   onDropFiles,
+  onComplete,
   resetNonce = 0,
   preview = false,
 }: Props) {
@@ -188,6 +191,8 @@ export function InteractiveStage({
   onRemoveConnRef.current = onRemoveConnection;
   const onRelinkRef = useRef(onRelinkConnection);
   onRelinkRef.current = onRelinkConnection;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
   // 연결 hit-test/적중 판정용 최신 요소·연결 목록(고정 핸들러에서 읽음).
   const elsRef = useRef(doc.elements);
   elsRef.current = doc.elements;
@@ -689,6 +694,7 @@ export function InteractiveStage({
       if (seqOrder[seqIndexRef.current] === el.id) {
         seqIndexRef.current += 1;
         void fireBehavior(beh.id);
+        if (seqIndexRef.current >= seqOrder.length && seqOrder.length > 0) onCompleteRef.current?.(); // 순서 게임 완료
       } else {
         const inner = innerRefs.current[el.id];
         if (inner) runAnimate(inner, 'shake');
@@ -1169,6 +1175,10 @@ export function InteractiveStage({
           {storyIdx < storySteps.length - 1 ? (
             <button type="button" className="ic-narration-nav ic-narration-next" onClick={() => gotoStep(storyIdx + 1)}>
               다음 ▶
+            </button>
+          ) : onComplete ? (
+            <button type="button" className="ic-narration-nav ic-narration-next" onClick={() => onComplete()}>
+              완료 ▶
             </button>
           ) : (
             <button type="button" className="ic-narration-nav ic-narration-next" onClick={() => gotoStep(0)}>

@@ -140,7 +140,11 @@ export function HelpOverlay({ onClose }: Props) {
           </Section>
 
           <Section title="⑧ 수업 모드">
-            <p className="text-sm text-fg-2">보드에서 <b className="text-fg">수업 모드</b>를 켜고 인터렉티브 카드를 탭하면 <b className="text-fg">전체 화면으로 재생</b>돼요 — 아이들과 함께 놀 수 있어요. 슬라이드 덱에도 ‘인터렉티브’ 슬라이드로 넣을 수 있어요.</p>
+            <ul className="flex flex-col gap-1.5 text-sm text-fg-2">
+              <li>보드에서 <b className="text-fg">수업 모드</b>를 켜고 인터렉티브 카드를 탭하면 <b className="text-fg">전체 화면으로 재생</b>돼요.</li>
+              <li>슬라이드 덱 레이아웃에서 <b className="text-fg">‘인터렉티브’</b>를 고르면 만든 노드를 한 장으로 넣을 수 있어요.</li>
+              <li>그 슬라이드의 <b className="text-fg">‘✅ 완료 시 자동 넘김’</b>을 켜면, 아이가 활동(이야기 끝·순서 맞추기 완료)을 끝냈을 때 <b className="text-fg">저절로 다음 장</b>으로 넘어가요.</li>
+            </ul>
           </Section>
 
           <Section title="🎒 이렇게 만들어 보세요">

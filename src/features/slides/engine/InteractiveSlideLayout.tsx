@@ -14,38 +14,51 @@ import { loadInteractiveNode, listInteractiveNodes } from '../../interactive-vie
 function pick(nodeId: string | undefined) {
   window.dispatchEvent(new CustomEvent('kv:inode-slide-pick', { detail: { nodeId: nodeId ?? '' } }));
 }
+function setAdvance(mode: 'teacher' | 'onComplete') {
+  window.dispatchEvent(new CustomEvent('kv:inode-slide-advance', { detail: { mode } }));
+}
 
-export const InteractiveSlideLayout: FC<LayoutProps> = ({ slide, editable }) => {
+const chipBtn: React.CSSProperties = {
+  borderRadius: 999,
+  border: '1px solid var(--border)',
+  background: 'var(--surface)',
+  color: 'var(--fg-2)',
+  padding: '6px 12px',
+  font: '600 var(--fs-xs, 12px) var(--font-sans)',
+  cursor: 'pointer',
+  boxShadow: '0 2px 8px rgba(0,0,0,.12)',
+};
+
+export const InteractiveSlideLayout: FC<LayoutProps> = ({ slide, editable, thumbnail }) => {
   const nodeId = slide.nodeId;
   const node = useMemo(() => (nodeId ? loadInteractiveNode(nodeId) : null), [nodeId]);
+  const autoAdvance = slide.advance === 'onComplete';
 
-  // 노드가 정해졌고 로드되면 — 전체 재생.
+  // 노드가 정해졌고 로드되면 — 전체 재생(썸네일은 정적 미리보기).
   if (node) {
     return (
       <div style={{ position: 'absolute', inset: 0 }}>
-        <InteractiveStage doc={node} mode="play" />
+        <InteractiveStage
+          doc={node}
+          mode="play"
+          preview={thumbnail}
+          // 자동 넘김 정책일 때만 완료 콜백 전달 → 이야기 마지막에 '완료 ▶'가 뜨고 다음 장으로.
+          onComplete={autoAdvance && !thumbnail ? () => window.dispatchEvent(new CustomEvent('kv:inode-slide-complete')) : undefined}
+        />
         {editable && (
-          <button
-            type="button"
-            onClick={() => pick('')}
-            title="다른 인터렉티브로 바꾸기"
-            style={{
-              position: 'absolute',
-              right: 12,
-              top: 12,
-              zIndex: 5,
-              borderRadius: 999,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--fg-2)',
-              padding: '6px 12px',
-              font: '600 var(--fs-xs, 12px) var(--font-sans)',
-              cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,.12)',
-            }}
-          >
-            🔁 노드 바꾸기
-          </button>
+          <div style={{ position: 'absolute', right: 12, top: 12, zIndex: 5, display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setAdvance(autoAdvance ? 'teacher' : 'onComplete')}
+              title="활동을 끝내면(이야기 끝·순서 완료) 자동으로 다음 장으로 넘어가요"
+              style={{ ...chipBtn, ...(autoAdvance ? { background: 'var(--accent)', color: 'var(--on-accent)', borderColor: 'var(--accent)' } : {}) }}
+            >
+              {autoAdvance ? '✅ 완료 시 자동 넘김' : '⬜ 완료 시 자동 넘김'}
+            </button>
+            <button type="button" onClick={() => pick('')} title="다른 인터렉티브로 바꾸기" style={chipBtn}>
+              🔁 노드 바꾸기
+            </button>
+          </div>
         )}
       </div>
     );

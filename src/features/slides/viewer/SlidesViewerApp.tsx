@@ -340,15 +340,26 @@ export function SlidesViewerApp() {
     setDeck((d) => ({ ...d, slides: d.slides.map((s, i) => (i === slideIdx ? fn(s) : s)) }));
   }, []);
 
-  // 인터렉티브 슬라이드 — InteractiveSlideLayout의 picker가 고른 노드를 현재 슬라이드 nodeId로 반영.
+  // 인터렉티브 슬라이드 — picker가 고른 노드 / 진행 정책 / 완료 자동 넘김을 현재 슬라이드에 반영.
   useEffect(() => {
     const onPick = (e: Event) => {
       const id = (e as CustomEvent).detail?.nodeId as string | undefined;
       patchSlide(idx, (s) => ({ ...s, nodeId: id || undefined }));
     };
+    const onAdvancePolicy = (e: Event) => {
+      const mode = (e as CustomEvent).detail?.mode as 'teacher' | 'onComplete' | undefined;
+      patchSlide(idx, (s) => ({ ...s, advance: mode }));
+    };
+    const onComplete = () => goRel(1); // 활동 완료 → 다음 장(정책은 레이아웃이 판단해 발신)
     window.addEventListener('kv:inode-slide-pick', onPick as EventListener);
-    return () => window.removeEventListener('kv:inode-slide-pick', onPick as EventListener);
-  }, [idx, patchSlide]);
+    window.addEventListener('kv:inode-slide-advance', onAdvancePolicy as EventListener);
+    window.addEventListener('kv:inode-slide-complete', onComplete);
+    return () => {
+      window.removeEventListener('kv:inode-slide-pick', onPick as EventListener);
+      window.removeEventListener('kv:inode-slide-advance', onAdvancePolicy as EventListener);
+      window.removeEventListener('kv:inode-slide-complete', onComplete);
+    };
+  }, [idx, patchSlide, goRel]);
   const handlers: EditHandlers = useMemo(
     () => ({
       onText: (bi, text) =>
@@ -797,7 +808,7 @@ export function SlidesViewerApp() {
               onPointerUp={onThumbUp(i)}
             >
               <div className="rail-thumb-scale" style={{ width: SLIDE_W, height: SLIDE_H, transform: `scale(${THUMB_W / SLIDE_W})` }}>
-                <SlideRenderer slide={s} theme={deck.theme} editable={false} h={NOOP_HANDLERS} pageNumber={i + 1} />
+                <SlideRenderer slide={s} theme={deck.theme} editable={false} h={NOOP_HANDLERS} pageNumber={i + 1} thumbnail />
               </div>
               <span className="rail-thumb-num">{i + 1}</span>
             </button>
