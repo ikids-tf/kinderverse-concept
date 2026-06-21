@@ -86,6 +86,8 @@ interface Props {
   /** 여러 요소를 한 번에(dx,dy) 이동(한 undo 단계). */
   onMoveElements?: (ids: string[], dx: number, dy: number) => void;
   onResizeElement?: (elId: string, patch: Box) => void;
+  /** 회전 커밋(도, 0~359). */
+  onRotateElement?: (elId: string, rotation: number) => void;
   /** 글자 더블클릭 인라인 편집 커밋. */
   onEditText?: (elId: string, text: string) => void;
   /** 이미지 요소 호버 액션 — 마이보드 카드와 동일(편집 모달 / 풀스크린). origin = 화면 사각형. */
@@ -111,6 +113,7 @@ export function InteractiveStage({
   onSelectEls,
   onMoveElements,
   onResizeElement,
+  onRotateElement,
   onEditText,
   onEditImage,
   onFullscreenImage,
@@ -134,6 +137,9 @@ export function InteractiveStage({
   const [drag, setDrag] = useState<{ ids: string[]; origs: Record<string, { x: number; y: number }>; dx: number; dy: number } | null>(null);
   const resizeInfo = useRef<{ id: string; ax: number; ay: number; rect: DOMRect; box: Box } | null>(null);
   const [resize, setResize] = useState<(Box & { id: string }) | null>(null);
+  // 회전(라이브 미리보기 + 커밋) — 마이보드 회전 핸들과 동일 수식.
+  const rotateInfo = useRef<{ id: string; cx: number; cy: number; rect: DOMRect; startRot: number; startAng: number; deg: number } | null>(null);
+  const [rotate, setRotate] = useState<{ id: string; deg: number } | null>(null);
   const [swapped, setSwapped] = useState<Record<string, boolean>>({});
   const [dropping, setDropping] = useState(false);
   // 글자 더블클릭 인라인 편집 / 호버 시 연결 포트(hoverElId) / 연결 드래그 중 임시 선(linking).
@@ -160,6 +166,8 @@ export function InteractiveStage({
   onMoveRef.current = onMoveElements;
   const onResizeRef = useRef(onResizeElement);
   onResizeRef.current = onResizeElement;
+  const onRotateRef = useRef(onRotateElement);
+  onRotateRef.current = onRotateElement;
   const onAddConnRef = useRef(onAddConnection);
   onAddConnRef.current = onAddConnection;
   const onRemoveConnRef = useRef(onRemoveConnection);
@@ -222,6 +230,29 @@ export function InteractiveStage({
     setResize(null);
     if (r) onResizeRef.current?.(r.id, r.box);
   }, [onResizeMove]);
+
+  // ── 편집: 회전(중심 기준, 마이보드 회전 핸들과 동일 수식. Shift=15° 스냅) ──
+  const onRotateMove = useCallback((e: PointerEvent) => {
+    const r = rotateInfo.current;
+    if (!r) return;
+    const sc = scaleRef.current;
+    const px = (e.clientX - r.rect.left) / sc;
+    const py = (e.clientY - r.rect.top) / sc;
+    const ang = Math.atan2(py - r.cy, px - r.cx);
+    let deg = r.startRot + ((ang - r.startAng) * 180) / Math.PI;
+    if (e.shiftKey) deg = Math.round(deg / 15) * 15;
+    deg = (((Math.round(deg) % 360) + 360) % 360);
+    r.deg = deg;
+    setRotate({ id: r.id, deg });
+  }, []);
+  const onRotateUp = useCallback(() => {
+    window.removeEventListener('pointermove', onRotateMove);
+    window.removeEventListener('pointerup', onRotateUp);
+    const r = rotateInfo.current;
+    rotateInfo.current = null;
+    setRotate(null);
+    if (r) onRotateRef.current?.(r.id, r.deg);
+  }, [onRotateMove]);
 
   // 커서(논리 좌표) 아래 연결 가능한 최상위 요소(여유 pad 포함). 고정 핸들러에서 호출.
   const hitElementAt = useCallback((x: number, y: number): ElementNode | null => {
@@ -289,8 +320,10 @@ export function InteractiveStage({
       window.removeEventListener('pointerup', onResizeUp);
       window.removeEventListener('pointermove', onLinkMove);
       window.removeEventListener('pointerup', onLinkUp);
+      window.removeEventListener('pointermove', onRotateMove);
+      window.removeEventListener('pointerup', onRotateUp);
     },
-    [onWinMove, onWinUp, onResizeMove, onResizeUp, onLinkMove, onLinkUp],
+    [onWinMove, onWinUp, onResizeMove, onResizeUp, onLinkMove, onLinkUp, onRotateMove, onRotateUp],
   );
 
   // 포트 pointerdown — 빈 슬롯이면 새 연결, 연결된 슬롯이면 떼어내기(반대 끝 고정).
@@ -359,6 +392,24 @@ export function InteractiveStage({
     setResize({ id: el.id, x: t.x, y: t.y, w: t.w, h: t.h });
     window.addEventListener('pointermove', onResizeMove);
     window.addEventListener('pointerup', onResizeUp);
+  };
+
+  const onRotateDown = (e: React.PointerEvent, el: ElementNode) => {
+    if (preview || mode !== 'edit') return;
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const b = boxOf(el);
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    const px = (e.clientX - rect.left) / scale;
+    const py = (e.clientY - rect.top) / scale;
+    const startRot = el.transform.rotation ?? 0;
+    rotateInfo.current = { id: el.id, cx, cy, rect, startRot, startAng: Math.atan2(py - cy, px - cx), deg: startRot };
+    setRotate({ id: el.id, deg: startRot });
+    window.addEventListener('pointermove', onRotateMove);
+    window.addEventListener('pointerup', onRotateUp);
   };
 
   /** 동작 실행 — 재생 탭과 편집 미리보기(▶)가 공유. animate=재생, swap=토글. */
@@ -478,6 +529,9 @@ export function InteractiveStage({
     }
     return { x: el.transform.x, y: el.transform.y, w: el.transform.w, h: el.transform.h };
   };
+
+  /** 요소의 현재 회전(라이브 우선) — 드래그 회전 중이면 미리보기 값. */
+  const rotDeg = (el: ElementNode): number => (rotate && rotate.id === el.id ? rotate.deg : el.transform.rotation ?? 0);
 
   // ── 연결 기하(마이보드 sideMap/portSlots/linkAnchor 동일 규칙) ──
   /** 연결의 두 끝이 각각 어느 면(l/r)에 붙는지 — 왼쪽 요소의 오른면 ↔ 오른쪽 요소의 왼면. */
@@ -634,7 +688,8 @@ export function InteractiveStage({
                   top: b.y,
                   width: b.w,
                   height: b.h,
-                  transform: el.transform.rotation ? `rotate(${el.transform.rotation}deg)` : undefined,
+                  transform: rotDeg(el) ? `rotate(${rotDeg(el)}deg)` : undefined,
+                  transformOrigin: 'center center',
                   zIndex: el.transform.z,
                 }}
                 onPointerDown={(e) => onElPointerDown(e, el)}
@@ -728,8 +783,9 @@ export function InteractiveStage({
               box={boxOf(singleSel)}
               scale={scale}
               radius={singleSel.kind === 'shape' ? 18 : 8}
-              rotation={singleSel.transform.rotation}
+              rotation={rotDeg(singleSel)}
               onHandleDown={(e, corner) => onHandleDown(e, singleSel, corner)}
+              onRotateDown={(e) => onRotateDown(e, singleSel)}
             />
           )}
 

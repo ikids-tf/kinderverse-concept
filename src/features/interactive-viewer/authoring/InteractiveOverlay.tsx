@@ -216,6 +216,12 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
       }),
     }));
 
+  const rotateElement = (elId: string, rotation: number) =>
+    mutate(docId, (d) => ({
+      ...d,
+      elements: d.elements.map((e) => (e.id === elId ? { ...e, transform: { ...e.transform, rotation } } : e)),
+    }));
+
   const duplicateElement = (elId: string) => {
     const el = doc.elements.find((e) => e.id === elId);
     if (!el) return;
@@ -422,6 +428,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
             onSelectEls={setSelectedElIds}
             onMoveElements={moveElements}
             onResizeElement={resizeElement}
+            onRotateElement={rotateElement}
             onEditText={editText}
             onEditImage={editImage}
             onFullscreenImage={fullscreenImage}
@@ -500,26 +507,31 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
         />
       )}
 
-      {/* 이미지 편집 모달 — 마이보드와 동일 컴포넌트. target.onApply로 요소 src 교체. */}
+      {/* 이미지 편집 모달 — 마이보드와 동일 컴포넌트. target.onApply로 요소 src 교체.
+          🔴 z-200 래퍼로 감싸 ZoomOverlay(z-130) 위에 띄운다(안 그러면 오버레이 뒤로 가려 안 보인다). */}
       {editImg &&
         createPortal(
-          <ImageEditorModal
-            target={{
-              src: editImg.src,
-              caption: editImg.caption,
-              allowExtract: false,
-              onApply: (url) => setElementSrc(editImg.elId, url),
-            }}
-            origin={editImg.origin}
-            onClose={() => setEditImg(null)}
-          />,
+          <div style={{ position: 'fixed', inset: 0, zIndex: 200 }}>
+            <ImageEditorModal
+              target={{
+                src: editImg.src,
+                caption: editImg.caption,
+                allowExtract: false,
+                onApply: (url) => setElementSrc(editImg.elId, url),
+              }}
+              origin={editImg.origin}
+              onClose={() => setEditImg(null)}
+            />
+          </div>,
           document.body,
         )}
 
-      {/* 이미지 풀스크린 — 마이보드와 동일 컴포넌트. */}
+      {/* 이미지 풀스크린 — 마이보드와 동일 컴포넌트(동일하게 z-200 래퍼로 오버레이 위에). */}
       {fsImg &&
         createPortal(
-          <ImageFullscreen src={fsImg.src} caption={fsImg.caption} origin={fsImg.origin} onClose={() => setFsImg(null)} />,
+          <div style={{ position: 'fixed', inset: 0, zIndex: 200 }}>
+            <ImageFullscreen src={fsImg.src} caption={fsImg.caption} origin={fsImg.origin} onClose={() => setFsImg(null)} />
+          </div>,
           document.body,
         )}
     </div>
