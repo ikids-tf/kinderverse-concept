@@ -14,6 +14,7 @@ import type { OriginRect } from '@/components/board/useZoomModal';
 import { useInteractiveStore } from '../store/interactiveStore';
 import { InteractiveStage } from '../runtime/InteractiveStage';
 import { Inspector } from '../inspector/Inspector';
+import { StoryPanel } from './StoryPanel';
 import { AssetPicker, type AssetPick } from './AssetPicker';
 import {
   fileToAssetRef,
@@ -68,6 +69,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   const [resetNonce, setResetNonce] = useState(0);
   const [picker, setPicker] = useState<null | { for: 'add' | 'swap' }>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [storyOpen, setStoryOpen] = useState(false);
   // 이미지 요소 편집/풀스크린 모달(마이보드 카드와 동일 컴포넌트 재사용).
   const [editImg, setEditImg] = useState<{ elId: string; src: string; caption: string; origin: OriginRect | null } | null>(null);
   const [fsImg, setFsImg] = useState<{ src: string; caption: string; origin: OriginRect | null } | null>(null);
@@ -296,6 +298,31 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   const setBackground = (token: string) =>
     mutate(docId, (d) => ({ ...d, canvas: { ...d.canvas, background: token } }));
 
+  // ── 이야기(story) 단계 편집 ──
+  const addStoryStep = () =>
+    mutate(docId, (d) => ({
+      ...d,
+      story: { ...(d.story ?? { steps: [] }), steps: [...(d.story?.steps ?? []), { id: newId('step'), speak: { text: '', mode: 'narration' as const } }] },
+    }));
+  const updateStoryStepText = (id: string, text: string) =>
+    mutate(docId, (d) =>
+      d.story
+        ? { ...d, story: { ...d.story, steps: d.story.steps.map((s) => (s.id === id ? { ...s, speak: { text, mode: s.speak?.mode ?? 'narration' } } : s)) } }
+        : d,
+    );
+  const removeStoryStep = (id: string) =>
+    mutate(docId, (d) => (d.story ? { ...d, story: { ...d.story, steps: d.story.steps.filter((s) => s.id !== id) } } : d));
+  const moveStoryStep = (id: string, dir: -1 | 1) =>
+    mutate(docId, (d) => {
+      if (!d.story) return d;
+      const steps = [...d.story.steps];
+      const i = steps.findIndex((s) => s.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= steps.length) return d;
+      [steps[i], steps[j]] = [steps[j], steps[i]];
+      return { ...d, story: { ...d.story, steps } };
+    });
+
   // 요소 연결(from→to) — 중복/자기연결 무시. 마이보드 링크와 동일한 from/to 모델.
   const addConnection = (from: string, to: string) =>
     mutate(docId, (d) => {
@@ -447,6 +474,16 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
               <button onClick={() => redo(docId)} className={chromeBtn} title="다시실행 (⌘/Ctrl+⇧Z)">
                 ↪
               </button>
+              <button
+                onClick={() => {
+                  setStoryOpen((v) => !v);
+                  setSelectedElIds([]);
+                }}
+                className={storyOpen ? chromeBtnAccent : chromeBtn}
+                title="이야기 — 단계별 나레이션"
+              >
+                📖 이야기
+              </button>
               {selectedElIds.length > 1 && (
                 <span className="rounded-pill bg-accent-soft px-3 py-1.5 text-sm font-semibold text-fg">{selectedElIds.length}개 선택</span>
               )}
@@ -489,7 +526,16 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
             resetNonce={resetNonce}
           />
         </div>
-        {mode === 'edit' && selectedElIds.length === 1 && (
+        {mode === 'edit' && storyOpen ? (
+          <StoryPanel
+            story={doc.story}
+            onAddStep={addStoryStep}
+            onUpdateStepText={updateStoryStepText}
+            onRemoveStep={removeStoryStep}
+            onMoveStep={moveStoryStep}
+            onClose={() => setStoryOpen(false)}
+          />
+        ) : mode === 'edit' && selectedElIds.length === 1 ? (
           <Inspector
             doc={doc}
             elId={selectedElIds[0]}
@@ -504,7 +550,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
             onRemoveElement={() => removeElement(selectedElIds[0])}
             busy={busy}
           />
-        )}
+        ) : null}
       </div>
 
       {/* 저작 툴바 — 마이보드식 좌측 세로 레일(재생 모드에선 숨김). 클릭 시 노드 내부 요소로 추가. */}

@@ -149,6 +149,8 @@ export function InteractiveStage({
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const [highlighted, setHighlighted] = useState<Record<string, string>>({});
   const [bubbles, setBubbles] = useState<Record<string, string>>({});
+  // 이야기(story) 재생 — 현재 단계(없으면 null). 나레이션 바 + 다음/이전.
+  const [storyIdx, setStoryIdx] = useState<number | null>(null);
   // 조건 평가용 동기 미러(체이닝 중 최신값 읽기) + 리셋 토큰(지연/체인 취소).
   const countersRef = useRef<Record<string, number>>({});
   const flagsRef = useRef<Record<string, boolean>>({});
@@ -392,6 +394,36 @@ export function InteractiveStage({
     }, 80);
     return () => window.clearTimeout(t);
   }, [resetNonce, mode, preview, doc.behaviors, fireBehavior]);
+
+  // ── 이야기(story) 재생 — 단계 이동 + 나레이션(자막+TTS) + (있으면) move 동작 ──
+  const storySteps = doc.story?.steps ?? [];
+  const gotoStep = useCallback(
+    (i: number) => {
+      const steps = doc.story?.steps ?? [];
+      if (i < 0 || i >= steps.length) return;
+      setStoryIdx(i);
+      const step = steps[i];
+      if (step.move) void fireBehavior(step.move);
+      if (step.speak?.text) speakText(step.speak.text);
+    },
+    [doc.story, fireBehavior],
+  );
+  // 재생 시작 시 첫 단계부터.
+  useEffect(() => {
+    if (preview || mode !== 'play' || !(doc.story?.steps?.length)) {
+      setStoryIdx(null);
+      return;
+    }
+    setStoryIdx(0);
+    const steps = doc.story.steps;
+    const token = runToken.current;
+    const t = window.setTimeout(() => {
+      if (token !== runToken.current) return;
+      if (steps[0].speak?.text) speakText(steps[0].speak.text);
+      if (steps[0].move) void fireBehavior(steps[0].move);
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [resetNonce, mode, preview, doc.story, fireBehavior]);
 
   // ── 편집: (그룹) 드래그 — 스크린 델타 ÷ scale = 논리 델타, 선택된 모든 요소 함께 이동 ──
   const onWinMove = useCallback((e: PointerEvent) => {
@@ -1120,6 +1152,31 @@ export function InteractiveStage({
             })()}
         </div>
       </div>
+
+      {/* 이야기 나레이션 바 — 재생 중 하단 자막 + 이전/다음. 아이 대면(파스텔). */}
+      {!preview && mode === 'play' && storyIdx !== null && storySteps[storyIdx] && (
+        <div className="ic-narration">
+          <button
+            type="button"
+            className="ic-narration-nav"
+            onClick={() => gotoStep(storyIdx - 1)}
+            disabled={storyIdx === 0}
+            aria-label="이전"
+          >
+            ◀
+          </button>
+          <div className="ic-narration-text">{storySteps[storyIdx].speak?.text ?? ''}</div>
+          {storyIdx < storySteps.length - 1 ? (
+            <button type="button" className="ic-narration-nav ic-narration-next" onClick={() => gotoStep(storyIdx + 1)}>
+              다음 ▶
+            </button>
+          ) : (
+            <button type="button" className="ic-narration-nav ic-narration-next" onClick={() => gotoStep(0)}>
+              ↺ 다시
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
