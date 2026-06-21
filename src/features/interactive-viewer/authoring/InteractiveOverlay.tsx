@@ -15,6 +15,7 @@ import { useInteractiveStore } from '../store/interactiveStore';
 import { InteractiveStage } from '../runtime/InteractiveStage';
 import { Inspector } from '../inspector/Inspector';
 import { StoryPanel } from './StoryPanel';
+import { HelpOverlay } from './HelpOverlay';
 import { AssetPicker, type AssetPick } from './AssetPicker';
 import {
   fileToAssetRef,
@@ -70,6 +71,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   const [picker, setPicker] = useState<null | { for: 'add' | 'swap' }>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   // 이미지 요소 편집/풀스크린 모달(마이보드 카드와 동일 컴포넌트 재사용).
   const [editImg, setEditImg] = useState<{ elId: string; src: string; caption: string; origin: OriginRect | null } | null>(null);
   const [fsImg, setFsImg] = useState<{ src: string; caption: string; origin: OriginRect | null } | null>(null);
@@ -491,6 +493,9 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
           )}
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setHelpOpen(true)} className={chromeBtn} title="도움말 — 기능·단축키 안내" aria-label="도움말">
+            ❔ 도움말
+          </button>
           {mode === 'play' && (
             <button onClick={() => setResetNonce((n) => n + 1)} className={chromeBtn}>
               ↺ 처음으로
@@ -606,6 +611,8 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
           onPick={onPick}
         />
       )}
+
+      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
 
       {/* 이미지 편집 모달 — 마이보드와 동일 컴포넌트. target.onApply로 요소 src 교체.
           🔴 z-200 래퍼로 감싸 ZoomOverlay(z-130) 위에 띄운다(안 그러면 오버레이 뒤로 가려 안 보인다). */}
