@@ -150,6 +150,14 @@ export function handleBoardPrompt(text: string): boolean {
     return true;
   }
 
+  // 🔵 인터랙티브 노드 풀스크린(편집)이면 — 입력은 그 노드로. 선택 요소가 있으면 그 요소에,
+  //    없으면 노드 전체 맥락으로 AI가 적용한다(InteractiveOverlay가 kv:inode-prompt를 받음).
+  const fsInodeId = useUIStore.getState().inodeFsDocId;
+  if (fsInodeId) {
+    window.dispatchEvent(new CustomEvent('kv:inode-prompt', { detail: { docId: fsInodeId, prompt: text } }));
+    return true;
+  }
+
   // 게임 뷰어 카드가 단독 선택돼 있으면 — 보드 프롬프트를 그 카드의 게임 생성으로 보낸다.
   // (게임뷰어 하단바 하이브리드: 임베드 소형 카드는 보드 프롬프트바로 제어. NodeView가 iframe에 전달)
   if (sel.length === 1 && typeof sel[0].data?.embed === 'string' && sel[0].data.embed.includes('game-viewer')) {

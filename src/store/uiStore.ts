@@ -51,6 +51,14 @@ interface UIState {
       보드로 새지 않고 무조건 이 게임 뷰어로 라우팅된다(풀스크린 = 그 게임 전용 컨텍스트). */
   gameViewerFsNodeId: string | null;
   setGameViewerFs: (id: string | null) => void;
+
+  /** 인터랙티브 노드가 풀스크린(편집)으로 떠 있을 때 그 문서 docId. 설정되면 프롬프트바
+      입력은 보드로 새지 않고 그 노드 편집(AI 적용)으로 라우팅된다(풀스크린 = 그 노드 전용). */
+  inodeFsDocId: string | null;
+  /** 그 노드에서 현재 선택된 요소 수(프롬프트바 칩/플레이스홀더용). 0이면 전체 맥락. */
+  inodeFsSelCount: number;
+  setInodeFs: (docId: string | null) => void;
+  setInodeFsSelCount: (n: number) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -61,8 +69,12 @@ export const useUIStore = create<UIState>((set) => ({
   availableActions: [],
   promptBarLeftInset: 0,
   gameViewerFsNodeId: null,
+  inodeFsDocId: null,
+  inodeFsSelCount: 0,
 
   setGameViewerFs: (id) => set({ gameViewerFsNodeId: id }),
+  setInodeFs: (docId) => set(docId ? { inodeFsDocId: docId } : { inodeFsDocId: null, inodeFsSelCount: 0 }),
+  setInodeFsSelCount: (n) => set({ inodeFsSelCount: n }),
   setPromptBarLeftInset: (px) => set({ promptBarLeftInset: px }),
   setPromptBarCollapsed: (v) => set(v ? { promptBarCollapsed: true, favoritesOpen: false } : { promptBarCollapsed: false }),
   togglePromptBar: () =>

@@ -5,6 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Icon } from '@/lib/icons';
 import { ZoomOverlay } from '@/components/board/ZoomOverlay';
 import type { OriginRect } from '@/components/board/useZoomModal';
 import type { BoardNode } from '@/store/boardStore';
@@ -103,8 +104,8 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
           title="재생 — 탭하면 시작해요"
           className="group/play absolute inset-0 z-10 grid place-items-center bg-transparent"
         >
-          <span className="grid h-20 w-20 place-items-center rounded-full bg-accent/90 text-3xl text-on-accent shadow-lg ring-4 ring-surface/70 transition-transform duration-150 group-hover/play:scale-105">
-            ▶
+          <span className="grid h-20 w-20 place-items-center rounded-full bg-accent/90 text-on-accent shadow-lg ring-4 ring-surface/70 transition-transform duration-150 group-hover/play:scale-105">
+            <Icon name="play" size={34} fill="currentColor" stroke={0} />
           </span>
         </button>
       )}
@@ -121,10 +122,10 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
               e.stopPropagation();
               openOverlay('edit');
             }}
-            className={hoverBtn}
+            className={`${hoverBtn} gap-1`}
             title="편집 — 자료 넣고 동작 주기"
           >
-            ✎ 편집
+            <Icon name="edit" size={13} /> 편집
           </button>
           <button
             onPointerDown={(e) => e.stopPropagation()}
@@ -132,10 +133,10 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
               e.stopPropagation();
               openOverlay('play');
             }}
-            className={hoverBtn}
+            className={`${hoverBtn} gap-1`}
             title="재생 — 풀스크린으로"
           >
-            ▶ 재생
+            <Icon name="play" size={13} /> 재생
           </button>
         </div>
       )}

@@ -8,6 +8,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { newId } from '@/store/boardStore';
+import { Icon } from '@/lib/icons';
+import { PromptBar } from '@/components/PromptBar';
+import { useUIStore } from '@/store/uiStore';
+import { showToast } from '@/lib/toast';
 import { ImageFullscreen } from '@/components/board/ImageFullscreen';
 import { ImageEditorModal } from '@/components/board/ImageEditorModal';
 import type { OriginRect } from '@/components/board/useZoomModal';
@@ -17,6 +21,7 @@ import { Inspector } from '../inspector/Inspector';
 import { StoryPanel } from './StoryPanel';
 import { HelpOverlay } from './HelpOverlay';
 import { AssetPicker, type AssetPick } from './AssetPicker';
+import { applyInteractivePrompt } from './applyPrompt';
 import {
   fileToAssetRef,
   makeImageElement,
@@ -46,9 +51,12 @@ interface Props {
 }
 
 const chromeBtn =
-  'rounded-pill border border-border bg-surface/95 px-3 py-1.5 text-sm font-semibold text-fg shadow-sm transition-colors hover:border-accent hover:text-accent';
+  'inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface/95 px-3 py-1.5 text-sm font-semibold text-fg shadow-sm transition-colors hover:border-accent hover:text-accent';
 const chromeBtnAccent =
-  'rounded-pill bg-accent px-3 py-1.5 text-sm font-bold text-on-accent shadow-sm transition-colors hover:bg-accent-strong';
+  'inline-flex items-center gap-1.5 rounded-pill bg-accent px-3 py-1.5 text-sm font-bold text-on-accent shadow-sm transition-colors hover:bg-accent-strong';
+// 아이콘 전용(정사각) 크롬 버튼 — 실행취소/다시실행 등.
+const chromeIconBtn =
+  'inline-flex h-8 w-8 items-center justify-center rounded-pill border border-border bg-surface/95 text-fg shadow-sm transition-colors hover:border-accent hover:text-accent';
 const tbBtn = 'flex h-10 w-10 items-center justify-center rounded-pill text-base font-semibold text-fg-2 transition-colors hover:bg-accent hover:text-on-accent';
 
 /** 여러 클론을 한 문서에 누적 추가(한 mutate). */
@@ -80,6 +88,46 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   useEffect(() => {
     ensure(docId);
   }, [docId, ensure]);
+
+  // 프롬프트바 라우팅용 — 편집 풀스크린일 때 이 노드를 '전용 컨텍스트'로 표시(보드로 안 샘).
+  const setInodeFs = useUIStore((s) => s.setInodeFs);
+  const setInodeFsSelCount = useUIStore((s) => s.setInodeFsSelCount);
+  useEffect(() => {
+    if (mode !== 'edit') {
+      setInodeFs(null);
+      return;
+    }
+    setInodeFs(docId);
+    return () => setInodeFs(null);
+  }, [mode, docId, setInodeFs]);
+  useEffect(() => {
+    if (mode === 'edit') setInodeFsSelCount(selectedElIds.length);
+  }, [selectedElIds, mode, setInodeFsSelCount]);
+
+  // 프롬프트바 입력 → 이 노드 AI 편집. 선택 요소가 있으면 그 요소에, 없으면 노드 전체 맥락.
+  // 최신 선택을 안정 핸들러에서 읽으려 ref로 미러링한다.
+  const selRef = useRef<string[]>([]);
+  useEffect(() => {
+    selRef.current = selectedElIds;
+  }, [selectedElIds]);
+  const applyingRef = useRef(false);
+  useEffect(() => {
+    const onPrompt = (e: Event) => {
+      const d = (e as CustomEvent).detail as { docId?: string; prompt?: string } | null;
+      if (!d || d.docId !== docId || !d.prompt || applyingRef.current) return;
+      applyingRef.current = true;
+      void applyInteractivePrompt(docId, d.prompt, selRef.current, setBusy)
+        .then((r) => {
+          showToast(r.message, r.ok ? 'success' : 'error');
+          if (r.ok && r.addedIds.length) setSelectedElIds(r.addedIds);
+        })
+        .finally(() => {
+          applyingRef.current = false;
+        });
+    };
+    window.addEventListener('kv:inode-prompt', onPrompt as EventListener);
+    return () => window.removeEventListener('kv:inode-prompt', onPrompt as EventListener);
+  }, [docId]);
 
   // 노드 단축키 — capture+stopImmediatePropagation으로 보드 단축키(bubble)보다 먼저 가로챈다.
   // 실행취소/다시실행/전체선택/붙여넣기는 선택 없이도, 나머지(삭제·복제·복사·이동)는 선택 요소 전부 대상.
@@ -506,11 +554,11 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
           <span className="rounded-pill bg-surface px-3 py-1.5 text-sm font-bold text-fg shadow-sm">{doc.title}</span>
           {mode === 'edit' && (
             <>
-              <button onClick={() => undo(docId)} className={chromeBtn} title="실행취소 (⌘/Ctrl+Z)">
-                ↩
+              <button onClick={() => undo(docId)} className={chromeIconBtn} title="실행취소 (⌘/Ctrl+Z)" aria-label="실행취소">
+                <Icon name="undo" size={16} />
               </button>
-              <button onClick={() => redo(docId)} className={chromeBtn} title="다시실행 (⌘/Ctrl+⇧Z)">
-                ↪
+              <button onClick={() => redo(docId)} className={chromeIconBtn} title="다시실행 (⌘/Ctrl+⇧Z)" aria-label="다시실행">
+                <Icon name="redo" size={16} />
               </button>
               <button
                 onClick={() => {
@@ -520,13 +568,13 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
                 className={storyOpen ? chromeBtnAccent : chromeBtn}
                 title="이야기 — 단계별 나레이션"
               >
-                📖 이야기
+                <Icon name="book" size={16} /> 이야기
               </button>
               {selectedElIds.length > 1 && (
                 <>
                   <span className="rounded-pill bg-accent-soft px-3 py-1.5 text-sm font-semibold text-fg">{selectedElIds.length}개 선택</span>
                   <button onClick={duplicateBundle} className={chromeBtn} title="선택한 것들을 동작·연결까지 묶어서 복제(프리팹)">
-                    🧩 묶어서 복제
+                    <Icon name="copy" size={16} /> 묶어서 복제
                   </button>
                 </>
               )}
@@ -535,18 +583,18 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setHelpOpen(true)} className={chromeBtn} title="도움말 — 기능·단축키 안내" aria-label="도움말">
-            ❔ 도움말
+            <Icon name="help" size={16} /> 도움말
           </button>
           {mode === 'play' && (
             <button onClick={() => setResetNonce((n) => n + 1)} className={chromeBtn}>
-              ↺ 처음으로
+              <Icon name="reset" size={16} /> 처음으로
             </button>
           )}
           <button onClick={toggleMode} className={chromeBtnAccent}>
-            {mode === 'edit' ? '▶ 재생' : '✎ 편집'}
+            {mode === 'edit' ? <><Icon name="play" size={16} /> 재생</> : <><Icon name="edit" size={16} /> 편집</>}
           </button>
-          <button onClick={onClose} className={chromeBtn}>
-            ✕ 닫기
+          <button onClick={onClose} className={chromeBtn} aria-label="닫기">
+            <Icon name="x" size={16} /> 닫기
           </button>
         </div>
       </div>
@@ -603,21 +651,21 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
       {mode === 'edit' && (
         <div className="pointer-events-none absolute left-4 top-1/2 flex -translate-y-1/2">
           <div className="pointer-events-auto flex flex-col items-center gap-1 rounded-pill border border-border bg-surface/95 p-1.5 shadow-md backdrop-blur">
-            <button onClick={() => setSelectedElIds([])} title="선택 해제" className={tbBtn}>
-              ↖
+            <button onClick={() => setSelectedElIds([])} title="선택 해제" className={tbBtn} aria-label="선택 해제">
+              <Icon name="cursor" size={18} />
             </button>
             <span className="my-0.5 h-px w-6 bg-border" />
-            <button onClick={() => fileRef.current?.click()} title="사진 추가(파일)" className={tbBtn}>
-              📷
+            <button onClick={() => fileRef.current?.click()} title="사진 추가(파일)" className={tbBtn} aria-label="사진 추가">
+              <Icon name="gallery" size={18} />
             </button>
-            <button onClick={() => setPicker({ for: 'add' })} title="보관함에서 추가" className={tbBtn}>
-              🗂
+            <button onClick={() => setPicker({ for: 'add' })} title="보관함에서 추가" className={tbBtn} aria-label="보관함에서 추가">
+              <Icon name="folder" size={18} />
             </button>
-            <button onClick={addText} title="글자 추가" className={tbBtn}>
-              가
+            <button onClick={addText} title="글자 추가" className={tbBtn} aria-label="글자 추가">
+              <Icon name="type" size={18} />
             </button>
-            <button onClick={addShape} title="도형 추가" className={tbBtn}>
-              ⬛
+            <button onClick={addShape} title="도형 추가" className={tbBtn} aria-label="도형 추가">
+              <Icon name="square" size={18} />
             </button>
             <span className="my-0.5 h-px w-6 bg-border" />
             {PASTEL_BGS.map((b) => (
@@ -682,6 +730,14 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
           </div>,
           document.body,
         )}
+
+      {/* 공용 프롬프트바 — 풀스크린(편집) 하단 중앙. 입력은 이 노드로 라우팅(board/prompt가
+          kv:inode-prompt로 전달). 선택 요소 있으면 그 요소에, 없으면 노드 전체 맥락으로 AI 적용. */}
+      {mode === 'edit' && (
+        <div className="kv-fsbar-enter">
+          <PromptBar />
+        </div>
+      )}
     </div>
   );
 }

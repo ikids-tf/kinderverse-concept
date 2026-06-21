@@ -3,6 +3,7 @@
  * '이미지 추가'와 '교체 대상 고르기'가 공유. 보관함 자산은 복사만(원본은 보관함 유지).
  */
 import { useEffect, useState } from 'react';
+import { Icon } from '@/lib/icons';
 import { listAssets, type ImageAsset } from '@/board/assets';
 
 export type AssetPick = { kind: 'file'; file: File } | { kind: 'library'; asset: ImageAsset };
@@ -40,13 +41,13 @@ export function AssetPicker({ title, onPick, onClose }: Props) {
       >
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-fg">{title}</h3>
-          <button onClick={onClose} className="rounded-pill px-2 py-1 text-fg-muted hover:bg-surface-3 hover:text-fg">
-            ✕
+          <button onClick={onClose} className="inline-flex items-center rounded-pill px-2 py-1 text-fg-muted hover:bg-surface-3 hover:text-fg" aria-label="닫기">
+            <Icon name="x" size={16} />
           </button>
         </div>
 
         <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border px-3 py-3 text-sm font-semibold text-fg-2 transition-colors hover:border-accent hover:text-accent">
-          📁 파일에서 가져오기
+          <Icon name="upload" size={16} /> 파일에서 가져오기
           <input
             type="file"
             accept="image/*"

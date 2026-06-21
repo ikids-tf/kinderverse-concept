@@ -1086,8 +1086,9 @@ export function InteractiveStage({
                       e.stopPropagation();
                       runBehavior(el);
                     }}
+                    aria-label="동작 미리보기"
                   >
-                    ▶
+                    <Icon name="play" size={18} fill="currentColor" stroke={0} />
                   </button>
                 )}
                 {/* 이미지 요소 호버 액션 — 마이보드 카드와 동일(편집·다운로드·풀스크린). */}
@@ -1231,20 +1232,20 @@ export function InteractiveStage({
             disabled={storyIdx === 0}
             aria-label="이전"
           >
-            ◀
+            <Icon name="chevronLeft" size={18} />
           </button>
           <div className="ic-narration-text">{storySteps[storyIdx].speak?.text ?? ''}</div>
           {storyIdx < storySteps.length - 1 ? (
-            <button type="button" className="ic-narration-nav ic-narration-next" onClick={storyNext}>
-              다음 ▶
+            <button type="button" className="ic-narration-nav ic-narration-next inline-flex items-center gap-1" onClick={storyNext}>
+              다음 <Icon name="chevronRight" size={16} />
             </button>
           ) : onComplete ? (
-            <button type="button" className="ic-narration-nav ic-narration-next" onClick={() => onComplete()}>
-              완료 ▶
+            <button type="button" className="ic-narration-nav ic-narration-next inline-flex items-center gap-1" onClick={() => onComplete()}>
+              완료 <Icon name="check" size={16} />
             </button>
           ) : (
-            <button type="button" className="ic-narration-nav ic-narration-next" onClick={() => gotoStep(0)}>
-              ↺ 다시
+            <button type="button" className="ic-narration-nav ic-narration-next inline-flex items-center gap-1" onClick={() => gotoStep(0)}>
+              <Icon name="reset" size={15} /> 다시
             </button>
           )}
         </div>

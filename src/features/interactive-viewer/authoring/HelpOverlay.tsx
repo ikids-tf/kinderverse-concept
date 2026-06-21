@@ -3,6 +3,8 @@
  * 레시피를 단계별로 제공하고, 아래에 동작·트리거·연결·단축키 참고를 둔다.
  * 저작 크롬 → Milray 토큰. 풀스크린 오버레이 위 모달.
  */
+import { Icon } from '@/lib/icons';
+
 interface Props {
   onClose: () => void;
 }
@@ -342,9 +344,9 @@ export function HelpOverlay({ onClose }: Props) {
     <div className="absolute inset-0 z-[60] grid place-items-center p-4" style={{ background: 'rgba(20,19,17,.5)' }}>
       <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xl" onPointerDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
-          <span className="text-base font-extrabold text-fg">❔ 인터렉티브 노드 — 따라 만들기</span>
-          <button onClick={onClose} className="rounded-pill border border-border bg-surface px-3 py-1.5 text-sm font-semibold text-fg-2 hover:border-accent hover:text-accent">
-            ✕ 닫기
+          <span className="inline-flex items-center gap-2 text-base font-extrabold text-fg"><Icon name="help" size={18} /> 인터렉티브 노드 — 따라 만들기</span>
+          <button onClick={onClose} className="inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-sm font-semibold text-fg-2 hover:border-accent hover:text-accent">
+            <Icon name="x" size={15} /> 닫기
           </button>
         </div>
 

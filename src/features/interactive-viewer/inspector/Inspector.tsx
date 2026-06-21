@@ -5,6 +5,7 @@
  */
 import { useState } from 'react';
 import { newId } from '@/store/boardStore';
+import { Icon } from '@/lib/icons';
 import type { Behavior, Condition, ElementNode, InteractiveNode, Trigger } from '../schema/interactiveNode';
 import { ANIMATE_LABELS, ANIMATE_PRESETS } from '../runtime/behaviors';
 
@@ -83,7 +84,7 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
   };
   const toggleTarget = (id: string) => setTargets((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
 
-  const actionBtn = 'rounded-xl border border-border bg-surface-2 px-2 py-2 text-sm font-semibold text-fg transition-colors hover:border-accent hover:text-accent';
+  const actionBtn = 'inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-surface-2 px-2 py-2 text-sm font-semibold text-fg transition-colors hover:border-accent hover:text-accent';
 
   return (
     <aside className="flex w-64 flex-col gap-3 overflow-y-auto rounded-2xl border border-border bg-surface p-3 shadow-md">
@@ -261,9 +262,9 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
                   <button
                     key={mc.connId}
                     onClick={() => setBeh({ id: newId('beh'), target: elId, trigger: 'tap', action: 'moveAlongPath', params: { connectionId: mc.connId, speed: 1 } })}
-                    className="rounded-lg border border-border bg-surface-2 px-2 py-1.5 text-left text-[12px] font-semibold text-fg-2 transition-colors hover:border-accent hover:text-accent"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2 py-1.5 text-left text-[12px] font-semibold text-fg-2 transition-colors hover:border-accent hover:text-accent"
                   >
-                    ➡ {o ? elementLabel(o, idx) : '연결 요소'}
+                    <Icon name="arrowRight" size={14} /> {o ? elementLabel(o, idx) : '연결 요소'}
                   </button>
                 );
               })}
@@ -275,11 +276,11 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
         ) : (
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => setSub('animate')} className={actionBtn}>
-              ✨ 반응
+              <Icon name="sparkle" size={16} /> 반응
             </button>
             {isImage && (
               <button onClick={onAddSwap} className={actionBtn}>
-                🔄 교체
+                <Icon name="repeat" size={16} /> 교체
               </button>
             )}
             {isVideo && el.src && (
@@ -287,30 +288,30 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
                 onClick={() => onSetBehavior({ id: newId('beh'), target: elId, trigger: 'tap', action: 'playVideo', params: { src: el.src!, autoplay: false } })}
                 className={actionBtn}
               >
-                🎞 영상 재생
+                <Icon name="video" size={16} /> 영상 재생
               </button>
             )}
             <button onClick={() => setSub('speak')} className={actionBtn}>
-              💬 말하기
+              <Icon name="message" size={16} /> 말하기
             </button>
             <button onClick={() => setSub('reveal')} className={actionBtn}>
-              👁 보이기
+              <Icon name="observation" size={16} /> 보이기
             </button>
             <button onClick={() => setSub('hide')} className={actionBtn}>
-              🙈 숨기기
+              <Icon name="eyeOff" size={16} /> 숨기기
             </button>
             <button onClick={() => setSub('highlight')} className={actionBtn}>
-              🌟 강조
+              <Icon name="star" size={16} /> 강조
             </button>
             <button onClick={() => onAddCount('개수')} className={actionBtn}>
-              🔢 세기
+              <Icon name="hash" size={16} /> 세기
             </button>
             <button onClick={() => onAddSetFlag(true)} className={actionBtn}>
-              🔌 스위치
+              <Icon name="toggle" size={16} /> 스위치
             </button>
             {myConns.length > 0 && (
               <button onClick={() => (myConns.length === 1 ? setBeh({ id: newId('beh'), target: elId, trigger: 'tap', action: 'moveAlongPath', params: { connectionId: myConns[0].connId, speed: 1 } }) : setSub('move'))} className={`${actionBtn} col-span-2`}>
-                ➡ 연결 따라 이동
+                <Icon name="arrowRight" size={16} /> 연결 따라 이동
               </button>
             )}
           </div>
@@ -322,9 +323,9 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
         <button
           onClick={onRemoveBg}
           disabled={!!busy}
-          className="rounded-xl border border-border bg-surface-2 px-2 py-2 text-sm font-semibold text-fg transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-surface-2 px-2 py-2 text-sm font-semibold text-fg transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
         >
-          🪄 배경 제거
+          <Icon name="scissors" size={16} /> 배경 제거
         </button>
       )}
 

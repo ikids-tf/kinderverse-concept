@@ -155,6 +155,9 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const videoCompose = useUIStore((s) => s.videoCompose);
   // 게임 뷰어 풀스크린 — 입력이 무조건 그 게임으로 가므로 placeholder도 게임 문구로.
   const gameViewerFs = useUIStore((s) => s.gameViewerFsNodeId);
+  // 인터랙티브 노드 풀스크린(편집) — 입력이 그 노드 편집으로 간다. 선택 수로 칩/문구를 바꾼다.
+  const inodeFs = useUIStore((s) => s.inodeFsDocId);
+  const inodeSelCount = useUIStore((s) => s.inodeFsSelCount);
   const setVideoCompose = useUIStore((s) => s.setVideoCompose);
 
   const sendToRouter = useRouterStore((s) => s.send);
@@ -225,7 +228,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const [assetSel, setAssetSel] = useState<string[]>([]); // 클릭 순서 유지(배치 순서)
   const assetKey = (a: ImageAsset) => `${a.tag}-${a.createdAt}`;
   useEffect(() => {
-    if (!location.pathname.startsWith('/board') || draft.trim().length < 2) {
+    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2) {
       setAssetSugs([]);
       setAssetSel([]);
       return;
@@ -242,7 +245,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
         .catch(() => setAssetSugs([]));
     }, 160);
     return () => clearTimeout(t);
-  }, [draft, location.pathname]);
+  }, [draft, location.pathname, inodeFs]);
 
   /** 선택한 보관함 자료를 보드의 빈 자리에 그리드로 정렬 배치(겹침 없음). */
   function applySelectedAssets() {
@@ -258,7 +261,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const [webSugs, setWebSugs] = useState<WebLink[]>([]);
   const [webSel, setWebSel] = useState<string[]>([]); // url 기준 복수 선택
   useEffect(() => {
-    if (!location.pathname.startsWith('/board') || draft.trim().length < 2) {
+    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2) {
       setWebSugs([]);
       setWebSel([]);
       return;
@@ -274,7 +277,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
         .catch(() => setWebSugs([]));
     }, 160);
     return () => clearTimeout(t);
-  }, [draft, location.pathname]);
+  }, [draft, location.pathname, inodeFs]);
 
   /** 선택한 웹링크를 한 장의 웹 자료 카드로 보드(뷰포트 중앙)에 배치. */
   function applySelectedWebLinks() {
@@ -369,8 +372,16 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
 
   // Page-aware command context: the bar acts on the current screen and its
   // current selection. On My Board it scopes to the selected card(s)/frame.
+  // 인터랙티브 노드 편집 중에는 보드 선택이 아니라 '노드 안 요소' 선택 수로 칩/강조를 잡는다.
   const boardSelectionCount = location.pathname.startsWith('/board') ? boardSelection.length : 0;
+  const selChipCount = inodeFs ? inodeSelCount : boardSelectionCount;
   const placeholder = (() => {
+    // 인터랙티브 노드 풀스크린(편집) — 입력은 그 노드로. 선택 있으면 그 요소에, 없으면 전체.
+    if (inodeFs) {
+      return inodeSelCount > 0
+        ? '고른 요소에 적용 — 예) 탭하면 "안녕" 말하기 · 통통 튀게 · 노란색으로'
+        : '이 노드에 무엇을 더할까요? — 예) 토끼 그림 넣어줘 · 배경 하늘색 · "동물 농장" 글자';
+    }
     // 게임 뷰어 풀스크린 — 입력은 그 게임 전용. (보드 선택과 무관.)
     if (gameViewerFs) return '무슨 게임을 만들까요?  예) 동물 이름 맞추기 · 과일 짝 맞추기';
     // 동영상 작성 모드 — 추천 프롬프트를 placeholder로(비워서 보내면 이 값을 사용).
@@ -820,14 +831,14 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
           </div>
         )}
 
-        <div className={`kv-pbar-glow ${!collapsed && boardSelectionCount > 0 ? 'kv-pbar-glow-on' : ''}`}>
+        <div className={`kv-pbar-glow ${!collapsed && selChipCount > 0 ? 'kv-pbar-glow-on' : ''}`}>
         <form
           onSubmit={onSubmit}
           className={`kv-pbar-vt relative z-10 mx-auto flex w-full items-end overflow-hidden rounded-2xl border py-t4 transition-all duration-300 ease-soft ${
             collapsed
               ? 'max-w-[3.25rem] gap-0 border-transparent bg-transparent shadow-none'
               : `max-w-3xl gap-t2 px-t2 pl-t3 kv-pbar-glass backdrop-blur shadow-lg ${
-                  streaming ? 'kv-pbar-streaming' : boardSelectionCount > 0 ? 'kv-pbar-selected' : 'border-border'
+                  streaming ? 'kv-pbar-streaming' : selChipCount > 0 ? 'kv-pbar-selected' : 'border-border'
                 }`
           }`}
         >
@@ -873,10 +884,11 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
               <Icon name="plus" size={20} />
             </button>
 
-            {/* Selection scope chip — the bar's command targets these elements */}
-            {boardSelectionCount > 0 && !statusInline && (
+            {/* Selection scope chip — the bar's command targets these elements
+                (board cards · or interactive-node elements when its overlay is open) */}
+            {selChipCount > 0 && !statusInline && (
               <span className="flex shrink-0 items-center gap-t1 self-center rounded-pill bg-accent-soft px-t2 py-1 text-xs font-semibold text-accent">
-                <Icon name="board" size={12} /> {boardSelectionCount}개 선택
+                <Icon name={inodeFs ? 'cursor' : 'board'} size={12} /> {inodeFs ? '요소 ' : ''}{selChipCount}개 선택
               </span>
             )}
 

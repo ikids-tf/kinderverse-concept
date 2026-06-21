@@ -4,6 +4,7 @@
  * (분기/장면 이동은 후속 — v1은 선형 나레이션.)
  * 저작 크롬 → Milray 토큰. 인스펙터와 같은 자리(오른쪽).
  */
+import { Icon } from '@/lib/icons';
 import type { StoryGraph } from '../schema/interactiveNode';
 
 interface Props {
@@ -22,7 +23,7 @@ export function StoryPanel({ story, onAddStep, onUpdateStepText, onRemoveStep, o
   return (
     <aside className="flex w-72 flex-col gap-3 overflow-y-auto rounded-2xl border border-border bg-surface p-3 shadow-md">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-bold text-fg">📖 이야기</span>
+        <span className="inline-flex items-center gap-1.5 text-sm font-bold text-fg"><Icon name="book" size={16} /> 이야기</span>
         <button onClick={onClose} className="rounded-pill px-2 py-1 text-[11px] font-semibold text-fg-muted hover:bg-surface-3 hover:text-fg">
           닫기
         </button>
@@ -36,14 +37,14 @@ export function StoryPanel({ story, onAddStep, onUpdateStepText, onRemoveStep, o
           <div className="flex items-center justify-between">
             <span className="grid h-5 w-5 place-items-center rounded-full bg-accent text-[11px] font-bold text-on-accent">{i + 1}</span>
             <div className="flex items-center gap-0.5">
-              <button onClick={() => onMoveStep(s.id, -1)} disabled={i === 0} className={navBtn} title="위로">
-                ▲
+              <button onClick={() => onMoveStep(s.id, -1)} disabled={i === 0} className={`${navBtn} inline-flex items-center`} title="위로" aria-label="위로">
+                <Icon name="chevronUp" size={14} />
               </button>
-              <button onClick={() => onMoveStep(s.id, 1)} disabled={i === steps.length - 1} className={navBtn} title="아래로">
-                ▼
+              <button onClick={() => onMoveStep(s.id, 1)} disabled={i === steps.length - 1} className={`${navBtn} inline-flex items-center`} title="아래로" aria-label="아래로">
+                <Icon name="chevronDown" size={14} />
               </button>
-              <button onClick={() => onRemoveStep(s.id)} className="rounded-md px-1.5 py-0.5 text-[11px] text-fg-muted hover:bg-danger-soft hover:text-danger" title="삭제">
-                🗑
+              <button onClick={() => onRemoveStep(s.id)} className="inline-flex items-center rounded-md px-1.5 py-0.5 text-fg-muted hover:bg-danger-soft hover:text-danger" title="삭제" aria-label="삭제">
+                <Icon name="trash" size={14} />
               </button>
             </div>
           </div>
@@ -59,9 +60,9 @@ export function StoryPanel({ story, onAddStep, onUpdateStepText, onRemoveStep, o
 
       <button
         onClick={onAddStep}
-        className="rounded-xl border border-dashed border-border bg-surface-2 px-2 py-2 text-sm font-semibold text-fg-2 transition-colors hover:border-accent hover:text-accent"
+        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border bg-surface-2 px-2 py-2 text-sm font-semibold text-fg-2 transition-colors hover:border-accent hover:text-accent"
       >
-        + 단계 추가
+        <Icon name="plus" size={16} /> 단계 추가
       </button>
     </aside>
   );

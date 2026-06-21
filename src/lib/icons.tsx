@@ -56,7 +56,18 @@ export type IconName =
   | 'undo'
   | 'redo'
   | 'upload'
-  | 'link';
+  | 'link'
+  | 'chevronUp'
+  | 'trash'
+  | 'square'
+  | 'type'
+  | 'hash'
+  | 'toggle'
+  | 'help'
+  | 'eyeOff'
+  | 'book'
+  | 'repeat'
+  | 'reset';
 
 const ICON_PATHS: Record<IconName, string> = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
@@ -114,6 +125,17 @@ const ICON_PATHS: Record<IconName, string> = {
   motion: '<circle cx="5" cy="18" r="2.6"/><circle cx="19" cy="6" r="2.6"/><path d="M7.3 16.2C10.5 13.6 13.5 10.4 16.7 7.8"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
   upload: '<path d="M12 19V7"/><path d="m7 11 5-5 5 5"/><path d="M5 21h14"/>',
   link: '<path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/>',
+  chevronUp: '<path d="m6 15 6-6 6 6"/>',
+  trash: '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/>',
+  square: '<rect x="4" y="4" width="16" height="16" rx="3"/>',
+  type: '<path d="M4 7V4h16v3M9 20h6M12 4v16"/>',
+  hash: '<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
+  toggle: '<rect x="2" y="6" width="20" height="12" rx="6"/><circle cx="8" cy="12" r="3"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><path d="M12 17h.01"/>',
+  eyeOff: '<path d="M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a13 13 0 0 1-1.7 2.7"/><path d="M6.6 6.6A13 13 0 0 0 2 12s3 8 10 8a8.8 8.8 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m2 2 20 20"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
 };
 
 export interface IconProps {
