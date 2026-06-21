@@ -284,6 +284,42 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
     setSelectedElIds([clone.id]);
   };
 
+  // 묶어서 복제(프리팹) — 선택한 여러 요소를 동작·내부 연결까지 함께 복제(id 재매핑).
+  const duplicateBundle = () => {
+    if (selectedElIds.length < 2) return;
+    const ids = new Set(selectedElIds);
+    const srcEls = doc.elements.filter((e) => ids.has(e.id));
+    const srcBehs = doc.behaviors.filter((b) => ids.has(b.target));
+    const srcConns = doc.connections.filter((c) => ids.has(c.from) && ids.has(c.to));
+    const elMap: Record<string, string> = {};
+    srcEls.forEach((e) => (elMap[e.id] = newId('el')));
+    const behMap: Record<string, string> = {};
+    srcBehs.forEach((b) => (behMap[b.id] = newId('beh')));
+    const connMap: Record<string, string> = {};
+    srcConns.forEach((c) => (connMap[c.id] = newId('conn')));
+    const remapEls = (arr?: string[]) => (arr ?? []).map((t) => elMap[t] ?? t);
+    const newEls = srcEls.map((e) => ({ ...e, id: elMap[e.id], transform: { ...e.transform, x: e.transform.x + 28, y: e.transform.y + 28 } }));
+    const newBehs = srcBehs.map((b) => {
+      // JSON 클론으로 union 타입 우회 — id/참조만 재매핑.
+      const nb = JSON.parse(JSON.stringify(b)) as Record<string, unknown> & { params?: Record<string, unknown> };
+      nb.id = behMap[b.id];
+      nb.target = elMap[b.target] ?? b.target;
+      if (typeof nb.after === 'string') nb.after = behMap[nb.after] ?? nb.after;
+      if (Array.isArray(nb.then)) nb.then = (nb.then as string[]).map((t) => behMap[t] ?? t);
+      if (nb.params && Array.isArray(nb.params.targets)) nb.params.targets = remapEls(nb.params.targets as string[]);
+      if (nb.params && typeof nb.params.connectionId === 'string') nb.params.connectionId = connMap[nb.params.connectionId as string] ?? nb.params.connectionId;
+      return nb as unknown as Behavior;
+    });
+    const newConns = srcConns.map((c) => ({ ...c, id: connMap[c.id], from: elMap[c.from], to: elMap[c.to] }));
+    mutate(docId, (d) => ({
+      ...d,
+      elements: [...d.elements, ...newEls],
+      behaviors: [...d.behaviors, ...newBehs],
+      connections: [...d.connections, ...newConns],
+    }));
+    setSelectedElIds(Object.values(elMap));
+  };
+
   const editText = (elId: string, text: string) =>
     mutate(docId, (d) => ({ ...d, elements: d.elements.map((e) => (e.id === elId ? { ...e, text } : e)) }));
 
@@ -487,7 +523,12 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
                 📖 이야기
               </button>
               {selectedElIds.length > 1 && (
-                <span className="rounded-pill bg-accent-soft px-3 py-1.5 text-sm font-semibold text-fg">{selectedElIds.length}개 선택</span>
+                <>
+                  <span className="rounded-pill bg-accent-soft px-3 py-1.5 text-sm font-semibold text-fg">{selectedElIds.length}개 선택</span>
+                  <button onClick={duplicateBundle} className={chromeBtn} title="선택한 것들을 동작·연결까지 묶어서 복제(프리팹)">
+                    🧩 묶어서 복제
+                  </button>
+                </>
               )}
             </>
           )}

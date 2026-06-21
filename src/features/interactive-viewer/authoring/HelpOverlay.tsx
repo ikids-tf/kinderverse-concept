@@ -31,6 +31,8 @@ const TRIGGERS: Array<[string, string]> = [
   ['탭하면', '아이가 그 요소를 탭했을 때 동작해요(기본).'],
   ['시작하면 (자동)', '재생이 시작되면 저절로 동작해요 — 인사·인트로에 좋아요.'],
   ['순서대로 탭', '연결한 순서(①②③)대로 탭해야만 동작해요 — 순서 맞추기 놀이.'],
+  ['끌어서 잇기', '요소를 연결한 상대 위로 끌어다 놓으면 동작해요 — 물고기를 어항에 넣기.'],
+  ['이야기 넘길 때', '이야기가 다음 장면으로 넘어갈 때마다 동작해요.'],
 ];
 
 const SHORTCUTS: Array<[React.ReactNode, string]> = [
@@ -49,6 +51,7 @@ const RECIPES: Array<[string, string[]]> = [
   ['까꿍 숨바꼭질', ['그림 두 개를 넣어요', '하나 선택 → 🙈 숨기기 → 숨길 그림 고르기', '다른 하나 선택 → 👁 보이기 → 같은 그림 고르기']],
   ['순서 맞추기 놀이', ['요소들을 호버해 동그라미를 ①→②→③ 순서로 연결', '각 요소 선택 → 동작 카드의 ‘언제’를 순서대로 탭으로', '▶ 재생에서 순서대로 탭하면 성공']],
   ['이야기 들려주기', ['상단 📖 이야기 열기', '단계마다 한 줄씩 적기', '▶ 재생 → 자막과 소리로 ‘다음’ 넘기기']],
+  ['물고기를 어항에', ['물고기와 어항을 넣고 둘을 연결', '물고기 선택 → 동작(예: ✨ 반응) → ‘언제’를 끌어서 잇기로', '▶ 재생에서 물고기를 어항 위로 끌어다 놓기']],
 ];
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -88,6 +91,7 @@ export function HelpOverlay({ onClose }: Props) {
               <li><b className="text-fg">드래그</b> = 옮기기 · <b className="text-fg">모서리</b> = 크기 · <b className="text-fg">위 동그라미</b> = 회전</li>
               <li><b className="text-fg">글자 더블클릭</b> = 바로 글자 수정 (글자는 칸에 맞춰 자동 크기)</li>
               <li><b className="text-fg">그림에 마우스</b>를 올리면 편집 · 다운로드 · 크게 보기 버튼이 떠요.</li>
+              <li><b className="text-fg">여러 개 선택</b>(Shift 클릭) 후 <b className="text-fg">🧩 묶어서 복제</b> = 동작·연결까지 통째로 복제해 재사용해요.</li>
             </ul>
           </Section>
 

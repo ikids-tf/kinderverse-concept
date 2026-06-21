@@ -167,6 +167,8 @@ export function InteractiveStage({
   // 떼어내 분리/옮기기. from=고정(반대) 끝, keepFrom=고정 끝이 연결의 from인지.
   const lk = useRef<{ mode: 'new' | 'detach'; from: string; x1: number; y1: number; connId?: string; keepFrom?: boolean } | null>(null);
   const linkRectRef = useRef<DOMRect | null>(null);
+  // 재생: pathTraverse(끌어서 잇기) — 요소를 연결된 상대 위로 끌면 발화. 놓으면 제자리로.
+  const pathInfo = useRef<{ id: string; behId: string; rect: DOMRect; sx: number; sy: number; orig: { x: number; y: number } } | null>(null);
   const textEditRef = useRef<HTMLTextAreaElement>(null);
 
   const selSet = useMemo(() => new Set(selectedElIds), [selectedElIds]);
@@ -410,9 +412,25 @@ export function InteractiveStage({
       const step = steps[i];
       if (step.move) void fireBehavior(step.move);
       if (step.speak?.text) speakText(step.speak.text);
+      // storyAdvance 트리거 — 이야기가 한 단계 넘어갈 때마다 발화(페이지넘김 효과 등).
+      doc.behaviors.filter((b) => b.trigger === 'storyAdvance').forEach((b) => void fireBehavior(b.id));
     },
-    [doc.story, fireBehavior],
+    [doc.story, doc.behaviors, fireBehavior],
   );
+  // 다음 단계 — 분기(branches)가 있으면 조건 맞는 곳으로 점프, 없으면 그냥 다음.
+  const storyNext = () => {
+    if (storyIdx === null) return;
+    const branches = doc.story?.branches ?? [];
+    const hit = branches.find((b) => evalCond(b.when));
+    if (hit) {
+      const j = (doc.story?.steps ?? []).findIndex((s) => s.id === hit.toStep);
+      if (j >= 0) {
+        gotoStep(j);
+        return;
+      }
+    }
+    gotoStep(storyIdx + 1);
+  };
   // 재생 시작 시 첫 단계부터.
   useEffect(() => {
     if (preview || mode !== 'play' || !(doc.story?.steps?.length)) {
@@ -567,6 +585,34 @@ export function InteractiveStage({
     setHoverElId(null);
   }, [onLinkMove, hitElementAt]);
 
+  // ── 재생: pathTraverse 드래그(요소를 연결된 상대 위로 끌기) ──
+  const onPathMove = useCallback((e: PointerEvent) => {
+    const p = pathInfo.current;
+    if (!p) return;
+    const sc = scaleRef.current;
+    const dx = Math.round((e.clientX - p.sx) / sc);
+    const dy = Math.round((e.clientY - p.sy) / sc);
+    setDrag({ ids: [p.id], origs: { [p.id]: p.orig }, dx, dy });
+  }, []);
+  const onPathUp = useCallback((e: PointerEvent) => {
+    window.removeEventListener('pointermove', onPathMove);
+    window.removeEventListener('pointerup', onPathUp);
+    const p = pathInfo.current;
+    pathInfo.current = null;
+    setDrag(null); // 제자리로(이동 커밋 안 함 — 제스처)
+    if (!p) return;
+    const sc = scaleRef.current;
+    const x = (e.clientX - p.rect.left) / sc;
+    const y = (e.clientY - p.rect.top) / sc;
+    const hit = hitElementAt(x, y);
+    if (hit && hit.id !== p.id) {
+      const connected = connsRef.current.some(
+        (c) => (c.from === p.id && c.to === hit.id) || (c.from === hit.id && c.to === p.id),
+      );
+      if (connected) void fireBehavior(p.behId); // 연결된 상대 위에 놓음 → 발화
+    }
+  }, [onPathMove, hitElementAt, fireBehavior]);
+
   // cleanup은 언마운트에서만(deps []). 핸들러가 영구 고정이라 리렌더 중 리스너가
   // 떨어지지 않는다 — 위 ref 주석 참조.
   useEffect(
@@ -579,8 +625,10 @@ export function InteractiveStage({
       window.removeEventListener('pointerup', onLinkUp);
       window.removeEventListener('pointermove', onRotateMove);
       window.removeEventListener('pointerup', onRotateUp);
+      window.removeEventListener('pointermove', onPathMove);
+      window.removeEventListener('pointerup', onPathUp);
     },
-    [onWinMove, onWinUp, onResizeMove, onResizeUp, onLinkMove, onLinkUp, onRotateMove, onRotateUp],
+    [onWinMove, onWinUp, onResizeMove, onResizeUp, onLinkMove, onLinkUp, onRotateMove, onRotateUp, onPathMove, onPathUp],
   );
 
   // 포트 pointerdown — 빈 슬롯이면 새 연결, 연결된 슬롯이면 떼어내기(반대 끝 고정).
@@ -613,6 +661,19 @@ export function InteractiveStage({
   };
 
   const onElPointerDown = (e: React.PointerEvent, el: ElementNode) => {
+    // 재생: pathTraverse(끌어서 잇기) 동작이 걸린 요소면 드래그 제스처 시작.
+    if (!preview && mode === 'play') {
+      const pb = doc.behaviors.find((b) => b.target === el.id && b.trigger === 'pathTraverse');
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (pb && rect) {
+        e.stopPropagation();
+        pathInfo.current = { id: el.id, behId: pb.id, rect, sx: e.clientX, sy: e.clientY, orig: { x: el.transform.x, y: el.transform.y } };
+        setDrag({ ids: [el.id], origs: { [el.id]: { x: el.transform.x, y: el.transform.y } }, dx: 0, dy: 0 });
+        window.addEventListener('pointermove', onPathMove);
+        window.addEventListener('pointerup', onPathUp);
+      }
+      return;
+    }
     if (preview || mode !== 'edit') return;
     if (editingTextId === el.id) return; // 인라인 편집 중인 글자는 드래그 시작 안 함(텍스트 선택 허용)
     e.stopPropagation();
@@ -960,7 +1021,8 @@ export function InteractiveStage({
           )}
           {sorted.map((el) => {
             const b = boxOf(el);
-            const playable = mode === 'play' && !preview && !!tapLike(el.id);
+            const playable =
+              mode === 'play' && !preview && (!!tapLike(el.id) || doc.behaviors.some((b) => b.target === el.id && b.trigger === 'pathTraverse'));
             // 숨김(hide/reveal)은 재생에서만 반영 — 편집에선 항상 보여 교사가 다룰 수 있게.
             const isHidden = mode === 'play' && !preview && !!hidden[el.id];
             const hl = highlighted[el.id];
@@ -1173,7 +1235,7 @@ export function InteractiveStage({
           </button>
           <div className="ic-narration-text">{storySteps[storyIdx].speak?.text ?? ''}</div>
           {storyIdx < storySteps.length - 1 ? (
-            <button type="button" className="ic-narration-nav ic-narration-next" onClick={() => gotoStep(storyIdx + 1)}>
+            <button type="button" className="ic-narration-nav ic-narration-next" onClick={storyNext}>
               다음 ▶
             </button>
           ) : onComplete ? (
