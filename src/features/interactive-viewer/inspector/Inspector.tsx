@@ -1,11 +1,11 @@
 /**
- * 인스펙터 — 선택 요소의 동작 카드(반응/교체) 추가·수정·삭제 + 이미지 배경제거 + 글자 편집.
+ * 인스펙터 — 선택 요소의 탭 동작(반응/교체/말하기/보이기/숨기기/강조) 저작 + 이미지 배경제거 + 글자 편집.
  * 저작 크롬 → Milray 토큰(Tailwind 유틸). 캔버스(.kv-inode 파스텔)와 섞지 않는다.
- * 요소당 단일 tap 동작(P0). 고급 옵션(then/when/순서…)은 노출하지 않음(Phase 2+).
+ * 요소당 단일 tap 동작. 런타임 동작 엔진이 실제 실행(then/when 등 고급 옵션은 AI/후속 UI).
  */
 import { useState } from 'react';
 import { newId } from '@/store/boardStore';
-import type { Behavior, InteractiveNode } from '../schema/interactiveNode';
+import type { Behavior, ElementNode, InteractiveNode } from '../schema/interactiveNode';
 import { ANIMATE_LABELS, ANIMATE_PRESETS } from '../runtime/behaviors';
 
 interface Props {
@@ -19,19 +19,54 @@ interface Props {
   busy?: string | null;
 }
 
+/** 요소를 교사가 알아볼 친근한 라벨로. */
+function elementLabel(e: ElementNode, idx: number): string {
+  const base =
+    e.kind === 'text' ? `글자 "${(e.text ?? '').trim().slice(0, 8) || '글자'}"` : e.kind === 'image' || e.kind === 'sprite' ? '그림' : e.kind === 'video' ? '영상' : '도형';
+  return `${base} ${idx + 1}`;
+}
+
+type Sub = 'menu' | 'animate' | 'speak' | 'reveal' | 'hide' | 'highlight';
+
 export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onRemoveBg, onEditText, onRemoveElement, busy }: Props) {
   const el = doc.elements.find((e) => e.id === elId);
   const beh = doc.behaviors.find((b) => b.target === elId && b.trigger === 'tap');
-  const [picking, setPicking] = useState(false);
+  const [sub, setSub] = useState<Sub>('menu');
+  const [speak, setSpeak] = useState('');
+  const [targets, setTargets] = useState<string[]>([]);
   if (!el) return null;
 
   const isImage = el.kind === 'image' || el.kind === 'sprite';
-  const behLabel =
-    beh?.action === 'animate'
+  const others = doc.elements.filter((e) => e.id !== elId);
+
+  const behLabel = !beh
+    ? null
+    : beh.action === 'animate'
       ? `반응 · ${ANIMATE_LABELS[beh.params.preset]}`
-      : beh?.action === 'swap'
+      : beh.action === 'swap'
         ? '교체 · 탭하면 바뀌어요'
-        : null;
+        : beh.action === 'speak'
+          ? `말하기 · "${beh.params.text.slice(0, 12)}"`
+          : beh.action === 'reveal'
+            ? `보이기 · ${beh.params.targets.length}개`
+            : beh.action === 'hide'
+              ? `숨기기 · ${beh.params.targets.length}개`
+              : beh.action === 'highlight'
+                ? `강조 · ${beh.params.targets.length}개`
+                : '동작';
+
+  const reset = () => {
+    setSub('menu');
+    setSpeak('');
+    setTargets([]);
+  };
+  const setBeh = (b: Behavior) => {
+    onSetBehavior(b);
+    reset();
+  };
+  const toggleTarget = (id: string) => setTargets((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
+
+  const actionBtn = 'rounded-xl border border-border bg-surface-2 px-2 py-2 text-sm font-semibold text-fg transition-colors hover:border-accent hover:text-accent';
 
   return (
     <aside className="flex w-64 flex-col gap-3 overflow-y-auto rounded-2xl border border-border bg-surface p-3 shadow-md">
@@ -59,6 +94,7 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onRemoveBg, onE
       {/* 동작 — 탭하면 일어나는 일 */}
       <div className="flex flex-col gap-2">
         <span className="text-[11px] font-bold text-fg-2">탭하면…</span>
+
         {beh ? (
           <div className="flex items-center justify-between rounded-xl border border-accent-soft bg-accent-soft/40 px-3 py-2">
             <span className="text-sm font-semibold text-fg">{behLabel}</span>
@@ -69,43 +105,107 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onRemoveBg, onE
               해제
             </button>
           </div>
-        ) : picking ? (
+        ) : sub === 'animate' ? (
           <div className="grid grid-cols-3 gap-1.5">
             {ANIMATE_PRESETS.map((p) => (
               <button
                 key={p}
-                onClick={() => {
-                  onSetBehavior({ id: newId('beh'), target: elId, trigger: 'tap', action: 'animate', params: { preset: p } });
-                  setPicking(false);
-                }}
+                onClick={() => setBeh({ id: newId('beh'), target: elId, trigger: 'tap', action: 'animate', params: { preset: p } })}
                 className="rounded-lg border border-border bg-surface-2 px-1.5 py-2 text-[11px] font-semibold text-fg-2 transition-colors hover:border-accent hover:bg-accent hover:text-on-accent"
               >
                 {ANIMATE_LABELS[p]}
               </button>
             ))}
-            <button
-              onClick={() => setPicking(false)}
-              className="col-span-3 rounded-lg px-2 py-1 text-[11px] text-fg-muted hover:text-fg"
-            >
+            <button onClick={reset} className="col-span-3 rounded-lg px-2 py-1 text-[11px] text-fg-muted hover:text-fg">
               취소
             </button>
           </div>
+        ) : sub === 'speak' ? (
+          <div className="flex flex-col gap-2">
+            <textarea
+              value={speak}
+              onChange={(e) => setSpeak(e.target.value)}
+              placeholder="할 말을 적어요 (예: 안녕!)"
+              rows={2}
+              autoFocus
+              className="w-full resize-none rounded-md border border-border bg-surface-2 px-2 py-1.5 text-sm text-fg focus:border-accent focus:outline-none"
+            />
+            <div className="flex gap-2">
+              <button
+                disabled={!speak.trim()}
+                onClick={() => setBeh({ id: newId('beh'), target: elId, trigger: 'tap', action: 'speak', params: { text: speak.trim(), mode: 'bubble' } })}
+                className="flex-1 rounded-lg bg-accent px-2 py-1.5 text-sm font-bold text-on-accent disabled:opacity-50"
+              >
+                적용
+              </button>
+              <button onClick={reset} className="rounded-lg px-2 py-1.5 text-[11px] text-fg-muted hover:text-fg">
+                취소
+              </button>
+            </div>
+          </div>
+        ) : sub === 'reveal' || sub === 'hide' || sub === 'highlight' ? (
+          <div className="flex flex-col gap-2">
+            <span className="text-[11px] text-fg-2">
+              {sub === 'reveal' ? '보여줄' : sub === 'hide' ? '숨길' : '강조할'} 요소를 골라요
+            </span>
+            <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+              {others.length === 0 && <span className="px-1 text-[11px] text-fg-muted">다른 요소가 없어요</span>}
+              {others.map((o, i) => (
+                <label
+                  key={o.id}
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 text-[12px] font-semibold transition-colors ${
+                    targets.includes(o.id) ? 'border-accent bg-accent-soft/50 text-fg' : 'border-border bg-surface-2 text-fg-2 hover:border-accent'
+                  }`}
+                >
+                  <input type="checkbox" checked={targets.includes(o.id)} onChange={() => toggleTarget(o.id)} className="accent-[var(--accent)]" />
+                  {elementLabel(o, i)}
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button
+                disabled={!targets.length}
+                onClick={() => {
+                  const id = newId('beh');
+                  const b: Behavior =
+                    sub === 'highlight'
+                      ? { id, target: elId, trigger: 'tap', action: 'highlight', params: { targets } }
+                      : sub === 'hide'
+                        ? { id, target: elId, trigger: 'tap', action: 'hide', params: { targets } }
+                        : { id, target: elId, trigger: 'tap', action: 'reveal', params: { targets } };
+                  setBeh(b);
+                }}
+                className="flex-1 rounded-lg bg-accent px-2 py-1.5 text-sm font-bold text-on-accent disabled:opacity-50"
+              >
+                적용 ({targets.length})
+              </button>
+              <button onClick={reset} className="rounded-lg px-2 py-1.5 text-[11px] text-fg-muted hover:text-fg">
+                취소
+              </button>
+            </div>
+          </div>
         ) : (
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPicking(true)}
-              className="flex-1 rounded-xl border border-border bg-surface-2 px-2 py-2 text-sm font-semibold text-fg transition-colors hover:border-accent hover:text-accent"
-            >
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => setSub('animate')} className={actionBtn}>
               ✨ 반응
             </button>
             {isImage && (
-              <button
-                onClick={onAddSwap}
-                className="flex-1 rounded-xl border border-border bg-surface-2 px-2 py-2 text-sm font-semibold text-fg transition-colors hover:border-accent hover:text-accent"
-              >
+              <button onClick={onAddSwap} className={actionBtn}>
                 🔄 교체
               </button>
             )}
+            <button onClick={() => setSub('speak')} className={actionBtn}>
+              💬 말하기
+            </button>
+            <button onClick={() => setSub('reveal')} className={actionBtn}>
+              👁 보이기
+            </button>
+            <button onClick={() => setSub('hide')} className={actionBtn}>
+              🙈 숨기기
+            </button>
+            <button onClick={() => setSub('highlight')} className={actionBtn}>
+              🌟 강조
+            </button>
           </div>
         )}
       </div>
