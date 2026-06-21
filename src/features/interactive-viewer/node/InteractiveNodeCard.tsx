@@ -91,6 +91,24 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
         </div>
       )}
 
+      {/* 수업 모드 — 카드 전체가 '재생' 버튼. 탭하면 풀스크린 인터랙티브 재생(아이 대면). */}
+      {presenting && doc && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            openOverlay('play');
+          }}
+          title="재생 — 탭하면 시작해요"
+          className="group/play absolute inset-0 z-10 grid place-items-center bg-transparent"
+        >
+          <span className="grid h-20 w-20 place-items-center rounded-full bg-accent/90 text-3xl text-on-accent shadow-lg ring-4 ring-surface/70 transition-transform duration-150 group-hover/play:scale-105">
+            ▶
+          </span>
+        </button>
+      )}
+
       {!presenting && (
         <div
           className={`absolute right-1 top-1 flex gap-1 transition-opacity duration-150 ${

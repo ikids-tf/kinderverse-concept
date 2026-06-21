@@ -930,7 +930,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         style={{ left, top, width: node.w, zIndex: dragZ, ...radiusStyle(node), ...rootTransform(node) }}
       >
         <InteractiveNodeCard node={node} height={node.h} selected={selected} presenting={presenting} />
-        {selected && !node.locked && <RadiusHandle node={node} />}
+        {selected && !node.locked && !presenting && <RadiusHandle node={node} />}
         {node.locked && <LockBadge />}
       </div>
     );
