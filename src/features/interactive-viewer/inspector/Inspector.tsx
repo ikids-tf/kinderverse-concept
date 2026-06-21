@@ -5,7 +5,7 @@
  */
 import { useState } from 'react';
 import { newId } from '@/store/boardStore';
-import type { Behavior, ElementNode, InteractiveNode } from '../schema/interactiveNode';
+import type { Behavior, Condition, ElementNode, InteractiveNode } from '../schema/interactiveNode';
 import { ANIMATE_LABELS, ANIMATE_PRESETS } from '../runtime/behaviors';
 
 interface Props {
@@ -13,6 +13,9 @@ interface Props {
   elId: string;
   onSetBehavior: (b: Behavior | null) => void;
   onAddSwap: () => void;
+  onAddCount: (label: string) => void;
+  onAddSetFlag: (value: boolean) => void;
+  onSetCondition: (cond: Condition | null) => void;
   onRemoveBg: () => void;
   onEditText: (text: string) => void;
   onRemoveElement: () => void;
@@ -26,9 +29,9 @@ function elementLabel(e: ElementNode, idx: number): string {
   return `${base} ${idx + 1}`;
 }
 
-type Sub = 'menu' | 'animate' | 'speak' | 'reveal' | 'hide' | 'highlight';
+type Sub = 'menu' | 'animate' | 'speak' | 'reveal' | 'hide' | 'highlight' | 'move';
 
-export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onRemoveBg, onEditText, onRemoveElement, busy }: Props) {
+export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onAddSetFlag, onSetCondition, onRemoveBg, onEditText, onRemoveElement, busy }: Props) {
   const el = doc.elements.find((e) => e.id === elId);
   const beh = doc.behaviors.find((b) => b.target === elId && b.trigger === 'tap');
   const [sub, setSub] = useState<Sub>('menu');
@@ -38,6 +41,10 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onRemoveBg, onE
 
   const isImage = el.kind === 'image' || el.kind === 'sprite';
   const others = doc.elements.filter((e) => e.id !== elId);
+  // 이 요소가 가진 연결(따라 이동 대상) — 연결된 상대 요소들.
+  const myConns = doc.connections
+    .filter((c) => c.from === elId || c.to === elId)
+    .map((c) => ({ connId: c.id, other: c.from === elId ? c.to : c.from }));
 
   const behLabel = !beh
     ? null
@@ -53,7 +60,13 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onRemoveBg, onE
               ? `숨기기 · ${beh.params.targets.length}개`
               : beh.action === 'highlight'
                 ? `강조 · ${beh.params.targets.length}개`
-                : '동작';
+                : beh.action === 'count'
+                  ? '세기 · +1'
+                  : beh.action === 'setFlag'
+                    ? `스위치 · ${beh.params.value ? '켜기' : '끄기'}`
+                    : beh.action === 'moveAlongPath'
+                      ? '따라 이동'
+                      : '동작';
 
   const reset = () => {
     setSub('menu');
@@ -96,14 +109,35 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onRemoveBg, onE
         <span className="text-[11px] font-bold text-fg-2">탭하면…</span>
 
         {beh ? (
-          <div className="flex items-center justify-between rounded-xl border border-accent-soft bg-accent-soft/40 px-3 py-2">
-            <span className="text-sm font-semibold text-fg">{behLabel}</span>
-            <button
-              onClick={() => onSetBehavior(null)}
-              className="rounded-pill px-2 py-0.5 text-[11px] font-semibold text-fg-muted hover:bg-surface-3 hover:text-fg"
-            >
-              해제
-            </button>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between rounded-xl border border-accent-soft bg-accent-soft/40 px-3 py-2">
+              <span className="text-sm font-semibold text-fg">{behLabel}</span>
+              <button
+                onClick={() => onSetBehavior(null)}
+                className="rounded-pill px-2 py-0.5 text-[11px] font-semibold text-fg-muted hover:bg-surface-3 hover:text-fg"
+              >
+                해제
+              </button>
+            </div>
+            {/* 조건(when) — 스위치(플래그)가 있을 때만 노출. 이 동작이 언제 실행될지. */}
+            {doc.flags && doc.flags.length > 0 && (
+              <label className="flex items-center gap-2 px-1 text-[11px] text-fg-2">
+                실행 조건
+                <select
+                  value={beh.when?.kind === 'flag' ? (beh.when.is ? 'on' : 'off') : 'always'}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const flagId = doc.flags![0].id;
+                    onSetCondition(v === 'always' ? null : { kind: 'flag', flagId, is: v === 'on' });
+                  }}
+                  className="flex-1 rounded-md border border-border bg-surface-2 px-1.5 py-1 text-[12px] font-semibold text-fg focus:border-accent focus:outline-none"
+                >
+                  <option value="always">언제나</option>
+                  <option value="on">스위치 켜졌을 때만</option>
+                  <option value="off">스위치 꺼졌을 때만</option>
+                </select>
+              </label>
+            )}
           </div>
         ) : sub === 'animate' ? (
           <div className="grid grid-cols-3 gap-1.5">
@@ -184,6 +218,28 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onRemoveBg, onE
               </button>
             </div>
           </div>
+        ) : sub === 'move' ? (
+          <div className="flex flex-col gap-2">
+            <span className="text-[11px] text-fg-2">어디로 이동할지 (연결된 요소)</span>
+            <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+              {myConns.map((mc) => {
+                const o = doc.elements.find((e) => e.id === mc.other);
+                const idx = doc.elements.findIndex((e) => e.id === mc.other);
+                return (
+                  <button
+                    key={mc.connId}
+                    onClick={() => setBeh({ id: newId('beh'), target: elId, trigger: 'tap', action: 'moveAlongPath', params: { connectionId: mc.connId, speed: 1 } })}
+                    className="rounded-lg border border-border bg-surface-2 px-2 py-1.5 text-left text-[12px] font-semibold text-fg-2 transition-colors hover:border-accent hover:text-accent"
+                  >
+                    ➡ {o ? elementLabel(o, idx) : '연결 요소'}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={reset} className="rounded-lg px-2 py-1 text-[11px] text-fg-muted hover:text-fg">
+              취소
+            </button>
+          </div>
         ) : (
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => setSub('animate')} className={actionBtn}>
@@ -206,6 +262,17 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onRemoveBg, onE
             <button onClick={() => setSub('highlight')} className={actionBtn}>
               🌟 강조
             </button>
+            <button onClick={() => onAddCount('개수')} className={actionBtn}>
+              🔢 세기
+            </button>
+            <button onClick={() => onAddSetFlag(true)} className={actionBtn}>
+              🔌 스위치
+            </button>
+            {myConns.length > 0 && (
+              <button onClick={() => (myConns.length === 1 ? setBeh({ id: newId('beh'), target: elId, trigger: 'tap', action: 'moveAlongPath', params: { connectionId: myConns[0].connId, speed: 1 } }) : setSub('move'))} className={`${actionBtn} col-span-2`}>
+                ➡ 연결 따라 이동
+              </button>
+            )}
           </div>
         )}
       </div>

@@ -193,6 +193,49 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
       behaviors: [...d.behaviors.filter((b) => !(b.target === elId && b.trigger === 'tap')), ...(beh ? [beh] : [])],
     }));
 
+  // 조건(when) — 요소의 tap 동작이 '언제 실행될지' 게이트(예: 스위치 켜졌을 때만).
+  const setConditionFor = (elId: string, cond: Behavior['when'] | null) =>
+    mutate(docId, (d) => ({
+      ...d,
+      behaviors: d.behaviors.map((b) => (b.target === elId && b.trigger === 'tap' ? { ...b, when: cond ?? undefined } : b)),
+    }));
+
+  // 세기(count) — 노드의 공용 카운터를 (없으면) 만들고 그 요소에 +1 동작 부여. 카운팅 놀이용.
+  const addCountFor = (elId: string, label: string) =>
+    mutate(docId, (d) => {
+      const counters = d.counters ?? [];
+      let counter = counters[0];
+      let nextCounters = counters;
+      if (!counter) {
+        counter = { id: newId('cnt'), initial: 0, label, display: { x: 48, y: 48 } };
+        nextCounters = [...counters, counter];
+      }
+      const beh: Behavior = { id: newId('beh'), target: elId, trigger: 'tap', action: 'count', params: { counterId: counter.id, by: 1 } };
+      return {
+        ...d,
+        counters: nextCounters,
+        behaviors: [...d.behaviors.filter((b) => !(b.target === elId && b.trigger === 'tap')), beh],
+      };
+    });
+
+  // 플래그 스위치(setFlag) — 노드의 공용 플래그를 (없으면) 만들고 토글 동작 부여.
+  const addSetFlagFor = (elId: string, value: boolean) =>
+    mutate(docId, (d) => {
+      const flags = d.flags ?? [];
+      let flag = flags[0];
+      let nextFlags = flags;
+      if (!flag) {
+        flag = { id: newId('flag'), initial: false };
+        nextFlags = [...flags, flag];
+      }
+      const beh: Behavior = { id: newId('beh'), target: elId, trigger: 'tap', action: 'setFlag', params: { flagId: flag.id, value } };
+      return {
+        ...d,
+        flags: nextFlags,
+        behaviors: [...d.behaviors.filter((b) => !(b.target === elId && b.trigger === 'tap')), beh],
+      };
+    });
+
   const moveElements = (ids: string[], dx: number, dy: number) => {
     const set = new Set(ids);
     mutate(docId, (d) => ({
@@ -445,6 +488,9 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
             elId={selectedElIds[0]}
             onSetBehavior={(b) => setBehaviorFor(selectedElIds[0], b)}
             onAddSwap={() => setPicker({ for: 'swap' })}
+            onAddCount={(label) => addCountFor(selectedElIds[0], label)}
+            onAddSetFlag={(value) => addSetFlagFor(selectedElIds[0], value)}
+            onSetCondition={(cond) => setConditionFor(selectedElIds[0], cond)}
             onRemoveBg={removeBg}
             onEditText={(t) => editText(selectedElIds[0], t)}
             onRemoveElement={() => removeElement(selectedElIds[0])}
