@@ -20,6 +20,7 @@ import {
   urlToAssetRef,
   withElementAdded,
 } from '../runtime/assetIngest';
+import { clampXY } from '../runtime/geometry';
 import type { Behavior, ElementNode, InteractiveNode } from '../schema/interactiveNode';
 
 /** 요소 클립보드(⌘C/⌘V) — 다중 복사 지원, 오버레이 인스턴스 간 공유(세션 한정). */
@@ -160,9 +161,12 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
         else if (e.key === 'ArrowDown') dy = step;
         mutate(docId, (d) => ({
           ...d,
-          elements: d.elements.map((z) =>
-            ids.has(z.id) ? { ...z, transform: { ...z.transform, x: Math.round(z.transform.x + dx), y: Math.round(z.transform.y + dy) } } : z,
-          ),
+          elements: d.elements.map((z) => {
+            if (!ids.has(z.id)) return z;
+            const t = z.transform;
+            const p = clampXY(t.x + dx, t.y + dy, t.w, t.h, d.canvas.size.w, d.canvas.size.h);
+            return { ...z, transform: { ...t, ...p } };
+          }),
         }));
       }
     };
@@ -186,14 +190,23 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
     const set = new Set(ids);
     mutate(docId, (d) => ({
       ...d,
-      elements: d.elements.map((e) => (set.has(e.id) ? { ...e, transform: { ...e.transform, x: e.transform.x + dx, y: e.transform.y + dy } } : e)),
+      elements: d.elements.map((e) => {
+        if (!set.has(e.id)) return e;
+        const t = e.transform;
+        const p = clampXY(t.x + dx, t.y + dy, t.w, t.h, d.canvas.size.w, d.canvas.size.h);
+        return { ...e, transform: { ...t, ...p } };
+      }),
     }));
   };
 
   const resizeElement = (elId: string, patch: { x: number; y: number; w: number; h: number }) =>
     mutate(docId, (d) => ({
       ...d,
-      elements: d.elements.map((e) => (e.id === elId ? { ...e, transform: { ...e.transform, ...patch } } : e)),
+      elements: d.elements.map((e) => {
+        if (e.id !== elId) return e;
+        const p = clampXY(patch.x, patch.y, patch.w, patch.h, d.canvas.size.w, d.canvas.size.h);
+        return { ...e, transform: { ...e.transform, ...patch, ...p } };
+      }),
     }));
 
   const duplicateElement = (elId: string) => {
@@ -219,6 +232,29 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
 
   const setBackground = (token: string) =>
     mutate(docId, (d) => ({ ...d, canvas: { ...d.canvas, background: token } }));
+
+  // 요소 연결(from→to) — 중복/자기연결 무시. 마이보드 링크와 동일한 from/to 모델.
+  const addConnection = (from: string, to: string) =>
+    mutate(docId, (d) => {
+      if (from === to) return d;
+      const dup = d.connections.some(
+        (c) => (c.from === from && c.to === to) || (c.from === to && c.to === from),
+      );
+      if (dup) return d;
+      return { ...d, connections: [...d.connections, { id: newId('conn'), kind: 'link' as const, from, to }] };
+    });
+  const removeConnection = (id: string) =>
+    mutate(docId, (d) => ({ ...d, connections: d.connections.filter((c) => c.id !== id) }));
+  // 떼어내 다른 요소로 옮기기 — 자기연결이면 무시, 이미 같은 쌍이 있으면 이 연결은 제거(중복 방지).
+  const relinkConnection = (id: string, from: string, to: string) =>
+    mutate(docId, (d) => {
+      if (from === to) return d;
+      const dup = d.connections.some(
+        (c) => c.id !== id && ((c.from === from && c.to === to) || (c.from === to && c.to === from)),
+      );
+      if (dup) return { ...d, connections: d.connections.filter((c) => c.id !== id) };
+      return { ...d, connections: d.connections.map((c) => (c.id === id ? { ...c, from, to } : c)) };
+    });
 
   const addImageRef = (
     ref: Awaited<ReturnType<typeof fileToAssetRef>>,
@@ -361,6 +397,10 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
             onResizeElement={resizeElement}
             onDuplicateElement={duplicateElement}
             onRemoveElement={removeElement}
+            onEditText={editText}
+            onAddConnection={addConnection}
+            onRemoveConnection={removeConnection}
+            onRelinkConnection={relinkConnection}
             onDropFiles={onDropFiles}
             resetNonce={resetNonce}
           />

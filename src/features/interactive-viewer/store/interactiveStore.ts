@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 import { newId } from '@/store/boardStore';
 import { parseInteractiveNode, safeParseInteractiveNode } from '../schema/parse';
+import { normalizeNode } from '../runtime/geometry';
 import type { InteractiveNode } from '../schema/interactiveNode';
 
 const LS_KEY = 'kv:inodes:v1';
@@ -90,8 +91,10 @@ export const useInteractiveStore = create<InteractiveState>((set, get) => ({
   ensure: (docId) => {
     const cached = get().docs[docId];
     if (cached) return cached;
-    const loaded = loadInteractiveNode(docId) ?? createDefaultNode(docId);
-    if (!loadInteractiveNode(docId)) saveInteractiveNode(loaded); // 신규 문서 즉시 영속화
+    const stored = loadInteractiveNode(docId);
+    // 화면 밖으로 튕겨나간 요소 회수 + 신규 문서는 즉시 영속화.
+    const loaded = normalizeNode(stored ?? createDefaultNode(docId));
+    if (!stored || loaded !== stored) saveInteractiveNode(loaded);
     set((s) => ({ docs: { ...s.docs, [docId]: loaded } }));
     return loaded;
   },

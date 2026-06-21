@@ -134,6 +134,45 @@
   color: #fff;
 }
 
+/* 글자 인라인 편집(더블클릭) — .ic-text와 동일한 모양의 textarea. */
+.kv-inode .ic-text-edit {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: 2px solid var(--ic-coral);
+  outline-offset: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--ic-ink);
+  text-align: center;
+  font-family: inherit;
+  font-weight: 800;
+  line-height: 1.15;
+  resize: none;
+  padding: 0;
+  display: block;
+}
+
+/* 연결 순번 라벨 — 연결된 요소 좌상단 작은 원형 배지. */
+.kv-inode .ic-seq {
+  position: absolute;
+  left: 0;
+  top: 0;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ic-coral);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(87, 75, 62, 0.25);
+  pointer-events: none;
+  z-index: 6;
+}
+
 /* 빈 캔버스 안내 */
 .kv-inode .ic-empty {
   position: absolute;

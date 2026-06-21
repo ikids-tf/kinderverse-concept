@@ -3,11 +3,13 @@
  * 재생(탭→반응/교체)을 한 컴포넌트가 담당. 보드 카드 미리보기·풀스크린·수업 모드
  * 어댑터가 모두 이 컴포넌트를 공유한다(단일 런타임).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AssetRef, ElementNode, InteractiveNode } from '../schema/interactiveNode';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AssetRef, Connection, ElementNode, InteractiveNode } from '../schema/interactiveNode';
 import { useStageFit } from './useStageFit';
 import { cancelAnimations, runAnimate } from './behaviors';
 import { ElementSelectionBox } from './ElementSelectionBox';
+import { clampXY } from './geometry';
+import { linkSequence } from '@/board/links';
 import './inode.css';
 
 const COLOR_TOKENS: Record<string, string> = {
@@ -38,6 +40,14 @@ interface Props {
   onResizeElement?: (elId: string, patch: Box) => void;
   onDuplicateElement?: (elId: string) => void;
   onRemoveElement?: (elId: string) => void;
+  /** 글자 더블클릭 인라인 편집 커밋. */
+  onEditText?: (elId: string, text: string) => void;
+  /** 포트 드래그로 두 요소 연결(from→to). */
+  onAddConnection?: (from: string, to: string) => void;
+  /** 연결선 클릭 해제. */
+  onRemoveConnection?: (id: string) => void;
+  /** 포트 떼어내기로 연결 끝을 다른 요소로 옮김(한 undo 단계). */
+  onRelinkConnection?: (id: string, from: string, to: string) => void;
   onDropFiles?: (files: File[], at: { x: number; y: number }) => void;
   /** play 리셋/모드 전환 시 애니메이션·교체 상태 원복. */
   resetNonce?: number;
@@ -54,6 +64,10 @@ export function InteractiveStage({
   onResizeElement,
   onDuplicateElement,
   onRemoveElement,
+  onEditText,
+  onAddConnection,
+  onRemoveConnection,
+  onRelinkConnection,
   onDropFiles,
   resetNonce = 0,
   preview = false,
@@ -73,9 +87,41 @@ export function InteractiveStage({
   const [resize, setResize] = useState<(Box & { id: string }) | null>(null);
   const [swapped, setSwapped] = useState<Record<string, boolean>>({});
   const [dropping, setDropping] = useState(false);
+  // 글자 더블클릭 인라인 편집 / 호버 시 연결 포트(hoverElId) / 연결 드래그 중 임시 선(linking).
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [hoverElId, setHoverElId] = useState<string | null>(null);
+  const [linking, setLinking] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  // 연결 드래그 상태기계 — 마이보드와 동일: 'new'=빈 포트에서 새 연결, 'detach'=연결된 포트를
+  // 떼어내 분리/옮기기. from=고정(반대) 끝, keepFrom=고정 끝이 연결의 from인지.
+  const lk = useRef<{ mode: 'new' | 'detach'; from: string; x1: number; y1: number; connId?: string; keepFrom?: boolean } | null>(null);
+  const linkRectRef = useRef<DOMRect | null>(null);
+  const textEditRef = useRef<HTMLTextAreaElement>(null);
 
   const selSet = useMemo(() => new Set(selectedElIds), [selectedElIds]);
   const sorted = useMemo(() => [...doc.elements].sort((a, b) => a.transform.z - b.transform.z), [doc.elements]);
+  // 연결 순번 라벨(1, 1-1, 2 …) — 마이보드와 동일 규칙(@/board/links 재사용).
+  const linkLabels = useMemo(() => linkSequence(doc.connections), [doc.connections]);
+
+  // 🔴 드래그/리사이즈 핸들러가 매 렌더 새 identity가 되면, 선택 직후 인스펙터 마운트로 인한
+  //    리렌더의 cleanup이 방금 붙인 window 리스너를 떼어내 드래그가 즉시 죽는다. 가변값을
+  //    ref로 읽어 핸들러를 영구 고정한다(리스너는 pointerup·언마운트에서만 제거).
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
+  const onMoveRef = useRef(onMoveElements);
+  onMoveRef.current = onMoveElements;
+  const onResizeRef = useRef(onResizeElement);
+  onResizeRef.current = onResizeElement;
+  const onAddConnRef = useRef(onAddConnection);
+  onAddConnRef.current = onAddConnection;
+  const onRemoveConnRef = useRef(onRemoveConnection);
+  onRemoveConnRef.current = onRemoveConnection;
+  const onRelinkRef = useRef(onRelinkConnection);
+  onRelinkRef.current = onRelinkConnection;
+  // 연결 hit-test/적중 판정용 최신 요소·연결 목록(고정 핸들러에서 읽음).
+  const elsRef = useRef(doc.elements);
+  elsRef.current = doc.elements;
+  const connsRef = useRef(doc.connections);
+  connsRef.current = doc.connections;
 
   useEffect(() => {
     if (rootRef.current) cancelAnimations(rootRef.current);
@@ -102,43 +148,134 @@ export function InteractiveStage({
     dragInfo.current = null;
     setDrag(null);
     // 🔴 side-effect는 setState 업데이터 밖에서(무한 업데이트 루프 방지).
-    if (d && (d.dx !== 0 || d.dy !== 0)) onMoveElements?.(d.ids, d.dx, d.dy);
-  }, [onMoveElements, onWinMove]);
+    if (d && (d.dx !== 0 || d.dy !== 0)) onMoveRef.current?.(d.ids, d.dx, d.dy);
+  }, [onWinMove]);
 
   // ── 편집: 모서리 리사이즈(반대 모서리 앵커 고정, 단일 요소) ──
   const onResizeMove = useCallback((e: PointerEvent) => {
     const r = resizeInfo.current;
     if (!r) return;
-    const px = (e.clientX - r.rect.left) / scale;
-    const py = (e.clientY - r.rect.top) / scale;
+    const sc = scaleRef.current;
+    const px = (e.clientX - r.rect.left) / sc;
+    const py = (e.clientY - r.rect.top) / sc;
     const x = Math.round(Math.min(r.ax, px));
     const y = Math.round(Math.min(r.ay, py));
     const w = Math.max(32, Math.round(Math.abs(px - r.ax)));
     const h = Math.max(32, Math.round(Math.abs(py - r.ay)));
     r.box = { x, y, w, h };
     setResize({ id: r.id, x, y, w, h });
-  }, [scale]);
+  }, []);
   const onResizeUp = useCallback(() => {
     window.removeEventListener('pointermove', onResizeMove);
     window.removeEventListener('pointerup', onResizeUp);
     const r = resizeInfo.current;
     resizeInfo.current = null;
     setResize(null);
-    if (r) onResizeElement?.(r.id, r.box);
-  }, [onResizeElement, onResizeMove]);
+    if (r) onResizeRef.current?.(r.id, r.box);
+  }, [onResizeMove]);
 
+  // 커서(논리 좌표) 아래 연결 가능한 최상위 요소(여유 pad 포함). 고정 핸들러에서 호출.
+  const hitElementAt = useCallback((x: number, y: number): ElementNode | null => {
+    const pad = 16 / scaleRef.current;
+    return (
+      [...elsRef.current]
+        .sort((a, b) => b.transform.z - a.transform.z)
+        .find((el) => {
+          const t = el.transform;
+          return x >= t.x - pad && x <= t.x + t.w + pad && y >= t.y - pad && y <= t.y + t.h + pad;
+        }) ?? null
+    );
+  }, []);
+
+  // ── 편집: 연결 드래그(마이보드 onLinkMove/onLinkUp 동일 로직) ──
+  const onLinkMove = useCallback((e: PointerEvent) => {
+    const st = lk.current;
+    const rect = linkRectRef.current;
+    if (!st || !rect) return;
+    const sc = scaleRef.current;
+    const x = (e.clientX - rect.left) / sc;
+    const y = (e.clientY - rect.top) / sc;
+    setLinking({ x1: st.x1, y1: st.y1, x2: x, y2: y });
+    const t = hitElementAt(x, y);
+    setHoverElId(t && t.id !== st.from ? t.id : null); // 드롭 대상 하이라이트
+  }, [hitElementAt]);
+  const onLinkUp = useCallback((e: PointerEvent) => {
+    window.removeEventListener('pointermove', onLinkMove);
+    window.removeEventListener('pointerup', onLinkUp);
+    const st = lk.current;
+    lk.current = null;
+    setLinking(null);
+    const rect = linkRectRef.current;
+    if (!st || !rect) {
+      setHoverElId(null);
+      return;
+    }
+    const sc = scaleRef.current;
+    const x = (e.clientX - rect.left) / sc;
+    const y = (e.clientY - rect.top) / sc;
+    const target = hitElementAt(x, y);
+    if (st.mode === 'new') {
+      if (target && target.id !== st.from) onAddConnRef.current?.(st.from, target.id);
+    } else if (st.connId) {
+      // 떼어내기: 빈 곳=해제, 다른 요소=옮겨 연결, 제자리=유지.
+      const conn = connsRef.current.find((c) => c.id === st.connId);
+      if (conn) {
+        const detached = st.keepFrom ? conn.to : conn.from; // 떼어낸 쪽
+        if (!target) onRemoveConnRef.current?.(conn.id);
+        else if (target.id !== detached && target.id !== st.from) {
+          onRelinkRef.current?.(conn.id, st.keepFrom ? st.from : target.id, st.keepFrom ? target.id : st.from);
+        }
+      }
+    }
+    setHoverElId(null);
+  }, [onLinkMove, hitElementAt]);
+
+  // cleanup은 언마운트에서만(deps []). 핸들러가 영구 고정이라 리렌더 중 리스너가
+  // 떨어지지 않는다 — 위 ref 주석 참조.
   useEffect(
     () => () => {
       window.removeEventListener('pointermove', onWinMove);
       window.removeEventListener('pointerup', onWinUp);
       window.removeEventListener('pointermove', onResizeMove);
       window.removeEventListener('pointerup', onResizeUp);
+      window.removeEventListener('pointermove', onLinkMove);
+      window.removeEventListener('pointerup', onLinkUp);
     },
-    [onWinMove, onWinUp, onResizeMove, onResizeUp],
+    [onWinMove, onWinUp, onResizeMove, onResizeUp, onLinkMove, onLinkUp],
   );
+
+  // 포트 pointerdown — 빈 슬롯이면 새 연결, 연결된 슬롯이면 떼어내기(반대 끝 고정).
+  const onPortDown = (
+    e: React.PointerEvent,
+    elId: string,
+    _side: 'l' | 'r',
+    slot: { x: number; y: number },
+    detachConn?: Connection,
+  ) => {
+    if (preview || mode !== 'edit') return;
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    linkRectRef.current = rect;
+    if (detachConn) {
+      const otherId = detachConn.from === elId ? detachConn.to : detachConn.from;
+      const s = sidesOf(detachConn);
+      const otherSide = detachConn.from === otherId ? s.from : s.to;
+      const anch = linkAnchor(otherId, otherSide, detachConn.id);
+      lk.current = { mode: 'detach', from: otherId, x1: anch.x, y1: anch.y, connId: detachConn.id, keepFrom: detachConn.from === otherId };
+      setLinking({ x1: anch.x, y1: anch.y, x2: anch.x, y2: anch.y });
+    } else {
+      lk.current = { mode: 'new', from: elId, x1: slot.x, y1: slot.y };
+      setLinking({ x1: slot.x, y1: slot.y, x2: slot.x, y2: slot.y });
+    }
+    window.addEventListener('pointermove', onLinkMove);
+    window.addEventListener('pointerup', onLinkUp);
+  };
 
   const onElPointerDown = (e: React.PointerEvent, el: ElementNode) => {
     if (preview || mode !== 'edit') return;
+    if (editingTextId === el.id) return; // 인라인 편집 중인 글자는 드래그 시작 안 함(텍스트 선택 허용)
     e.stopPropagation();
     // Shift = 선택 토글(드래그 안 함)
     if (e.shiftKey) {
@@ -194,6 +331,19 @@ export function InteractiveStage({
     runBehavior(el);
   };
 
+  // ── 편집: 글자 더블클릭 → 인라인 편집 ──
+  const onElDoubleClick = (e: React.MouseEvent, el: ElementNode) => {
+    if (preview || mode !== 'edit' || el.kind !== 'text') return;
+    e.stopPropagation();
+    onSelectEls?.([el.id]);
+    setEditingTextId(el.id);
+  };
+  const commitTextEdit = () => {
+    const id = editingTextId;
+    setEditingTextId(null);
+    if (id) onEditText?.(id, textEditRef.current?.value ?? '');
+  };
+
   const onCanvasPointerDown = () => {
     if (!preview && mode === 'edit') onSelectEls?.([]);
   };
@@ -231,6 +381,30 @@ export function InteractiveStage({
   const renderContent = (el: ElementNode) => {
     if (el.kind === 'text') {
       const fontPx = Math.max(14, Math.min(el.transform.h * 0.5, el.transform.w * 0.22));
+      if (editingTextId === el.id) {
+        return (
+          <textarea
+            ref={textEditRef}
+            className="ic-text-edit"
+            defaultValue={el.text}
+            style={{ fontSize: fontPx }}
+            autoFocus
+            onFocus={(e) => e.currentTarget.select()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onBlur={commitTextEdit}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                commitTextEdit();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setEditingTextId(null);
+              }
+            }}
+          />
+        );
+      }
       return (
         <div className="ic-text" style={{ fontSize: fontPx }}>
           {el.text}
@@ -253,9 +427,74 @@ export function InteractiveStage({
     if (resize && resize.id === el.id) return { x: resize.x, y: resize.y, w: resize.w, h: resize.h };
     if (drag && drag.origs[el.id]) {
       const o = drag.origs[el.id];
-      return { x: o.x + drag.dx, y: o.y + drag.dy, w: el.transform.w, h: el.transform.h };
+      const p = clampXY(o.x + drag.dx, o.y + drag.dy, el.transform.w, el.transform.h, cw, ch);
+      return { x: p.x, y: p.y, w: el.transform.w, h: el.transform.h };
     }
     return { x: el.transform.x, y: el.transform.y, w: el.transform.w, h: el.transform.h };
+  };
+
+  // ── 연결 기하(마이보드 sideMap/portSlots/linkAnchor 동일 규칙) ──
+  /** 연결의 두 끝이 각각 어느 면(l/r)에 붙는지 — 왼쪽 요소의 오른면 ↔ 오른쪽 요소의 왼면. */
+  const sidesOf = (c: Connection): { from: 'l' | 'r'; to: 'l' | 'r' } => {
+    const a = doc.elements.find((e) => e.id === c.from);
+    const z = doc.elements.find((e) => e.id === c.to);
+    const ax = a ? a.transform.x + a.transform.w / 2 : 0;
+    const zx = z ? z.transform.x + z.transform.w / 2 : 0;
+    const l2r = ax <= zx;
+    return { from: l2r ? 'r' : 'l', to: l2r ? 'l' : 'r' };
+  };
+  /** 요소·면별 붙은 연결 목록(생성 순) — 선과 포트가 같은 슬롯을 공유. */
+  const sideMap = useMemo(() => {
+    const m = new Map<string, { l: string[]; r: string[] }>();
+    const put = (id: string, side: 'l' | 'r', cid: string) => {
+      if (!m.has(id)) m.set(id, { l: [], r: [] });
+      m.get(id)![side].push(cid);
+    };
+    for (const c of doc.connections) {
+      const s = sidesOf(c);
+      put(c.from, s.from, c.id);
+      put(c.to, s.to, c.id);
+    }
+    return m;
+    // sidesOf는 doc.elements에 의존 → 두 배열을 deps로.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.connections, doc.elements]);
+  /** 한 면의 포트 슬롯 — 붙은 연결들(순서대로) + 마지막 '새 연결' 빈 슬롯. */
+  const portSlots = (elId: string, side: 'l' | 'r'): Array<{ x: number; y: number; connId?: string }> => {
+    const el = doc.elements.find((e) => e.id === elId);
+    if (!el) return [];
+    const b = boxOf(el);
+    const list = sideMap.get(elId)?.[side] ?? [];
+    const total = list.length + 1; // +1 = 다중 연결용 새 포트
+    const gap = 22 / scale;
+    const x = side === 'l' ? b.x : b.x + b.w;
+    const cy = b.y + b.h / 2;
+    return Array.from({ length: total }, (_, i) => ({ x, y: cy + (i - (total - 1) / 2) * gap, connId: list[i] }));
+  };
+  /** 연결의 한쪽 끝 좌표 = 그 연결이 차지한 포트 슬롯 위치. */
+  const linkAnchor = (elId: string, side: 'l' | 'r', connId: string): { x: number; y: number } => {
+    const slots = portSlots(elId, side);
+    const slot = slots.find((s) => s.connId === connId) ?? slots[0];
+    return { x: slot.x, y: slot.y };
+  };
+  /** 두 점 사이 부드러운 곡선 path(마이보드 연결선과 동일한 모양). */
+  const curve = (x1: number, y1: number, x2: number, y2: number): string => {
+    const k = (x1 <= x2 ? 1 : -1) * Math.max(28, Math.min(120, Math.abs(x2 - x1) / 2));
+    return `M ${x1} ${y1} C ${x1 + k} ${y1}, ${x2 - k} ${y2}, ${x2} ${y2}`;
+  };
+
+  const showLinkUi = mode === 'edit' && !preview;
+
+  // 캔버스 호버 → 포트 표시 요소 추적(요소/리사이즈/연결 드래그 중엔 끔).
+  const onCanvasHover = (e: React.PointerEvent) => {
+    if (!showLinkUi || lk.current || drag || resize) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = (e.clientX - rect.left) / scale;
+    const y = (e.clientY - rect.top) / scale;
+    const hit = hitElementAt(x, y);
+    const next = hit ? hit.id : null;
+    if (next !== hoverElId) setHoverElId(next);
   };
 
   // 핸들 박스는 단일 선택일 때만(다중 선택은 외곽선 표시).
@@ -275,6 +514,10 @@ export function InteractiveStage({
           ref={canvasRef}
           className="ic-canvas"
           onPointerDown={onCanvasPointerDown}
+          onPointerMove={onCanvasHover}
+          onPointerLeave={() => {
+            if (!lk.current) setHoverElId(null);
+          }}
           style={{
             width: cw,
             height: ch,
@@ -286,6 +529,48 @@ export function InteractiveStage({
           {isAssetRef(doc.canvas.background) && <img className="ic-canvas-bg" src={doc.canvas.background.src} alt="" />}
           {sorted.length === 0 && mode === 'edit' && !preview && (
             <div className="ic-empty">자료를 끌어다 놓거나 왼쪽 도구로 추가하세요</div>
+          )}
+
+          {/* 요소 연결선 — 포트↔포트 곡선(클릭하면 해제) + 연결 드래그 중 임시 선. */}
+          {(doc.connections.length > 0 || linking) && (
+            <svg className="ic-links" width={cw} height={ch} viewBox={`0 0 ${cw} ${ch}`} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>
+              {doc.connections.map((c) => {
+                if (!doc.elements.some((e) => e.id === c.from) || !doc.elements.some((e) => e.id === c.to)) return null;
+                const s = sidesOf(c);
+                const p1 = linkAnchor(c.from, s.from, c.id);
+                const p2 = linkAnchor(c.to, s.to, c.id);
+                const d = curve(p1.x, p1.y, p2.x, p2.y);
+                return (
+                  <g key={c.id}>
+                    <path d={d} fill="none" stroke="var(--ic-coral)" strokeWidth={3 / scale} strokeLinecap="round" opacity={0.7} />
+                    <circle cx={p2.x} cy={p2.y} r={5 / scale} fill="var(--ic-coral)" opacity={0.85} />
+                    {showLinkUi && (
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={16 / scale}
+                        style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                        onClick={() => onRemoveConnection?.(c.id)}
+                      >
+                        <title>클릭하면 연결 해제</title>
+                      </path>
+                    )}
+                  </g>
+                );
+              })}
+              {linking && (
+                <path
+                  d={curve(linking.x1, linking.y1, linking.x2, linking.y2)}
+                  fill="none"
+                  stroke="var(--ic-coral)"
+                  strokeWidth={3 / scale}
+                  strokeDasharray={`${8 / scale} ${6 / scale}`}
+                  strokeLinecap="round"
+                  opacity={0.85}
+                />
+              )}
+            </svg>
           )}
           {sorted.map((el) => {
             const b = boxOf(el);
@@ -308,6 +593,7 @@ export function InteractiveStage({
                 }}
                 onPointerDown={(e) => onElPointerDown(e, el)}
                 onClick={(e) => onElClick(e, el)}
+                onDoubleClick={(e) => onElDoubleClick(e, el)}
               >
                 <div
                   className="ic-el-inner"
@@ -318,6 +604,12 @@ export function InteractiveStage({
                 >
                   {renderContent(el)}
                 </div>
+                {/* 연결 순번 라벨(연결된 요소만) — 마이보드 규칙. */}
+                {showLinkUi && linkLabels.has(el.id) && (
+                  <span className="ic-seq" style={{ transform: `translate(-50%, -50%) scale(${1 / scale})` }}>
+                    {linkLabels.get(el.id)}
+                  </span>
+                )}
                 {/* 편집 모드 — 동작 있는 요소는 호버 시 가운데 ▶로 동작을 미리보기(확인용). */}
                 {mode === 'edit' && !preview && tapBehavior(el.id) && (
                   <button
@@ -346,6 +638,53 @@ export function InteractiveStage({
               onRemove={() => onRemoveElement?.(singleSel.id)}
             />
           )}
+
+          {/* 연결 포트 레이어 — 호버(또는 연결 드롭 대상) 요소의 좌·우 슬롯.
+              빈 슬롯=새 연결, 채워진 슬롯=떼어내기. 마이보드 포트 렌더와 동일.
+              요소·리사이즈 드래그 중엔 숨김(좌표가 흔들리므로). */}
+          {showLinkUi && hoverElId && editingTextId !== hoverElId && !drag && !resize &&
+            doc.elements.some((e) => e.id === hoverElId) &&
+            (() => {
+              const sz = 16 / scale;
+              const bw = Math.max(1, 2 / scale);
+              const ring = !!lk.current && lk.current.from !== hoverElId; // 드롭 대상 강조
+              const dot = (key: string, slot: { x: number; y: number; connId?: string }, side: 'l' | 'r') => {
+                const detach = slot.connId ? doc.connections.find((c) => c.id === slot.connId) : undefined;
+                const filled = !!detach || ring;
+                return (
+                  <button
+                    key={key}
+                    title={detach ? '드래그해서 떼어내기 — 빈 곳에 놓으면 연결 해제' : '드래그해서 다른 요소와 연결'}
+                    onPointerDown={(e) => onPortDown(e, hoverElId, side, slot, detach)}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      position: 'absolute',
+                      left: slot.x,
+                      top: slot.y,
+                      width: sz,
+                      height: sz,
+                      transform: 'translate(-50%, -50%)',
+                      borderRadius: 999,
+                      border: `${bw}px solid var(--ic-coral)`,
+                      background: filled ? 'var(--ic-coral)' : '#fff',
+                      boxShadow: '0 2px 6px rgba(87, 75, 62, 0.25)',
+                      cursor: detach ? 'grab' : 'crosshair',
+                      zIndex: 7,
+                      pointerEvents: 'auto',
+                    }}
+                  />
+                );
+              };
+              return (
+                <>
+                  {(['l', 'r'] as const).map((side) => (
+                    <Fragment key={side}>
+                      {portSlots(hoverElId, side).map((slot, i) => dot(`${side}-${i}`, slot, side))}
+                    </Fragment>
+                  ))}
+                </>
+              );
+            })()}
         </div>
       </div>
     </div>
