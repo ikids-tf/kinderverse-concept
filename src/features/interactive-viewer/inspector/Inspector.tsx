@@ -41,6 +41,7 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
   if (!el) return null;
 
   const isImage = el.kind === 'image' || el.kind === 'sprite';
+  const isVideo = el.kind === 'video';
   const others = doc.elements.filter((e) => e.id !== elId);
   // 이 요소가 가진 연결(따라 이동 대상) — 연결된 상대 요소들.
   const myConns = doc.connections
@@ -67,7 +68,9 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
                     ? `스위치 · ${beh.params.value ? '켜기' : '끄기'}`
                     : beh.action === 'moveAlongPath'
                       ? '따라 이동'
-                      : '동작';
+                      : beh.action === 'playVideo'
+                        ? '영상 재생'
+                        : '동작';
 
   const reset = () => {
     setSub('menu');
@@ -261,6 +264,14 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
             {isImage && (
               <button onClick={onAddSwap} className={actionBtn}>
                 🔄 교체
+              </button>
+            )}
+            {isVideo && el.src && (
+              <button
+                onClick={() => onSetBehavior({ id: newId('beh'), target: elId, trigger: 'tap', action: 'playVideo', params: { src: el.src!, autoplay: false } })}
+                className={actionBtn}
+              >
+                🎞 영상 재생
               </button>
             )}
             <button onClick={() => setSub('speak')} className={actionBtn}>

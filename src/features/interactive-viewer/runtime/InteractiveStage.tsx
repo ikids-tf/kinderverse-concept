@@ -136,7 +136,7 @@ export function InteractiveStage({
   const innerRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const dragInfo = useRef<{ ids: string[]; origs: Record<string, { x: number; y: number }>; sx: number; sy: number; sc: number; dx: number; dy: number } | null>(null);
   const [drag, setDrag] = useState<{ ids: string[]; origs: Record<string, { x: number; y: number }>; dx: number; dy: number } | null>(null);
-  const resizeInfo = useRef<{ id: string; ax: number; ay: number; rect: DOMRect; box: Box } | null>(null);
+  const resizeInfo = useRef<{ id: string; ax: number; ay: number; rect: DOMRect; box: Box; theta: number; cx: number; cy: number } | null>(null);
   const [resize, setResize] = useState<(Box & { id: string }) | null>(null);
   // 회전(라이브 미리보기 + 커밋) — 마이보드 회전 핸들과 동일 수식.
   const rotateInfo = useRef<{ id: string; cx: number; cy: number; rect: DOMRect; startRot: number; startAng: number; deg: number } | null>(null);
@@ -357,6 +357,13 @@ export function InteractiveStage({
         if (token !== runToken.current) return;
         await fireBehavior(t, depth + 1);
       }
+      // afterComplete 트리거 — 이 동작 완료를 기다리던 동작들 발화.
+      for (const ac of doc.behaviors) {
+        if (ac.trigger === 'afterComplete' && ac.after === beh.id) {
+          if (token !== runToken.current) return;
+          await fireBehavior(ac.id, depth + 1);
+        }
+      }
     },
     // applyAction/evalCond는 최신 doc/state 클로저 — doc.behaviors 바뀔 때만 갱신.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -392,13 +399,30 @@ export function InteractiveStage({
     if (d && (d.dx !== 0 || d.dy !== 0)) onMoveRef.current?.(d.ids, d.dx, d.dy);
   }, [onWinMove]);
 
-  // ── 편집: 모서리 리사이즈(반대 모서리 앵커 고정, 단일 요소) ──
+  // ── 편집: 모서리 리사이즈 ──
+  //  · 회전 0: 반대 모서리 앵커 고정(축 정렬).
+  //  · 회전 ≠0: 중심 고정 + 로컬축(회전축) 투영으로 폭/높이 — 회전된 요소도 자연스럽게.
   const onResizeMove = useCallback((e: PointerEvent) => {
     const r = resizeInfo.current;
     if (!r) return;
     const sc = scaleRef.current;
     const px = (e.clientX - r.rect.left) / sc;
     const py = (e.clientY - r.rect.top) / sc;
+    if (r.theta) {
+      const cos = Math.cos(r.theta);
+      const sin = Math.sin(r.theta);
+      const dx = px - r.cx;
+      const dy = py - r.cy;
+      const a = dx * cos + dy * sin; // 로컬 폭축 성분
+      const b = -dx * sin + dy * cos; // 로컬 높이축 성분
+      const w = Math.max(32, Math.round(Math.abs(a) * 2));
+      const h = Math.max(32, Math.round(Math.abs(b) * 2));
+      const x = Math.round(r.cx - w / 2);
+      const y = Math.round(r.cy - h / 2);
+      r.box = { x, y, w, h };
+      setResize({ id: r.id, x, y, w, h });
+      return;
+    }
     const x = Math.round(Math.min(r.ax, px));
     const y = Math.round(Math.min(r.ay, py));
     const w = Math.max(32, Math.round(Math.abs(px - r.ax)));
@@ -572,7 +596,16 @@ export function InteractiveStage({
     const t = el.transform;
     const ax = corner === 0 || corner === 3 ? t.x + t.w : t.x;
     const ay = corner === 0 || corner === 1 ? t.y + t.h : t.y;
-    resizeInfo.current = { id: el.id, ax, ay, rect, box: { x: t.x, y: t.y, w: t.w, h: t.h } };
+    resizeInfo.current = {
+      id: el.id,
+      ax,
+      ay,
+      rect,
+      box: { x: t.x, y: t.y, w: t.w, h: t.h },
+      theta: ((t.rotation ?? 0) * Math.PI) / 180,
+      cx: t.x + t.w / 2,
+      cy: t.y + t.h / 2,
+    };
     setResize({ id: el.id, x: t.x, y: t.y, w: t.w, h: t.h });
     window.addEventListener('pointermove', onResizeMove);
     window.addEventListener('pointerup', onResizeUp);
