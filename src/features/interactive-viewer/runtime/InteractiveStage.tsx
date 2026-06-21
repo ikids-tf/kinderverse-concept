@@ -363,6 +363,17 @@ export function InteractiveStage({
     [doc.behaviors, doc.connections, doc.elements, swapped],
   );
 
+  // sceneEnter 트리거 — 재생 시작 시 자동 실행(인트로 애니메이션·나레이션). 리셋 토큰으로 취소.
+  useEffect(() => {
+    if (preview || mode !== 'play') return;
+    const token = runToken.current;
+    const t = window.setTimeout(() => {
+      if (token !== runToken.current) return;
+      doc.behaviors.filter((b) => b.trigger === 'sceneEnter').forEach((b) => void fireBehavior(b.id));
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [resetNonce, mode, preview, doc.behaviors, fireBehavior]);
+
   // ── 편집: (그룹) 드래그 — 스크린 델타 ÷ scale = 논리 델타, 선택된 모든 요소 함께 이동 ──
   const onWinMove = useCallback((e: PointerEvent) => {
     const d = dragInfo.current;

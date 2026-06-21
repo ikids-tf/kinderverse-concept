@@ -190,14 +190,21 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   const setBehaviorFor = (elId: string, beh: Behavior | null) =>
     mutate(docId, (d) => ({
       ...d,
-      behaviors: [...d.behaviors.filter((b) => !(b.target === elId && b.trigger === 'tap')), ...(beh ? [beh] : [])],
+      behaviors: [...d.behaviors.filter((b) => b.target !== elId), ...(beh ? [beh] : [])],
     }));
 
-  // 조건(when) — 요소의 tap 동작이 '언제 실행될지' 게이트(예: 스위치 켜졌을 때만).
+  // 조건(when) — 요소의 동작이 '언제 실행될지' 게이트(예: 스위치 켜졌을 때만).
   const setConditionFor = (elId: string, cond: Behavior['when'] | null) =>
     mutate(docId, (d) => ({
       ...d,
-      behaviors: d.behaviors.map((b) => (b.target === elId && b.trigger === 'tap' ? { ...b, when: cond ?? undefined } : b)),
+      behaviors: d.behaviors.map((b) => (b.target === elId ? { ...b, when: cond ?? undefined } : b)),
+    }));
+
+  // 트리거 — 이 동작이 '탭하면(tap)' 일어날지 '시작하면(sceneEnter)' 자동 실행될지.
+  const setTriggerFor = (elId: string, trigger: Behavior['trigger']) =>
+    mutate(docId, (d) => ({
+      ...d,
+      behaviors: d.behaviors.map((b) => (b.target === elId ? { ...b, trigger } : b)),
     }));
 
   // 세기(count) — 노드의 공용 카운터를 (없으면) 만들고 그 요소에 +1 동작 부여. 카운팅 놀이용.
@@ -214,7 +221,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
       return {
         ...d,
         counters: nextCounters,
-        behaviors: [...d.behaviors.filter((b) => !(b.target === elId && b.trigger === 'tap')), beh],
+        behaviors: [...d.behaviors.filter((b) => b.target !== elId), beh],
       };
     });
 
@@ -232,7 +239,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
       return {
         ...d,
         flags: nextFlags,
-        behaviors: [...d.behaviors.filter((b) => !(b.target === elId && b.trigger === 'tap')), beh],
+        behaviors: [...d.behaviors.filter((b) => b.target !== elId), beh],
       };
     });
 
@@ -491,6 +498,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
             onAddCount={(label) => addCountFor(selectedElIds[0], label)}
             onAddSetFlag={(value) => addSetFlagFor(selectedElIds[0], value)}
             onSetCondition={(cond) => setConditionFor(selectedElIds[0], cond)}
+            onSetTrigger={(trigger) => setTriggerFor(selectedElIds[0], trigger)}
             onRemoveBg={removeBg}
             onEditText={(t) => editText(selectedElIds[0], t)}
             onRemoveElement={() => removeElement(selectedElIds[0])}

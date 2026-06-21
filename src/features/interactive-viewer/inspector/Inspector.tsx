@@ -5,7 +5,7 @@
  */
 import { useState } from 'react';
 import { newId } from '@/store/boardStore';
-import type { Behavior, Condition, ElementNode, InteractiveNode } from '../schema/interactiveNode';
+import type { Behavior, Condition, ElementNode, InteractiveNode, Trigger } from '../schema/interactiveNode';
 import { ANIMATE_LABELS, ANIMATE_PRESETS } from '../runtime/behaviors';
 
 interface Props {
@@ -16,6 +16,7 @@ interface Props {
   onAddCount: (label: string) => void;
   onAddSetFlag: (value: boolean) => void;
   onSetCondition: (cond: Condition | null) => void;
+  onSetTrigger: (trigger: Trigger) => void;
   onRemoveBg: () => void;
   onEditText: (text: string) => void;
   onRemoveElement: () => void;
@@ -31,9 +32,9 @@ function elementLabel(e: ElementNode, idx: number): string {
 
 type Sub = 'menu' | 'animate' | 'speak' | 'reveal' | 'hide' | 'highlight' | 'move';
 
-export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onAddSetFlag, onSetCondition, onRemoveBg, onEditText, onRemoveElement, busy }: Props) {
+export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onAddSetFlag, onSetCondition, onSetTrigger, onRemoveBg, onEditText, onRemoveElement, busy }: Props) {
   const el = doc.elements.find((e) => e.id === elId);
-  const beh = doc.behaviors.find((b) => b.target === elId && b.trigger === 'tap');
+  const beh = doc.behaviors.find((b) => b.target === elId);
   const [sub, setSub] = useState<Sub>('menu');
   const [speak, setSpeak] = useState('');
   const [targets, setTargets] = useState<string[]>([]);
@@ -119,6 +120,18 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
                 해제
               </button>
             </div>
+            {/* 트리거 — 탭하면 / 시작하면(자동). */}
+            <label className="flex items-center gap-2 px-1 text-[11px] text-fg-2">
+              언제
+              <select
+                value={beh.trigger === 'sceneEnter' ? 'enter' : 'tap'}
+                onChange={(e) => onSetTrigger(e.target.value === 'enter' ? 'sceneEnter' : 'tap')}
+                className="flex-1 rounded-md border border-border bg-surface-2 px-1.5 py-1 text-[12px] font-semibold text-fg focus:border-accent focus:outline-none"
+              >
+                <option value="tap">탭하면</option>
+                <option value="enter">시작하면 (자동)</option>
+              </select>
+            </label>
             {/* 조건(when) — 스위치(플래그)가 있을 때만 노출. 이 동작이 언제 실행될지. */}
             {doc.flags && doc.flags.length > 0 && (
               <label className="flex items-center gap-2 px-1 text-[11px] text-fg-2">
