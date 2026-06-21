@@ -3,13 +3,14 @@
  * 재생(탭→반응/교체)을 한 컴포넌트가 담당. 보드 카드 미리보기·풀스크린·수업 모드
  * 어댑터가 모두 이 컴포넌트를 공유한다(단일 런타임).
  */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AssetRef, Connection, ElementNode, InteractiveNode } from '../schema/interactiveNode';
 import { useStageFit } from './useStageFit';
 import { cancelAnimations, runAnimate } from './behaviors';
 import { ElementSelectionBox } from './ElementSelectionBox';
 import { clampXY } from './geometry';
 import { linkSequence } from '@/board/links';
+import { Icon } from '@/lib/icons';
 import './inode.css';
 
 const COLOR_TOKENS: Record<string, string> = {
@@ -29,6 +30,53 @@ function bgColor(c: string): string {
 
 type Box = { x: number; y: number; w: number; h: number };
 
+/** 글자 요소 — 바운드박스(w×h)에 맞춰 폰트 크기를 자동으로 키우/줄여 채운다(반응형).
+ *  이진 탐색으로 가로·세로 모두 넘치지 않는 최대 폰트를 찾는다. w/h/text 변할 때마다 재계산. */
+function FitText({ text, w, h }: { text: string; w: number; h: number }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const spanRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const span = spanRef.current;
+    if (!box || !span) return;
+    const availW = box.clientWidth;
+    const availH = box.clientHeight;
+    if (availW <= 0 || availH <= 0) return;
+    let lo = 6;
+    let hi = Math.max(8, availH);
+    let best = lo;
+    for (let i = 0; i < 11; i++) {
+      const mid = (lo + hi) / 2;
+      span.style.fontSize = `${mid}px`;
+      const fits = span.scrollWidth <= availW + 0.5 && span.scrollHeight <= availH + 0.5;
+      if (fits) {
+        best = mid;
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    span.style.fontSize = `${best}px`;
+  }, [text, w, h]);
+  return (
+    <div ref={boxRef} className="ic-text">
+      <span ref={spanRef} className="ic-text-span">
+        {text}
+      </span>
+    </div>
+  );
+}
+
+/** 이미지 다운로드(마이보드 downloadImage와 동일) — 파일명 안전화. */
+function downloadImageUrl(src: string, name?: string): void {
+  const a = document.createElement('a');
+  a.href = src;
+  a.download = `${(name || 'kinderverse').replace(/[\\/:*?"<>|]/g, '_')}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 interface Props {
   doc: InteractiveNode;
   mode: 'play' | 'edit';
@@ -38,10 +86,11 @@ interface Props {
   /** 여러 요소를 한 번에(dx,dy) 이동(한 undo 단계). */
   onMoveElements?: (ids: string[], dx: number, dy: number) => void;
   onResizeElement?: (elId: string, patch: Box) => void;
-  onDuplicateElement?: (elId: string) => void;
-  onRemoveElement?: (elId: string) => void;
   /** 글자 더블클릭 인라인 편집 커밋. */
   onEditText?: (elId: string, text: string) => void;
+  /** 이미지 요소 호버 액션 — 마이보드 카드와 동일(편집 모달 / 풀스크린). origin = 화면 사각형. */
+  onEditImage?: (elId: string, origin: { x: number; y: number; w: number; h: number }) => void;
+  onFullscreenImage?: (elId: string, origin: { x: number; y: number; w: number; h: number }) => void;
   /** 포트 드래그로 두 요소 연결(from→to). */
   onAddConnection?: (from: string, to: string) => void;
   /** 연결선 클릭 해제. */
@@ -62,9 +111,9 @@ export function InteractiveStage({
   onSelectEls,
   onMoveElements,
   onResizeElement,
-  onDuplicateElement,
-  onRemoveElement,
   onEditText,
+  onEditImage,
+  onFullscreenImage,
   onAddConnection,
   onRemoveConnection,
   onRelinkConnection,
@@ -380,8 +429,9 @@ export function InteractiveStage({
 
   const renderContent = (el: ElementNode) => {
     if (el.kind === 'text') {
-      const fontPx = Math.max(14, Math.min(el.transform.h * 0.5, el.transform.w * 0.22));
       if (editingTextId === el.id) {
+        // 편집 textarea도 박스에 맞춰 — 대략적 폰트(자동맞춤은 커밋 후 FitText가 처리).
+        const fontPx = Math.max(14, Math.min(el.transform.h * 0.5, (el.transform.w * 0.9) / Math.max(1, (el.text ?? '').length) * 1.6));
         return (
           <textarea
             ref={textEditRef}
@@ -405,11 +455,7 @@ export function InteractiveStage({
           />
         );
       }
-      return (
-        <div className="ic-text" style={{ fontSize: fontPx }}>
-          {el.text}
-        </div>
-      );
+      return <FitText text={el.text ?? ''} w={boxOf(el).w} h={boxOf(el).h} />;
     }
     if (el.kind === 'shape') return <div className="ic-shape" />;
     const src = displaySrc(el);
@@ -625,17 +671,65 @@ export function InteractiveStage({
                     ▶
                   </button>
                 )}
+                {/* 이미지 요소 호버 액션 — 마이보드 카드와 동일(편집·다운로드·풀스크린). */}
+                {mode === 'edit' && !preview && el.kind === 'image' && el.src?.src && (
+                  <div
+                    className="ic-img-actions"
+                    style={{ position: 'absolute', top: 0, right: 0, transform: `scale(${1 / scale})`, transformOrigin: 'top right' }}
+                  >
+                    <button
+                      type="button"
+                      aria-label="이미지 편집"
+                      title="이미지 편집 (배경 제거·요소 지우기)"
+                      className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:bg-accent hover:text-on-accent"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const r = (e.currentTarget.closest('.ic-el') as HTMLElement | null)?.getBoundingClientRect();
+                        onEditImage?.(el.id, r ? { x: r.left, y: r.top, w: r.width, h: r.height } : { x: 0, y: 0, w: 0, h: 0 });
+                      }}
+                    >
+                      <Icon name="edit" size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="다운로드"
+                      title="다운로드"
+                      className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (el.src?.src) downloadImageUrl(el.src.src, el.text);
+                      }}
+                    >
+                      <Icon name="download" size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="크게 보기"
+                      title="크게 보기 (풀스크린)"
+                      className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/95 text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const r = (e.currentTarget.closest('.ic-el') as HTMLElement | null)?.getBoundingClientRect();
+                        onFullscreenImage?.(el.id, r ? { x: r.left, y: r.top, w: r.width, h: r.height } : { x: 0, y: 0, w: 0, h: 0 });
+                      }}
+                    >
+                      <Icon name="present" size={14} />
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
           {singleSel && (
             <ElementSelectionBox
-              el={singleSel}
-              pos={boxOf(singleSel)}
+              box={boxOf(singleSel)}
               scale={scale}
+              radius={singleSel.kind === 'shape' ? 18 : 8}
+              rotation={singleSel.transform.rotation}
               onHandleDown={(e, corner) => onHandleDown(e, singleSel, corner)}
-              onDuplicate={() => onDuplicateElement?.(singleSel.id)}
-              onRemove={() => onRemoveElement?.(singleSel.id)}
             />
           )}
 

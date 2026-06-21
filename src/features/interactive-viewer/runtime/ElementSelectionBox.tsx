@@ -1,105 +1,65 @@
 /**
- * 요소 선택 바운드박스 + 모서리 리사이즈 핸들 — 마이보드 SelectionHandles와 동일 손끝감각.
- * .ic-canvas(논리좌표, scale 적용) 안에 요소와 같은 위치로 렌더하고, 핸들은 1/scale로
- * 역보정해 화면상 ~12px로 일정하게. 리사이즈 계산은 InteractiveStage가 담당(onHandleDown).
+ * 요소 선택 바운드박스 + 모서리 리사이즈 핸들 — 마이보드 선택 링/핸들과 동일 스타일.
+ * 마이보드: 링 = ring-2 ring-accent(오프셋 없이 요소를 감쌈), 핸들 = 원형
+ *   (rounded-full border-2 border-accent bg-surface). 여기선 .ic-canvas(scale 적용) 안이라
+ *   링/핸들 두께·크기를 1/scale로 역보정해 화면상 일정하게 유지한다.
+ * box(라이브)를 그대로 받아 너비/높이까지 실시간 반영 → 리사이즈 시 요소와 함께 즉시 움직인다.
  */
-import type { ElementNode } from '../schema/interactiveNode';
-
 interface Props {
-  el: ElementNode;
-  /** 드래그 중 라이브 위치(있으면 우선). */
-  pos: { x: number; y: number };
+  /** 라이브 박스(드래그/리사이즈 즉시 반영). */
+  box: { x: number; y: number; w: number; h: number };
   scale: number;
+  /** 요소 콘텐츠 라운드(링이 콘텐츠를 따라 둥글게). */
+  radius?: number;
+  rotation?: number;
   onHandleDown: (e: React.PointerEvent, corner: number) => void;
-  onDuplicate: () => void;
-  onRemove: () => void;
 }
 
-export function ElementSelectionBox({ el, pos, scale, onHandleDown, onDuplicate, onRemove }: Props) {
-  const w = el.transform.w;
-  const h = el.transform.h;
-  const sz = 12 / scale;
-  const bw = Math.max(1, 2 / scale);
-  const handle = (cx: number, cy: number, cursor: string): React.CSSProperties => ({
+export function ElementSelectionBox({ box, scale, radius = 8, rotation, onHandleDown }: Props) {
+  const sz = 12 / scale; // 화면상 ~12px(마이보드 h-3 w-3)
+  const bw = Math.max(1, 2 / scale); // 화면상 ~2px(border-2)
+  const handleStyle = (cx: number, cy: number, cursor: string): React.CSSProperties => ({
     position: 'absolute',
     left: cx,
     top: cy,
     width: sz,
     height: sz,
     transform: 'translate(-50%, -50%)',
-    background: '#fff',
-    border: `${bw}px solid var(--ic-coral, #ff9e7d)`,
-    borderRadius: 3,
+    background: 'var(--surface, #fff)',
+    border: `${bw}px solid var(--accent, #f2733e)`,
+    borderRadius: 999, // 원형 — 마이보드 rounded-full
+    boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
     cursor,
     touchAction: 'none',
     zIndex: 5,
+    pointerEvents: 'auto',
   });
   const corners: Array<[number, number, number, string]> = [
     [0, 0, 0, 'nwse-resize'],
-    [1, w, 0, 'nesw-resize'],
-    [2, w, h, 'nwse-resize'],
-    [3, 0, h, 'nesw-resize'],
+    [1, box.w, 0, 'nesw-resize'],
+    [2, box.w, box.h, 'nwse-resize'],
+    [3, 0, box.h, 'nesw-resize'],
   ];
   return (
     <div
       className="ic-selbox"
       style={{
         position: 'absolute',
-        left: pos.x,
-        top: pos.y,
-        width: w,
-        height: h,
-        transform: el.transform.rotation ? `rotate(${el.transform.rotation}deg)` : undefined,
-        outline: `${Math.max(1, 2 / scale)}px solid var(--ic-coral, #ff9e7d)`,
-        outlineOffset: 2 / scale,
+        left: box.x,
+        top: box.y,
+        width: box.w,
+        height: box.h,
+        transform: rotation ? `rotate(${rotation}deg)` : undefined,
+        outline: `${bw}px solid var(--accent, #f2733e)`,
+        outlineOffset: 0,
+        borderRadius: radius,
         pointerEvents: 'none',
         zIndex: 4,
       }}
     >
       {corners.map(([corner, cx, cy, cursor]) => (
-        <div
-          key={corner}
-          style={{ ...handle(cx, cy, cursor), pointerEvents: 'auto' }}
-          onPointerDown={(e) => onHandleDown(e, corner)}
-        />
+        <div key={corner} style={handleStyle(cx, cy, cursor)} onPointerDown={(e) => onHandleDown(e, corner)} />
       ))}
-      {/* 호버 액션 메뉴 — 박스 우상단 위에, 역스케일로 화면 크기 유지(마이보드 호버 메뉴와 동일 위치감). */}
-      <div
-        style={{
-          position: 'absolute',
-          left: w,
-          top: 0,
-          transform: `translate(-100%, -100%) scale(${1 / scale})`,
-          transformOrigin: 'right bottom',
-          display: 'flex',
-          gap: 4,
-          marginBottom: 6,
-          pointerEvents: 'auto',
-        }}
-      >
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDuplicate();
-          }}
-          title="복제 (⌘/Ctrl+D)"
-          className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-surface/95 text-xs text-fg-2 shadow-sm hover:border-accent hover:bg-accent hover:text-on-accent"
-        >
-          ⧉
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          title="삭제 (Delete)"
-          className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-surface/95 text-xs text-fg-2 shadow-sm hover:border-danger hover:bg-danger-soft hover:text-danger"
-        >
-          🗑
-        </button>
-      </div>
     </div>
   );
 }

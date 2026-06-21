@@ -6,7 +6,11 @@
  *    (.kv-inode, InteractiveStage 내부). 재생 모드에선 저작 툴바·인스펙터를 숨긴다.
  */
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { newId } from '@/store/boardStore';
+import { ImageFullscreen } from '@/components/board/ImageFullscreen';
+import { ImageEditorModal } from '@/components/board/ImageEditorModal';
+import type { OriginRect } from '@/components/board/useZoomModal';
 import { useInteractiveStore } from '../store/interactiveStore';
 import { InteractiveStage } from '../runtime/InteractiveStage';
 import { Inspector } from '../inspector/Inspector';
@@ -64,6 +68,9 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   const [resetNonce, setResetNonce] = useState(0);
   const [picker, setPicker] = useState<null | { for: 'add' | 'swap' }>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // 이미지 요소 편집/풀스크린 모달(마이보드 카드와 동일 컴포넌트 재사용).
+  const [editImg, setEditImg] = useState<{ elId: string; src: string; caption: string; origin: OriginRect | null } | null>(null);
+  const [fsImg, setFsImg] = useState<{ src: string; caption: string; origin: OriginRect | null } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -245,6 +252,26 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
     });
   const removeConnection = (id: string) =>
     mutate(docId, (d) => ({ ...d, connections: d.connections.filter((c) => c.id !== id) }));
+
+  // 이미지 요소 호버 액션 — 마이보드 카드의 편집/풀스크린을 그대로(같은 컴포넌트) 재사용.
+  const editImage = (elId: string, origin: { x: number; y: number; w: number; h: number }) => {
+    const el = doc.elements.find((e) => e.id === elId);
+    if (!el?.src?.src) return;
+    setEditImg({ elId, src: el.src.src, caption: el.text ?? '이미지', origin });
+  };
+  const fullscreenImage = (elId: string, origin: { x: number; y: number; w: number; h: number }) => {
+    const el = doc.elements.find((e) => e.id === elId);
+    if (!el?.src?.src) return;
+    setFsImg({ src: el.src.src, caption: el.text ?? '이미지', origin });
+  };
+  // 편집 결과(PNG dataURL) 반영 — assetKind는 보존, src만 교체.
+  const setElementSrc = (elId: string, url: string) =>
+    mutate(docId, (d) => ({
+      ...d,
+      elements: d.elements.map((e) =>
+        e.id === elId && e.src ? { ...e, src: { ...e.src, id: newId('asset'), src: url } } : e,
+      ),
+    }));
   // 떼어내 다른 요소로 옮기기 — 자기연결이면 무시, 이미 같은 쌍이 있으면 이 연결은 제거(중복 방지).
   const relinkConnection = (id: string, from: string, to: string) =>
     mutate(docId, (d) => {
@@ -395,9 +422,9 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
             onSelectEls={setSelectedElIds}
             onMoveElements={moveElements}
             onResizeElement={resizeElement}
-            onDuplicateElement={duplicateElement}
-            onRemoveElement={removeElement}
             onEditText={editText}
+            onEditImage={editImage}
+            onFullscreenImage={fullscreenImage}
             onAddConnection={addConnection}
             onRemoveConnection={removeConnection}
             onRelinkConnection={relinkConnection}
@@ -472,6 +499,29 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
           onPick={onPick}
         />
       )}
+
+      {/* 이미지 편집 모달 — 마이보드와 동일 컴포넌트. target.onApply로 요소 src 교체. */}
+      {editImg &&
+        createPortal(
+          <ImageEditorModal
+            target={{
+              src: editImg.src,
+              caption: editImg.caption,
+              allowExtract: false,
+              onApply: (url) => setElementSrc(editImg.elId, url),
+            }}
+            origin={editImg.origin}
+            onClose={() => setEditImg(null)}
+          />,
+          document.body,
+        )}
+
+      {/* 이미지 풀스크린 — 마이보드와 동일 컴포넌트. */}
+      {fsImg &&
+        createPortal(
+          <ImageFullscreen src={fsImg.src} caption={fsImg.caption} origin={fsImg.origin} onClose={() => setFsImg(null)} />,
+          document.body,
+        )}
     </div>
   );
 }
