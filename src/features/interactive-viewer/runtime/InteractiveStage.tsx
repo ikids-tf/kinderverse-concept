@@ -4,9 +4,10 @@
  * 어댑터가 모두 이 컴포넌트를 공유한다(단일 런타임).
  */
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { AssetRef, Connection, ElementNode, InteractiveNode } from '../schema/interactiveNode';
+import type { AssetRef, Behavior, Condition, Connection, ElementNode, InteractiveNode } from '../schema/interactiveNode';
 import { useStageFit } from './useStageFit';
 import { cancelAnimations, runAnimate } from './behaviors';
+import { speakText, stopSpeaking } from './speak';
 import { ElementSelectionBox } from './ElementSelectionBox';
 import { clampXY } from './geometry';
 import { linkSequence } from '@/board/links';
@@ -142,6 +143,17 @@ export function InteractiveStage({
   const [rotate, setRotate] = useState<{ id: string; deg: number } | null>(null);
   const [swapped, setSwapped] = useState<Record<string, boolean>>({});
   const [dropping, setDropping] = useState(false);
+  // ── 재생 런타임 상태(동작 엔진) — 카운터/플래그/숨김/강조/말풍선 ──
+  const [counters, setCounters] = useState<Record<string, number>>({});
+  const [flags, setFlags] = useState<Record<string, boolean>>({});
+  const [hidden, setHidden] = useState<Record<string, boolean>>({});
+  const [highlighted, setHighlighted] = useState<Record<string, string>>({});
+  const [bubbles, setBubbles] = useState<Record<string, string>>({});
+  // 조건 평가용 동기 미러(체이닝 중 최신값 읽기) + 리셋 토큰(지연/체인 취소).
+  const countersRef = useRef<Record<string, number>>({});
+  const flagsRef = useRef<Record<string, boolean>>({});
+  const runToken = useRef(0);
+  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   // 글자 더블클릭 인라인 편집 / 호버 시 연결 포트(hoverElId) / 연결 드래그 중 임시 선(linking).
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [hoverElId, setHoverElId] = useState<string | null>(null);
@@ -180,14 +192,175 @@ export function InteractiveStage({
   const connsRef = useRef(doc.connections);
   connsRef.current = doc.connections;
 
+  // 재생 리셋/모드 전환 — 애니메이션 취소 + 런타임 상태를 문서 기본값으로 초기화.
   useEffect(() => {
+    runToken.current += 1;
     if (rootRef.current) cancelAnimations(rootRef.current);
+    stopSpeaking();
+    const c: Record<string, number> = {};
+    (doc.counters ?? []).forEach((x) => (c[x.id] = x.initial ?? 0));
+    const f: Record<string, boolean> = {};
+    (doc.flags ?? []).forEach((x) => (f[x.id] = x.initial ?? false));
+    countersRef.current = c;
+    flagsRef.current = f;
+    setCounters(c);
+    setFlags(f);
     setSwapped({});
+    setHidden({});
+    setHighlighted({});
+    setBubbles({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetNonce, mode]);
 
   const tapBehavior = useCallback(
     (elId: string) => doc.behaviors.find((b) => b.target === elId && b.trigger === 'tap'),
     [doc.behaviors],
+  );
+
+  // ── 동작 엔진(스키마 전체 실행) — when 조건 평가 + delay + then 체이닝 + 11종 액션 ──
+  const evalCond = (cond?: Condition): boolean => {
+    if (!cond) return true;
+    if (cond.kind === 'counter') {
+      const v = countersRef.current[cond.counterId] ?? 0;
+      return cond.op === '>=' ? v >= cond.value : cond.op === '==' ? v === cond.value : v < cond.value;
+    }
+    if (cond.kind === 'flag') return (flagsRef.current[cond.flagId] ?? false) === cond.is;
+    if (cond.kind === 'state') return (swapped[cond.target] ? 'swapped' : 'default') === cond.equals;
+    return true;
+  };
+
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+  const applyAction = async (beh: Behavior): Promise<void> => {
+    switch (beh.action) {
+      case 'animate': {
+        const inner = innerRefs.current[beh.target];
+        const a = inner ? runAnimate(inner, beh.params.preset, beh.params.repeat) : null;
+        if (a) await a.finished.catch(() => {});
+        return;
+      }
+      case 'swap':
+        setSwapped((s) => ({ ...s, [beh.target]: !s[beh.target] }));
+        return;
+      case 'reveal':
+        setHidden((h) => {
+          const n = { ...h };
+          beh.params.targets.forEach((t) => (n[t] = false));
+          return n;
+        });
+        return;
+      case 'hide':
+        setHidden((h) => {
+          const n = { ...h };
+          beh.params.targets.forEach((t) => (n[t] = true));
+          return n;
+        });
+        return;
+      case 'highlight': {
+        const color = beh.params.color || 'var(--ic-coral)';
+        setHighlighted((h) => {
+          const n = { ...h };
+          beh.params.targets.forEach((t) => (n[t] = color));
+          return n;
+        });
+        const token = runToken.current;
+        window.setTimeout(() => {
+          if (token !== runToken.current) return;
+          setHighlighted((h) => {
+            const n = { ...h };
+            beh.params.targets.forEach((t) => delete n[t]);
+            return n;
+          });
+        }, 1500);
+        return;
+      }
+      case 'count': {
+        const id = beh.params.counterId;
+        const next = (countersRef.current[id] ?? 0) + (beh.params.by ?? 1);
+        countersRef.current = { ...countersRef.current, [id]: next };
+        setCounters((c) => ({ ...c, [id]: next }));
+        return;
+      }
+      case 'setFlag':
+        flagsRef.current = { ...flagsRef.current, [beh.params.flagId]: beh.params.value };
+        setFlags((f) => ({ ...f, [beh.params.flagId]: beh.params.value }));
+        return;
+      case 'speak': {
+        const text = beh.params.text;
+        setBubbles((b) => ({ ...b, [beh.target]: text }));
+        speakText(text);
+        const token = runToken.current;
+        await sleep(Math.min(5000, Math.max(1600, text.length * 130)));
+        if (token === runToken.current)
+          setBubbles((b) => {
+            const n = { ...b };
+            delete n[beh.target];
+            return n;
+          });
+        return;
+      }
+      case 'playVideo': {
+        const v = videoRefs.current[beh.target];
+        if (v) {
+          try {
+            v.currentTime = 0;
+            await v.play();
+          } catch {
+            /* autoplay 정책 차단 — 무시 */
+          }
+        }
+        return;
+      }
+      case 'moveAlongPath': {
+        const conn = doc.connections.find((c) => c.id === beh.params.connectionId);
+        const inner = innerRefs.current[beh.target];
+        const me = doc.elements.find((e) => e.id === beh.target);
+        if (conn && inner && me) {
+          const otherId = conn.from === beh.target ? conn.to : conn.from;
+          const other = doc.elements.find((e) => e.id === otherId);
+          if (other) {
+            const dx = other.transform.x + other.transform.w / 2 - (me.transform.x + me.transform.w / 2);
+            const dy = other.transform.y + other.transform.h / 2 - (me.transform.y + me.transform.h / 2);
+            const dur = 1200 / (beh.params.speed || 1);
+            const iters = beh.params.repeat && beh.params.repeat > 0 ? beh.params.repeat : 1;
+            const a = inner.animate(
+              [{ transform: 'translate(0,0)' }, { transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0,0)' }],
+              { duration: dur, iterations: iters, easing: 'ease-in-out' },
+            );
+            await a.finished.catch(() => {});
+          }
+        }
+        return;
+      }
+      case 'goToScene':
+        // 장면 전환 — 장면 개념 미도입(P2). 충돌 없이 무시.
+        return;
+      default:
+        return;
+    }
+  };
+
+  /** 동작 실행(체인 진입점) — when 평가 → delay → 액션 → then[] 순차 실행. 리셋 시 취소. */
+  const fireBehavior = useCallback(
+    async (behaviorId: string, depth = 0) => {
+      if (depth > 24) return;
+      const token = runToken.current;
+      const beh = doc.behaviors.find((b) => b.id === behaviorId);
+      if (!beh || !evalCond(beh.when)) return;
+      if (beh.delay && beh.delay > 0) {
+        await sleep(beh.delay);
+        if (token !== runToken.current) return;
+      }
+      await applyAction(beh);
+      if (token !== runToken.current) return;
+      for (const t of beh.then ?? []) {
+        if (token !== runToken.current) return;
+        await fireBehavior(t, depth + 1);
+      }
+    },
+    // applyAction/evalCond는 최신 doc/state 클로저 — doc.behaviors 바뀔 때만 갱신.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc.behaviors, doc.connections, doc.elements, swapped],
   );
 
   // ── 편집: (그룹) 드래그 — 스크린 델타 ÷ scale = 논리 델타, 선택된 모든 요소 함께 이동 ──
@@ -412,16 +585,10 @@ export function InteractiveStage({
     window.addEventListener('pointerup', onRotateUp);
   };
 
-  /** 동작 실행 — 재생 탭과 편집 미리보기(▶)가 공유. animate=재생, swap=토글. */
+  /** 동작 실행 — 재생 탭과 편집 미리보기(▶)가 공유. 탭 동작을 엔진으로 실행(체인/조건 포함). */
   const runBehavior = (el: ElementNode) => {
     const beh = tapBehavior(el.id);
-    if (!beh) return;
-    if (beh.action === 'animate') {
-      const inner = innerRefs.current[el.id];
-      if (inner) runAnimate(inner, beh.params.preset, beh.params.repeat);
-    } else if (beh.action === 'swap') {
-      setSwapped((s) => ({ ...s, [el.id]: !s[el.id] }));
-    }
+    if (beh) void fireBehavior(beh.id);
   };
 
   const onElClick = (e: React.MouseEvent, el: ElementNode) => {
@@ -514,8 +681,21 @@ export function InteractiveStage({
     const swapBeh = doc.behaviors.find((b) => b.target === el.id && b.action === 'swap');
     const asVideo = el.kind === 'video' || (!!swapped[el.id] && swapBeh?.action === 'swap' && swapBeh.params.mode === 'video');
     if (asVideo) {
-      return <video src={src} playsInline controls={mode === 'play' && !preview} autoPlay={mode === 'play' && !preview} muted />;
+      // 🔴 자동재생 금지 — playVideo 동작/컨트롤로만 재생(아이 대면 화면이 멋대로 시작되지 않게).
+      return (
+        <video
+          ref={(n) => {
+            videoRefs.current[el.id] = n;
+          }}
+          src={src}
+          playsInline
+          controls={mode === 'play' && !preview}
+          muted
+          loop={false}
+        />
+      );
     }
+    // sprite는 별도 렌더가 없으므로 이미지로 표시(빈 화면 방지).
     return <img src={src} alt={el.text ?? ''} draggable={false} />;
   };
 
@@ -675,6 +855,9 @@ export function InteractiveStage({
           {sorted.map((el) => {
             const b = boxOf(el);
             const playable = mode === 'play' && !preview && !!tapBehavior(el.id);
+            // 숨김(hide/reveal)은 재생에서만 반영 — 편집에선 항상 보여 교사가 다룰 수 있게.
+            const isHidden = mode === 'play' && !preview && !!hidden[el.id];
+            const hl = highlighted[el.id];
             const cls = ['ic-el'];
             // 다중 선택일 때만 외곽선(단일은 SelectionBox가 그린다).
             if (!preview && mode === 'edit' && selectedElIds.length > 1 && selSet.has(el.id)) cls.push('is-selected');
@@ -691,6 +874,7 @@ export function InteractiveStage({
                   transform: rotDeg(el) ? `rotate(${rotDeg(el)}deg)` : undefined,
                   transformOrigin: 'center center',
                   zIndex: el.transform.z,
+                  visibility: isHidden ? 'hidden' : undefined,
                 }}
                 onPointerDown={(e) => onElPointerDown(e, el)}
                 onClick={(e) => onElClick(e, el)}
@@ -701,10 +885,22 @@ export function InteractiveStage({
                   ref={(n) => {
                     innerRefs.current[el.id] = n;
                   }}
-                  style={{ width: '100%', height: '100%' }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    outline: hl ? `${4 / scale}px solid ${hl}` : undefined,
+                    outlineOffset: hl ? `${2 / scale}px` : undefined,
+                    borderRadius: hl ? 12 : undefined,
+                  }}
                 >
                   {renderContent(el)}
                 </div>
+                {/* 말풍선(speak) — 재생 중 요소 위에 표시. */}
+                {bubbles[el.id] && (
+                  <div className="ic-bubble" style={{ transform: `translate(-50%, -100%) scale(${1 / scale})` }}>
+                    {bubbles[el.id]}
+                  </div>
+                )}
                 {/* 연결 순번 라벨(연결된 요소만) — 마이보드 규칙. */}
                 {showLinkUi && linkLabels.has(el.id) && (
                   <span className="ic-seq" style={{ transform: `translate(-50%, -50%) scale(${1 / scale})` }}>
@@ -778,6 +974,25 @@ export function InteractiveStage({
               </div>
             );
           })}
+
+          {/* 카운터 표시(count 동작) — display 좌표(없으면 좌상단 세로 스택). 재생/미리보기에서. */}
+          {!preview &&
+            (doc.counters ?? []).map((cn, i) => {
+              const val = counters[cn.id] ?? cn.initial ?? 0;
+              const dx = cn.display?.x ?? 24;
+              const dy = cn.display?.y ?? 24 + i * 64;
+              return (
+                <div
+                  key={cn.id}
+                  className="ic-counter"
+                  style={{ left: dx, top: dy, transform: `scale(${1 / scale})`, transformOrigin: 'left top' }}
+                >
+                  {cn.label ? <span className="ic-counter-label">{cn.label}</span> : null}
+                  <span className="ic-counter-val">{val}</span>
+                </div>
+              );
+            })}
+
           {singleSel && (
             <ElementSelectionBox
               box={boxOf(singleSel)}
