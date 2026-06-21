@@ -67,7 +67,8 @@ export type IconName =
   | 'eyeOff'
   | 'book'
   | 'repeat'
-  | 'reset';
+  | 'reset'
+  | 'circle';
 
 const ICON_PATHS: Record<IconName, string> = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
@@ -136,6 +137,7 @@ const ICON_PATHS: Record<IconName, string> = {
   book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
   repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
   reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  circle: '<circle cx="12" cy="12" r="8"/>',
 };
 
 export interface IconProps {

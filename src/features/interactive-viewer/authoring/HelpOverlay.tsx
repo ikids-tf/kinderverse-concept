@@ -3,7 +3,8 @@
  * 레시피를 단계별로 제공하고, 아래에 동작·트리거·연결·단축키 참고를 둔다.
  * 저작 크롬 → Milray 토큰. 풀스크린 오버레이 위 모달.
  */
-import { Icon } from '@/lib/icons';
+import { Fragment } from 'react';
+import { Icon, type IconName } from '@/lib/icons';
 
 interface Props {
   onClose: () => void;
@@ -15,6 +16,29 @@ const MOD = isMac ? '⌘' : 'Ctrl';
 const Kbd = ({ children }: { children: React.ReactNode }) => (
   <kbd className="rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] font-bold text-fg-2 shadow-sm">{children}</kbd>
 );
+
+/* 도움말 본문의 이모지를 본 UI와 동일한 심플 아이콘(@/lib/icons)으로 인라인 렌더한다. */
+const EMOJI: Record<string, IconName> = {
+  '📷': 'gallery', '🗂': 'folder', '⬛': 'square', '○': 'circle', '↩': 'undo', '↪': 'redo',
+  '📖': 'book', '🧩': 'copy', '❔': 'help', '▶': 'play', '💬': 'message', '✨': 'sparkle',
+  '🔄': 'repeat', '🙈': 'eyeOff', '👁': 'observation', '🌟': 'star', '🔢': 'hash', '🔌': 'toggle',
+  '➡': 'arrowRight', '🎞': 'video', '👆': 'cursor', '✋': 'cursor', '🏫': 'present', '✅': 'check',
+  '🧭': 'search', '🎒': 'sparkle', '📌': 'board',
+};
+const EMOJI_RE = new RegExp('(' + Object.keys(EMOJI).join('|') + ')', 'g');
+
+/** 인라인 아이콘 — 글줄 안에서 텍스트와 함께. */
+const II = ({ name }: { name: IconName }) => (
+  <span className="mx-0.5 inline-flex translate-y-[2px] text-fg-2"><Icon name={name} size={13} /></span>
+);
+
+/** 문자열 안의 이모지를 아이콘으로 치환해 렌더(변형 셀렉터 ️ 무시). */
+function ri(text: string): React.ReactNode {
+  return text
+    .replace(/️/g, '')
+    .split(EMOJI_RE)
+    .map((p, i) => (EMOJI[p] ? <II key={i} name={EMOJI[p]} /> : <Fragment key={i}>{p}</Fragment>));
+}
 
 /* ── 도구 위치 안내(레시피 따라가기 전에) ── */
 const TOOL_MAP: Array<[string, string]> = [
@@ -330,10 +354,13 @@ const SHORTCUTS: Array<[React.ReactNode, string]> = [
   [<><Kbd>Esc</Kbd></>, '선택 해제'],
 ];
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ icon, title, children }: { icon?: IconName; title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-extrabold text-fg">{title}</h3>
+      <h3 className="inline-flex items-center gap-1.5 text-sm font-extrabold text-fg">
+        {icon && <Icon name={icon} size={15} />}
+        {title}
+      </h3>
       {children}
     </section>
   );
@@ -355,31 +382,31 @@ export function HelpOverlay({ onClose }: Props) {
             <ol className="flex flex-col gap-1.5 text-sm text-fg-2">
               <li>왼쪽 도구로 <b className="text-fg">사진·글자·도형</b>을 넣어요.</li>
               <li>요소를 <b className="text-fg">선택</b>하면 오른쪽 ‘탭하면…’에서 동작을 골라요(‘언제’로 트리거도 바꿔요).</li>
-              <li><b className="text-fg">▶ 재생</b>으로 아이처럼 놀아 보며 확인해요.</li>
+              <li><b className="inline-flex items-center gap-1 text-fg"><Icon name="play" size={13} /> 재생</b>으로 아이처럼 놀아 보며 확인해요.</li>
             </ol>
           </Section>
 
           {/* 도구 위치 안내 — 레시피의 버튼이 어디 있는지 먼저. */}
-          <Section title="🧭 도구는 어디에?">
+          <Section icon="search" title="도구는 어디에?">
             <div className="flex flex-col gap-1.5">
               {TOOL_MAP.map(([where, what]) => (
                 <div key={where} className="flex flex-col gap-0.5 rounded-lg bg-surface-2 px-3 py-1.5 text-[12.5px] text-fg-2 sm:flex-row sm:gap-2">
                   <b className="whitespace-nowrap text-fg">{where}</b>
-                  <span>{what}</span>
+                  <span>{ri(what)}</span>
                 </div>
               ))}
             </div>
           </Section>
 
           {/* ── 실전 활용 레시피(중심) — 모든 단계가 실제 버튼·순서대로 ── */}
-          <Section title="🎒 실전 활용 — 따라 만들기">
-            <p className="-mt-1 text-[12px] text-fg-muted">아래 순서대로 버튼만 따라 누르면 완성돼요. ▶ 재생으로 바로 확인!</p>
+          <Section icon="sparkle" title="실전 활용 — 따라 만들기">
+            <p className="-mt-1 text-[12px] text-fg-muted">{ri('아래 순서대로 버튼만 따라 누르면 완성돼요. ▶ 재생으로 바로 확인!')}</p>
             <div className="flex flex-col gap-4">
               {RECIPE_GROUPS.map((g) => (
                 <div key={g.cat} className="flex flex-col gap-2 rounded-2xl border border-border bg-surface-2/60 p-3">
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-extrabold text-fg">{g.cat}</span>
-                    <span className="text-[12px] text-fg-muted">{g.note}</span>
+                    <span className="inline-flex items-center gap-1.5 text-sm font-extrabold text-fg">{ri(g.cat)}</span>
+                    <span className="text-[12px] text-fg-muted">{ri(g.note)}</span>
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {g.items.map((it) => (
@@ -390,7 +417,7 @@ export function HelpOverlay({ onClose }: Props) {
                         </div>
                         <ol className="ml-4 list-decimal text-[12.5px] leading-relaxed text-fg-2">
                           {it.steps.map((s, i) => (
-                            <li key={i}>{s}</li>
+                            <li key={i}>{ri(s)}</li>
                           ))}
                         </ol>
                       </div>
@@ -402,17 +429,17 @@ export function HelpOverlay({ onClose }: Props) {
           </Section>
 
           {/* ── 기능 참고 ── */}
-          <Section title="📌 동작 한눈에">
+          <Section icon="sparkle" title="동작 한눈에">
             <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
               {ACTIONS.map(([name, desc]) => (
                 <div key={name} className="rounded-lg bg-surface-2 px-3 py-1.5 text-[13px] text-fg-2">
-                  <b className="text-fg">{name}</b> — {desc}
+                  <b className="inline-flex items-center gap-1 text-fg">{ri(name)}</b> — {desc}
                 </div>
               ))}
             </div>
           </Section>
 
-          <Section title="📌 트리거(언제 일어날까)">
+          <Section icon="cursor" title="트리거(언제 일어날까)">
             <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
               {TRIGGERS.map(([name, desc]) => (
                 <div key={name} className="rounded-lg bg-surface-2 px-3 py-1.5 text-[13px] text-fg-2">
@@ -423,15 +450,15 @@ export function HelpOverlay({ onClose }: Props) {
             <p className="px-1 text-[12px] text-fg-muted">‘완료 후’ 트리거와 실행 조건(스위치)은 동작 카드에서 함께 설정해요.</p>
           </Section>
 
-          <Section title="📌 연결 · 묶어서 복제">
+          <Section icon="link" title="연결 · 묶어서 복제">
             <ul className="flex flex-col gap-1.5 text-sm text-fg-2">
               <li>요소에 마우스를 올리면 <b className="text-fg">양옆 동그라미(포트)</b> → 끌어서 다른 요소에 놓으면 연결(번호=순서).</li>
               <li>연결 동그라미를 빈 곳에 끌면 해제, 선을 클릭해도 해제.</li>
-              <li>여러 개 선택 후 <b className="text-fg">🧩 묶어서 복제</b> = 동작·연결까지 통째 복제.</li>
+              <li>여러 개 선택 후 <b className="inline-flex items-center gap-1 text-fg"><Icon name="copy" size={13} /> 묶어서 복제</b> = 동작·연결까지 통째 복제.</li>
             </ul>
           </Section>
 
-          <Section title="📌 단축키">
+          <Section icon="settings" title="단축키">
             <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
               {SHORTCUTS.map(([keys, desc], i) => (
                 <div key={i} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-1.5 text-sm text-fg-2">
