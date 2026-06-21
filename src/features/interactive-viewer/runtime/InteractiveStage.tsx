@@ -10,7 +10,7 @@ import { cancelAnimations, runAnimate } from './behaviors';
 import { speakText, stopSpeaking } from './speak';
 import { ElementSelectionBox } from './ElementSelectionBox';
 import { clampXY } from './geometry';
-import { linkSequence } from '@/board/links';
+import { linkSequence, compareLabels } from '@/board/links';
 import { Icon } from '@/lib/icons';
 import './inode.css';
 
@@ -203,6 +203,7 @@ export function InteractiveStage({
     (doc.flags ?? []).forEach((x) => (f[x.id] = x.initial ?? false));
     countersRef.current = c;
     flagsRef.current = f;
+    seqIndexRef.current = 0;
     setCounters(c);
     setFlags(f);
     setSwapped({});
@@ -212,10 +213,21 @@ export function InteractiveStage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetNonce, mode]);
 
-  const tapBehavior = useCallback(
-    (elId: string) => doc.behaviors.find((b) => b.target === elId && b.trigger === 'tap'),
+  /** 탭으로 발화하는 동작(탭 또는 순서대로 탭) — 재생 클릭/▶/손끝 표시 대상. */
+  const tapLike = useCallback(
+    (elId: string) => doc.behaviors.find((b) => b.target === elId && (b.trigger === 'tap' || b.trigger === 'sequenceTap')),
     [doc.behaviors],
   );
+  /** 순서대로 탭(sequenceTap) 차례 — 연결 순번 라벨 순으로 정렬한 요소 목록. */
+  const seqOrder = useMemo(
+    () =>
+      doc.behaviors
+        .filter((b) => b.trigger === 'sequenceTap')
+        .map((b) => b.target)
+        .sort((a, b) => compareLabels(linkLabels.get(a) ?? '999', linkLabels.get(b) ?? '999')),
+    [doc.behaviors, linkLabels],
+  );
+  const seqIndexRef = useRef(0);
 
   // ── 동작 엔진(스키마 전체 실행) — when 조건 평가 + delay + then 체이닝 + 11종 액션 ──
   const evalCond = (cond?: Condition): boolean => {
@@ -629,17 +641,29 @@ export function InteractiveStage({
     window.addEventListener('pointerup', onRotateUp);
   };
 
-  /** 동작 실행 — 재생 탭과 편집 미리보기(▶)가 공유. 탭 동작을 엔진으로 실행(체인/조건 포함). */
+  /** 동작 실행 — 편집 미리보기(▶) 공유. 요소의 탭/순서 동작을 엔진으로 실행(체인/조건 포함). */
   const runBehavior = (el: ElementNode) => {
-    const beh = tapBehavior(el.id);
+    const beh = tapLike(el.id);
     if (beh) void fireBehavior(beh.id);
   };
 
   const onElClick = (e: React.MouseEvent, el: ElementNode) => {
     if (preview || mode !== 'play') return;
-    if (!tapBehavior(el.id)) return;
+    const beh = tapLike(el.id);
+    if (!beh) return;
     e.stopPropagation();
-    runBehavior(el);
+    if (beh.trigger === 'sequenceTap') {
+      // 순서대로 탭 — 지금 차례의 요소만 발화하고 다음 차례로. 틀리면 흔들흔들 피드백.
+      if (seqOrder[seqIndexRef.current] === el.id) {
+        seqIndexRef.current += 1;
+        void fireBehavior(beh.id);
+      } else {
+        const inner = innerRefs.current[el.id];
+        if (inner) runAnimate(inner, 'shake');
+      }
+      return;
+    }
+    void fireBehavior(beh.id);
   };
 
   // ── 편집: 글자 더블클릭 → 인라인 편집 ──
@@ -898,7 +922,7 @@ export function InteractiveStage({
           )}
           {sorted.map((el) => {
             const b = boxOf(el);
-            const playable = mode === 'play' && !preview && !!tapBehavior(el.id);
+            const playable = mode === 'play' && !preview && !!tapLike(el.id);
             // 숨김(hide/reveal)은 재생에서만 반영 — 편집에선 항상 보여 교사가 다룰 수 있게.
             const isHidden = mode === 'play' && !preview && !!hidden[el.id];
             const hl = highlighted[el.id];
@@ -952,7 +976,7 @@ export function InteractiveStage({
                   </span>
                 )}
                 {/* 편집 모드 — 동작 있는 요소는 호버 시 가운데 ▶로 동작을 미리보기(확인용). */}
-                {mode === 'edit' && !preview && tapBehavior(el.id) && (
+                {mode === 'edit' && !preview && tapLike(el.id) && (
                   <button
                     className="ic-preview-play"
                     title="동작 미리보기"

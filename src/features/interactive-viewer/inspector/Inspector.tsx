@@ -127,12 +127,13 @@ export function Inspector({ doc, elId, onSetBehavior, onAddSwap, onAddCount, onA
             <label className="flex items-center gap-2 px-1 text-[11px] text-fg-2">
               언제
               <select
-                value={beh.trigger === 'sceneEnter' ? 'enter' : 'tap'}
-                onChange={(e) => onSetTrigger(e.target.value === 'enter' ? 'sceneEnter' : 'tap')}
+                value={beh.trigger === 'sceneEnter' ? 'enter' : beh.trigger === 'sequenceTap' ? 'seq' : 'tap'}
+                onChange={(e) => onSetTrigger(e.target.value === 'enter' ? 'sceneEnter' : e.target.value === 'seq' ? 'sequenceTap' : 'tap')}
                 className="flex-1 rounded-md border border-border bg-surface-2 px-1.5 py-1 text-[12px] font-semibold text-fg focus:border-accent focus:outline-none"
               >
                 <option value="tap">탭하면</option>
                 <option value="enter">시작하면 (자동)</option>
+                <option value="seq">순서대로 탭 (연결 순서)</option>
               </select>
             </label>
             {/* 조건(when) — 스위치(플래그)가 있을 때만 노출. 이 동작이 언제 실행될지. */}
