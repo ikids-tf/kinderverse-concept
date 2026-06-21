@@ -339,6 +339,16 @@ export function SlidesViewerApp() {
   const patchSlide = useCallback((slideIdx: number, fn: (s: Slide) => Slide) => {
     setDeck((d) => ({ ...d, slides: d.slides.map((s, i) => (i === slideIdx ? fn(s) : s)) }));
   }, []);
+
+  // 인터렉티브 슬라이드 — InteractiveSlideLayout의 picker가 고른 노드를 현재 슬라이드 nodeId로 반영.
+  useEffect(() => {
+    const onPick = (e: Event) => {
+      const id = (e as CustomEvent).detail?.nodeId as string | undefined;
+      patchSlide(idx, (s) => ({ ...s, nodeId: id || undefined }));
+    };
+    window.addEventListener('kv:inode-slide-pick', onPick as EventListener);
+    return () => window.removeEventListener('kv:inode-slide-pick', onPick as EventListener);
+  }, [idx, patchSlide]);
   const handlers: EditHandlers = useMemo(
     () => ({
       onText: (bi, text) =>

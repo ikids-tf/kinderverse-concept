@@ -23,6 +23,7 @@ import {
 } from '../schema/deckspec';
 import { SlideImage } from './SlideImage';
 import { SlideChart } from './SlideChart';
+import { InteractiveSlideLayout } from './InteractiveSlideLayout';
 
 /** 자유 배치 — pos가 있으면 흐름에서 빼내 캔버스(%) 절대 좌표로(+높이·회전). */
 function posStyle(pos?: BlockPos): CSSProperties | undefined {
@@ -488,6 +489,7 @@ export const LAYOUT_COMPONENTS: Record<Layout, FC<LayoutProps>> = {
   'photo-grid': PhotoGridLayout,
   quote: QuoteLayout,
   chart: ChartLayout,
+  interactive: InteractiveSlideLayout,
 };
 
 /* ── 레이아웃 선택 메뉴용 메타(라벨 + 16:9 미니 와이어프레임) ───────────────── */
@@ -514,4 +516,5 @@ export const LAYOUT_META: { id: Layout; label: string; icon: ReactNode }[] = [
   { id: 'photo-grid', label: '사진', icon: mini(<>{bar(10, 8, 20, 9, 'var(--surface-3)')}{bar(34, 8, 20, 9, 'var(--surface-3)')}{bar(10, 20, 20, 9, 'var(--surface-3)')}{bar(34, 20, 20, 9, 'var(--surface-3)')}</>) },
   { id: 'quote', label: '인용', icon: mini(<>{bar(12, 11, 40, 4)}{bar(12, 19, 30, 4)}{bar(12, 28, 14, 2.5, 'var(--accent)')}</>) },
   { id: 'chart', label: '차트', icon: mini(<>{bar(12, 22, 6, 7, 'var(--accent)')}{bar(22, 16, 6, 13, 'var(--fg-muted)')}{bar(32, 12, 6, 17, 'var(--accent)')}{bar(42, 19, 6, 10, 'var(--fg-muted)')}</>) },
+  { id: 'interactive', label: '인터렉티브', icon: mini(<>{bar(14, 10, 36, 16, 'var(--surface-3)')}<circle cx="32" cy="18" r="4" fill="var(--accent)" />{bar(26, 29, 12, 2.5, 'var(--accent)')}</>) },
 ];

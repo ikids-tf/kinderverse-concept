@@ -36,6 +36,7 @@ export const LAYOUTS = [
   'photo-grid',
   'quote',
   'chart',
+  'interactive',
 ] as const;
 export type Layout = (typeof LAYOUTS)[number];
 
@@ -122,6 +123,8 @@ export interface Slide {
   accentRole?: AccentRole;
   /** 교사용 진행 멘트(선택). 슬라이드에는 렌더되지 않음. */
   speakerNote?: string;
+  /** layout==='interactive' 전용 — 재생할 인터렉티브 노드 docId(localStorage 'kv:inodes:v1'). 수업 모드. */
+  nodeId?: string;
 }
 
 export interface DeckSpec {
@@ -213,6 +216,9 @@ export function defaultBlocks(layout: Layout): Block[] {
         },
         { type: 'caption', text: '꾸준히 늘어난 우리 반 출석' },
       ];
+    case 'interactive':
+      // 인터렉티브 슬라이드는 블록이 없다 — 노드(nodeId) 하나를 전체로 재생.
+      return [];
     default:
       return [{ type: 'title', text: '제목' }];
   }
@@ -292,7 +298,8 @@ export function validateDeck(deck: unknown): ValidationResult {
     d.slides.forEach((s, i) => {
       if (!s || typeof s !== 'object') return errors.push(`slide[${i}]가 객체가 아닙니다`);
       if (!(LAYOUTS as readonly string[]).includes(s.layout)) errors.push(`slide[${i}].layout 무효: ${String(s.layout)}`);
-      if (!Array.isArray(s.blocks) || s.blocks.length < 1) errors.push(`slide[${i}].blocks가 비어 있습니다`);
+      // 인터렉티브 슬라이드는 블록이 없다(노드 재생) — 블록 요건 면제.
+      if (s.layout !== 'interactive' && (!Array.isArray(s.blocks) || s.blocks.length < 1)) errors.push(`slide[${i}].blocks가 비어 있습니다`);
     });
   }
   return { ok: errors.length === 0, errors };

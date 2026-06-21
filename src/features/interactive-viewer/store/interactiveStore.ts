@@ -41,6 +41,12 @@ export function loadInteractiveNode(id: string): InteractiveNode | null {
   return r.success ? r.data : null;
 }
 
+/** 저장된 모든 인터렉티브 노드 목록(수업 슬라이드 picker용) — id·제목·요소 수. */
+export function listInteractiveNodes(): Array<{ id: string; title: string; count: number }> {
+  const all = readAll();
+  return Object.values(all).map((d) => ({ id: d.id, title: d.title || '인터랙티브', count: (d.elements ?? []).length }));
+}
+
 /** 문서를 localStorage에 저장(저장 직전 엄격 파싱으로 무결성 보장). */
 export function saveInteractiveNode(doc: InteractiveNode): void {
   const all = readAll();
