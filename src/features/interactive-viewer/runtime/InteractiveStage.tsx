@@ -154,6 +154,9 @@ export function InteractiveStage({
   const [bubbles, setBubbles] = useState<Record<string, string>>({});
   // 숨바꼭질/추측 연출 — peek 플래그가 있으면 대상 아랫부분을 '풀 속에 잠긴 듯' 가리고, 탭하면 전신 공개.
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  // 탭/찾기 이펙트 — 작은 파티클 버스트(과하지 않게, 자동 소멸).
+  const [bursts, setBursts] = useState<Array<{ id: number; x: number; y: number }>>([]);
+  const burstSeq = useRef(0);
   // 이야기(story) 재생 — 현재 단계(없으면 null). 나레이션 바 + 다음/이전.
   const [storyIdx, setStoryIdx] = useState<number | null>(null);
   // 조건 평가용 동기 미러(체이닝 중 최신값 읽기) + 리셋 토큰(지연/체인 취소).
@@ -246,6 +249,7 @@ export function InteractiveStage({
     setHighlighted({});
     setBubbles({});
     setRevealed({});
+    setBursts([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetNonce, mode]);
 
@@ -788,6 +792,14 @@ export function InteractiveStage({
     if (beh) void fireBehavior(beh.id);
   };
 
+  // 작은 파티클 버스트를 (cx,cy)에 띄운다(자동 소멸). prefers-reduced-motion이면 생략.
+  const fireBurst = (cx: number, cy: number) => {
+    if (typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const id = (burstSeq.current += 1);
+    setBursts((b) => [...b, { id, x: cx, y: cy }]);
+    window.setTimeout(() => setBursts((b) => b.filter((p) => p.id !== id)), 700);
+  };
+
   const onElClick = (e: React.MouseEvent, el: ElementNode) => {
     if (preview || mode !== 'play') return;
     const beh = tapLike(el.id);
@@ -799,6 +811,7 @@ export function InteractiveStage({
         seqIndexRef.current += 1;
         void fireBehavior(beh.id);
         if (peekMode && peekIds.has(el.id)) setRevealed((r) => ({ ...r, [el.id]: true })); // 탭 → 전신 공개
+        { const c = boxOf(el); fireBurst(c.x + c.w / 2, c.y + c.h / 2); } // 찾기 이펙트
         if (seqIndexRef.current >= seqOrder.length && seqOrder.length > 0) fireComplete(); // 순서 게임 완료
       } else {
         const inner = innerRefs.current[el.id];
@@ -808,6 +821,10 @@ export function InteractiveStage({
     }
     void fireBehavior(beh.id);
     if (peekMode && peekIds.has(el.id)) setRevealed((r) => ({ ...r, [el.id]: true })); // 탭 → 전신 공개
+    if (!(beh.action === 'animate' && beh.params.preset === 'shake')) {
+      const c = boxOf(el);
+      fireBurst(c.x + c.w / 2, c.y + c.h / 2); // 클릭 이펙트(오답 흔들기엔 생략)
+    }
   };
 
   // ── 편집: 글자 더블클릭 → 인라인 편집 ──
@@ -1075,7 +1092,7 @@ export function InteractiveStage({
             // 숨바꼭질 — 재생 중 아직 안 누른 peek 대상은 아랫부분을 그라데이션으로 가린다(풀 속에 숨은 듯).
             const peekMaskCss =
               peekMode && mode === 'play' && !preview && peekIds.has(el.id) && !revealed[el.id]
-                ? 'linear-gradient(to top, transparent 4%, rgba(0,0,0,0.16) 32%, #000 62%)'
+                ? 'linear-gradient(to top, transparent 3%, rgba(0,0,0,0.12) 38%, #000 70%)'
                 : undefined;
             const cls = ['ic-el'];
             // 다중 선택일 때만 외곽선(단일은 SelectionBox가 그린다).
@@ -1220,6 +1237,22 @@ export function InteractiveStage({
                 </div>
               );
             })}
+
+          {bursts.map((bt) => (
+            <div key={bt.id} className="ic-burst" style={{ left: bt.x, top: bt.y }}>
+              {Array.from({ length: 10 }).map((_, i) => {
+                const ang = (i / 10) * Math.PI * 2;
+                const dist = 34 + (i % 3) * 14;
+                return (
+                  <span
+                    key={i}
+                    className="ic-spark"
+                    style={{ ['--dx']: `${Math.round(Math.cos(ang) * dist)}px`, ['--dy']: `${Math.round(Math.sin(ang) * dist)}px`, background: i % 2 ? 'var(--ic-coral)' : '#fff' } as React.CSSProperties}
+                  />
+                );
+              })}
+            </div>
+          ))}
 
           {singleSel && (
             <ElementSelectionBox

@@ -245,9 +245,10 @@ export async function composeInteractiveNode(
       const artBg = readArtBackground(raw);
       delete (raw as { art?: unknown }).art;
       forceShape(raw, docId, prompt);
+      const theme = String(raw.title || prompt || '').slice(0, 40); // 라이브러리 태깅(주제축)
       // 배경(장면) 생성은 토큰 그림과 '병렬'로 — 색 토큰 배경이면 끝에서 교체.
-      const bgPromise = generateSceneBackground(artBg || String(raw.title || prompt));
-      await fillTokenImages(raw, { onBusy });
+      const bgPromise = generateSceneBackground(artBg || theme, theme);
+      await fillTokenImages(raw, { onBusy, theme });
       const parsed = safeParseInteractiveNode(raw);
       if (!parsed.success) return null;
       let node = autoLayout(parsed.data);
@@ -396,7 +397,7 @@ export async function editInteractiveNode(
       delete (raw as { art?: unknown }).art; // 편집에선 배경 재생성 안 함
       forceShape(raw, docId, doc.title);
       restoreImages(raw, doc);   // KEEP → 원본 그림 복원
-      await fillTokenImages(raw, { onBusy }); // "gen:" → 새 그림(통일 스타일·누끼)
+      await fillTokenImages(raw, { onBusy, theme: doc.title }); // "gen:" → 새 그림(통일 스타일·누끼)
       const parsed = safeParseInteractiveNode(raw);
       return parsed.success ? parsed.data : null;
     };

@@ -490,6 +490,12 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
     setPicker(null);
     setBusy('자료 넣는 중…');
     try {
+      // 라이브러리에서 '배경' 태그 이미지를 고르면 → 요소가 아니라 캔버스 배경으로 적용.
+      if (!forSwap && pick.kind === 'library' && /배경|background/i.test(`${pick.asset.tag} ${pick.asset.group ?? ''}`)) {
+        const bgRef = await urlToAssetRef(pick.asset.url, 'generated');
+        mutate(docId, (d) => ({ ...d, canvas: { ...d.canvas, background: bgRef } }));
+        return;
+      }
       const ref =
         pick.kind === 'file'
           ? await fileToAssetRef(pick.file, 'teacher-upload')
@@ -585,6 +591,11 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
           )}
         </div>
         <div className="flex items-center gap-2">
+          {mode === 'edit' && (
+            <button onClick={() => setPicker({ for: 'add' })} className={chromeBtn} title="저장된 게임 이미지·배경에서 골라 넣기" aria-label="게임 이미지">
+              <Icon name="gallery" size={16} /> 게임 이미지
+            </button>
+          )}
           <button onClick={() => setHelpOpen(true)} className={chromeBtn} title="도움말 — 기능·단축키 안내" aria-label="도움말">
             <Icon name="help" size={16} /> 도움말
           </button>
@@ -699,7 +710,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
 
       {picker && (
         <AssetPicker
-          title={picker.for === 'swap' ? '바뀔 그림 고르기' : '그림 추가'}
+          title={picker.for === 'swap' ? '바뀔 그림 고르기' : '게임 이미지'}
           onClose={() => setPicker(null)}
           onPick={onPick}
         />

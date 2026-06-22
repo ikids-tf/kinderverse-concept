@@ -71,9 +71,11 @@ export function AssetPicker({ title, onPick, onClose }: Props) {
                 key={`${a.tag}-${i}`}
                 onClick={() => onPick({ kind: 'library', asset: a })}
                 title={a.tag}
-                className="aspect-square overflow-hidden rounded-lg border border-border bg-surface-2 transition-colors hover:border-accent"
+                className="h-24 overflow-hidden rounded-lg border border-border bg-surface-2 transition-colors hover:border-accent"
               >
-                <img src={a.url} alt={a.tag} className="h-full w-full object-cover" draggable={false} />
+                {/* 셀에 '고정 높이(h-24)'를 준다 — aspect-ratio는 그리드 auto 행 높이에 기여하지 않아
+                    셀이 붕괴(2px)하고 행끼리 세로로 겹쳤다(겹침 버그). 고정 높이면 행이 확실히 잡힌다. */}
+                <img src={a.url} alt={a.tag} className="block h-full w-full object-cover" draggable={false} />
               </button>
             ))}
           </div>

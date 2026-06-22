@@ -11,6 +11,7 @@
  * 생성은 병렬(네트워크), 누끼는 워커에서 직렬 처리된다. compose/edit 양쪽이 이 모듈만 쓴다.
  */
 import { callGateway } from '@/ai/client';
+import { saveAsset } from '@/board/assets';
 import { urlToAssetRef } from '../runtime/assetIngest';
 import { removeBackground, cleanupBackground, warmupBackgroundRemoval } from '@/shared/background-removal';
 import type { AssetRef } from '../schema/interactiveNode';
@@ -161,7 +162,7 @@ async function assignImage(el: RawEl, dataUri: string | null, doCutout: boolean)
  */
 export async function fillTokenImages(
   raw: RawNode,
-  opts: { cutout?: boolean; onBusy?: (m: string | null) => void },
+  opts: { cutout?: boolean; onBusy?: (m: string | null) => void; theme?: string },
 ): Promise<void> {
   const doCut = opts.cutout ?? true;
   const els = Array.isArray(raw.elements) ? raw.elements : [];
@@ -184,16 +185,27 @@ export async function fillTokenImages(
     targets.map(async (t) => {
       const img = await genImage(t.label, TOKEN_STYLE);
       await assignImage(t.el, img, doCut);
+      // 라이브러리(IDB)에 저장 — 편집 시 '게임 이미지 갤러리'에서 재사용. 실제 PNG만(플레이스홀더 제외).
+      const s = t.el.src;
+      const uri = s && typeof s === 'object' ? (s as { src?: unknown }).src : undefined;
+      if (typeof uri === 'string' && uri.startsWith('data:image/') && !uri.startsWith('data:image/svg')) {
+        void saveAsset(t.label, 'image', uri, opts.theme);
+      }
     }),
   );
 }
 
 /** 주제에 맞는 장면 배경 1장(누끼 없음·풀블리드). 실패 시 null → 색 배경 유지. */
-export async function generateSceneBackground(prompt: string): Promise<AssetRef | null> {
+export async function generateSceneBackground(prompt: string, theme?: string): Promise<AssetRef | null> {
   const img = await genImage(prompt, SCENE_STYLE, 1);
   if (!img) return null;
   try {
-    return await urlToAssetRef(img, 'generated');
+    const ref = await urlToAssetRef(img, 'generated');
+    // 배경도 라이브러리에 저장(재사용) — 태그에 '배경'을 넣어 갤러리/피커가 '배경으로 적용'을 식별.
+    if (ref.src.startsWith('data:image/') && !ref.src.startsWith('data:image/svg')) {
+      void saveAsset(`${(theme || '게임').slice(0, 24)} 배경`, 'image', ref.src, `배경 ${theme ?? ''}`.trim());
+    }
+    return ref;
   } catch {
     return null;
   }
