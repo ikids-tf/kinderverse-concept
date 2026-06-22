@@ -1854,6 +1854,62 @@ export async function consultBehavior(text: string): Promise<void> {
   recordSpawnedNodes([id], '아동 행동 상담');
 }
 
+const EXTEND_SYSTEM =
+  '너는 유아 교사를 돕는 계획 에이전트다. 방금 아이들이 한 인터랙티브 놀이의 주제를 이어받아, 교실에서 바로 이어 할 수 있는 "확장 활동" 한 장을 만든다. ' +
+  '마크다운으로 작성: "## ✨ 확장 활동" 제목 + 한 줄 소개 + "### 이야기 나누기"(발문 3~4개 글머리표) + "### 함께 해보기"(몸·미술·자연 등 2~3가지, 각 한 줄) + "### 가정 연계"(1~2줄, "> " 콜아웃). ' +
+  '누리과정 영역을 가볍게 곁들여도 좋다. 아이 눈높이의 따뜻한 한국어, 350~600자. 사실을 지어내지 말고 주제에 충실히.';
+
+/** 인터랙티브 놀이 '확장 활동' — 게임 카드 오른쪽(없으면 빈 자리)에 교사용 활동 문서 카드를
+    만들고 주제 기반으로 내용을 생성한 뒤 카메라를 그쪽으로 옮긴다(보드가 오른쪽으로 확장). */
+export async function extendInteractiveActivity(title: string, anchorNodeId?: string): Promise<void> {
+  const b = useBoardStore.getState();
+  const anchor = anchorNodeId ? b.nodes[anchorNodeId] : undefined;
+  let docX: number;
+  let docY: number;
+  if (anchor) {
+    docX = Math.round(anchor.x + anchor.w + 96); // 게임 카드 오른쪽
+    docY = Math.round(anchor.y);
+  } else {
+    const spot = openDocSpot(DOC_WIDTH, 600);
+    docX = spot.x;
+    docY = spot.y;
+  }
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id, type: 'sticky',
+    x: docX, y: docY, w: DOC_WIDTH, h: 280, autoH: true,
+    text: '✨ 확장 활동을 준비하고 있어요…', color: 'paper',
+    data: { doc: true, role: 'plan', loadingDoc: true },
+  });
+  b.setSelection([id]);
+  cancelPanAnimation();
+  b.focusNode(id, 1); // 새 카드로 카메라 이동(보드가 오른쪽으로 확장된 것처럼)
+  b.beginGen();
+  b.setGenerating('✨ 확장 활동을 만들고 있어요…');
+  let text = '';
+  try {
+    const res = await callGateway({
+      task: 'plan', tier: 'mid', provider: 'auto', fallback: ['high'],
+      system: EXTEND_SYSTEM,
+      messages: [{ role: 'user', content: `방금 아이들이 한 인터랙티브 놀이 제목: "${title}".\n이 놀이를 마친 뒤 교실에서 이어서 할 확장 활동 한 장을 만들어줘.` }],
+      meta: { kind: 'interactive_extend' },
+      maxTokens: 1200,
+    });
+    if (res.ok && !res.mocked && res.text) text = res.text.trim();
+  } catch {
+    /* 아래에서 폴백 메시지 */
+  }
+  const cur = useBoardStore.getState().nodes[id];
+  if (cur) {
+    b.updateNodeRaw(id, {
+      text: text || '확장 활동 생성에 실패했어요(AI 키 설정이 필요할 수 있어요). 다시 시도해 주세요.',
+      data: { ...(cur.data ?? {}), loadingDoc: false },
+    });
+  }
+  b.endGen();
+  recordSpawnedNodes([id], '확장 활동');
+}
+
 /** Rewrite a plan/worksheet document into a warm, parent-facing weekly newsletter. */
 async function genNewsletter(sourceDoc: string, ctx: string): Promise<string> {
   const res = await callGateway({

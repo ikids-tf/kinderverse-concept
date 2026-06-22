@@ -1,4 +1,6 @@
-import { useBoardStore, type BoardNode } from '@/store/boardStore';
+import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
+import { useInteractiveStore } from '@/features/interactive-viewer/store/interactiveStore';
+import { composeInteractiveNode } from '@/features/interactive-viewer/authoring/composeNode';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
@@ -37,6 +39,46 @@ const STYLE_SERIES_RE = /각각|여러\s*가지|여러\s*개|여러\s*장|다른
     게임/놀이/퀴즈/마음알기 어휘 + 생성 동사가 함께 있어야 게임 생성으로 본다(스타일 재생성과 구분). */
 const GAME_WORD_RE = /게임|놀이|퀴즈|마음\s*알기|맞추기|맞히기|마음\s*읽기/;
 const GAME_GEN_RE = /만들|만드|생성|제작|구성|꾸며|짜\s*줘|짜\b/;
+
+/** "○○ 게임/퀴즈 만들어줘"(선택·이미지 없이) → 보드에 인터랙티브 노드를 만들고 전체 구성.
+    강한 신호(게임/퀴즈/인터랙티브)는 단독으로, 약한 신호(맞추기/마음알기)는 활동지·계획·도안이
+    아닐 때만 인터랙티브 게임으로 본다(활동지/도안 요청을 가로채지 않게). */
+const STRONG_GAME_RE = /게임|퀴즈|인터랙티브|인터렉티브/;
+const SOFT_GAME_RE = /맞추기|맞히기|마음\s*알기|마음\s*읽기/;
+function isNewInteractiveGame(text: string): boolean {
+  if (!GAME_GEN_RE.test(text)) return false;
+  if (STRONG_GAME_RE.test(text)) return true;
+  return SOFT_GAME_RE.test(text) && !WORKSHEET_RE.test(text) && !PLAN_RE.test(text) && !/도안|색칠/.test(text);
+}
+
+/** 보드에 인터랙티브 노드를 만들고 프롬프트로 게임 전체를 구성한다(디렉터).
+    카드는 store.docs[docId]를 구독하므로 구성이 끝나면 게임이 자동으로 나타난다.
+    구성은 store.mutate라 카드 풀스크린의 실행취소로도 되돌릴 수 있다. */
+async function createInteractiveGame(text: string): Promise<void> {
+  const c = viewportCenterBoardPoint();
+  const docId = newId('inode');
+  const nodeId = addPresetNodeCmd(
+    'interactive',
+    c.x,
+    c.y,
+    { w: 720, h: 450, autoH: false, data: { docId } },
+    '인터랙티브 게임',
+  );
+  const board = useBoardStore.getState();
+  board.focusNode(nodeId);
+  slideFrameToEmpty(nodeId); // 다른 요소와 겹치지 않게 가까운 빈자리로
+  board.beginGen();
+  board.setGenerating('🎮 인터랙티브 게임을 만들고 있어요…');
+  try {
+    useInteractiveStore.getState().ensure(docId);
+    const r = await composeInteractiveNode(docId, text, (m) =>
+      board.setGenerating(m ?? '🎮 인터랙티브 게임을 만들고 있어요…'),
+    );
+    showToast(r.message, r.ok ? 'success' : 'error');
+  } finally {
+    board.endGen();
+  }
+}
 
 /** 입력 정규화(보수적) — 앞뒤 공백·따옴표 정리, 줄 안 공백 축약(줄바꿈은 보존).
     오타·자모분해 교정은 과교정으로 오인식 위험이 있어 넣지 않는다. */
@@ -236,6 +278,12 @@ export function handleBoardPrompt(text: string): boolean {
     // boardOp 가드보다 먼저 — 상담 문장에 '크게 운다'처럼 조작어가 섞여도 상담이 우선.
     if (isBehaviorConsult(text)) {
       void consultBehavior(text);
+      return true;
+    }
+    // 인터랙티브 게임 — "○○ 게임/퀴즈 만들어줘" → 보드에 인터랙티브 노드를 만들고 구성(디렉터).
+    // 활동지/계획/도안 컴포저(아래 composeFromPrompt)로 새지 않도록 그 앞에서 가로챈다.
+    if (isNewInteractiveGame(text)) {
+      void createInteractiveGame(text);
       return true;
     }
     const noTargetOp = boardOp(text);

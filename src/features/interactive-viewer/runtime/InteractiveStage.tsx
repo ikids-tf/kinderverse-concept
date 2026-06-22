@@ -148,7 +148,7 @@ export function InteractiveStage({
   const [dropping, setDropping] = useState(false);
   // ── 재생 런타임 상태(동작 엔진) — 카운터/플래그/숨김/강조/말풍선 ──
   const [counters, setCounters] = useState<Record<string, number>>({});
-  const [flags, setFlags] = useState<Record<string, boolean>>({});
+  const [, setFlags] = useState<Record<string, boolean>>({});
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const [highlighted, setHighlighted] = useState<Record<string, string>>({});
   const [bubbles, setBubbles] = useState<Record<string, string>>({});
@@ -159,6 +159,8 @@ export function InteractiveStage({
   const flagsRef = useRef<Record<string, boolean>>({});
   const runToken = useRef(0);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+  // moveAlongPath 누적 오프셋(요소별) — '가서 머무름'으로 다음 이동이 현재 위치에서 이어지게.
+  const moveOffset = useRef<Record<string, { x: number; y: number }>>({});
   // 글자 더블클릭 인라인 편집 / 호버 시 연결 포트(hoverElId) / 연결 드래그 중 임시 선(linking).
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [hoverElId, setHoverElId] = useState<string | null>(null);
@@ -175,6 +177,12 @@ export function InteractiveStage({
   const sorted = useMemo(() => [...doc.elements].sort((a, b) => a.transform.z - b.transform.z), [doc.elements]);
   // 연결 순번 라벨(1, 1-1, 2 …) — 마이보드와 동일 규칙(@/board/links 재사용).
   const linkLabels = useMemo(() => linkSequence(doc.connections), [doc.connections]);
+  // 시작 시 숨김(sceneEnter hide) 대상 = '승리/피드백 오버레이' 후보 — 이 요소가 reveal되면 완료로 본다.
+  const hiddenAtStartIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const b of doc.behaviors) if (b.action === 'hide' && b.trigger === 'sceneEnter') b.params.targets.forEach((t) => s.add(t));
+    return s;
+  }, [doc.behaviors]);
 
   // 🔴 드래그/리사이즈 핸들러가 매 렌더 새 identity가 되면, 선택 직후 인스펙터 마운트로 인한
   //    리렌더의 cleanup이 방금 붙인 window 리스너를 떼어내 드래그가 즉시 죽는다. 가변값을
@@ -195,6 +203,13 @@ export function InteractiveStage({
   onRelinkRef.current = onRelinkConnection;
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+  // 완료는 한 번만 — 순서 완주(line) 또는 '승리 요소 reveal'(고르기·분류 등 비순서) 중 먼저 오는 것.
+  const completedRef = useRef(false);
+  const fireComplete = useCallback(() => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    onCompleteRef.current?.();
+  }, []);
   // 연결 hit-test/적중 판정용 최신 요소·연결 목록(고정 핸들러에서 읽음).
   const elsRef = useRef(doc.elements);
   elsRef.current = doc.elements;
@@ -204,6 +219,7 @@ export function InteractiveStage({
   // 재생 리셋/모드 전환 — 애니메이션 취소 + 런타임 상태를 문서 기본값으로 초기화.
   useEffect(() => {
     runToken.current += 1;
+    completedRef.current = false;
     if (rootRef.current) cancelAnimations(rootRef.current);
     stopSpeaking();
     const c: Record<string, number> = {};
@@ -213,6 +229,7 @@ export function InteractiveStage({
     countersRef.current = c;
     flagsRef.current = f;
     seqIndexRef.current = 0;
+    moveOffset.current = {};
     setCounters(c);
     setFlags(f);
     setSwapped({});
@@ -269,6 +286,11 @@ export function InteractiveStage({
           beh.params.targets.forEach((t) => (n[t] = false));
           return n;
         });
+        // 조건부로 '시작 시 숨겨둔' 요소(=승리 오버레이)를 보이면 = 게임 완료(비순서 게임의 완료 신호).
+        if (beh.when && beh.params.targets.some((t) => hiddenAtStartIds.has(t))) {
+          const token = runToken.current;
+          window.setTimeout(() => { if (token === runToken.current) fireComplete(); }, 700);
+        }
         return;
       case 'hide':
         setHidden((h) => {
@@ -340,14 +362,25 @@ export function InteractiveStage({
           const otherId = conn.from === beh.target ? conn.to : conn.from;
           const other = doc.elements.find((e) => e.id === otherId);
           if (other) {
+            // 대상(연잎 등) 중심으로 이동 — 좌표는 요소 레이아웃 원점 기준 누적 translate.
             const dx = other.transform.x + other.transform.w / 2 - (me.transform.x + me.transform.w / 2);
             const dy = other.transform.y + other.transform.h / 2 - (me.transform.y + me.transform.h / 2);
-            const dur = 1200 / (beh.params.speed || 1);
-            const iters = beh.params.repeat && beh.params.repeat > 0 ? beh.params.repeat : 1;
+            const dur = 750 / (beh.params.speed || 1);
+            const prev = moveOffset.current[beh.target] ?? { x: 0, y: 0 };
+            // '점프' 이동 — 시작↔끝 사이를 위로 솟구치는 호(중간점)로 콩 뛰어 이동 후 머무름(fill:forwards).
+            // 다음 이동은 현재 위치(prev)에서 이어진다.
+            const midX = (prev.x + dx) / 2;
+            const hop = Math.min(140, 64 + Math.abs(dx - prev.x) * 0.12); // 이동 거리에 따라 점프 높이(상한 140)
+            const midY = Math.min(prev.y, dy) - hop;
             const a = inner.animate(
-              [{ transform: 'translate(0,0)' }, { transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0,0)' }],
-              { duration: dur, iterations: iters, easing: 'ease-in-out' },
+              [
+                { transform: `translate(${prev.x}px, ${prev.y}px)`, offset: 0, easing: 'cubic-bezier(.3,0,.5,1)' },
+                { transform: `translate(${midX}px, ${midY}px)`, offset: 0.5, easing: 'cubic-bezier(.4,0,.7,1)' },
+                { transform: `translate(${dx}px, ${dy}px)`, offset: 1 },
+              ],
+              { duration: dur, fill: 'forwards' },
             );
+            moveOffset.current[beh.target] = { x: dx, y: dy };
             await a.finished.catch(() => {});
           }
         }
@@ -755,7 +788,7 @@ export function InteractiveStage({
       if (seqOrder[seqIndexRef.current] === el.id) {
         seqIndexRef.current += 1;
         void fireBehavior(beh.id);
-        if (seqIndexRef.current >= seqOrder.length && seqOrder.length > 0) onCompleteRef.current?.(); // 순서 게임 완료
+        if (seqIndexRef.current >= seqOrder.length && seqOrder.length > 0) fireComplete(); // 순서 게임 완료
       } else {
         const inner = innerRefs.current[el.id];
         if (inner) runAnimate(inner, 'shake');
@@ -978,8 +1011,9 @@ export function InteractiveStage({
             <div className="ic-empty">자료를 끌어다 놓거나 왼쪽 도구로 추가하세요</div>
           )}
 
-          {/* 요소 연결선 — 포트↔포트 곡선(클릭하면 해제) + 연결 드래그 중 임시 선. */}
-          {(doc.connections.length > 0 || linking) && (
+          {/* 요소 연결선 — 포트↔포트 곡선(클릭하면 해제) + 연결 드래그 중 임시 선.
+              편집에서만 보인다(연결=순서/경로의 저작 구조). 재생/미리보기 화면(아이 대면)엔 숨김. */}
+          {showLinkUi && (doc.connections.length > 0 || linking) && (
             <svg className="ic-links" width={cw} height={ch} viewBox={`0 0 ${cw} ${ch}`} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>
               {doc.connections.map((c) => {
                 if (!doc.elements.some((e) => e.id === c.from) || !doc.elements.some((e) => e.id === c.to)) return null;
@@ -1063,9 +1097,15 @@ export function InteractiveStage({
                 >
                   {renderContent(el)}
                 </div>
-                {/* 말풍선(speak) — 재생 중 요소 위에 표시. */}
+                {/* 말풍선(speak) — 재생 중 요소 위에 표시. 액터가 moveAlongPath로 이동했으면 그
+                    오프셋만큼 따라가 '이동한 머리 위'에 뜬다(이동 전 원래 자리에 고정되던 문제 수정). */}
                 {bubbles[el.id] && (
-                  <div className="ic-bubble" style={{ transform: `translate(-50%, -100%) scale(${1 / scale})` }}>
+                  <div
+                    className="ic-bubble"
+                    style={{
+                      transform: `${((m) => (m ? `translate(${m.x}px, ${m.y}px) ` : ''))(moveOffset.current[el.id])}translate(-50%, -100%) scale(${1 / scale})`,
+                    }}
+                  >
                     {bubbles[el.id]}
                   </div>
                 )}

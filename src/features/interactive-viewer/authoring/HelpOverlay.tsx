@@ -52,6 +52,68 @@ const TOOL_MAP: Array<[string, string]> = [
 /* ── 실전 레시피 — 카테고리별 '따라 만들기'. 모든 단계는 실제 버튼·위치 순서대로. ── */
 const RECIPE_GROUPS: Array<{ cat: string; note: string; items: Array<{ title: string; age?: string; steps: string[] }> }> = [
   {
+    cat: '✨ AI로 한 번에 만들기 (프롬프트)',
+    note: '보드 하단 프롬프트바에 한 줄이면 — 장면 배경·그림·배치·완료 버튼까지 갖춘 게임이 자동으로 만들어져요.',
+    items: [
+      {
+        title: '세기·순서 게임',
+        age: '수학적 탐구',
+        steps: [
+          '보드 프롬프트바에 “개구리가 연잎을 순서대로 눌러 숫자 세는 게임 만들어줘”',
+          '잠시 기다리면 배경·캐릭터·연잎·숫자판·완료 버튼까지 자동 구성돼요',
+          '▶ 재생 → 순서대로 탭하면 캐릭터가 콩콩 이동하며 세어요',
+        ],
+      },
+      {
+        title: '고르기(정답 찾기)',
+        age: '의사소통·분별',
+        steps: [
+          '“여러 그림 중에서 과일만 찾아 누르는 게임 만들어줘”',
+          '정답(과일)은 누르면 수거되고, 오답은 흔들흔들 — 다 찾으면 완료 화면',
+        ],
+      },
+      {
+        title: '분류 · 탐험/소리',
+        age: '범주·자연탐구',
+        steps: [
+          '분류: “쓰레기를 종류별 통에 옮기는 분류 게임 만들어줘”',
+          '탐험: “동물을 누르면 이름·소리를 들려주는 게임 만들어줘”',
+        ],
+      },
+      {
+        title: '만든 게임 프롬프트로 고치기',
+        age: '부분 수정',
+        steps: [
+          '게임 노드 안에서 고칠 요소를 탭해 선택(없으면 전체) → 하단 프롬프트바',
+          '“개구리를 더 크게”, “배경을 밤하늘로”, “토끼 그림 하나 더” 처럼 입력',
+          'AI가 그 게임 맥락 안에서 그 부분만 고쳐요(나머지 동작·연결은 그대로)',
+        ],
+      },
+    ],
+  },
+  {
+    cat: '✅ 게임이 끝나면 (완료 화면)',
+    note: '세기·순서를 끝내거나 정답을 다 찾으면, 재생 화면 아래에 버튼이 떠요.',
+    items: [
+      {
+        title: '다시하기 · 종료',
+        age: '재생 중',
+        steps: [
+          '다시하기 → 처음부터 다시 놀아요',
+          '종료 → 인터랙티브 홈(지금까지 만든 놀이 모음)으로 가요',
+        ],
+      },
+      {
+        title: '✨ 확장 활동',
+        age: '교사용',
+        steps: [
+          '확장 활동 → 보드가 오른쪽으로 넓어지면서',
+          '이 놀이 주제로 이어갈 교사용 활동 카드(이야기 나누기·함께 해보기·가정 연계)가 자동으로 생겨요',
+        ],
+      },
+    ],
+  },
+  {
     cat: '👆 탭하면 반응하는 카드',
     note: '가장 기본 — 아이가 탭하면 움직이거나 말해요.',
     items: [
@@ -379,6 +441,10 @@ export function HelpOverlay({ onClose }: Props) {
 
         <div className="flex flex-col gap-6 overflow-y-auto px-5 py-5">
           <Section title="빠른 시작 (3단계)">
+            <p className="-mt-1 inline-flex items-start gap-1.5 rounded-lg bg-accent-soft/40 px-3 py-2 text-[12.5px] text-fg-2">
+              <Icon name="sparkle" size={14} />
+              <span>가장 빠른 길: 보드 프롬프트바에 <b className="text-fg">“○○ 게임 만들어줘”</b>라고 입력하면 배경·그림·배치까지 자동으로 완성돼요. 직접 만들려면 아래 3단계.</span>
+            </p>
             <ol className="flex flex-col gap-1.5 text-sm text-fg-2">
               <li>왼쪽 도구로 <b className="text-fg">사진·글자·도형</b>을 넣어요.</li>
               <li>요소를 <b className="text-fg">선택</b>하면 오른쪽 ‘탭하면…’에서 동작을 골라요(‘언제’로 트리거도 바꿔요).</li>
@@ -400,7 +466,7 @@ export function HelpOverlay({ onClose }: Props) {
 
           {/* ── 실전 활용 레시피(중심) — 모든 단계가 실제 버튼·순서대로 ── */}
           <Section icon="sparkle" title="실전 활용 — 따라 만들기">
-            <p className="-mt-1 text-[12px] text-fg-muted">{ri('아래 순서대로 버튼만 따라 누르면 완성돼요. ▶ 재생으로 바로 확인!')}</p>
+            <p className="-mt-1 text-[12px] text-fg-muted">{ri('맨 위 ✨ AI에게 한 줄로 시키거나, 아래 순서대로 버튼만 따라 눌러 손으로 만들어요. ▶ 재생으로 바로 확인!')}</p>
             <div className="flex flex-col gap-4">
               {RECIPE_GROUPS.map((g) => (
                 <div key={g.cat} className="flex flex-col gap-2 rounded-2xl border border-border bg-surface-2/60 p-3">

@@ -1,0 +1,440 @@
+/**
+ * 프롬프트 → 인터랙티브 노드 '전체 구성'(AI 게임 디렉터).
+ *
+ * applyPrompt(증분 편집)와 달리, 한 번의 프롬프트로 요소·연결·행동·카운터·스토리를
+ * 갖춘 InteractiveNode '전체'를 만들어 논리 캔버스(1280×800)에 직접 배치한다.
+ * 런타임(InteractiveStage/playNode)이 이미 구현한 기능만 조합한다(goToScene 제외).
+ *
+ * 흐름: 게이트웨이(task 'interactive-compose', mid→high, JSON) → 이미지 채우기(gen: 라벨→실제 그림)
+ *   → 정규화(id/캔버스/메타 강제 + 좌표 클램프) → 스키마 검증 → 실패 시 1회 self-repair
+ *   → store.mutate 로 교체(undo 가능). 검증/키 실패 시 노드 미변경.
+ *
+ * 규칙(CLAUDE §2~4): 에이전트는 JSON만 출력 → 스키마 검증 → 렌더. 그림은 task 'image'
+ *   (generated, 외부 전송 허용). 교사 입력만 모델로 보낸다(아동 매체 미전송).
+ */
+import { callGateway } from '@/ai/client';
+import { extractJson } from '@/ai/json';
+import { useInteractiveStore } from '../store/interactiveStore';
+import { safeParseInteractiveNode } from '../schema/parse';
+import { clampXY } from '../runtime/geometry';
+import { autoLayout } from './layout';
+import { fillTokenImages, generateSceneBackground } from './artDirect';
+import type { InteractiveNode } from '../schema/interactiveNode';
+
+export interface ComposeResult {
+  ok: boolean;
+  message: string;
+}
+
+const CANVAS = { w: 1280, h: 800 } as const;
+
+/* ──────────────── 시스템 프롬프트(계약 + 규칙 + few-shot) ──────────────── */
+
+const FEWSHOT = JSON.stringify({
+  id: 'sample',
+  title: '개구리 점프 세기',
+  canvas: { background: 'pastel.mint', size: { w: 1280, h: 800 } },
+  elements: [
+    { id: 'title', kind: 'text', text: '연잎을 순서대로 콩콩 눌러요', origin: 'upload', assetKind: 'teacher-upload', transform: { x: 360, y: 60, w: 560, h: 90, rotation: 0, z: 1 } },
+    { id: 'frog', kind: 'image', src: { id: 'a_frog', src: 'gen:귀여운 초록 개구리', assetKind: 'generated' }, origin: 'upload', assetKind: 'generated', transform: { x: 110, y: 300, w: 180, h: 180, rotation: 0, z: 5 } },
+    { id: 'pad1', kind: 'image', src: { id: 'a_p1', src: 'gen:연잎', assetKind: 'generated' }, origin: 'upload', assetKind: 'generated', transform: { x: 120, y: 560, w: 170, h: 120, rotation: 0, z: 2 } },
+    { id: 'pad2', kind: 'image', src: { id: 'a_p2', src: 'gen:연잎', assetKind: 'generated' }, origin: 'upload', assetKind: 'generated', transform: { x: 340, y: 560, w: 170, h: 120, rotation: 0, z: 2 } },
+    { id: 'pad3', kind: 'image', src: { id: 'a_p3', src: 'gen:연잎', assetKind: 'generated' }, origin: 'upload', assetKind: 'generated', transform: { x: 560, y: 560, w: 170, h: 120, rotation: 0, z: 2 } },
+    { id: 'pad4', kind: 'image', src: { id: 'a_p4', src: 'gen:연잎', assetKind: 'generated' }, origin: 'upload', assetKind: 'generated', transform: { x: 780, y: 560, w: 170, h: 120, rotation: 0, z: 2 } },
+    { id: 'pad5', kind: 'image', src: { id: 'a_p5', src: 'gen:연잎', assetKind: 'generated' }, origin: 'upload', assetKind: 'generated', transform: { x: 1000, y: 560, w: 170, h: 120, rotation: 0, z: 2 } },
+    { id: 'win', kind: 'text', text: '잘했어요! 다 셌어요 🎉', origin: 'upload', assetKind: 'teacher-upload', transform: { x: 390, y: 250, w: 500, h: 110, rotation: 0, z: 9 } },
+  ],
+  // 개구리→각 연잎 연결: 순서(연결 순번 라벨) + 개구리 이동(moveAlongPath)의 경로가 된다.
+  connections: [
+    { id: 'cf1', kind: 'order', from: 'frog', to: 'pad1' },
+    { id: 'cf2', kind: 'order', from: 'frog', to: 'pad2' },
+    { id: 'cf3', kind: 'order', from: 'frog', to: 'pad3' },
+    { id: 'cf4', kind: 'order', from: 'frog', to: 'pad4' },
+    { id: 'cf5', kind: 'order', from: 'frog', to: 'pad5' },
+  ],
+  behaviors: [
+    { id: 'hidewin', target: 'win', trigger: 'sceneEnter', action: 'hide', params: { targets: ['win'] } },
+    // 연잎 탭(순서대로) → 숫자 세기 → then 으로 개구리를 그 연잎으로 이동.
+    { id: 'b1', target: 'pad1', trigger: 'sequenceTap', action: 'count', params: { counterId: 'cnt', by: 1 }, then: ['move1'] },
+    { id: 'b2', target: 'pad2', trigger: 'sequenceTap', action: 'count', params: { counterId: 'cnt', by: 1 }, then: ['move2'] },
+    { id: 'b3', target: 'pad3', trigger: 'sequenceTap', action: 'count', params: { counterId: 'cnt', by: 1 }, then: ['move3'] },
+    { id: 'b4', target: 'pad4', trigger: 'sequenceTap', action: 'count', params: { counterId: 'cnt', by: 1 }, then: ['move4'] },
+    { id: 'b5', target: 'pad5', trigger: 'sequenceTap', action: 'count', params: { counterId: 'cnt', by: 1 }, then: ['move5'] },
+    // 개구리 이동(target=frog) — 연결(cfN)을 따라 해당 연잎으로 콩 이동 후, 마지막엔 완료 확인.
+    { id: 'move1', target: 'frog', trigger: 'afterComplete', action: 'moveAlongPath', params: { connectionId: 'cf1', speed: 1 }, then: ['showwin'] },
+    { id: 'move2', target: 'frog', trigger: 'afterComplete', action: 'moveAlongPath', params: { connectionId: 'cf2', speed: 1 }, then: ['showwin'] },
+    { id: 'move3', target: 'frog', trigger: 'afterComplete', action: 'moveAlongPath', params: { connectionId: 'cf3', speed: 1 }, then: ['showwin'] },
+    { id: 'move4', target: 'frog', trigger: 'afterComplete', action: 'moveAlongPath', params: { connectionId: 'cf4', speed: 1 }, then: ['showwin'] },
+    { id: 'move5', target: 'frog', trigger: 'afterComplete', action: 'moveAlongPath', params: { connectionId: 'cf5', speed: 1 }, then: ['showwin'] },
+    { id: 'showwin', target: 'win', trigger: 'afterComplete', action: 'reveal', params: { targets: ['win'] }, when: { kind: 'counter', counterId: 'cnt', op: '>=', value: 5 } },
+  ],
+  counters: [{ id: 'cnt', initial: 0, label: '세었어요', display: { x: 600, y: 36 } }],
+  meta: { createdBy: 'teacher', safety: { containsChildAssets: false, reviewed: false }, version: 1 },
+});
+
+const SYSTEM = `너는 킨더버스 '인터랙티브 노드 디렉터'다. 유아 교사의 한국어 요청을 받아,
+아이들이 바로 가지고 놀 수 있는 인터랙티브 게임 '한 개'를 완성된 JSON(InteractiveNode)으로 출력한다.
+설명·마크다운 금지. JSON 객체 하나만 출력한다.
+
+[좌표계] 논리 캔버스 1280×800. transform.x,y 는 요소의 '좌상단' 픽셀. 모든 요소는 캔버스 안에 두고
+서로 겹치지 않게 배치한다. 가장자리 40px 여백. 또래가 누르기 쉽게 충분히 크게(터치 대상 ≥ 120px).
+
+[요소(elements)] 각 요소는 {id, kind, transform{x,y,w,h,rotation:0,z}, origin:"upload", assetKind} 필수.
+- kind:"text" → text:"글자" 추가. (assetKind:"teacher-upload")
+- kind:"image" → src:{id, src:"gen:<대상>", assetKind:"generated"} 로 둔다. 실제 그림은 시스템이
+  "gen:" 라벨을 보고 자동 생성한다. assetKind 도 "generated". (그림이 필요하면 반드시 이 형식.)
+  · 라벨엔 '대상'만 간단히(예: gen:연잎, gen:사과). 그림체·흰배경·그림자 같은 말은 쓰지 마라 —
+    시스템이 통일된 스타일과 배경제거(누끼)를 자동 적용한다.
+  · 똑같이 생겨야 하는 세트는 '모두 같은 라벨'을 쓴다(예: 연잎 5개 → 5개 모두 gen:연잎).
+    시스템이 한 장으로 그려 동일하게 맞춘다(서로 다른 라벨이면 제각각 그려진다).
+- kind:"shape" → 단색 네모(배경/판). src 없음.
+- 그림은 한 게임에 최대 8개.
+
+[연결(connections)] {id, kind:"order"|"path"|"link", from:<요소id>, to:<요소id>}.
+- 순서대로 눌러야 하는 게임은 요소들을 체인으로 잇는다(예: pad1→pad2→pad3…). 첫 요소가 1번, 따라가며 2,3…
+  이 순번이 sequenceTap 차례가 된다.
+
+[행동(behaviors)] {id, target:<요소id>, trigger, action, params, when?, then?, after?, delay?}. 한 행동 = 한 액션.
+- trigger: "tap"(누르면) · "sequenceTap"(순서대로 누르면) · "pathTraverse"(연결 따라 끌면) ·
+  "sceneEnter"(시작하자마자) · "storyAdvance"(이야기 넘길 때) · "afterComplete"(다른 행동 끝난 뒤·then으로 호출).
+- action 과 params:
+  · animate {preset} — preset: bounce|jump|wiggle|grow|spin|shake|float|fadeIn|fadeOut
+  · speak {text, mode:"bubble"} — 말풍선+음성
+  · count {counterId, by:1} — 카운터 증가(세기)
+  · reveal|hide|highlight {targets:[요소id…]} — 보이기/숨기기/강조
+  · swap {to:{id,src,assetKind}, mode:"image"} — 그림 바꾸기
+  · moveAlongPath {connectionId, speed:1} — target(캐릭터)을 연결의 '상대 요소' 위치로 이동시켜 그대로 머무름
+  · setFlag {flagId, value:true}
+- when: {kind:"counter", counterId, op:">="|"=="|"<", value} 또는 {kind:"flag", flagId, is:true}. 조건 충족 때만 실행.
+- then: 이 행동 직후 이어서 실행할 행동 id 목록(체이닝).
+- ⚠ "goToScene" 는 쓰지 마라(미지원). 완료/축하는 'when counter>=N → reveal' 또는 speak 로 표현.
+
+[상태] counters:[{id, initial:0, label?, display:{x,y}}] — display 좌표에 '큰 숫자판'으로 보인다(세기 게임 필수).
+flags:[{id, initial:false}].
+
+[스토리(선택)] story:{steps:[{id, speak:{text, mode:"narration"}}]} — 나레이션 단계.
+
+[메타] meta:{createdBy:"teacher", safety:{containsChildAssets:false, reviewed:false}, version:1}.
+canvas:{background:"pastel.cream"|"pastel.peach"|"pastel.mint"|"pastel.sky" 또는 "#rrggbb", size:{w:1280,h:800}}.
+
+[배경] canvas.background 를 'pastel.X' 토큰으로 두면 시스템이 주제에 맞는 '장면 배경'을 자동 생성해 깐다.
+원하면 최상위에 art:{background:"<배경 장면 한국어 설명, 인물·글자 없음, 가운데는 비움>"} 를 추가로 출력해 배경 주제를 지정할 수 있다(선택).
+배경은 시스템이 처리하니 큰 배경 도형(shape)으로 화면을 덮지 마라.
+
+[무결성] behavior.target / when.counterId / count.counterId / then 의 모든 id 는 실제로 존재해야 한다.
+연결의 from/to 도 실제 요소여야 한다. id 는 게임 안에서 유일하게.
+
+[캐릭터 이동] 개구리·동물 등 캐릭터가 탭한 대상으로 '이동'하게 하려면:
+ 1) 캐릭터→각 대상 연결을 만든다(connections, from=캐릭터, to=대상). 이 연결이 순번(순서)도 정한다.
+ 2) 각 대상의 탭 행동(then)으로 그 캐릭터의 moveAlongPath(connectionId=해당 연결)를 잇는다.
+ → 탭하면 캐릭터가 그 대상 위로 콩 이동해 머문다. (연결선은 재생 화면엔 안 보이고 편집에서만 보인다.)
+
+[좋은 게임 설계] 요청 주제에 맞는 콘텐츠로, 도입(제목)+놀이(탭/순서/짝)+성공 피드백(reveal/speak/카운터)을 갖춘다.
+
+[게임 유형별 패턴] 요청에 맞는 유형을 골라 아래 예시 구조로 만든다(검증된 동작만 사용).
+· 세기/순서: sequenceTap+count+counter(display)+캐릭터 moveAlongPath, 승리 reveal(when counter>=N). (아래 예시)
+· 고르기(정답 찾기): 정답 요소=tap→count(by:1)→then 자기 hide(수거 느낌). 오답 요소=tap→animate(shake)→then speak("아니야~", bubble).
+  승리 텍스트는 sceneEnter로 숨기고, 각 hide의 then 으로 showwin(afterComplete·reveal 승리·when counter>=정답수) 을 호출한다.
+· 분류(옮기기): 각 항목→올바른 분류함으로 connection. 항목 tap→moveAlongPath(그 connection)→then count. 다 옮기면 승리 reveal(when counter>=항목수).
+· 탐험/소리: 각 요소 tap→speak("이름/소리", bubble)+then animate(bounce). 자유 탐색(원하면 모두 한 번씩 누르면 count로 승리).
+※ 비순서(고르기·분류)도 '승리 reveal'(sceneEnter로 숨김 → when 으로 보이기)을 넣으면 완료로 인식돼 하단 완료 버튼이 뜬다.
+※ 한 요소에 효과 두 개(세기+숨기기 등)는 then 으로 잇는다(한 동작=한 액션).
+
+예시(개구리 순서 세기) — 이 구조와 배치를 참고하되, 요청 주제와 유형에 맞게 새로 만든다:
+${FEWSHOT}`;
+
+/* ──────────────── 게이트웨이 호출 ──────────────── */
+
+interface RawNode {
+  elements?: Array<Record<string, unknown>>;
+  [k: string]: unknown;
+}
+
+/** 검증 전 강제 보정 — id/캔버스/메타 고정(스토어 키·좌표 규칙 일치 보장). 배경은 문자열(토큰)·객체(에셋) 모두 보존. */
+function forceShape(raw: RawNode, docId: string, fallbackTitle: string): void {
+  raw.id = docId;
+  if (typeof raw.title !== 'string' || !raw.title.trim()) raw.title = (fallbackTitle || '').slice(0, 40) || '인터랙티브';
+  const bgVal = raw.canvas && typeof raw.canvas === 'object' ? (raw.canvas as { background?: unknown }).background : undefined;
+  let bg: unknown = 'pastel.cream';
+  if (typeof bgVal === 'string' && bgVal.trim()) bg = bgVal;
+  else if (bgVal && typeof bgVal === 'object') bg = bgVal; // 에셋(데이터 URI·KEEP 마커) 배경 보존
+  raw.canvas = { background: bg, size: { w: CANVAS.w, h: CANVAS.h } };
+  raw.meta = { createdBy: 'teacher', safety: { containsChildAssets: false, reviewed: false }, version: 1 };
+  if (!Array.isArray(raw.elements)) raw.elements = [];
+}
+
+/** 검증 통과 노드 — 좌표를 캔버스 안으로 클램프(겹침은 못 막지만 화면 밖 이탈 방지). */
+function clampNode(node: InteractiveNode): InteractiveNode {
+  const cw = node.canvas.size.w;
+  const ch = node.canvas.size.h;
+  return {
+    ...node,
+    elements: node.elements.map((e) => {
+      const t = e.transform;
+      const { x, y } = clampXY(t.x, t.y, t.w, t.h, cw, ch);
+      return x === t.x && y === t.y ? e : { ...e, transform: { ...t, x, y } };
+    }),
+  };
+}
+
+async function callCompose(
+  prompt: string,
+  repair?: { prevText: string; errors: string },
+): Promise<string | null> {
+  const messages = repair
+    ? [
+        { role: 'user' as const, content: `교사 요청: "${prompt}"` },
+        { role: 'assistant' as const, content: repair.prevText },
+        { role: 'user' as const, content: `직전 출력이 스키마를 위반했다(${repair.errors}). 설명 없이 올바른 JSON만 다시 출력하라.` },
+      ]
+    : [{ role: 'user' as const, content: `교사 요청: "${prompt}"\n위 요청에 맞는 인터랙티브 게임을 InteractiveNode JSON 하나로 만들어라.` }];
+  const res = await callGateway({
+    task: 'interactive-compose',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: SYSTEM,
+    messages,
+    meta: { kind: 'interactive_compose' },
+    maxTokens: 4000,
+  });
+  if (!res.ok || res.mocked || !res.text) return null;
+  return res.text;
+}
+
+/** LLM이 선택적으로 출력하는 art.background(배경 장면 설명) — 있으면 문자열, 없으면 null. */
+function readArtBackground(raw: RawNode): string | null {
+  const art = (raw as { art?: unknown }).art;
+  if (art && typeof art === 'object') {
+    const b = (art as { background?: unknown }).background;
+    if (typeof b === 'string' && b.trim()) return b.trim();
+  }
+  return null;
+}
+
+/* ──────────────── 공개 진입점 ──────────────── */
+
+export async function composeInteractiveNode(
+  docId: string,
+  prompt: string,
+  onBusy?: (msg: string | null) => void,
+): Promise<ComposeResult> {
+  const store = useInteractiveStore.getState();
+  store.ensure(docId); // 캐시 보장(mutate 대상)
+  onBusy?.('AI가 게임을 구성하는 중…');
+  try {
+    // 1) 1차 생성
+    let text = await callCompose(prompt);
+    if (text === null) {
+      return { ok: false, message: 'AI를 사용할 수 없어요 (키 설정 필요)' };
+    }
+
+    // 2) 파싱 → 이미지 채우기 → 강제 보정 → 스키마 검증 (실패 시 1회 self-repair)
+    const buildNode = async (rawText: string): Promise<InteractiveNode | null> => {
+      let raw: RawNode;
+      try {
+        raw = extractJson(rawText) as RawNode;
+      } catch {
+        return null;
+      }
+      const artBg = readArtBackground(raw);
+      delete (raw as { art?: unknown }).art;
+      forceShape(raw, docId, prompt);
+      // 배경(장면) 생성은 토큰 그림과 '병렬'로 — 색 토큰 배경이면 끝에서 교체.
+      const bgPromise = generateSceneBackground(artBg || String(raw.title || prompt));
+      await fillTokenImages(raw, { sheetSets: true, onBusy });
+      const parsed = safeParseInteractiveNode(raw);
+      if (!parsed.success) return null;
+      let node = autoLayout(parsed.data);
+      if (typeof node.canvas.background === 'string') {
+        onBusy?.('배경을 그리는 중…');
+        const bgRef = await bgPromise;
+        if (bgRef) node = { ...node, canvas: { ...node.canvas, background: bgRef } };
+      }
+      return node;
+    };
+
+    let node = await buildNode(text);
+    if (!node) {
+      // self-repair: 스키마 오류를 되먹여 1회 재시도
+      const raw0 = (() => { try { return extractJson(text!) as RawNode; } catch { return null; } })();
+      let errs = '구문/스키마 오류';
+      if (raw0) {
+        forceShape(raw0, docId, prompt);
+        const p = safeParseInteractiveNode(raw0);
+        if (!p.success) errs = p.error.issues.slice(0, 6).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+      }
+      onBusy?.('AI가 게임을 다듬는 중…');
+      text = await callCompose(prompt, { prevText: text, errors: errs });
+      if (text) node = await buildNode(text);
+    }
+
+    if (!node) {
+      return { ok: false, message: '게임을 만들지 못했어요 — 조금 더 구체적으로 말씀해 주세요' };
+    }
+
+    // 3) 좌표 클램프 후 교체(undo 가능)
+    const finalNode = clampNode(node);
+    onBusy?.('적용하는 중…');
+    store.mutate(docId, () => finalNode);
+
+    const n = finalNode.elements.length;
+    return { ok: true, message: `'${finalNode.title}' 게임을 만들었어요 (요소 ${n}개)` };
+  } finally {
+    onBusy?.(null);
+  }
+}
+
+/* ──────────────── 맥락 인지 편집(현재 노드 전체를 보고 지시대로 최소 수정) ──────────────── */
+
+const KEEP = '__KEEP__';
+const KEEP_BG = '__KEEP_BG__';
+
+/** LLM에 보낼 안전 버전 — 이미지/영상 data URI를 마커로 치환(토큰 폭주 방지). 구조만 보낸다. */
+function toSafeDoc(doc: InteractiveNode): unknown {
+  const clone = JSON.parse(JSON.stringify(doc)) as { elements?: Array<Record<string, unknown>>; canvas?: { background?: unknown } };
+  for (const el of Array.isArray(clone.elements) ? clone.elements : []) {
+    if ((el.kind === 'image' || el.kind === 'video' || el.kind === 'sprite') && el.src && typeof el.src === 'object') {
+      const s = el.src as { id?: unknown; assetKind?: unknown };
+      el.src = { id: s.id, src: KEEP, assetKind: s.assetKind };
+    }
+  }
+  if (clone.canvas && clone.canvas.background && typeof clone.canvas.background === 'object') {
+    clone.canvas.background = { ...(clone.canvas.background as object), src: KEEP_BG };
+  }
+  return clone;
+}
+
+/** 편집 결과의 이미지 복원 — KEEP 마커는 원본 그림 유지("gen:"은 fillImages가 새로 생성). */
+function restoreImages(raw: RawNode, orig: InteractiveNode): void {
+  const byId = new Map(orig.elements.map((e) => [e.id, e] as const));
+  for (const el of Array.isArray(raw.elements) ? raw.elements : []) {
+    if (el.kind !== 'image' && el.kind !== 'video' && el.kind !== 'sprite') continue;
+    const sv = el.src as unknown;
+    const isKeep = sv === KEEP || (!!sv && typeof sv === 'object' && (sv as { src?: unknown }).src === KEEP);
+    if (!isKeep) continue;
+    const o = byId.get(el.id as string) as { src?: unknown } | undefined;
+    if (o && o.src) el.src = o.src; // 원본 그림 복원
+    else { el.kind = 'shape'; delete el.src; }
+  }
+  const canvas = (raw as { canvas?: { background?: unknown } }).canvas;
+  const bg = canvas?.background as { src?: unknown } | undefined;
+  if (bg && typeof bg === 'object' && bg.src === KEEP_BG && typeof orig.canvas.background === 'object') {
+    canvas!.background = orig.canvas.background;
+  }
+}
+
+const EDIT_SYSTEM = `너는 킨더버스 '인터랙티브 노드 에디터'다. '현재 노드'(InteractiveNode JSON)와 교사의 수정 지시가 주어진다.
+지시대로 수정한 '전체 노드'를 JSON 하나로만 출력한다. 설명·마크다운 금지.
+
+[원칙]
+- 기존 요소·동작·연결·카운터의 id 를 그대로 유지하고, 지시와 무관한 부분은 절대 바꾸지 않는다(보존). 지시와 무관하면 현재 노드를 거의 그대로 출력한다.
+- 선택된 요소가 있으면 그 요소를 우선 대상으로 한다.
+- 이미지 요소의 src.src 가 "${KEEP}" 이면 기존 그림 그대로 둔다(절대 바꾸지 마라). 새 그림이 필요할 때만 src.src 를 "gen:<한글 설명>" 으로.
+- 좌표는 논리 캔버스 1280×800(좌상단 기준), 요소 겹침 금지, 캔버스 안.
+
+[동작(behaviors) — 맥락을 이해해 고친다. 기존 체인을 함부로 끊지 마라]
+- 한 동작 = 한 액션({id,target,trigger,action,params,when?,then?}). 여러 효과는 then(이어 실행)으로 잇는다.
+- trigger: tap·sequenceTap·sceneEnter·afterComplete 등. action: animate{preset}·moveAlongPath{connectionId,speed}·count{counterId,by}·speak{text,mode}·reveal|hide|highlight{targets}·setFlag.
+- 캐릭터(개구리 등)가 '이동'하는 게임엔 그 캐릭터 target 의 moveAlongPath 동작들이 있다(연결을 따라 대상으로 이동).
+  · moveAlongPath 는 이미 '점프(위로 솟는 호)' 모션으로 이동한다. "점프로 이동" 같은 지시면 moveAlongPath 를 '그대로 두면' 된다 — 지우거나 tap-animate 로 대체하지 마라.
+  · 이동을 없애지 말고 속도(speed)·대상 정도만 최소 수정한다.
+- 같은 target 의 다른 동작(이동·말하기·세기 등)을 삭제하지 마라. 한 요소를 고치려고 그 요소의 기존 동작을 통째로 지우면 안 된다.`;
+
+async function callEdit(
+  safeDocJson: string,
+  prompt: string,
+  selInfo: string,
+  repair?: { prevText: string; errors: string },
+): Promise<string | null> {
+  const base = `현재 노드:\n${safeDocJson}\n\n교사 지시: "${prompt}"\n${selInfo}\n위 지시대로 수정한 전체 노드 JSON 하나만 출력.`;
+  const messages = repair
+    ? [
+        { role: 'user' as const, content: base },
+        { role: 'assistant' as const, content: repair.prevText },
+        { role: 'user' as const, content: `직전 출력이 스키마를 위반했다(${repair.errors}). 설명 없이 올바른 JSON만 다시 출력하라.` },
+      ]
+    : [{ role: 'user' as const, content: base }];
+  const res = await callGateway({
+    task: 'interactive-edit',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: EDIT_SYSTEM,
+    messages,
+    meta: { kind: 'interactive_edit' },
+    maxTokens: 6000,
+  });
+  if (!res.ok || res.mocked || !res.text) return null;
+  return res.text;
+}
+
+export async function editInteractiveNode(
+  docId: string,
+  prompt: string,
+  selectedElIds: string[],
+  onBusy?: (msg: string | null) => void,
+): Promise<ComposeResult> {
+  const store = useInteractiveStore.getState();
+  const doc = store.peek(docId) ?? store.ensure(docId);
+  onBusy?.('AI가 노드를 고치는 중…');
+  try {
+    const safeJson = JSON.stringify(toSafeDoc(doc));
+    const selInfo = selectedElIds.length
+      ? `선택된 요소 id: ${selectedElIds.join(', ')}`
+      : '선택된 요소 없음(노드 전체 맥락)';
+
+    const build = async (rawText: string): Promise<InteractiveNode | null> => {
+      let raw: RawNode;
+      try { raw = extractJson(rawText) as RawNode; } catch { return null; }
+      delete (raw as { art?: unknown }).art; // 편집에선 배경 재생성 안 함
+      forceShape(raw, docId, doc.title);
+      restoreImages(raw, doc);   // KEEP → 원본 그림 복원
+      await fillTokenImages(raw, { sheetSets: false, onBusy }); // "gen:" → 새 그림(통일 스타일·누끼)
+      const parsed = safeParseInteractiveNode(raw);
+      return parsed.success ? parsed.data : null;
+    };
+
+    let text = await callEdit(safeJson, prompt, selInfo);
+    if (text === null) return { ok: false, message: 'AI를 사용할 수 없어요 (키 설정 필요)' };
+    let node = await build(text);
+    if (!node) {
+      // self-repair: 스키마 오류 되먹여 1회 재시도
+      const raw0 = (() => { try { return extractJson(text!) as RawNode; } catch { return null; } })();
+      let errs = '구문/스키마 오류';
+      if (raw0) {
+        forceShape(raw0, docId, doc.title);
+        restoreImages(raw0, doc);
+        const p = safeParseInteractiveNode(raw0);
+        if (!p.success) errs = p.error.issues.slice(0, 6).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+      }
+      onBusy?.('AI가 다시 다듬는 중…');
+      text = await callEdit(safeJson, prompt, selInfo, { prevText: text, errors: errs });
+      if (text) node = await build(text);
+    }
+    if (!node) return { ok: false, message: '수정을 적용하지 못했어요 — 더 구체적으로 말씀해 주세요' };
+
+    // 레이아웃 보존 — 위치/크기 지시가 아니면 기존 요소의 transform 을 원래대로 유지(무관한 이동·리사이즈 드리프트 방지).
+    const LAYOUT_RE = /크게|작게|크기|사이즈|옮겨|옮길|위치|정렬|배치|줄여|키워|넓게|좁게|move|resize|size|bigger|smaller|position/i;
+    let result = node;
+    if (!LAYOUT_RE.test(prompt)) {
+      const origById = new Map(doc.elements.map((e) => [e.id, e] as const));
+      result = {
+        ...node,
+        elements: node.elements.map((e) => {
+          const o = origById.get(e.id);
+          return o ? { ...e, transform: o.transform } : e; // 기존 요소는 원래 위치/크기 유지, 새 요소만 LLM 좌표
+        }),
+      };
+    }
+
+    const finalNode = clampNode(result);
+    onBusy?.('적용하는 중…');
+    store.mutate(docId, () => finalNode);
+    return { ok: true, message: '수정했어요' };
+  } finally {
+    onBusy?.(null);
+  }
+}

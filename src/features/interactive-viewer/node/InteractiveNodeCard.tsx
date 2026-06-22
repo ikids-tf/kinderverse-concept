@@ -12,6 +12,8 @@ import type { BoardNode } from '@/store/boardStore';
 import { useInteractiveStore } from '../store/interactiveStore';
 import { InteractiveStage } from '../runtime/InteractiveStage';
 import { InteractiveOverlay } from '../authoring/InteractiveOverlay';
+import { InteractiveGallery } from '../authoring/InteractiveGallery';
+import { extendInteractiveActivity } from '@/board/composer';
 import { urlToAssetRef, makeImageElement, makeVideoElement, withElementAdded } from '../runtime/assetIngest';
 
 interface Props {
@@ -31,6 +33,7 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
   const mutate = useInteractiveStore((s) => s.mutate);
   const cardRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<null | { mode: 'play' | 'edit'; origin: OriginRect | null }>(null);
+  const [galleryOpen, setGalleryOpen] = useState(false); // 게임 '종료' → 인터랙티브 홈/갤러리
 
   useEffect(() => {
     if (docId) ensure(docId);
@@ -144,10 +147,20 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
       {open &&
         createPortal(
           <ZoomOverlay origin={open.origin} onClose={() => setOpen(null)} zIndex={130} backdropClassName="">
-            {(close) => <InteractiveOverlay docId={docId} initialMode={open.mode} onClose={close} />}
+            {(close) => (
+              <InteractiveOverlay
+                docId={docId}
+                initialMode={open.mode}
+                onClose={close}
+                onExtend={() => { close(); void extendInteractiveActivity(doc?.title ?? '인터랙티브 놀이', node.id); }}
+                onExit={() => { close(); setGalleryOpen(true); }}
+              />
+            )}
           </ZoomOverlay>,
           document.body,
         )}
+
+      {galleryOpen && <InteractiveGallery onClose={() => setGalleryOpen(false)} />}
     </div>
   );
 }

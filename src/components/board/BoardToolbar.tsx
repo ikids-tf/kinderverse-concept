@@ -99,8 +99,10 @@ const GAME_VIEWER_PATCH: Partial<BoardNode> = {
     .kv-inode) — Milray 미적용. 저작 단위 InteractiveNode는 data.docId로 참조(스키마:
     src/features/interactive-viewer/schema). 카드 비율은 논리 캔버스(1280×800=1.6)에 맞춤. */
 const INTERACTIVE_VIEWER_PATCH: Partial<BoardNode> = {
-  w: 360,
-  h: 225,
+  // 슬라이드와 같은 크기로 생성(처음 호출 시 너무 작던 문제). 논리 캔버스 1280×800=1.6 비율 유지
+  // → 슬라이드 폭(720)에 맞추면 높이 450(720/1.6, 레터박스 없음).
+  w: 720,
+  h: 450,
   autoH: false,
   text: '인터랙티브',
   data: { title: '인터랙티브' },

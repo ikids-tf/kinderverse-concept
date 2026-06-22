@@ -169,15 +169,16 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const canSend = hasText || !!videoCompose || attachments.length > 0;
   const onChatPage = location.pathname === AI_CHAT_PATH;
 
-  // 입력이 길어지면 스크롤 대신 바가 위로 확장 — textarea 높이를 내용에 맞춘다(한눈에 다 보이게).
-  // 너무 긴 입력은 화면을 덮지 않게 CSS max-height(42vh)에서만 스크롤(안전장치).
+  // 입력이 길어지면 스크롤 대신 바가 위로 확장 — textarea 높이를 내용에 '정확히' 맞춰 스크롤바
+  // 없이 다 보이게 한다(마이보드 바와 동일). 화면을 다 덮지 않게 80vh 안전 상한에서만 스크롤.
   useEffect(() => {
     const el = inputRef.current;
     if (!el || statusInline) return;
-    // 접힘 상태에선 textarea 폭이 0(max-w-0)이라 scrollHeight가 여러 줄로 폭주 → 높이가 42vh로
+    // 접힘 상태에선 textarea 폭이 0(max-w-0)이라 scrollHeight가 여러 줄로 폭주 → 높이가 폭주로
     // 튀어 접힌 바가 세로로 커진다. 접혔을 땐 자동높이를 끄고 CSS 기본 높이로 되돌린다.
     if (collapsed) {
       el.style.height = '';
+      el.style.overflowY = 'hidden';
       return;
     }
     const fit = () => {
@@ -185,9 +186,11 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
       // 폭이 충분히 확정됐을 때만 측정한다. 전환 완료(transitionend)에 다시 fit이 불려 최종 높이를 잡는다.
       if (el.clientWidth < 60) return;
       el.style.height = 'auto';
-      // 너무 긴 입력은 화면을 덮지 않게 42vh로 클램프.
-      const maxPx = Math.round(window.innerHeight * 0.42);
-      el.style.height = `${Math.min(el.scrollHeight, maxPx)}px`;
+      // 내용 높이에 맞춰 위로 확장(스크롤바 없음). 너무 길면 80vh에서만 스크롤(안전장치).
+      const maxPx = Math.round(window.innerHeight * 0.8);
+      const needed = el.scrollHeight;
+      el.style.height = `${Math.min(needed, maxPx)}px`;
+      el.style.overflowY = needed > maxPx ? 'auto' : 'hidden';
     };
     fit();
     // 펼침/접힘 전환 중에는 폭이 좁아 높이가 잘못 측정되므로, 폭이 확정되면 재측정해 교정.
@@ -924,8 +927,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                 onKeyDown={onKeyDown}
                 tabIndex={collapsed ? -1 : 0}
                 placeholder={placeholder}
-                style={{ maxHeight: '42vh' }}
-                className="min-h-[40px] flex-1 resize-none self-end overflow-y-auto bg-transparent px-t1 py-t2 font-sans text-body text-fg placeholder:text-fg-muted focus:outline-none"
+                className="min-h-[40px] flex-1 resize-none self-end overflow-hidden bg-transparent px-t1 py-t2 font-sans text-body text-fg placeholder:text-fg-muted focus:outline-none"
               />
             )}
 

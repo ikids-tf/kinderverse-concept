@@ -48,6 +48,10 @@ interface Props {
   docId: string;
   initialMode?: 'play' | 'edit';
   onClose: () => void;
+  /** 게임 완료 후 '확장 활동' — 보드 오른쪽에 교사용 활동 카드 생성(없으면 버튼 숨김). */
+  onExtend?: () => void;
+  /** 게임 완료 후 '종료' — 인터랙티브 홈/갤러리로 이동(없으면 onClose 로 폴백). */
+  onExit?: () => void;
 }
 
 const chromeBtn =
@@ -67,7 +71,7 @@ function cloneOf(el: ElementNode): ElementNode {
   return { ...el, id: newId('el'), transform: { ...el.transform, x: el.transform.x + 24, y: el.transform.y + 24 } };
 }
 
-export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Props) {
+export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExtend, onExit }: Props) {
   const doc = useInteractiveStore((s) => s.docs[docId]);
   const ensure = useInteractiveStore((s) => s.ensure);
   const mutate = useInteractiveStore((s) => s.mutate);
@@ -76,6 +80,8 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   const [mode, setMode] = useState<'play' | 'edit'>(initialMode);
   const [selectedElIds, setSelectedElIds] = useState<string[]>([]);
   const [resetNonce, setResetNonce] = useState(0);
+  // 게임 완료(순서 게임 클리어·이야기 끝) — 하단 완료 버튼바를 띄운다. 다시하기/모드전환/문서변경 시 해제.
+  const [finished, setFinished] = useState(false);
   const [picker, setPicker] = useState<null | { for: 'add' | 'swap' }>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
@@ -88,6 +94,11 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
   useEffect(() => {
     ensure(docId);
   }, [docId, ensure]);
+
+  // 다시하기/모드 전환/문서 변경 시 완료 버튼바 숨김.
+  useEffect(() => {
+    setFinished(false);
+  }, [resetNonce, mode, docId]);
 
   // 프롬프트바 라우팅용 — 편집 풀스크린일 때 이 노드를 '전용 컨텍스트'로 표시(보드로 안 샘).
   const setInodeFs = useUIStore((s) => s.setInodeFs);
@@ -323,14 +334,6 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
       ...d,
       elements: d.elements.map((e) => (e.id === elId ? { ...e, transform: { ...e.transform, rotation } } : e)),
     }));
-
-  const duplicateElement = (elId: string) => {
-    const el = doc.elements.find((e) => e.id === elId);
-    if (!el) return;
-    const clone = cloneOf(el);
-    mutate(docId, (d) => withElementAdded(d, clone));
-    setSelectedElIds([clone.id]);
-  };
 
   // 묶어서 복제(프리팹) — 선택한 여러 요소를 동작·내부 연결까지 함께 복제(id 재매핑).
   const duplicateBundle = () => {
@@ -618,6 +621,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
             onRelinkConnection={relinkConnection}
             onDropFiles={onDropFiles}
             resetNonce={resetNonce}
+            onComplete={() => { if (mode === 'play') setFinished(true); }}
           />
         </div>
         {mode === 'edit' && storyOpen ? (
@@ -736,6 +740,30 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose }: Pro
       {mode === 'edit' && (
         <div className="kv-fsbar-enter">
           <PromptBar />
+        </div>
+      )}
+
+      {/* 게임 완료 — 하단 버튼바. 다시하기 · (다음 게임: 다음 레벨 있을 때만 · 지금은 레벨 시스템 없어 숨김)
+          · 확장 활동(보드 오른쪽으로) · 종료(인터랙티브 홈). */}
+      {mode === 'play' && finished && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-6 z-30 flex justify-center px-4">
+          <div className="kv-fsbar-enter pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-[28px] border border-border bg-surface/95 px-3 py-2 shadow-lg backdrop-blur">
+            <button
+              onClick={() => { setResetNonce((n) => n + 1); setFinished(false); }}
+              className={chromeBtn}
+              title="처음부터 다시"
+            >
+              <Icon name="reset" size={16} /> 다시하기
+            </button>
+            {onExtend && (
+              <button onClick={() => onExtend()} className={chromeBtn} title="이 놀이로 확장 활동 만들기 (보드 오른쪽)">
+                <span aria-hidden>✨</span> 확장 활동
+              </button>
+            )}
+            <button onClick={() => (onExit ? onExit() : onClose())} className={chromeBtnAccent} title="인터랙티브 홈으로">
+              <Icon name="x" size={16} /> 종료
+            </button>
+          </div>
         </div>
       )}
     </div>
