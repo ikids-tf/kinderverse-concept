@@ -25,8 +25,8 @@ const STYLE_CORE =
   '완전 정면 금지 — 대상의 특징이 가장 잘 드러나는 3/4 측면 각도(동물·생물은 꼬리·다리까지 전신이 다 보이게, 사물·기구·건물은 형태가 분명한 입체 각도), ' +
   '사물·동물은 의인화하지 말 것(사람 얼굴·표정·옷·직립 보행 금지), 실제 모습 그대로 정확하게(아이들이 실제 정보를 배우도록), ' +
   '완전한 순백색 단색 배경, 그림자·바닥·반사 없음, 또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화';
-/** 단일 토큰 — 대상이 프레임을 꽉 채우게(여백 최소, 단 잘리지 않고 전체가 보이게) → 표시·편집 시 충분히 크게. */
-const TOKEN_STYLE = `대상 하나만 프레임에 꽉 차게 크게(여백 최소·가장자리까지, 단 잘리지 않고 전체가 보이게), 다른 사물 없음, ${STYLE_CORE}`;
+/** 단일 토큰 — 대상 '전체'가 잘리지 않고 프레임 안에 여유 있게(사방 여백). 타이트한 박스는 누끼 후 trimTransparent가 만든다(여기서 꽉 채우면 앞다리·꼬리가 잘림). */
+const TOKEN_STYLE = `대상 하나만, 머리·귀부터 꼬리·발끝까지 전체가 절대 잘리지 않고 프레임 안에 여유 있게 다 들어오도록(사방에 넉넉한 여백, 화면을 꽉 채우지 말 것), 화면 가운데에 또렷하게, 다른 사물 없음, ${STYLE_CORE}`;
 /** 장면 배경 — 풀블리드 3D 픽사풍, 은은하게(전경 가독 보호). 누끼하지 않음. */
 const SCENE_STYLE =
   '3D 픽사풍 부드러운 배경 장면, 밝은 파스텔 색, 은은하고 단순, 가로 와이드 16:10, 인물·캐릭터·동물 없음, 글자 없음, 가운데는 비워 균형 잡힌 구도';
@@ -127,25 +127,6 @@ async function trimTransparent(dataUri: string, padRatio = 0.03): Promise<string
   return out2.toDataURL('image/png');
 }
 
-/** 가로로 늘어선 세트 그림을 n등분(동일 폭)으로 자른다. */
-async function sliceRow(dataUri: string, n: number): Promise<string[]> {
-  const blob = await (await fetch(dataUri)).blob();
-  const bmp = await createImageBitmap(blob);
-  const colW = Math.floor(bmp.width / n);
-  const out: string[] = [];
-  for (let i = 0; i < n; i++) {
-    const c = document.createElement('canvas');
-    c.width = colW;
-    c.height = bmp.height;
-    const ctx = c.getContext('2d');
-    if (!ctx) break;
-    ctx.drawImage(bmp, i * colW, 0, colW, bmp.height, 0, 0, colW, bmp.height);
-    out.push(c.toDataURL('image/png'));
-  }
-  bmp.close?.();
-  return out;
-}
-
 /** 요소의 src에서 "gen:라벨"을 뽑는다(문자열 또는 {src} 객체 모두 허용). 없으면 null. */
 function genLabelOf(el: RawEl): string | null {
   const s = el.src;
@@ -174,12 +155,13 @@ async function assignImage(el: RawEl, dataUri: string | null, doCutout: boolean)
 }
 
 /**
- * "gen:" 토큰 채우기. sheetSets=true면 동일 라벨 2~6개를 한 장으로 그려 분할(완전 동일).
- * 라벨 없는 이미지·상한 초과분·생성 실패분은 도형 폴백(유효·가시).
+ * "gen:" 토큰을 통일 스타일 + 누끼(투명) 그림으로 채운다 — 각 대상을 '개별' 생성한다(병렬).
+ * (한 장→분할 방식은 칸 경계에서 대상이 잘려 폐기. 같은 라벨도 강한 공통 스타일로 일관되게 나온다.)
+ * 라벨 없는 이미지·상한 초과분·생성 실패분은 폴백(플레이스홀더/도형).
  */
 export async function fillTokenImages(
   raw: RawNode,
-  opts: { sheetSets: boolean; cutout?: boolean; onBusy?: (m: string | null) => void },
+  opts: { cutout?: boolean; onBusy?: (m: string | null) => void },
 ): Promise<void> {
   const doCut = opts.cutout ?? true;
   const els = Array.isArray(raw.elements) ? raw.elements : [];
@@ -198,43 +180,12 @@ export async function fillTokenImages(
   opts.onBusy?.('그림을 만드는 중…');
   if (doCut) warmupBackgroundRemoval(); // 모델 미리 로드(누끼 대기 단축)
 
-  // 라벨별 그룹(동일 라벨 = 같이 생겨야 하는 세트)
-  const groups = new Map<string, Array<{ el: RawEl; label: string }>>();
-  for (const t of targets) {
-    const k = t.label.toLowerCase();
-    let g = groups.get(k);
-    if (!g) { g = []; groups.set(k, g); }
-    g.push(t);
-  }
-
-  const jobs: Array<Promise<void>> = [];
-  for (const members of groups.values()) {
-    const label = members[0].label;
-    if (opts.sheetSets && members.length >= 2 && members.length <= 6) {
-      // 세트: 한 장으로 그려 분할 → 각 누끼(완전 동일). 실패 시 멤버별 개별 생성으로 폴백.
-      jobs.push(
-        (async () => {
-          const sheet = await genImage(
-            `같은 ${label} ${members.length}개가 한 줄로 균등 간격, 서로 닿지 않게 또렷이 분리, 모두 똑같은 모양과 크기`,
-            STYLE_CORE,
-          );
-          if (!sheet) {
-            await Promise.all(members.map(async (m) => assignImage(m.el, await genImage(label, TOKEN_STYLE), doCut)));
-            return;
-          }
-          let slices: string[] = [];
-          try { slices = await sliceRow(sheet, members.length); } catch { slices = []; }
-          await Promise.all(members.map((m, i) => assignImage(m.el, slices[i] ?? sheet, doCut)));
-        })(),
-      );
-    } else {
-      // 단일/대형 세트: 멤버별 개별 생성(스타일 통일)
-      for (const m of members) {
-        jobs.push((async () => assignImage(m.el, await genImage(label, TOKEN_STYLE), doCut))());
-      }
-    }
-  }
-  await Promise.all(jobs);
+  await Promise.all(
+    targets.map(async (t) => {
+      const img = await genImage(t.label, TOKEN_STYLE);
+      await assignImage(t.el, img, doCut);
+    }),
+  );
 }
 
 /** 주제에 맞는 장면 배경 1장(누끼 없음·풀블리드). 실패 시 null → 색 배경 유지. */

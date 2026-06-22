@@ -152,6 +152,8 @@ export function InteractiveStage({
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const [highlighted, setHighlighted] = useState<Record<string, string>>({});
   const [bubbles, setBubbles] = useState<Record<string, string>>({});
+  // 숨바꼭질/추측 연출 — peek 플래그가 있으면 대상 아랫부분을 '풀 속에 잠긴 듯' 가리고, 탭하면 전신 공개.
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   // 이야기(story) 재생 — 현재 단계(없으면 null). 나레이션 바 + 다음/이전.
   const [storyIdx, setStoryIdx] = useState<number | null>(null);
   // 조건 평가용 동기 미러(체이닝 중 최신값 읽기) + 리셋 토큰(지연/체인 취소).
@@ -183,6 +185,13 @@ export function InteractiveStage({
     for (const b of doc.behaviors) if (b.action === 'hide' && b.trigger === 'sceneEnter') b.params.targets.forEach((t) => s.add(t));
     return s;
   }, [doc.behaviors]);
+  // peek(숨바꼭질) 모드 — flags 에 'peek' 가 있으면 켜짐. 탭 대상들을 '풀 속에 숨은' 마스크로 가린다.
+  const peekMode = useMemo(() => (doc.flags ?? []).some((f) => f.id === 'peek'), [doc.flags]);
+  const peekIds = useMemo(() => {
+    const s = new Set<string>();
+    if (peekMode) for (const b of doc.behaviors) if (b.trigger === 'tap' || b.trigger === 'sequenceTap') s.add(b.target);
+    return s;
+  }, [peekMode, doc.behaviors]);
 
   // 🔴 드래그/리사이즈 핸들러가 매 렌더 새 identity가 되면, 선택 직후 인스펙터 마운트로 인한
   //    리렌더의 cleanup이 방금 붙인 window 리스너를 떼어내 드래그가 즉시 죽는다. 가변값을
@@ -236,6 +245,7 @@ export function InteractiveStage({
     setHidden({});
     setHighlighted({});
     setBubbles({});
+    setRevealed({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetNonce, mode]);
 
@@ -788,6 +798,7 @@ export function InteractiveStage({
       if (seqOrder[seqIndexRef.current] === el.id) {
         seqIndexRef.current += 1;
         void fireBehavior(beh.id);
+        if (peekMode && peekIds.has(el.id)) setRevealed((r) => ({ ...r, [el.id]: true })); // 탭 → 전신 공개
         if (seqIndexRef.current >= seqOrder.length && seqOrder.length > 0) fireComplete(); // 순서 게임 완료
       } else {
         const inner = innerRefs.current[el.id];
@@ -796,6 +807,7 @@ export function InteractiveStage({
       return;
     }
     void fireBehavior(beh.id);
+    if (peekMode && peekIds.has(el.id)) setRevealed((r) => ({ ...r, [el.id]: true })); // 탭 → 전신 공개
   };
 
   // ── 편집: 글자 더블클릭 → 인라인 편집 ──
@@ -1060,6 +1072,11 @@ export function InteractiveStage({
             // 숨김(hide/reveal)은 재생에서만 반영 — 편집에선 항상 보여 교사가 다룰 수 있게.
             const isHidden = mode === 'play' && !preview && !!hidden[el.id];
             const hl = highlighted[el.id];
+            // 숨바꼭질 — 재생 중 아직 안 누른 peek 대상은 아랫부분을 그라데이션으로 가린다(풀 속에 숨은 듯).
+            const peekMaskCss =
+              peekMode && mode === 'play' && !preview && peekIds.has(el.id) && !revealed[el.id]
+                ? 'linear-gradient(to top, transparent 4%, rgba(0,0,0,0.16) 32%, #000 62%)'
+                : undefined;
             const cls = ['ic-el'];
             // 다중 선택일 때만 외곽선(단일은 SelectionBox가 그린다).
             if (!preview && mode === 'edit' && selectedElIds.length > 1 && selSet.has(el.id)) cls.push('is-selected');
@@ -1093,6 +1110,8 @@ export function InteractiveStage({
                     outline: hl ? `${4 / scale}px solid ${hl}` : undefined,
                     outlineOffset: hl ? `${2 / scale}px` : undefined,
                     borderRadius: hl ? 12 : undefined,
+                    WebkitMaskImage: peekMaskCss,
+                    maskImage: peekMaskCss,
                   }}
                 >
                   {renderContent(el)}

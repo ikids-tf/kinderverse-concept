@@ -82,6 +82,7 @@ export function autoLayout(node: InteractiveNode): InteractiveNode {
   const { w: cw, h: ch } = node.canvas.size;
   const M = 48; // 안전 여백
   const roles = classify(node);
+  const peek = (node.flags ?? []).some((f) => f.id === 'peek'); // 숨바꼭질/추측 — 흩어 배치 + 런타임 마스크
   const byId = new Map(node.elements.map((e) => [e.id, e] as const));
   const tf = new Map<string, Transform>(); // id → 새 transform
 
@@ -97,9 +98,31 @@ export function autoLayout(node: InteractiveNode): InteractiveNode {
   const labels = roles.labels.map((id) => byId.get(id)!).filter(Boolean).sort((a, b) => a.transform.x - b.transform.x);
   const hasActor = roles.actors.length > 0;
 
-  // 2) 플레이 세트 — 균일 크기·균등 간격·중앙 정렬(한 줄 또는 격자), 하단 정렬
+  // 2) 플레이 세트 — 균일 크기·균등 간격·중앙 정렬(한 줄/격자), 하단 정렬. peek면 풀밭에 흩어 배치.
   let setTop = ch * 0.55; // 액터 배치 기준(세트 윗변)
-  if (play.length) {
+  if (play.length && peek) {
+    // 숨바꼭질/추측 — 흩어 배치(한 줄 X). 아랫부분은 런타임 마스크가 '풀 속에 잠긴 듯' 가린다.
+    const n = play.length;
+    const cols = n <= 4 ? n : Math.ceil(Math.sqrt(n * 1.4));
+    const rows = Math.ceil(n / cols);
+    const colW = (cw - 2 * M) / cols;
+    const size = Math.round(clamp(Math.min(colW * 0.62, 190), 120, 190));
+    const bandTop = ch * 0.4;
+    const bandH = ch * 0.82 - bandTop;
+    const rowH = bandH / rows;
+    play.forEach((e, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const jx = (((i * 37) % 100) / 100 - 0.5) * colW * 0.34; // 결정론적 지터(흩어진 느낌)
+      const jy = (((i * 53) % 100) / 100 - 0.5) * rowH * 0.4;
+      const cx = M + colW * (col + 0.5) + jx;
+      const cy = bandTop + rowH * (row + 0.5) + jy;
+      const x = Math.round(clamp(cx - size / 2, M, cw - M - size));
+      const y = Math.round(clamp(cy - size / 2, bandTop - 20, ch - M - size));
+      tf.set(e.id, { x, y, w: size, h: size, rotation: 0, z: 2 + row * 2 + (col % 2) });
+    });
+    setTop = bandTop;
+  } else if (play.length) {
     const n = play.length;
     const perRow = n <= 6 ? n : Math.ceil(Math.sqrt(n));
     const rows = Math.ceil(n / perRow);
