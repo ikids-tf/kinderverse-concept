@@ -1,0 +1,186 @@
+/**
+ * Resolver — 조립 빌더(요소·행동·노드 팩토리).
+ *
+ * 레시피가 공유하는 결정론 헬퍼. 스키마 출력 타입(z.infer)을 그대로 만들어 safeParse 를
+ * 항상 통과시킨다(rotation/z/origin/assetKind/meta 등 필수값을 빠짐없이 채움).
+ * 위치는 기본값만 주고, 정밀 배치는 autoLayout(layout.ts)에 위임한다.
+ *
+ * id 는 한 build 내에서만 유일하면 된다(레인 통합 시 offsetLane 이 전부 재매핑).
+ * 안정적·가독 id(item_1, tap_1 …)로 결정론 출력 + 디버깅 용이.
+ */
+import type {
+  Behavior,
+  Connection,
+  ElementNode,
+  InteractiveNode,
+  Transform,
+} from '../schema/interactiveNode';
+import type { RecipeInput } from './recipeTypes';
+
+/** Counter/Flag 는 스키마가 '값(zod)'으로만 export → 인덱스 접근으로 타입 파생. */
+type Counter = NonNullable<InteractiveNode['counters']>[number];
+type Flag = NonNullable<InteractiveNode['flags']>[number];
+
+export const CANVAS = { w: 1280, h: 800 } as const;
+
+/** 부분 transform → 완전 transform(필수값 보강). */
+export function tf(t: Partial<Transform> = {}): Transform {
+  return { x: 0, y: 0, w: 160, h: 160, rotation: 0, z: 1, ...t };
+}
+
+/** 텍스트 요소. */
+export function textEl(id: string, text: string, t: Partial<Transform> = {}): ElementNode {
+  return {
+    id,
+    kind: 'text',
+    text,
+    origin: 'upload',
+    assetKind: 'teacher-upload',
+    transform: tf({ w: 480, h: 84, ...t }),
+  };
+}
+
+/** 이미지 요소 — `gen:label` 로 두면 fillTokenImages 가 실제 그림+누끼로 채운다. */
+export function imageEl(id: string, label: string, t: Partial<Transform> = {}): ElementNode {
+  return {
+    id,
+    kind: 'image',
+    src: { id: `a_${id}`, src: `gen:${label}`, assetKind: 'generated' },
+    origin: 'upload',
+    assetKind: 'generated',
+    transform: tf({ w: 180, h: 180, ...t }),
+  };
+}
+
+/** 단색 도형(분류 통·빈칸 판 등). src 없음. */
+export function shapeEl(id: string, t: Partial<Transform> = {}): ElementNode {
+  return {
+    id,
+    kind: 'shape',
+    origin: 'upload',
+    assetKind: 'teacher-upload',
+    transform: tf({ w: 240, h: 180, ...t }),
+  };
+}
+
+/** 카드 뒷면(균일 '?' 파스텔) — memory-flip 시작 상태. 앞면(gen)은 swap.to 로 둔다. */
+export const CARD_BACK_URI =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="240" viewBox="0 0 200 240"><rect x="8" y="8" width="184" height="224" rx="26" fill="#F7D9C4" stroke="#E8A87C" stroke-width="5"/><text x="100" y="158" font-size="120" text-anchor="middle" fill="#D98B5F" font-family="sans-serif" font-weight="700">?</text></svg>`,
+  );
+
+/** 고정 이미지 요소 — 생성/누끼 아님(데이터 URI·URL 직접). 카드 뒷면 등. */
+export function fixedImageEl(id: string, srcUri: string, t: Partial<Transform> = {}): ElementNode {
+  return {
+    id,
+    kind: 'image',
+    src: { id: `a_${id}`, src: srcUri, assetKind: 'generated' },
+    origin: 'upload',
+    assetKind: 'generated',
+    transform: tf({ w: 180, h: 180, ...t }),
+  };
+}
+
+/* ─── 행동(트리거→액션) 생성자 — discriminated union 을 정확히 만든다 ─── */
+
+interface Ctl {
+  when?: Behavior['when'];
+  then?: string[];
+  after?: string;
+  delay?: number;
+}
+
+export const onHide = (id: string, target: string, trigger: Behavior['trigger'], targets: string[], ctl: Ctl = {}): Behavior => ({
+  id, target, trigger, action: 'hide', params: { targets }, ...ctl,
+});
+
+export const onReveal = (id: string, target: string, trigger: Behavior['trigger'], targets: string[], ctl: Ctl = {}): Behavior => ({
+  id, target, trigger, action: 'reveal', params: { targets }, ...ctl,
+});
+
+export const onCount = (id: string, target: string, trigger: Behavior['trigger'], counterId: string, by = 1, ctl: Ctl = {}): Behavior => ({
+  id, target, trigger, action: 'count', params: { counterId, by }, ...ctl,
+});
+
+export const onMove = (id: string, target: string, trigger: Behavior['trigger'], connectionId: string, speed = 1, ctl: Ctl = {}): Behavior => ({
+  id, target, trigger, action: 'moveAlongPath', params: { connectionId, speed }, ...ctl,
+});
+
+export const onAnimate = (id: string, target: string, trigger: Behavior['trigger'], preset: NonNullable<Extract<Behavior, { action: 'animate' }>['params']['preset']>, ctl: Ctl = {}): Behavior => ({
+  id, target, trigger, action: 'animate', params: { preset }, ...ctl,
+});
+
+export const onSpeak = (id: string, target: string, trigger: Behavior['trigger'], text: string, ctl: Ctl = {}): Behavior => ({
+  id, target, trigger, action: 'speak', params: { text, mode: 'bubble' }, ...ctl,
+});
+
+export const onSetFlag = (id: string, target: string, trigger: Behavior['trigger'], flagId: string, value: boolean, ctl: Ctl = {}): Behavior => ({
+  id, target, trigger, action: 'setFlag', params: { flagId, value }, ...ctl,
+});
+
+export const onSwap = (id: string, target: string, trigger: Behavior['trigger'], to: Extract<Behavior, { action: 'swap' }>['params']['to'], ctl: Ctl = {}): Behavior => ({
+  id, target, trigger, action: 'swap', params: { to, mode: 'image' }, ...ctl,
+});
+
+/** counter 조건(완료 게이트). */
+export const whenCounter = (counterId: string, value: number, op: '>=' | '==' | '<' = '>='): Behavior['when'] => ({
+  kind: 'counter', counterId, op, value,
+});
+
+/** flag 조건. */
+export const whenFlag = (flagId: string, is: boolean): Behavior['when'] => ({ kind: 'flag', flagId, is });
+
+/* ─── 연결 ─── */
+
+export const conn = (id: string, kind: Connection['kind'], from: string, to: string, points?: Connection['points']): Connection => ({
+  id, kind, from, to, ...(points ? { points } : {}),
+});
+
+/* ─── 상태 ─── */
+
+export const counter = (id: string, label?: string, display?: Counter['display']): Counter => ({
+  id, initial: 0, ...(label ? { label } : {}), ...(display ? { display } : {}),
+});
+
+export const flag = (id: string, initial = false): Flag => ({ id, initial });
+
+/* ─── 루트 노드 조립 ─── */
+
+export interface NodeParts {
+  elements: ElementNode[];
+  connections?: Connection[];
+  behaviors?: Behavior[];
+  counters?: Counter[];
+  flags?: Flag[];
+}
+
+/** 손제작 InteractiveNode(1280×800) — 모든 필수 필드 보강. */
+export function assembleNode(input: RecipeInput, parts: NodeParts): InteractiveNode {
+  const bg = input.background && /^(pastel\.|#)/.test(input.background) ? input.background : 'pastel.cream';
+  return {
+    id: input.docId,
+    title: (input.title || '인터랙티브').slice(0, 40),
+    theme: 'pastel-child',
+    canvas: { background: bg, size: { w: CANVAS.w, h: CANVAS.h } },
+    elements: parts.elements,
+    connections: parts.connections ?? [],
+    behaviors: parts.behaviors ?? [],
+    ...(parts.counters && parts.counters.length ? { counters: parts.counters } : {}),
+    ...(parts.flags && parts.flags.length ? { flags: parts.flags } : {}),
+    meta: { createdBy: 'teacher', safety: { containsChildAssets: false, reviewed: false }, version: 1 },
+  };
+}
+
+/** 항목들을 한 줄(가로 균등)로 깔기 — autoLayout 미적용 시의 기본 배치(겹침 방지). */
+export function rowTransforms(n: number, opts: { y?: number; size?: number; z?: number } = {}): Transform[] {
+  const size = opts.size ?? 160;
+  const y = opts.y ?? 560;
+  const z = opts.z ?? 2;
+  const M = 48;
+  const span = CANVAS.w - 2 * M;
+  const gap = n > 1 ? Math.min(40, (span - n * size) / (n - 1)) : 0;
+  const rowW = n * size + (n - 1) * Math.max(0, gap);
+  const startX = Math.round((CANVAS.w - rowW) / 2);
+  return Array.from({ length: n }, (_, i) => tf({ x: Math.round(startX + i * (size + Math.max(0, gap))), y, w: size, h: size, z }));
+}

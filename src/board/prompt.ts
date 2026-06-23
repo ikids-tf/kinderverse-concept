@@ -2,6 +2,8 @@ import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { useInteractiveStore } from '@/features/interactive-viewer/store/interactiveStore';
 import { composeInteractiveNode } from '@/features/interactive-viewer/authoring/composeNode';
 import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
+import { resolveIntent } from '@/features/interactive-viewer/resolver/resolveIntent';
+import { assembleAndPlace } from '@/features/interactive-viewer/resolver/place';
 import { recommendFromLibrary } from '@/features/interactive-viewer/store/library';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
@@ -74,15 +76,26 @@ async function createInteractiveGame(text: string): Promise<void> {
   slideFrameToEmpty(nodeId); // 다른 요소와 겹치지 않게 가까운 빈자리로
   board.beginGen();
   board.setGenerating('🎮 인터랙티브 게임을 만들고 있어요…');
+  const onBusy = (m: string | null) => board.setGenerating(m ?? '🎮 인터랙티브 게임을 만들고 있어요…');
   try {
     useInteractiveStore.getState().ensure(docId);
-    const r = await composeInteractiveNode(docId, text, (m) =>
-      board.setGenerating(m ?? '🎮 인터랙티브 게임을 만들고 있어요…'),
-    );
+    // v0.2 Resolver(결정론 레시피) 우선 — 매칭 의도는 즉시·안정 합성. 롱테일/실패는 compose 폴백.
+    const intent = await resolveIntent(text, onBusy);
+    let r: { ok: boolean; message: string } | null = null;
+    if (intent) {
+      const placed = await assembleAndPlace(docId, intent.mechanism, intent.input, onBusy);
+      if (placed.ok) r = { ok: true, message: placed.message };
+    }
+    if (!r) r = await composeInteractiveNode(docId, text, onBusy);
     showToast(r.message, r.ok ? 'success' : 'error');
   } finally {
     board.endGen();
   }
+}
+
+/** 추천 스트립·외부에서 '게임 만들기'를 직접 트리거 — 새 인터랙티브 노드 생성 + Resolver 합성. */
+export function startInteractiveGame(text: string): void {
+  void createInteractiveGame(normalizeInput(text));
 }
 
 /** 보드에서 인터랙티브 노드가 단독 선택된 채 프롬프트 — 그 노드(docId)에 바로 게임을

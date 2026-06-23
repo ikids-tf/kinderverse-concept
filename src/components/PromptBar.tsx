@@ -8,6 +8,7 @@ import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import type { ImageAsset } from '@/board/assets';
 import type { WebLink } from '@/board/webLinks';
 import { FavoriteCardRail } from './FavoriteCardRail';
+import { GameSuggestStrip } from './board/GameSuggestStrip';
 
 /* Board engine modules (prompt/workflow/assets) are heavy and only needed on My
    Board, so they're loaded on demand (keeps them out of the initial bundle). */
@@ -782,6 +783,18 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             )}
           </div>
         )}
+
+        {/* 게임 추천 스트립 — 보드에서 입력이 비고 유휴일 때 '이런 놀이 어때요?' 카드를 띄운다.
+            클릭하면 Resolver가 즉시 합성. 입력/다른 스트립/생성 중에는 숨긴다. */}
+        {location.pathname.startsWith('/board') &&
+          !inodeFs &&
+          !hasText &&
+          !collapsed &&
+          !favRender &&
+          !libRender &&
+          !videoCompose &&
+          !statusInline &&
+          attachments.length === 0 && <GameSuggestStrip />}
 
         {/* 분리된 진행 스트립 — 입력창을 클릭해 되찾으면 스트리밍이 바 '바로 위'에서
             계속된다. 입력창은 플레이스홀더로 복귀, 제출하면 생성이 병렬로 추가. */}

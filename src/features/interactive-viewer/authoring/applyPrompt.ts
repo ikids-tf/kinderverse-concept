@@ -11,6 +11,8 @@
  */
 import { useInteractiveStore } from '../store/interactiveStore';
 import { composeInteractiveNode, editInteractiveNode } from './composeNode';
+import { resolveIntent } from '../resolver/resolveIntent';
+import { assembleAndPlace } from '../resolver/place';
 
 export interface ApplyResult {
   ok: boolean;
@@ -34,10 +36,19 @@ export async function applyInteractivePrompt(
   const createIntent =
     /(게임|놀이|액티비티|활동|퀴즈|미션)/.test(prompt) && /(만들|구성|생성|새로|처음|짜)/.test(prompt);
 
-  const r =
-    empty && createIntent
-      ? await composeInteractiveNode(docId, prompt, onBusy)
-      : await editInteractiveNode(docId, prompt, selectedElIds, onBusy);
+  // 새 컨셉 생성 — 먼저 Resolver(결정론 레시피)로 즉시·안정 합성을 시도하고,
+  // 레시피 없는 의도(롱테일)거나 조립 실패면 기존 composeInteractiveNode(전체 LLM)로 폴백.
+  if (empty && createIntent) {
+    const intent = await resolveIntent(prompt, onBusy);
+    if (intent) {
+      const placed = await assembleAndPlace(docId, intent.mechanism, intent.input, onBusy);
+      if (placed.ok) return { ok: true, addedIds: [], message: placed.message };
+      // 레시피 조립 실패 → 폴백.
+    }
+    const c = await composeInteractiveNode(docId, prompt, onBusy);
+    return { ok: c.ok, addedIds: [], message: c.message };
+  }
 
+  const r = await editInteractiveNode(docId, prompt, selectedElIds, onBusy);
   return { ok: r.ok, addedIds: [], message: r.message };
 }

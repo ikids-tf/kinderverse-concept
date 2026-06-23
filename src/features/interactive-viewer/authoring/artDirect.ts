@@ -298,6 +298,26 @@ export async function fillTokenImages(
   );
 }
 
+/**
+ * 단일 라벨 → 통일 스타일 + 누끼 AssetRef. element 가 아닌 곳(behavior swap.to·프리셋 옵션 등)의
+ * 'gen:라벨' 이미지를 채울 때 쓴다(fillTokenImages 는 elements 만 훑으므로 그 사각지대 보강).
+ * 실패해도 부드러운 플레이스홀더 ref 를 돌려 '깨진 gen: 문자열'이 렌더되지 않게 한다.
+ */
+export async function generateCutoutAsset(label: string, doCutout = true): Promise<AssetRef> {
+  if (doCutout) warmupBackgroundRemoval();
+  const img = await genImage(label, isNumberedLabel(label) ? NUMBER_TOKEN_STYLE : TOKEN_STYLE);
+  const uri = img ? (doCutout ? await cutout(img) : img) : PLACEHOLDER;
+  try {
+    const ref = await urlToAssetRef(uri, 'generated');
+    if (img && ref.src.startsWith('data:image/') && !ref.src.startsWith('data:image/svg')) {
+      void saveAsset(label, 'image', ref.src, undefined, undefined, 'game');
+    }
+    return ref;
+  } catch {
+    return { id: `swap_${label.slice(0, 8)}`, src: PLACEHOLDER, assetKind: 'generated' };
+  }
+}
+
 /** 주제에 맞는 장면 배경 1장(누끼 없음·풀블리드). 실패 시 null → 색 배경 유지. */
 export async function generateSceneBackground(prompt: string, theme?: string): Promise<AssetRef | null> {
   const img = await genImage(prompt, SCENE_STYLE, 1);

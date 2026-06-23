@@ -25,6 +25,7 @@ import { warmupAssets } from '@/board/assets';
 import { saveToLibrary } from '../store/library';
 import { applyInteractivePrompt } from './applyPrompt';
 import { extendActivityInNode } from './extendLane';
+import { resolverExtend } from '../resolver/extend';
 import {
   fileToAssetRef,
   makeImageElement,
@@ -551,13 +552,15 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
   };
 
   // 확장 — 같은 노드에 새 레인을 추가하고 그 레인으로 패닝(MyBoard로 안 나감, 모델 2 무한 성장).
-  // 프롬프트는 플레이스홀더(v0.2 Resolver가 '무슨 확장인지'를 주입). 생성→병합→패닝 순서.
+  // v0.2 Resolver(결정론 레시피 + 기본 body 사슬)가 '무슨 확장인지'를 주입한다. 추정/충전 실패 시
+  // 기존 composeInteractiveNode(extendActivityInNode) 폴백. 생성→병합→패닝 순서.
   const runExtend = async () => {
     if (extending) return;
     setExtending(true);
     const extendPrompt = `"${doc.title || '인터랙티브 놀이'}" 다음에 이어서 할 새로운 확장 놀이를 만들어줘`;
     try {
-      const res = await extendActivityInNode(docId, extendPrompt, setBusy);
+      let res = await resolverExtend(docId, setBusy); // 레시피별 기본 body 로 다음 레인
+      if (!res.ok) res = await extendActivityInNode(docId, extendPrompt, setBusy); // 폴백(전체 LLM)
       if (res.ok) {
         setFinished(false);
         // 노드 로컬 카메라를 새 레인으로(InteractiveStage가 kv:inode-goto-lane 수신).

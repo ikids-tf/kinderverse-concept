@@ -42,8 +42,9 @@ function dropScratch(scratchId: string): void {
 
 /** 생성된 한 레인(1280×800) 노드를 새 밴드(offsetX)로 평행이동 + 모든 id 재매핑한 '조각'으로.
     참조 무결성을 위해 요소/행동/연결/카운터/플래그 id를 전부 새로 발급하고 상호참조를 갱신한다
-    (InteractiveOverlay.duplicateBundle 패턴). 확장 레인의 story는 단일 doc.story 충돌을 피해 생략. */
-function offsetLane(src: InteractiveNode, offsetX: number): {
+    (InteractiveOverlay.duplicateBundle 패턴). 확장 레인의 story는 단일 doc.story 충돌을 피해 생략.
+    Resolver(place.ts)도 재사용 — 손제작 레시피 노드를 다음 밴드에 머지할 때 동일 규칙. */
+export function offsetLane(src: InteractiveNode, offsetX: number): {
   elements: ElementNode[];
   behaviors: Behavior[];
   connections: Connection[];
