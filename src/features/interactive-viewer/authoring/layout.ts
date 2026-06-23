@@ -112,38 +112,62 @@ export function autoLayout(node: InteractiveNode): InteractiveNode {
   // 2) 플레이 세트 — grid(균일·한 줄/격자) 또는 scatter(흩어 + 원근 깊이). 하단 정렬.
   let setTop = ch * 0.55; // 액터 배치 기준(세트 윗변)
   if (play.length && scatter) {
-    // 흩어 배치(한 줄 X) + 원근 깊이: 위=작게(원경)·아래=크게(근경). peek면 런타임 마스크가 아랫부분을 가린다.
-    // actorCollect 는 하단 중앙을 액터 '집'으로 비우려 밴드를 위쪽에 둔다.
+    // 흩어 배치 + 원근 깊이: 위=작게(원경)·아래=크게(근경).
     const n = play.length;
-    const cols = n <= 4 ? n : Math.ceil(Math.sqrt(n * 1.4));
-    const rows = Math.ceil(n / cols);
-    const colW = (cw - 2 * M) / cols;
-    const baseSize = clamp(Math.min(colW * 0.62, 196), 116, 196);
-    const bandTop = peek ? ch * 0.4 : ch * 0.22;
-    const bandBottom = peek ? ch * 0.82 : ch * 0.56;
-    const bandH = bandBottom - bandTop;
-    const rowH = bandH / rows;
     const pairLabels = labels.length === n; // 숫자 라벨이 있으면 각 아이템 아래에 따라붙인다
-    play.forEach((e, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const jx = (((i * 37) % 100) / 100 - 0.5) * colW * 0.34; // 결정론적 지터(흩어진 느낌)
-      const jy = (((i * 53) % 100) / 100 - 0.5) * rowH * 0.4;
-      const cx = M + colW * (col + 0.5) + jx;
-      const cy = bandTop + rowH * (row + 0.5) + jy;
-      const depth = clamp((cy - bandTop) / Math.max(1, bandH), 0, 1); // 0=위(원경) → 1=아래(근경)
-      const size = Math.round(clamp(baseSize * (0.74 + 0.5 * depth), 92, 232)); // 원근 크기 차등
-      const x = Math.round(clamp(cx - size / 2, M, cw - M - size));
-      const y = Math.round(clamp(cy - size / 2, bandTop - 20, ch - M - size));
-      const z = 2 + Math.round(depth * 12); // 가까울수록(아래) 앞으로
-      tf.set(e.id, { x, y, w: size, h: size, rotation: 0, z });
-      if (pairLabels) {
-        const lab = labels[i];
-        const lw = clamp(lab.transform.w, 40, size);
-        tf.set(lab.id, { x: Math.round(x + (size - lw) / 2), y: y + size + 4, w: lw, h: 40, rotation: 0, z: z + 1 });
-      }
-    });
-    setTop = bandTop;
+    const setLabel = (lab: ElementNode, x: number, y: number, size: number, z: number) => {
+      const lw = clamp(lab.transform.w, 40, size);
+      tf.set(lab.id, { x: Math.round(x + (size - lw) / 2), y: y + size + 4, w: lw, h: 40, rotation: 0, z: z + 1 });
+    };
+    if (peek) {
+      // 숨바꼭질 — 격자 흩어 배치(아랫부분은 런타임 마스크가 풀 속처럼 가린다).
+      const cols = n <= 4 ? n : Math.ceil(Math.sqrt(n * 1.4));
+      const rows = Math.ceil(n / cols);
+      const colW = (cw - 2 * M) / cols;
+      const baseSize = clamp(Math.min(colW * 0.62, 196), 116, 196);
+      const bandTop = ch * 0.4;
+      const bandH = ch * 0.82 - bandTop;
+      const rowH = bandH / rows;
+      play.forEach((e, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const jx = (((i * 37) % 100) / 100 - 0.5) * colW * 0.34;
+        const jy = (((i * 53) % 100) / 100 - 0.5) * rowH * 0.4;
+        const cx = M + colW * (col + 0.5) + jx;
+        const cy = bandTop + rowH * (row + 0.5) + jy;
+        const depth = clamp((cy - bandTop) / Math.max(1, bandH), 0, 1);
+        const size = Math.round(clamp(baseSize * (0.74 + 0.5 * depth), 92, 232));
+        const x = Math.round(clamp(cx - size / 2, M, cw - M - size));
+        const y = Math.round(clamp(cy - size / 2, bandTop - 20, ch - M - size));
+        const z = 2 + Math.round(depth * 12);
+        tf.set(e.id, { x, y, w: size, h: size, rotation: 0, z });
+        if (pairLabels) setLabel(labels[i], x, y, size, z);
+      });
+      setTop = bandTop;
+    } else {
+      // 수집형 — 가로 n슬롯(겹침 없이 좌→우 분산) + 세로 황금비 스태거로 '장면 전체'에 골고루.
+      // 상단 HUD(제목·카운터)와 하단(액터 '집')은 비운다. 한 칸에 세로로 쌓이지 않게 분산.
+      const bandTop = ch * 0.24;
+      const bandBottom = ch * 0.62;
+      const bandH = bandBottom - bandTop;
+      const slotW = (cw - 2 * M) / n;
+      const baseSize = clamp(Math.min(slotW * 0.66, 200), 116, 200);
+      play.forEach((e, i) => {
+        const yFrac = (i * 0.618 + 0.2) % 1; // 황금비 — 세로로 잘 분산(지그재그 깊이)
+        const jx = (((i * 41) % 100) / 100 - 0.5) * slotW * 0.26;
+        const jy = (((i * 53) % 100) / 100 - 0.5) * bandH * 0.1;
+        const cx = M + slotW * (i + 0.5) + jx;
+        const cy = bandTop + bandH * yFrac + jy;
+        const depth = clamp((cy - bandTop) / Math.max(1, bandH), 0, 1);
+        const size = Math.round(clamp(baseSize * (0.74 + 0.5 * depth), 92, 230));
+        const x = Math.round(clamp(cx - size / 2, M, cw - M - size));
+        const y = Math.round(clamp(cy - size / 2, bandTop - 16, ch - M - size));
+        const z = 2 + Math.round(depth * 12);
+        tf.set(e.id, { x, y, w: size, h: size, rotation: 0, z });
+        if (pairLabels) setLabel(labels[i], x, y, size, z);
+      });
+      setTop = bandTop;
+    }
   } else if (play.length) {
     const n = play.length;
     const perRow = n <= 6 ? n : Math.ceil(Math.sqrt(n));

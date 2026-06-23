@@ -10,6 +10,7 @@ import { cancelAnimations, runAnimate } from './behaviors';
 import { speakText, stopSpeaking } from './speak';
 import { ElementSelectionBox } from './ElementSelectionBox';
 import { clampXY } from './geometry';
+import { loadActorSide } from '../store/actorPoses';
 import { linkSequence, compareLabels } from '@/board/links';
 import { Icon } from '@/lib/icons';
 import './inode.css';
@@ -78,6 +79,20 @@ function detectFacing(img: HTMLImageElement): 'left' | 'right' | 'front' {
   } catch {
     return 'front';
   }
+}
+
+/** 이동 방향으로 바라보게 — scaleX 부호(1/−1)를 낸다. 캐릭터의 자연 facing을 기준 삼되,
+    측면 포즈는 '오른쪽 향함'으로 생성하므로 facing이 'front'이거나 감지 실패여도 base='right'로
+    가정해 '항상' 이동 방향으로 플립한다(대칭이면 안 보여 무해, 측면이면 올바른 방향으로 향함).
+    세로 이동만(가로 변화 없음)이면 직전 방향을 유지한다. */
+function flipFor(
+  facing: 'left' | 'right' | 'front' | undefined,
+  moveDir: 'left' | 'right' | null,
+  prevF: 1 | -1,
+): 1 | -1 {
+  if (!moveDir) return prevF;
+  const base = facing === 'left' ? 'left' : 'right'; // front·undefined·right → 'right' 기준(측면 포즈 생성 방향)
+  return moveDir === base ? 1 : -1;
 }
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -207,6 +222,11 @@ export function InteractiveStage({
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   // 수집형(줍기/찾기) — 액터가 도착해 '획득'한 아이템 id(획득 순). 제자리에서 사라져 중앙 트레이로 정렬된다.
   const [collected, setCollected] = useState<string[]>([]);
+  // 주인공 2포즈 — 시작/끝(집)은 정면(메인 src), 이동 중엔 측면 포즈(있으면). actorAtHome=집에 있나.
+  const [actorSidePose, setActorSidePose] = useState<string | null>(null);
+  const [actorAtHome, setActorAtHome] = useState(true);
+  // 대기 애니메이션(Idle) — 정지 상태(시작·이동후 대기·완료)에 살짝 숨쉬듯. 이동 중엔 끈다.
+  const [actorMoving, setActorMoving] = useState(false);
   // 탭/찾기 이펙트 — 작은 파티클 버스트(과하지 않게, 자동 소멸).
   const [bursts, setBursts] = useState<Array<{ id: number; x: number; y: number }>>([]);
   const burstSeq = useRef(0);
@@ -317,6 +337,8 @@ export function InteractiveStage({
     setBubbles({});
     setRevealed({});
     setCollected([]);
+    setActorAtHome(true); // 리셋 = 집(정면)
+    setActorMoving(false); // 정지 = 대기 애니메이션 ON
     setBursts([]);
     setCelebrating(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -352,19 +374,43 @@ export function InteractiveStage({
       !!actorId &&
       playIds.size >= 3 &&
       doc.connections.some((c) => moveTargets.has(c.from) || moveTargets.has(c.to));
-    return { isCollect, actorId, playIds };
+    // 액터는 '진짜 수집형'에서만 의미. 분류 등 비수집형에선 첫 이동대상이 actorId로 잡혀
+    // 무생물 아이템(인형 등)에 액터 로직(플립·정면/측면 스왑·대기·집 상태)이 잘못 적용되던 문제 방지.
+    return { isCollect, actorId: isCollect ? actorId : null, playIds };
   }, [doc.behaviors, doc.connections]);
 
-  // 액터(캐릭터)가 향하는 자연 방향을 이미지에서 분석 — 이동 시 진행 방향으로 바라보게 하기 위함.
+  // 드래그-분류 게임 — 각 아이템이 '자기 자신'을 통/바구니(컨테이너)로 옮기는 moveAlongPath를
+  // tap/sequenceTap 트리거로 가진 구조. 이동 대상이 아이템마다 서로 달라(≥2종) 공용 액터 1명이
+  // 아이템들로 가는 '수집형'과 구분된다. 이런 아이템은 '탭 자동 이동' 대신 '드래그해서 통에 드롭'으로
+  // 동작시킨다(런타임 해석 — 스키마 불변). 드롭 = 그 아이템의 moveAlongPath 발화이고, onPathUp이
+  // '연결된 상대(올바른 통)' 위에 놓였을 때만 발화하므로 → 틀린 통/빈 곳은 제자리로(분류 챌린지 성립).
+  const dragSortBeh = useMemo(() => {
+    const moveBeh = doc.behaviors.filter(
+      (b) => b.action === 'moveAlongPath' && (b.trigger === 'tap' || b.trigger === 'sequenceTap'),
+    );
+    const targets = new Set(moveBeh.map((b) => b.target));
+    const byItem: Record<string, string> = {}; // itemId → moveBehaviorId
+    if (targets.size >= 2) for (const b of moveBeh) byItem[b.target] = b.id;
+    return byItem;
+  }, [doc.behaviors]);
+
+  // 액터의 '측면 포즈'를 불러오고(이동 중 사용), 그 이미지로 향하는 방향을 분석한다.
+  // 측면 포즈가 없으면(구버전 측면 캐릭터) 메인 src로 분석 — 그땐 정면 스왑 없이 기존처럼 동작.
   useEffect(() => {
     const id = collectInfo.actorId;
-    const el = id ? doc.elements.find((e) => e.id === id) : null;
-    const src = el?.src?.src;
-    if (!id || !src) return;
+    if (!id) {
+      setActorSidePose(null);
+      return;
+    }
+    const side = loadActorSide(doc.id, id);
+    setActorSidePose(side);
+    const el = doc.elements.find((e) => e.id === id);
+    const detectSrc = side ?? el?.src?.src;
+    if (!detectSrc) return;
     const img = new Image();
     img.onload = () => { actorFacingRef.current[id] = detectFacing(img); };
-    img.src = src;
-  }, [collectInfo.actorId, doc.elements]);
+    img.src = detectSrc;
+  }, [collectInfo.actorId, doc.id, doc.elements]);
 
   // 모두 획득(미션 완료) → 완료 이펙트(액터가 마지막 아이템에 '도착'한 이 시점에 동기) + 캐릭터를 시작 위치로.
   useEffect(() => {
@@ -375,15 +421,14 @@ export function InteractiveStage({
     const inner = innerRefs.current[actorId];
     const prev = moveOffset.current[actorId] ?? { x: 0, y: 0 };
     if (!inner || (prev.x === 0 && prev.y === 0)) return;
-    // 집으로 가는 방향을 바라보게.
+    // 집으로 가는 방향을 바라보게(0 − prev 방향). 정면/감지실패여도 이동 방향으로 플립.
     let f = flipRef.current[actorId] ?? 1;
     const facing = actorFacingRef.current[actorId];
-    const moveDir = prev.x > 6 ? 'left' : prev.x < -6 ? 'right' : null; // 0(집) - prev 방향
-    if ((facing === 'left' || facing === 'right') && moveDir) {
-      f = facing === moveDir ? 1 : -1;
-      flipRef.current[actorId] = f;
-    }
+    const moveDir = prev.x > 6 ? 'left' : prev.x < -6 ? 'right' : null;
+    f = flipFor(facing, moveDir, f);
+    flipRef.current[actorId] = f;
     const token = runToken.current;
+    setActorMoving(true); // 복귀 이동 — 대기 애니메이션 멈춤
     const a = inner.animate(
       [{ transform: `translate(${prev.x}px, ${prev.y}px) scaleX(${f})` }, { transform: `translate(0px, 0px) scaleX(${f})` }],
       { duration: 700, fill: 'forwards', easing: 'cubic-bezier(.4,0,.3,1)' },
@@ -393,7 +438,10 @@ export function InteractiveStage({
       .then(() => {
         if (token !== runToken.current) return;
         a.cancel();
-        inner.style.transform = f === 1 ? '' : `scaleX(${f})`;
+        inner.style.transform = ''; // 집 도착 = 정면(플립 없음)
+        flipRef.current[actorId] = 1;
+        setActorAtHome(true); // 측면 → 정면 스왑
+        setActorMoving(false); // 집 도착해 대기 — 대기 애니메이션 재개
       })
       .catch(() => {});
   }, [collected, collectInfo, fireComplete]);
@@ -498,6 +546,9 @@ export function InteractiveStage({
         return;
       }
       case 'moveAlongPath': {
+        // 드래그-분류 아이템은 onPathUp이 '드롭한 자리에서 숨김'으로 통에 넣으므로 시각 이동을 생략한다
+        // (outer/inner 좌표계 핸드오프로 위치가 튀던 버그 제거). 이동은 건너뛰되 후속 체인(count/hide/win)은 흐른다.
+        if (dragSortBeh[beh.target]) return;
         const conn = doc.connections.find((c) => c.id === beh.params.connectionId);
         const inner = innerRefs.current[beh.target];
         const me = doc.elements.find((e) => e.id === beh.target);
@@ -515,16 +566,15 @@ export function InteractiveStage({
             const midX = (prev.x + dx) / 2;
             const hop = Math.min(140, 64 + Math.abs(dx - prev.x) * 0.12); // 이동 거리에 따라 점프 높이(상한 140)
             const midY = Math.min(prev.y, dy) - hop;
-            // 진행 방향으로 바라보게 — 자연 facing과 가로 이동 방향이 다르면 좌우 반전(scaleX 부호 f). 세로 이동만이면 직전 방향 유지.
+            // 진행 방향으로 바라보게 — 가로 이동 방향으로 좌우 반전(scaleX 부호 f). 세로 이동만이면 직전 방향 유지.
             let f = flipRef.current[beh.target] ?? 1;
             if (beh.target === collectInfo.actorId) {
+              setActorAtHome(false); // 이동 시작 → 측면 포즈로 전환
+              setActorMoving(true); // 이동 중 — 대기 애니메이션 멈춤
               const facing = actorFacingRef.current[beh.target];
               const moveDir = dx > prev.x + 6 ? 'right' : dx < prev.x - 6 ? 'left' : null;
-              // 측면 캐릭터만 진행 방향으로 플립. '정면' 캐릭터는 플립하지 않는다(시작/끝 정면 유지).
-              if ((facing === 'left' || facing === 'right') && moveDir) {
-                f = facing === moveDir ? 1 : -1;
-                flipRef.current[beh.target] = f;
-              }
+              f = flipFor(facing, moveDir, f); // 정면/감지실패여도 이동 방향으로 항상 플립(측면 포즈는 오른쪽 향함 기준)
+              flipRef.current[beh.target] = f;
             }
             // '점프 포즈' — 도약(쭉)→공중(살짝 눌림)→착지(쿵) 스쿼시·스트레치 + 진행 방향 플립(f).
             const a = inner.animate(
@@ -543,6 +593,7 @@ export function InteractiveStage({
             // '처음으로'(리셋)에서 캐릭터가 시작 위치로 안 돌아가던 버그 수정(같은 값이라 깜빡임 없음).
             a.cancel();
             inner.style.transform = `translate(${dx}px, ${dy}px) scaleX(${f})`;
+            if (beh.target === collectInfo.actorId) setActorMoving(false); // 도착해 대기 — 대기 애니메이션 재개
             // 수집형 — 액터가 아이템에 '도착'하면 그 아이템을 줍는다(제자리에서 사라져 중앙 트레이로 모인다).
             if (collectInfo.isCollect && beh.target === collectInfo.actorId && collectInfo.playIds.has(otherId)) {
               setCollected((prev) => (prev.includes(otherId) ? prev : [...prev, otherId]));
@@ -750,6 +801,27 @@ export function InteractiveStage({
     );
   }, []);
 
+  /** 드롭(끌어 놓기) 대상 — (x,y)에 겹친 요소 중 fromId와 '연결된' 상대(올바른 통/짝)를 z 높은 순으로
+      찾는다. 연결을 조건으로 두므로 완료 텍스트 등 무관한 오버레이(z가 높아도)는 건너뛰고, 틀린 통/빈
+      곳에 놓으면 못 찾아 null → 제자리로(분류 챌린지 성립). 자기 자신 제외. */
+  const hitConnectedAt = useCallback((x: number, y: number, fromId: string): ElementNode | null => {
+    const pad = 16 / scaleRef.current;
+    return (
+      [...elsRef.current]
+        .filter((el) => el.id !== fromId)
+        .filter((el) => {
+          const t = el.transform;
+          return x >= t.x - pad && x <= t.x + t.w + pad && y >= t.y - pad && y <= t.y + t.h + pad;
+        })
+        .sort((a, b) => b.transform.z - a.transform.z)
+        .find((el) =>
+          connsRef.current.some(
+            (c) => (c.from === fromId && c.to === el.id) || (c.from === el.id && c.to === fromId),
+          ),
+        ) ?? null
+    );
+  }, []);
+
   // ── 편집: 연결 드래그(마이보드 onLinkMove/onLinkUp 동일 로직) ──
   const onLinkMove = useCallback((e: PointerEvent) => {
     const st = lk.current;
@@ -807,19 +879,46 @@ export function InteractiveStage({
     window.removeEventListener('pointerup', onPathUp);
     const p = pathInfo.current;
     pathInfo.current = null;
-    setDrag(null); // 제자리로(이동 커밋 안 함 — 제스처)
-    if (!p) return;
+    if (!p) { setDrag(null); return; }
     const sc = scaleRef.current;
     const x = (e.clientX - p.rect.left) / sc;
     const y = (e.clientY - p.rect.top) / sc;
-    const hit = hitElementAt(x, y);
-    if (hit && hit.id !== p.id) {
-      const connected = connsRef.current.some(
-        (c) => (c.from === p.id && c.to === hit.id) || (c.from === hit.id && c.to === p.id),
-      );
-      if (connected) void fireBehavior(p.behId); // 연결된 상대 위에 놓음 → 발화
+    // 드롭 지점에 겹친 요소 중 'p와 연결된 올바른 상대(통/짝)'를 찾는다(숨김/완료 텍스트에 안 가려지게).
+    const target = hitConnectedAt(x, y, p.id);
+    if (target) {
+      // ✅ 맞는 통 → 드롭한 '바로 그 자리'에서 통에 쏙 들어간다. moveAlongPath의 '시각 이동'은 drag-sort에서
+      //    생략하고(아래 case), 여기서 아이템을 그 자리에서 숨겨 통에 들어간 것처럼 보이게 한다.
+      //    숨김과 drag 리셋을 같은 틱에 배치 → 원점으로 깜빡이지 않는다(중복 동작·위치 튐 없음).
+      fireBurstRef.current(target.transform.x + target.transform.w / 2, target.transform.y + target.transform.h / 2);
+      const bi = innerRefs.current[target.id];
+      if (bi)
+        bi.animate(
+          [{ transform: 'scale(1)' }, { transform: 'scale(1.14)', offset: 0.4 }, { transform: 'scale(1)' }],
+          { duration: 420, easing: 'cubic-bezier(.3,1.5,.5,1)' },
+        );
+      setHidden((h) => ({ ...h, [p.id]: true }));
+      setDrag(null);
+      void fireBehavior(p.behId); // count/hide/win 체인(drag-sort moveAlongPath는 무시각)
+    } else {
+      // ❌ 틀린 통/빈 곳 → 드롭한 자리에서 '같은 outer 좌표계(drag 상태)'로 부드럽게 제자리 복귀.
+      // 드래그와 동일한 setDrag/clampXY 경로라 좌표계 핸드오프가 없어 위치가 튀지 않는다(rAF 보간).
+      const fromDx = Math.round((e.clientX - p.sx) / sc);
+      const fromDy = Math.round((e.clientY - p.sy) / sc);
+      const id = p.id, orig = p.orig, dur = 260, t0 = performance.now();
+      const step = (now: number) => {
+        if (pathInfo.current) return; // 새 드래그 시작 → 복귀 중단
+        const k = Math.min(1, (now - t0) / dur);
+        const ease = 1 - Math.pow(1 - k, 3);
+        if (k < 1) {
+          setDrag({ ids: [id], origs: { [id]: orig }, dx: Math.round(fromDx * (1 - ease)), dy: Math.round(fromDy * (1 - ease)) });
+          requestAnimationFrame(step);
+        } else {
+          setDrag(null);
+        }
+      };
+      requestAnimationFrame(step);
     }
-  }, [onPathMove, hitElementAt, fireBehavior]);
+  }, [onPathMove, hitConnectedAt, fireBehavior]);
 
   // cleanup은 언마운트에서만(deps []). 핸들러가 영구 고정이라 리렌더 중 리스너가
   // 떨어지지 않는다 — 위 ref 주석 참조.
@@ -869,9 +968,12 @@ export function InteractiveStage({
   };
 
   const onElPointerDown = (e: React.PointerEvent, el: ElementNode) => {
-    // 재생: pathTraverse(끌어서 잇기) 동작이 걸린 요소면 드래그 제스처 시작.
+    // 재생: pathTraverse(끌어서 잇기) 동작이 걸린 요소, 또는 드래그-분류 아이템이면 드래그 제스처 시작.
     if (!preview && mode === 'play') {
-      const pb = doc.behaviors.find((b) => b.target === el.id && b.trigger === 'pathTraverse');
+      // pathTraverse 명시 동작 우선, 없으면 드래그-분류 아이템(tap+moveAlongPath)을 드래그로 동작.
+      const pb =
+        doc.behaviors.find((b) => b.target === el.id && b.trigger === 'pathTraverse') ??
+        (dragSortBeh[el.id] ? doc.behaviors.find((b) => b.id === dragSortBeh[el.id]) : undefined);
       const rect = canvasRef.current?.getBoundingClientRect();
       if (pb && rect) {
         e.stopPropagation();
@@ -964,6 +1066,7 @@ export function InteractiveStage({
 
   const onElClick = (e: React.MouseEvent, el: ElementNode) => {
     if (preview || mode !== 'play') return;
+    if (dragSortBeh[el.id]) return; // 드래그-분류 아이템 = 드래그로만(탭 자동 이동 비활성 — 통에 끌어다 놓아야 들어감)
     const beh = tapLike(el.id);
     if (!beh) return;
     e.stopPropagation();
@@ -1035,6 +1138,10 @@ export function InteractiveStage({
       const beh = doc.behaviors.find((b) => b.target === el.id && b.action === 'swap');
       if (beh && beh.action === 'swap') return beh.params.to.src;
     }
+    // 주인공(액터) — 시작/끝(집)은 정면(메인 src), 이동 중엔 측면 포즈(있을 때만).
+    if (mode === 'play' && !preview && el.id === collectInfo.actorId && !actorAtHome && actorSidePose) {
+      return actorSidePose;
+    }
     return el.src?.src;
   };
 
@@ -1089,7 +1196,15 @@ export function InteractiveStage({
       );
     }
     // sprite는 별도 렌더가 없으므로 이미지로 표시(빈 화면 방지).
-    return <img src={src} alt={el.text ?? ''} draggable={false} />;
+    // 대기 애니메이션(살짝 숨쉬듯) — '살아있는' 캐릭터(수집형 주인공·숨바꼭질 대상)가 정지 상태일 때만.
+    // 분류 게임의 아이템(인형·블록·쓰레기 등 무생물)은 collectInfo.actorId로 잡혀도 대기 모션 금지 —
+    // isCollect(진짜 수집형: 움직이는 주인공이 있는 게임)일 때만 적용. 주인공은 이동 중엔 끈다.
+    const idle =
+      mode === 'play' &&
+      !preview &&
+      ((collectInfo.isCollect && el.id === collectInfo.actorId && !actorMoving) ||
+        (peekMode && peekIds.has(el.id)));
+    return <img src={src} alt={el.text ?? ''} draggable={false} className={idle ? 'ic-idle' : undefined} />;
   };
 
   /** 요소의 현재 박스(드래그/리사이즈 라이브 우선). */
@@ -1303,6 +1418,7 @@ export function InteractiveStage({
             // 다중 선택일 때만 외곽선(단일은 SelectionBox가 그린다).
             if (!preview && mode === 'edit' && selectedElIds.length > 1 && selSet.has(el.id)) cls.push('is-selected');
             if (playable) cls.push('is-playable');
+            if (mode === 'play' && !preview && dragSortBeh[el.id]) cls.push('is-draggable'); // 드래그-분류 = 잡기 커서
             return (
               <div
                 key={el.id}

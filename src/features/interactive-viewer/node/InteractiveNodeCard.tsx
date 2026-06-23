@@ -23,9 +23,6 @@ interface Props {
   presenting: boolean;
 }
 
-const hoverBtn =
-  'flex h-8 items-center rounded-md border border-border bg-surface/95 px-2 text-xs font-semibold text-fg-2 shadow-sm transition-colors hover:border-accent hover:bg-accent hover:text-on-accent';
-
 export function InteractiveNodeCard({ node, height, selected, presenting }: Props) {
   const docId = (node.data?.docId as string | undefined) ?? '';
   const doc = useInteractiveStore((s) => (docId ? s.docs[docId] : undefined));
@@ -113,35 +110,42 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
         </button>
       )}
 
+      {/* 호버 컨트롤(보드 노드일 때만) — 좌상단 홈 · 우상단 재생. 편집은 보드 카드에 숨긴다(재생 후 풀스크린에서 편집). */}
       {!presenting && (
-        <div
-          className={`absolute right-1 top-1 flex gap-1 transition-opacity duration-150 ${
-            selected ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'
-          }`}
-        >
+        <>
+          {/* 좌상단 — 인터랙티브 홈(저장 게임 목록·추천) */}
           <button
+            type="button"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
-              openOverlay('edit');
+              setGalleryOpen(true);
             }}
-            className={`${hoverBtn} gap-1`}
-            title="편집 — 자료 넣고 동작 주기"
+            title="인터랙티브 홈 — 저장한 게임 목록"
+            aria-label="인터랙티브 홈"
+            className={`absolute left-2 top-2 z-10 grid h-9 w-9 place-items-center rounded-pill bg-surface text-fg shadow-md ring-1 ring-border transition-all duration-150 hover:bg-accent hover:text-on-accent ${
+              selected ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'
+            }`}
           >
-            <Icon name="edit" size={13} /> 편집
+            <Icon name="home" size={18} />
           </button>
+          {/* 우상단 — 재생(빨강 원 + 큰 흰 플레이 아이콘) */}
           <button
+            type="button"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               openOverlay('play');
             }}
-            className={`${hoverBtn} gap-1`}
-            title="재생 — 풀스크린으로"
+            title="재생 — 풀스크린으로 시작"
+            aria-label="재생"
+            className={`absolute right-2 top-2 z-10 grid h-12 w-12 place-items-center rounded-full bg-accent text-on-accent shadow-lg ring-2 ring-surface/80 transition-all duration-150 hover:scale-105 hover:bg-accent-strong ${
+              selected ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'
+            }`}
           >
-            <Icon name="play" size={13} /> 재생
+            <Icon name="play" size={26} fill="currentColor" stroke={0} />
           </button>
-        </div>
+        </>
       )}
 
       {open &&

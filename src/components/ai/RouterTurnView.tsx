@@ -4,7 +4,7 @@ import { Icon } from '@/lib/icons';
 import { openDocOnBoard } from '@/board/composer';
 import { pathForRoute, ROUTE_LABEL } from '@/ai/actions';
 import { SUGGESTION_HIDE_BELOW, CONFIDENCE_THRESHOLD, type RouterOutput } from '@/ai/contract';
-import { useRouterStore, INLINE_ROUTES, type RouterTurn, type ChatAnswer } from '@/store/routerStore';
+import { useRouterStore, INLINE_ROUTES, type RouterTurn, type ChatAnswer, type ChatImages } from '@/store/routerStore';
 import { useUIStore } from '@/store/uiStore';
 import { RegistryRenderer } from '@/ui-registry/registry';
 import { MarkdownMessage } from './MarkdownMessage';
@@ -92,6 +92,38 @@ function ChatAnswerView({ chat }: { chat: ChatAnswer }) {
           <CopyButton text={chat.content} />
           {looksLikeDoc(chat.content) && <ViewOnBoardButton content={chat.content} />}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** 생성한 그림 — 진행 중 스피너 / 완료 그리드 / 실패(텍스트는 chat이 담당). */
+function ChatImageView({ image }: { image: ChatImages }) {
+  if (image.status === 'generating') {
+    return (
+      <div className="flex items-center gap-t2 py-t1 text-sm text-fg-2">
+        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-fg-muted/40 border-t-fg-muted" />
+        그림을 그리고 있어요…
+      </div>
+    );
+  }
+  if (image.status === 'error' || image.urls.length === 0) return null;
+  return (
+    <div>
+      <div className={`grid gap-t2 ${image.urls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        {image.urls.map((u, i) => (
+          <img
+            key={i}
+            src={u}
+            alt={image.caption ?? '생성 이미지'}
+            className="w-full max-w-sm rounded-xl border border-border bg-surface shadow-sm"
+          />
+        ))}
+      </div>
+      {image.mocked && (
+        <span className="mt-t2 inline-block rounded-pill bg-surface-2 px-t2 py-0.5 text-overline text-fg-muted">
+          MOCK (키 미설정)
+        </span>
       )}
     </div>
   );
@@ -226,6 +258,11 @@ export function RouterTurnView({ turn }: { turn: RouterTurn }) {
           <Icon name="sparkle" size={16} fill="currentColor" />
         </span>
         <div className="min-w-0 flex-1">
+          {turn.image && (
+            <div className={turn.chat?.content ? 'mb-t2' : ''}>
+              <ChatImageView image={turn.image} />
+            </div>
+          )}
           {turn.chat && <ChatAnswerView chat={turn.chat} />}
 
           {/* Contextual action from the Tier0 router (runs in parallel) */}

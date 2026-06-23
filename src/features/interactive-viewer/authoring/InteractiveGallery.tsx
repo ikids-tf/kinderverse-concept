@@ -10,7 +10,7 @@ import { Icon } from '@/lib/icons';
 import { ZoomOverlay } from '@/components/board/ZoomOverlay';
 import { extendInteractiveActivity } from '@/board/composer';
 import { newDocId, useInteractiveStore } from '../store/interactiveStore';
-import { listLibrary } from '../store/library';
+import { listLibrary, removeFromLibrary } from '../store/library';
 import { composeInteractiveNode } from './composeNode';
 import { InteractiveStage } from '../runtime/InteractiveStage';
 import { InteractiveOverlay } from './InteractiveOverlay';
@@ -42,9 +42,17 @@ function GalleryThumb({ id }: { id: string }) {
 export function InteractiveGallery({ onClose }: { onClose: () => void }) {
   const [playId, setPlayId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [, setTick] = useState(0); // 삭제 후 목록 재렌더용(상태 변경으로 listLibrary 재호출)
   const ensure = useInteractiveStore((s) => s.ensure);
   const games = listLibrary();
   const playing = games.find((g) => g.docId === playId) ?? null;
+
+  // 저장 목록에서 게임 삭제 — 목록에서만 빼고(게임 문서·이미지는 보드에 그대로), 즉시 재렌더.
+  const removeGame = (docId: string, title: string) => {
+    if (!window.confirm(`'${title || '인터랙티브'}'을(를) 목록에서 지울까요?\n(게임 자체는 보드에 남아요)`)) return;
+    removeFromLibrary(docId);
+    setTick((t) => t + 1);
+  };
 
   // 대표 프롬프트 → 새 게임 생성 후 바로 재생.
   const makeFromPrompt = async (prompt: string) => {
@@ -97,22 +105,31 @@ export function InteractiveGallery({ onClose }: { onClose: () => void }) {
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               {games.map((g) => (
-                <button
+                <div
                   key={g.docId}
-                  onClick={() => setPlayId(g.docId)}
                   className="group relative aspect-[16/10] overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md"
-                  title={`${g.title || '인터랙티브'} — 재생`}
                 >
-                  <div className="pointer-events-none absolute inset-0">
-                    <GalleryThumb id={g.docId} />
-                  </div>
-                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/55 to-transparent px-3 py-2 text-left">
-                    <span className="truncate text-sm font-bold text-white">{g.title || '인터랙티브'}</span>
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow">
-                      <Icon name="play" size={16} fill="currentColor" stroke={0} />
-                    </span>
-                  </div>
-                </button>
+                  <button onClick={() => setPlayId(g.docId)} className="absolute inset-0" title={`${g.title || '인터랙티브'} — 재생`}>
+                    <div className="pointer-events-none absolute inset-0">
+                      <GalleryThumb id={g.docId} />
+                    </div>
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/55 to-transparent px-3 py-2 text-left">
+                      <span className="truncate text-sm font-bold text-white">{g.title || '인터랙티브'}</span>
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow">
+                        <Icon name="play" size={16} fill="currentColor" stroke={0} />
+                      </span>
+                    </div>
+                  </button>
+                  {/* 삭제 — 호버 시 우상단. 목록에서만 제거(게임 문서는 보드에 남음). */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeGame(g.docId, g.title); }}
+                    className="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-full bg-black/45 text-white opacity-0 shadow transition-opacity hover:bg-accent group-hover:opacity-100"
+                    title="이 게임을 목록에서 삭제"
+                    aria-label="삭제"
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
+                </div>
               ))}
             </div>
           )}

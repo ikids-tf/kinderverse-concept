@@ -1,6 +1,7 @@
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { useInteractiveStore } from '@/features/interactive-viewer/store/interactiveStore';
 import { composeInteractiveNode } from '@/features/interactive-viewer/authoring/composeNode';
+import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
 import { recommendFromLibrary } from '@/features/interactive-viewer/store/library';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
@@ -76,6 +77,25 @@ async function createInteractiveGame(text: string): Promise<void> {
   try {
     useInteractiveStore.getState().ensure(docId);
     const r = await composeInteractiveNode(docId, text, (m) =>
+      board.setGenerating(m ?? '🎮 인터랙티브 게임을 만들고 있어요…'),
+    );
+    showToast(r.message, r.ok ? 'success' : 'error');
+  } finally {
+    board.endGen();
+  }
+}
+
+/** 보드에서 인터랙티브 노드가 단독 선택된 채 프롬프트 — 그 노드(docId)에 바로 게임을
+    구성/수정한다. applyInteractivePrompt가 분기: 빈 노드 + 생성 의도 → 전체 구성,
+    그 외 → 맥락 인지 편집. 풀스크린(kv:inode-prompt)과 완전히 동일한 경로. */
+async function promptInteractiveNode(nodeId: string, docId: string, text: string): Promise<void> {
+  const board = useBoardStore.getState();
+  board.focusNode(nodeId);
+  board.beginGen();
+  board.setGenerating('🎮 인터랙티브 게임을 만들고 있어요…');
+  try {
+    useInteractiveStore.getState().ensure(docId);
+    const r = await applyInteractivePrompt(docId, text, [], (m) =>
       board.setGenerating(m ?? '🎮 인터랙티브 게임을 만들고 있어요…'),
     );
     showToast(r.message, r.ok ? 'success' : 'error');
@@ -209,6 +229,21 @@ export function handleBoardPrompt(text: string): boolean {
   if (sel.length === 1 && typeof sel[0].data?.embed === 'string' && sel[0].data.embed.includes('game-viewer')) {
     window.dispatchEvent(new CustomEvent('kv:game-create', { detail: { nodeId: sel[0].id, prompt: text } }));
     return true;
+  }
+
+  // 인터랙티브 노드가 단독 선택된 채 프롬프트 — 그 노드(docId)에 바로 게임을 구성/수정한다.
+  //   · 순수 보드 조작(크게/정렬/지워…)이면 아래 공통 처리로 폴백.
+  //   · 그 외(주제·생성·수정 요청)는 모두 이 노드의 게임 생성/편집으로(풀스크린과 동일 경로).
+  // (인터랙티브 노드는 type==='interactive'라 아래 선택-적용 분기가 못 잡아 모호 팝업으로 새던 것 차단.)
+  const inodeDocId = sel.length === 1 && sel[0].type === 'interactive' ? sel[0].data?.docId : undefined;
+  if (typeof inodeDocId === 'string') {
+    const iop = boardOp(text);
+    const igen = /만들|만드|생성|그려|작성|써\s*줘|추가|넣어|넣고|짜\s*줘|구성|기획|바꿔|바꾸|수정|편집|고쳐|꾸며/.test(text);
+    if (!(iop && !igen)) {
+      void promptInteractiveNode(sel[0].id, inodeDocId, text);
+      return true;
+    }
+    // 순수 보드 조작(크게/정렬/지워…) → 아래 공통 처리로 폴백
   }
 
   // 배경 제거(누끼) 의도 — 선택된 이미지가 없을 때.

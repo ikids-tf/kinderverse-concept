@@ -1110,10 +1110,16 @@ export function BoardCanvas() {
             );
           })}
 
-        {/* 스케일·회전 핸들 — 단일 선택 시에만(드래그/박스 중엔 숨김). 러너 제외. */}
-        {selection.length === 1 && !drag && !box && nodes[selection[0]] && nodes[selection[0]].type !== 'runner' && (
-          <SelectionHandles node={nodes[selection[0]]} zoom={viewport.zoom} onHandleDown={onHandleDown} />
-        )}
+        {/* 스케일·회전 핸들 — 단일 선택 시에만(드래그/박스 중엔 숨김). 러너만 제외.
+            인터랙티브 노드도 슬라이드 뷰어와 똑같이 스케일 핸들을 보여준다(인터랙티브는 FREEFORM_RESIZE가
+            아니라 균일 스케일 → 게임 16:10 비율 유지). 코너 라운드(RadiusHandle)만 따로 숨김. */}
+        {selection.length === 1 &&
+          !drag &&
+          !box &&
+          nodes[selection[0]] &&
+          nodes[selection[0]].type !== 'runner' && (
+            <SelectionHandles node={nodes[selection[0]]} zoom={viewport.zoom} onHandleDown={onHandleDown} />
+          )}
 
         {/* selection box */}
         {box && (

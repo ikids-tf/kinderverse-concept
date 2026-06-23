@@ -19,6 +19,7 @@ import { safeParseInteractiveNode } from '../schema/parse';
 import { clampXY } from '../runtime/geometry';
 import { autoLayout } from './layout';
 import { fillTokenImages, generateSceneBackground } from './artDirect';
+import { saveActorSide } from '../store/actorPoses';
 import type { InteractiveNode } from '../schema/interactiveNode';
 
 export interface ComposeResult {
@@ -283,7 +284,12 @@ export async function composeInteractiveNode(
       const theme = String(raw.title || prompt || '').slice(0, 40); // 라이브러리 태깅(주제축)
       // 배경(장면) 생성은 토큰 그림과 '병렬'로 — 색 토큰 배경이면 끝에서 교체.
       const bgPromise = generateSceneBackground(artBg || theme, theme);
-      await fillTokenImages(raw, { onBusy, theme, frontIds: actorFrontIds(raw) });
+      await fillTokenImages(raw, {
+        onBusy,
+        theme,
+        frontIds: actorFrontIds(raw),
+        onActorSide: (elId, uri) => saveActorSide(docId, elId, uri),
+      });
       const parsed = safeParseInteractiveNode(raw);
       if (!parsed.success) return null;
       let node = autoLayout(parsed.data);
@@ -447,7 +453,12 @@ export async function editInteractiveNode(
       if (bgDesc) bgPromise = generateSceneBackground(bgDesc, doc.title);
       forceShape(raw, docId, doc.title);
       restoreImages(raw, doc);   // KEEP → 원본 그림 복원(배경 포함)
-      await fillTokenImages(raw, { onBusy, theme: doc.title, frontIds: actorFrontIds(raw) }); // "gen:" → 새 그림(주인공=정면, 누끼)
+      await fillTokenImages(raw, {
+        onBusy,
+        theme: doc.title,
+        frontIds: actorFrontIds(raw),
+        onActorSide: (elId, uri) => saveActorSide(docId, elId, uri),
+      }); // "gen:" → 새 그림(주인공=정면+측면 2포즈, 누끼)
       const parsed = safeParseInteractiveNode(raw);
       if (!parsed.success) return null;
       let node = parsed.data;

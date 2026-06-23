@@ -19,6 +19,15 @@ import type { AssetRef } from '../schema/interactiveNode';
 const GEN_PREFIX = 'gen:';
 export const MAX_IMAGES = 8; // 한 게임당 토큰 그림 상한(비용/지연 가드)
 
+/** ★ 누끼(배경제거) 최적화 클로즈 — 온디바이스 RMBG가 '주 피사체만' 깔끔히 따도록 생성
+    단계에서 강하게 강제한다. 스티커/다이컷처럼 피사체는 100% 불투명, 배경은 완전 평면 순백,
+    경계는 칼날 하드 엣지(소프트 매트·글로우·그림자가 반투명 사각 잔상으로 남는 것을 원천 차단). */
+const CUTOUT_CLAUSE =
+  '★배경제거(누끼)에 최적화된 그림: 스티커·다이컷처럼 피사체를 100% 완전 불투명하게 그리고, ' +
+  '배경은 오직 완전한 순백색(#FFFFFF) 평면 단색 한 가지뿐(그라데이션·질감·무늬·점·다른 색 픽셀·옅은 색조 절대 없음), ' +
+  '피사체와 배경의 경계는 칼날처럼 선명한 하드 엣지(흐릿한 가장자리·반투명·외곽 글로우/헤일로·소프트포커스·안개·모션블러·번짐·페더링 절대 금지), ' +
+  '드롭섀도·접지(바닥) 그림자·반사·비네팅·테두리 박스·액자 절대 없음, 피사체 실루엣이 배경과 또렷한 고대비로 완전히 분리';
+
 /** 토큰(개체) 공통 스타일 코어 — 3D 픽사풍·밝은 파스텔, 의인화 금지(교육용 정확성),
     순백 단색 배경·그림자 없음·또렷한 외곽선 = 배경제거(누끼)가 깔끔하게 되도록.
     ★ 아이 대면 콘텐츠 = 특별 지시 없으면 무조건 밝고 화사하고 예쁘게(어둡거나 칙칙·음침 금지). */
@@ -27,7 +36,7 @@ const STYLE_CORE =
   '3D 픽사풍 귀여운 렌더, 밝고 화사한 파스텔 색, 부드럽고 둥근 형태, ' +
   '완전 정면 금지 — 대상의 특징이 가장 잘 드러나는 3/4 측면 각도(동물·생물은 꼬리·다리까지 전신이 다 보이게, 사물·기구·건물은 형태가 분명한 입체 각도), ' +
   '사물·동물은 의인화하지 말 것(사람 얼굴·표정·옷·직립 보행 금지), 실제 모습 그대로 정확하게(아이들이 실제 정보를 배우도록), ' +
-  '완전한 순백색 단색 배경, 그림자·바닥·반사 없음, 또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화';
+  '또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화, ' + CUTOUT_CLAUSE;
 /** 단일 토큰 — 대상 '전체'가 잘리지 않고 프레임 안에 여유 있게(사방 여백). 타이트한 박스는 누끼 후 trimTransparent가 만든다(여기서 꽉 채우면 앞다리·꼬리가 잘림). */
 const TOKEN_STYLE = `대상 하나만, 머리·귀부터 꼬리·발끝까지 전체가 절대 잘리지 않고 프레임 안에 여유 있게 다 들어오도록(사방에 넉넉한 여백, 화면을 꽉 채우지 말 것), 화면 가운데에 또렷하게, 다른 사물 없음, ${STYLE_CORE}`;
 /** 숫자 토큰 — 수 세기·숫자 게임의 번호 아이템. 대상 위에 큰 아라비아 숫자를 또렷하게(‘글자 없음’ 해제). */
@@ -40,7 +49,7 @@ const isNumberedLabel = (label: string): boolean => /\d/.test(label) || /숫자|
 const FRONT_TOKEN_STYLE =
   '대상 하나만, 정면(카메라·아이를 바라보는) 귀엽고 또렷한 자세로 좌우 균형 있게, 머리부터 발끝까지 전신이 잘리지 않고 프레임 안에 여유 있게(사방 여백), 화면 가운데, 다른 사물 없음, ' +
   '아이들이 보는 콘텐츠라 늘 밝고 화사하고 예쁘게(어둡거나 칙칙·음침·무서운 느낌 절대 금지), 3D 픽사풍 귀여운 렌더, 밝고 화사한 파스텔 색, 부드럽고 둥근 형태, ' +
-  '사물·동물은 의인화하지 말 것(사람 얼굴·표정·옷·직립 보행 금지), 실제 모습 그대로 정확하게, 완전한 순백색 단색 배경, 그림자·바닥·반사 없음, 또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화';
+  '사물·동물은 의인화하지 말 것(사람 얼굴·표정·옷·직립 보행 금지), 실제 모습 그대로 정확하게, 또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화, ' + CUTOUT_CLAUSE;
 /** 장면 배경 — 풀블리드 3D 픽사풍, 풍부한 디테일·빛·깊이로 '아름답게'(아이 대면=밝고 예쁘게).
     그 위에 놓일 토큰(아이템)과 같은 화풍으로 어우러지되, 가운데 놀이 영역은 차분히 비워 가독 보호. 누끼 안 함. */
 const SCENE_STYLE =
@@ -146,6 +155,52 @@ async function trimTransparent(dataUri: string, padRatio = 0.03): Promise<string
   return out2.toDataURL('image/png');
 }
 
+/** 한 장(가로 2컷)을 좌/우 절반 data URI로 자른다 — 액터 정면+측면 2포즈 시트 분할용. */
+async function sliceHalves(dataUri: string): Promise<[string, string]> {
+  const blob = await (await fetch(dataUri)).blob();
+  const bmp = await createImageBitmap(blob);
+  const w = bmp.width;
+  const h = bmp.height;
+  const hw = Math.floor(w / 2);
+  const cut = (sx: number, sw: number): string => {
+    const cv = document.createElement('canvas');
+    cv.width = sw;
+    cv.height = h;
+    const ctx = cv.getContext('2d');
+    if (ctx) ctx.drawImage(bmp, sx, 0, sw, h, 0, 0, sw, h);
+    return cv.toDataURL('image/png');
+  };
+  const left = cut(0, hw);
+  const right = cut(hw, w - hw);
+  bmp.close?.();
+  return [left, right];
+}
+
+/**
+ * 주인공(액터)의 '정면 + 측면' 2포즈를 '한 장'에 그려(같은 캐릭터 보장) 좌/우로 분할·누끼한다.
+ * 게이트웨이 이미지엔 참조/시드가 없어 따로 생성하면 다른 캐릭터가 나오므로 한 장→분할이 일관성의 핵심.
+ * 실패 시 null(호출부가 정면 단독 생성으로 폴백).
+ */
+export async function generateActorPoses(label: string, doCutout: boolean): Promise<{ front: string; side: string } | null> {
+  const sheet = await genImage(
+    label,
+    `흰 배경에 같은 ${label} 캐릭터를 가로로 두 컷 나란히 — ` +
+      `왼쪽 칸: 정면(카메라·아이를 똑바로 바라보는) 자세. ` +
+      `오른쪽 칸: 완전한 옆모습 측면 프로필 — 머리·코·눈·시선이 모두 또렷하게 화면 오른쪽을 향해(오른쪽으로 걸어가는 듯한 이동 자세), 정면 요소 없이 확실한 사이드뷰. ` +
+      `두 컷이 완전히 같은 캐릭터·색·무늬·크기, 가운데 넉넉한 간격으로 분리해 서로 겹치지 않게, ${STYLE_CORE}`,
+    1,
+  );
+  if (!sheet) return null;
+  try {
+    const [left, right] = await sliceHalves(sheet);
+    const front = doCutout ? await cutout(left) : left;
+    const side = doCutout ? await cutout(right) : right;
+    return { front, side };
+  } catch {
+    return null;
+  }
+}
+
 /** 요소의 src에서 "gen:라벨"을 뽑는다(문자열 또는 {src} 객체 모두 허용). 없으면 null. */
 function genLabelOf(el: RawEl): string | null {
   const s = el.src;
@@ -180,7 +235,14 @@ async function assignImage(el: RawEl, dataUri: string | null, doCutout: boolean)
  */
 export async function fillTokenImages(
   raw: RawNode,
-  opts: { cutout?: boolean; onBusy?: (m: string | null) => void; theme?: string; frontIds?: Set<string> },
+  opts: {
+    cutout?: boolean;
+    onBusy?: (m: string | null) => void;
+    theme?: string;
+    frontIds?: Set<string>;
+    /** 액터의 측면 포즈(이동 중 사용) 콜백 — 정면은 메인 src, 측면은 별도 저장한다. */
+    onActorSide?: (elId: string, sideDataUri: string) => void;
+  },
 ): Promise<void> {
   const doCut = opts.cutout ?? true;
   const els = Array.isArray(raw.elements) ? raw.elements : [];
@@ -201,8 +263,24 @@ export async function fillTokenImages(
 
   await Promise.all(
     targets.map(async (t) => {
-      // 주인공(액터)은 정면, 번호 아이템은 숫자 새김, 그 외는 3/4 측면.
       const elId = String((t.el as { id?: unknown }).id ?? '');
+      // 주인공(액터) — 정면+측면 2포즈를 한 장에서 분할 생성(같은 캐릭터). 정면=메인 src, 측면=onActorSide로 저장.
+      if (opts.frontIds?.has(elId)) {
+        const poses = await generateActorPoses(t.label, doCut);
+        if (poses) {
+          try {
+            t.el.src = await urlToAssetRef(poses.front, 'generated');
+            t.el.assetKind = 'generated';
+            opts.onActorSide?.(elId, poses.side);
+          } catch {
+            t.el.kind = 'shape';
+            delete t.el.src;
+          }
+          return;
+        }
+        // 2포즈 생성 실패 → 아래 정면 단독 생성으로 폴백.
+      }
+      // 번호 아이템은 숫자 새김, 액터 폴백은 정면, 그 외는 3/4 측면.
       const style = opts.frontIds?.has(elId)
         ? FRONT_TOKEN_STYLE
         : isNumberedLabel(t.label)

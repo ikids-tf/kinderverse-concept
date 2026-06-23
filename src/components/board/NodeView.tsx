@@ -920,17 +920,18 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     );
   }
 
-  /* ---------- interactive: 네이티브 인터렉티브 노드(파스텔 캔버스 + 풀스크린 저작/재생) ---------- */
+  /* ---------- interactive: 네이티브 인터렉티브 노드(파스텔 캔버스 + 풀스크린 저작/재생) ----------
+     바운드 박스는 슬라이드 뷰어(임베드 sticky)와 동일 — 선택 링만, 코너 라운드/리사이즈
+     핸들 없음(아이 대면 카드라 깔끔하게). 모서리 조절은 풀스크린 편집에서. */
   if (node.type === 'interactive') {
     return (
       <div
         ref={cardRef}
         onPointerDown={down}
-        className={`group/card absolute select-none overflow-hidden rounded-md border border-border bg-surface shadow-sm ${ring}`}
-        style={{ left, top, width: node.w, zIndex: dragZ, ...radiusStyle(node), ...rootTransform(node) }}
+        className={`group/card absolute select-none overflow-hidden rounded-xl border border-border bg-surface shadow-lg ${ring}`}
+        style={{ left, top, width: node.w, zIndex: dragZ, ...rootTransform(node) }}
       >
         <InteractiveNodeCard node={node} height={node.h} selected={selected} presenting={presenting} />
-        {selected && !node.locked && !presenting && <RadiusHandle node={node} />}
         {node.locked && <LockBadge />}
       </div>
     );

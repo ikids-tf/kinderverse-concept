@@ -162,6 +162,19 @@
 @media (prefers-reduced-motion: reduce) {
   .kv-inode .ic-confetti { display: none; }
 }
+/* 대기 애니메이션(Idle) — 주인공이 정지 상태에서 살짝 숨쉬듯(과하지 않게). 발은 바닥에 둔다. */
+.kv-inode .ic-idle {
+  transform-origin: bottom center;
+  animation: ic-idle 2.4s ease-in-out infinite;
+  will-change: transform;
+}
+@keyframes ic-idle {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  50% { transform: translateY(-2.4%) scale(0.99, 1.025); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kv-inode .ic-idle { animation: none; }
+}
 
 /* 편집 모드 — 선택/호버 표시 + 이동 커서 */
 .kv-inode[data-mode='edit'] .ic-el {
@@ -179,6 +192,15 @@
 /* 재생 모드 — 동작이 걸린 요소는 탭 가능 손끝 표시 */
 .kv-inode[data-mode='play'] .ic-el.is-playable {
   cursor: pointer;
+}
+
+/* 재생 모드 — 드래그-분류 아이템은 '잡아서 통에 끌어다 놓기' 커서(잡기/잡는 중) */
+.kv-inode[data-mode='play'] .ic-el.is-draggable {
+  cursor: grab;
+  touch-action: none; /* 터치에서 드래그가 스크롤로 새지 않게 */
+}
+.kv-inode[data-mode='play'] .ic-el.is-draggable:active {
+  cursor: grabbing;
 }
 
 /* 편집 모드 — 동작 있는 요소 호버 시 가운데 ▶ 미리보기 버튼(클릭=동작 확인). */
