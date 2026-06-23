@@ -122,6 +122,46 @@
 @media (prefers-reduced-motion: reduce) {
   .kv-inode .ic-spark { animation: none; opacity: 0; }
 }
+/* 수집 트레이 아이템 — 획득 시 통통 나타난다(과하지 않게). */
+.kv-inode .ic-collect-item {
+  filter: drop-shadow(0 3px 7px rgba(87, 75, 62, 0.2));
+  animation: ic-collect-pop 0.34s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes ic-collect-pop {
+  0% { transform: scale(0.2) translateY(-16px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kv-inode .ic-collect-item { animation: none; }
+}
+/* 완료 축하 — 색종이가 위에서 잠깐 쏟아진다(과하지 않게). */
+.kv-inode .ic-confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 40;
+}
+.kv-inode .ic-confetti > span {
+  position: absolute;
+  top: -28px;
+  width: 12px;
+  height: 16px;
+  border-radius: 2px;
+  opacity: 0.92;
+  animation-name: ic-confetti-fall;
+  animation-timing-function: cubic-bezier(0.3, 0.2, 0.5, 1);
+  animation-iteration-count: 1;
+  animation-fill-mode: forwards;
+}
+@keyframes ic-confetti-fall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+  12% { opacity: 0.95; }
+  100% { transform: translateY(860px) rotate(560deg); opacity: 0.85; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kv-inode .ic-confetti { display: none; }
+}
 
 /* 편집 모드 — 선택/호버 표시 + 이동 커서 */
 .kv-inode[data-mode='edit'] .ic-el {

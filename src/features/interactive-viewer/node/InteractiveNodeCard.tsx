@@ -154,6 +154,7 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
                 onClose={close}
                 onExtend={() => { close(); void extendInteractiveActivity(doc?.title ?? '인터랙티브 놀이', node.id); }}
                 onExit={() => { close(); setGalleryOpen(true); }}
+                onHome={() => { close(); setGalleryOpen(true); }}
               />
             )}
           </ZoomOverlay>,

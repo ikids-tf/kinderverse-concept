@@ -97,19 +97,33 @@ export function autoLayout(node: InteractiveNode): InteractiveNode {
   const play = roles.play.map((id) => byId.get(id)!).filter(Boolean).sort((a, b) => a.transform.x - b.transform.x);
   const labels = roles.labels.map((id) => byId.get(id)!).filter(Boolean).sort((a, b) => a.transform.x - b.transform.x);
   const hasActor = roles.actors.length > 0;
+  // 액터가 아이템들로 콩콩 이동하며 줍는 '수집형'(예: 도토리 순서대로 줍기) — 한 줄(grid) 대신
+  // 깊이 있게 흩어 배치(원근 크기 차등). peek(숨바꼭질)와 함께 'scatter'로 처리한다.
+  const actorCollect =
+    hasActor &&
+    play.length >= 3 &&
+    play.filter((e) =>
+      node.connections.some(
+        (c) => (roles.actors.includes(c.from) && c.to === e.id) || (roles.actors.includes(c.to) && c.from === e.id),
+      ),
+    ).length >= Math.min(play.length, 3);
+  const scatter = peek || actorCollect;
 
-  // 2) 플레이 세트 — 균일 크기·균등 간격·중앙 정렬(한 줄/격자), 하단 정렬. peek면 풀밭에 흩어 배치.
+  // 2) 플레이 세트 — grid(균일·한 줄/격자) 또는 scatter(흩어 + 원근 깊이). 하단 정렬.
   let setTop = ch * 0.55; // 액터 배치 기준(세트 윗변)
-  if (play.length && peek) {
-    // 숨바꼭질/추측 — 흩어 배치(한 줄 X). 아랫부분은 런타임 마스크가 '풀 속에 잠긴 듯' 가린다.
+  if (play.length && scatter) {
+    // 흩어 배치(한 줄 X) + 원근 깊이: 위=작게(원경)·아래=크게(근경). peek면 런타임 마스크가 아랫부분을 가린다.
+    // actorCollect 는 하단 중앙을 액터 '집'으로 비우려 밴드를 위쪽에 둔다.
     const n = play.length;
     const cols = n <= 4 ? n : Math.ceil(Math.sqrt(n * 1.4));
     const rows = Math.ceil(n / cols);
     const colW = (cw - 2 * M) / cols;
-    const size = Math.round(clamp(Math.min(colW * 0.62, 190), 120, 190));
-    const bandTop = ch * 0.4;
-    const bandH = ch * 0.82 - bandTop;
+    const baseSize = clamp(Math.min(colW * 0.62, 196), 116, 196);
+    const bandTop = peek ? ch * 0.4 : ch * 0.22;
+    const bandBottom = peek ? ch * 0.82 : ch * 0.56;
+    const bandH = bandBottom - bandTop;
     const rowH = bandH / rows;
+    const pairLabels = labels.length === n; // 숫자 라벨이 있으면 각 아이템 아래에 따라붙인다
     play.forEach((e, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
@@ -117,9 +131,17 @@ export function autoLayout(node: InteractiveNode): InteractiveNode {
       const jy = (((i * 53) % 100) / 100 - 0.5) * rowH * 0.4;
       const cx = M + colW * (col + 0.5) + jx;
       const cy = bandTop + rowH * (row + 0.5) + jy;
+      const depth = clamp((cy - bandTop) / Math.max(1, bandH), 0, 1); // 0=위(원경) → 1=아래(근경)
+      const size = Math.round(clamp(baseSize * (0.74 + 0.5 * depth), 92, 232)); // 원근 크기 차등
       const x = Math.round(clamp(cx - size / 2, M, cw - M - size));
       const y = Math.round(clamp(cy - size / 2, bandTop - 20, ch - M - size));
-      tf.set(e.id, { x, y, w: size, h: size, rotation: 0, z: 2 + row * 2 + (col % 2) });
+      const z = 2 + Math.round(depth * 12); // 가까울수록(아래) 앞으로
+      tf.set(e.id, { x, y, w: size, h: size, rotation: 0, z });
+      if (pairLabels) {
+        const lab = labels[i];
+        const lw = clamp(lab.transform.w, 40, size);
+        tf.set(lab.id, { x: Math.round(x + (size - lw) / 2), y: y + size + 4, w: lw, h: 40, rotation: 0, z: z + 1 });
+      }
     });
     setTop = bandTop;
   } else if (play.length) {
@@ -176,7 +198,8 @@ export function autoLayout(node: InteractiveNode): InteractiveNode {
     }
   }
 
-  // 3) 액터 — 플레이 세트 위 중앙(이동 여유). 여러 개면 가로로 분산.
+  // 3) 액터 — scatter(수집/숨바꼭질)면 하단 중앙 '집'에서 출발(아이템 위로 콩콩, 근경이라 가장 크고 앞).
+  //    그 외는 플레이 세트 위 중앙(이동 여유). 여러 개면 가로로 분산.
   if (hasActor) {
     const slots = roles.actors.length;
     roles.actors.forEach((id, i) => {
@@ -190,9 +213,11 @@ export function autoLayout(node: InteractiveNode): InteractiveNode {
       else w = Math.round(target * aspect);
       w = clamp(w, 150, 300);
       h = clamp(h, 150, 300);
-      const y = Math.round(clamp(setTop - h - 28, 184, ch - h - M));
       const x = Math.round((cw * (i + 1)) / (slots + 1) - w / 2);
-      tf.set(id, { x, y, w, h, rotation: 0, z: 5 });
+      const y = scatter
+        ? Math.round(ch - h - M + 10) // 하단 '집'에서 출발
+        : Math.round(clamp(setTop - h - 28, 184, ch - h - M));
+      tf.set(id, { x, y, w, h, rotation: 0, z: scatter ? 40 : 5 });
     });
   }
 

@@ -1,6 +1,7 @@
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { useInteractiveStore } from '@/features/interactive-viewer/store/interactiveStore';
 import { composeInteractiveNode } from '@/features/interactive-viewer/authoring/composeNode';
+import { recommendFromLibrary } from '@/features/interactive-viewer/store/library';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
@@ -55,6 +56,9 @@ function isNewInteractiveGame(text: string): boolean {
     카드는 store.docs[docId]를 구독하므로 구성이 끝나면 게임이 자동으로 나타난다.
     구성은 store.mutate라 카드 풀스크린의 실행취소로도 되돌릴 수 있다. */
 async function createInteractiveGame(text: string): Promise<void> {
+  // 비슷한 저장 게임이 있으면 알려준다(추천) — 인터랙티브 홈에서 바로 재사용 가능.
+  const rec = recommendFromLibrary(text, 1)[0];
+  if (rec) showToast(`💡 비슷한 저장 게임 "${rec.title}"이 있어요 — 인터랙티브 홈에서 바로 쓸 수 있어요`, 'success', 4500);
   const c = viewportCenterBoardPoint();
   const docId = newId('inode');
   const nodeId = addPresetNodeCmd(

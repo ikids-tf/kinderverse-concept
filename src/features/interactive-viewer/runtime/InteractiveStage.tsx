@@ -25,8 +25,59 @@ const COLOR_TOKENS: Record<string, string> = {
 function isAssetRef(bg: InteractiveNode['canvas']['background']): bg is AssetRef {
   return typeof bg === 'object' && bg !== null && 'src' in bg;
 }
+/** 실제로 그릴 수 있는 이미지 배경 src만 — 미해결 "gen:" 라벨/비-URL 은 제외(깨진 img 방지). */
+function bgImageSrc(bg: InteractiveNode['canvas']['background']): string | null {
+  return isAssetRef(bg) && /^(data:|https?:|blob:)/.test(bg.src) ? bg.src : null;
+}
 function bgColor(c: string): string {
   return COLOR_TOKENS[c] ?? c;
+}
+/** 완료 축하 색종이 색(파스텔, 아이 친화). */
+const CONFETTI_COLORS = ['#F2A65A', '#7FB77E', '#5BA4CF', '#E58B8B', '#F2C94C', '#B98ED6'];
+
+/** 캐릭터 이미지가 향하는 방향(좌/우) 추정 — '머리(상단)' 영역의 가로중심이 몸 전체 중심보다
+    왼쪽이면 왼쪽을 향한 것으로 본다(머리가 향하는 쪽을 이끈다). 이동 시 이 방향의 반대로 가면 좌우 반전. */
+function detectFacing(img: HTMLImageElement): 'left' | 'right' | 'front' {
+  try {
+    const W = 72;
+    const H = 72;
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const x = c.getContext('2d');
+    if (!x) return 'front';
+    x.drawImage(img, 0, 0, W, H);
+    const d = x.getImageData(0, 0, W, H).data;
+    let minY = H;
+    let maxY = 0;
+    let fullSum = 0;
+    let fullN = 0;
+    for (let yy = 0; yy < H; yy++)
+      for (let xx = 0; xx < W; xx++)
+        if (d[(yy * W + xx) * 4 + 3] > 40) {
+          fullSum += xx;
+          fullN++;
+          if (yy < minY) minY = yy;
+          if (yy > maxY) maxY = yy;
+        }
+    if (fullN < 20) return 'front';
+    const fullCx = fullSum / fullN;
+    const headBottom = minY + (maxY - minY) * 0.42; // 상단 42% = 머리 영역
+    let headSum = 0;
+    let headN = 0;
+    for (let yy = minY; yy <= headBottom; yy++)
+      for (let xx = 0; xx < W; xx++)
+        if (d[(yy * W + xx) * 4 + 3] > 40) {
+          headSum += xx;
+          headN++;
+        }
+    if (!headN) return 'front';
+    const diff = headSum / headN - fullCx;
+    if (Math.abs(diff) < W * 0.08) return 'front'; // 머리가 가운데 ≈ 정면 → 좌우 플립 안 함
+    return diff < 0 ? 'left' : 'right';
+  } catch {
+    return 'front';
+  }
 }
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -154,9 +205,15 @@ export function InteractiveStage({
   const [bubbles, setBubbles] = useState<Record<string, string>>({});
   // 숨바꼭질/추측 연출 — peek 플래그가 있으면 대상 아랫부분을 '풀 속에 잠긴 듯' 가리고, 탭하면 전신 공개.
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  // 수집형(줍기/찾기) — 액터가 도착해 '획득'한 아이템 id(획득 순). 제자리에서 사라져 중앙 트레이로 정렬된다.
+  const [collected, setCollected] = useState<string[]>([]);
   // 탭/찾기 이펙트 — 작은 파티클 버스트(과하지 않게, 자동 소멸).
   const [bursts, setBursts] = useState<Array<{ id: number; x: number; y: number }>>([]);
   const burstSeq = useRef(0);
+  // applyAction(파티클 정의보다 먼저 선언)에서 버스트를 쏘기 위한 최신 핸들러 ref.
+  const fireBurstRef = useRef<(x: number, y: number) => void>(() => {});
+  // 게임 완료 축하 — 색종이(컨페티) 오버레이를 잠깐 띄운다.
+  const [celebrating, setCelebrating] = useState(false);
   // 이야기(story) 재생 — 현재 단계(없으면 null). 나레이션 바 + 다음/이전.
   const [storyIdx, setStoryIdx] = useState<number | null>(null);
   // 조건 평가용 동기 미러(체이닝 중 최신값 읽기) + 리셋 토큰(지연/체인 취소).
@@ -166,6 +223,9 @@ export function InteractiveStage({
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   // moveAlongPath 누적 오프셋(요소별) — '가서 머무름'으로 다음 이동이 현재 위치에서 이어지게.
   const moveOffset = useRef<Record<string, { x: number; y: number }>>({});
+  // 캐릭터가 향하는 자연 방향(이미지 분석: 좌/우/정면) + 현재 좌우 반전(1/-1) — 측면 캐릭터만 이동 방향으로 플립.
+  const actorFacingRef = useRef<Record<string, 'left' | 'right' | 'front'>>({});
+  const flipRef = useRef<Record<string, 1 | -1>>({});
   // 글자 더블클릭 인라인 편집 / 호버 시 연결 포트(hoverElId) / 연결 드래그 중 임시 선(linking).
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [hoverElId, setHoverElId] = useState<string | null>(null);
@@ -221,6 +281,9 @@ export function InteractiveStage({
     if (completedRef.current) return;
     completedRef.current = true;
     onCompleteRef.current?.();
+    // 완료 축하 이펙트 — 색종이가 잠깐 쏟아진다.
+    setCelebrating(true);
+    window.setTimeout(() => setCelebrating(false), 2600);
   }, []);
   // 연결 hit-test/적중 판정용 최신 요소·연결 목록(고정 핸들러에서 읽음).
   const elsRef = useRef(doc.elements);
@@ -242,6 +305,10 @@ export function InteractiveStage({
     flagsRef.current = f;
     seqIndexRef.current = 0;
     moveOffset.current = {};
+    flipRef.current = {};
+    // moveAlongPath 의 fill:forwards/커밋된 transform 잔상까지 비워 액터를 '시작 위치'로 확실히 원복
+    // (cancelAnimations 만으로 남는 경우가 있어 인라인 transform 도 함께 초기화 — 캐릭터가 마지막 아이템에 붙는 문제).
+    rootRef.current?.querySelectorAll<HTMLElement>('.ic-el-inner').forEach((el) => { el.style.transform = ''; });
     setCounters(c);
     setFlags(f);
     setSwapped({});
@@ -249,7 +316,9 @@ export function InteractiveStage({
     setHighlighted({});
     setBubbles({});
     setRevealed({});
+    setCollected([]);
     setBursts([]);
+    setCelebrating(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetNonce, mode]);
 
@@ -268,6 +337,66 @@ export function InteractiveStage({
     [doc.behaviors, linkLabels],
   );
   const seqIndexRef = useRef(0);
+
+  // 수집형(줍기/찾기) 게임 감지 — 액터(moveAlongPath 대상)가 아이템들(tap/sequenceTap)로 이동해 줍는 구조.
+  // (분류 게임은 아이템 자신이 이동하므로 playIds 가 비어 제외된다.)
+  const collectInfo = useMemo(() => {
+    const moveTargets = new Set(doc.behaviors.filter((b) => b.action === 'moveAlongPath').map((b) => b.target));
+    const actorId = [...moveTargets][0] ?? null;
+    const playIds = new Set(
+      doc.behaviors
+        .filter((b) => (b.trigger === 'tap' || b.trigger === 'sequenceTap') && !moveTargets.has(b.target))
+        .map((b) => b.target),
+    );
+    const isCollect =
+      !!actorId &&
+      playIds.size >= 3 &&
+      doc.connections.some((c) => moveTargets.has(c.from) || moveTargets.has(c.to));
+    return { isCollect, actorId, playIds };
+  }, [doc.behaviors, doc.connections]);
+
+  // 액터(캐릭터)가 향하는 자연 방향을 이미지에서 분석 — 이동 시 진행 방향으로 바라보게 하기 위함.
+  useEffect(() => {
+    const id = collectInfo.actorId;
+    const el = id ? doc.elements.find((e) => e.id === id) : null;
+    const src = el?.src?.src;
+    if (!id || !src) return;
+    const img = new Image();
+    img.onload = () => { actorFacingRef.current[id] = detectFacing(img); };
+    img.src = src;
+  }, [collectInfo.actorId, doc.elements]);
+
+  // 모두 획득(미션 완료) → 완료 이펙트(액터가 마지막 아이템에 '도착'한 이 시점에 동기) + 캐릭터를 시작 위치로.
+  useEffect(() => {
+    if (!collectInfo.isCollect || !collectInfo.actorId) return;
+    if (collected.length === 0 || collected.length < collectInfo.playIds.size) return;
+    fireComplete(); // 도착 시점에 완료(축하 컨페티·완료바) — 탭 시점의 조기 발화 대신
+    const actorId = collectInfo.actorId;
+    const inner = innerRefs.current[actorId];
+    const prev = moveOffset.current[actorId] ?? { x: 0, y: 0 };
+    if (!inner || (prev.x === 0 && prev.y === 0)) return;
+    // 집으로 가는 방향을 바라보게.
+    let f = flipRef.current[actorId] ?? 1;
+    const facing = actorFacingRef.current[actorId];
+    const moveDir = prev.x > 6 ? 'left' : prev.x < -6 ? 'right' : null; // 0(집) - prev 방향
+    if ((facing === 'left' || facing === 'right') && moveDir) {
+      f = facing === moveDir ? 1 : -1;
+      flipRef.current[actorId] = f;
+    }
+    const token = runToken.current;
+    const a = inner.animate(
+      [{ transform: `translate(${prev.x}px, ${prev.y}px) scaleX(${f})` }, { transform: `translate(0px, 0px) scaleX(${f})` }],
+      { duration: 700, fill: 'forwards', easing: 'cubic-bezier(.4,0,.3,1)' },
+    );
+    moveOffset.current[actorId] = { x: 0, y: 0 };
+    a.finished
+      .then(() => {
+        if (token !== runToken.current) return;
+        a.cancel();
+        inner.style.transform = f === 1 ? '' : `scaleX(${f})`;
+      })
+      .catch(() => {});
+  }, [collected, collectInfo, fireComplete]);
 
   // ── 동작 엔진(스키마 전체 실행) — when 조건 평가 + delay + then 체이닝 + 11종 액션 ──
   const evalCond = (cond?: Condition): boolean => {
@@ -386,16 +515,48 @@ export function InteractiveStage({
             const midX = (prev.x + dx) / 2;
             const hop = Math.min(140, 64 + Math.abs(dx - prev.x) * 0.12); // 이동 거리에 따라 점프 높이(상한 140)
             const midY = Math.min(prev.y, dy) - hop;
+            // 진행 방향으로 바라보게 — 자연 facing과 가로 이동 방향이 다르면 좌우 반전(scaleX 부호 f). 세로 이동만이면 직전 방향 유지.
+            let f = flipRef.current[beh.target] ?? 1;
+            if (beh.target === collectInfo.actorId) {
+              const facing = actorFacingRef.current[beh.target];
+              const moveDir = dx > prev.x + 6 ? 'right' : dx < prev.x - 6 ? 'left' : null;
+              // 측면 캐릭터만 진행 방향으로 플립. '정면' 캐릭터는 플립하지 않는다(시작/끝 정면 유지).
+              if ((facing === 'left' || facing === 'right') && moveDir) {
+                f = facing === moveDir ? 1 : -1;
+                flipRef.current[beh.target] = f;
+              }
+            }
+            // '점프 포즈' — 도약(쭉)→공중(살짝 눌림)→착지(쿵) 스쿼시·스트레치 + 진행 방향 플립(f).
             const a = inner.animate(
               [
-                { transform: `translate(${prev.x}px, ${prev.y}px)`, offset: 0, easing: 'cubic-bezier(.3,0,.5,1)' },
-                { transform: `translate(${midX}px, ${midY}px)`, offset: 0.5, easing: 'cubic-bezier(.4,0,.7,1)' },
-                { transform: `translate(${dx}px, ${dy}px)`, offset: 1 },
+                { transform: `translate(${prev.x}px, ${prev.y}px) scaleX(${f}) scaleY(1)`, offset: 0, easing: 'cubic-bezier(.3,0,.5,1)' },
+                { transform: `translate(${prev.x}px, ${prev.y}px) scaleX(${f * 0.92}) scaleY(1.1)`, offset: 0.12 },
+                { transform: `translate(${midX}px, ${midY}px) scaleX(${f * 1.05}) scaleY(0.95)`, offset: 0.5, easing: 'cubic-bezier(.4,0,.7,1)' },
+                { transform: `translate(${dx}px, ${dy}px) scaleX(${f * 0.92}) scaleY(1.06)`, offset: 0.9 },
+                { transform: `translate(${dx}px, ${dy}px) scaleX(${f}) scaleY(1)`, offset: 1 },
               ],
               { duration: dur, fill: 'forwards' },
             );
             moveOffset.current[beh.target] = { x: dx, y: dy };
             await a.finished.catch(() => {});
+            // 이동 위치를 인라인 transform으로 확정 + 애니메이션 제거 — fill:forwards 잔상이 남아
+            // '처음으로'(리셋)에서 캐릭터가 시작 위치로 안 돌아가던 버그 수정(같은 값이라 깜빡임 없음).
+            a.cancel();
+            inner.style.transform = `translate(${dx}px, ${dy}px) scaleX(${f})`;
+            // 수집형 — 액터가 아이템에 '도착'하면 그 아이템을 줍는다(제자리에서 사라져 중앙 트레이로 모인다).
+            if (collectInfo.isCollect && beh.target === collectInfo.actorId && collectInfo.playIds.has(otherId)) {
+              setCollected((prev) => (prev.includes(otherId) ? prev : [...prev, otherId]));
+              fireBurstRef.current(other.transform.x + other.transform.w / 2, other.transform.y + other.transform.h / 2); // 획득 이펙트
+              // '줍기 포즈' — 살짝 숙였다 펴는 모션(플립 유지, fill 없음 → 끝나면 인라인 위치로 복귀).
+              inner.animate(
+                [
+                  { transform: `translate(${dx}px, ${dy}px) scaleX(${f}) scaleY(1)` },
+                  { transform: `translate(${dx}px, ${dy + 12}px) scaleX(${f * 1.06}) scaleY(0.9)`, offset: 0.4 },
+                  { transform: `translate(${dx}px, ${dy}px) scaleX(${f}) scaleY(1)` },
+                ],
+                { duration: 380, easing: 'ease-out' },
+              );
+            }
           }
         }
         return;
@@ -799,6 +960,7 @@ export function InteractiveStage({
     setBursts((b) => [...b, { id, x: cx, y: cy }]);
     window.setTimeout(() => setBursts((b) => b.filter((p) => p.id !== id)), 700);
   };
+  fireBurstRef.current = fireBurst; // applyAction(수집 등)에서 최신 핸들러로 호출
 
   const onElClick = (e: React.MouseEvent, el: ElementNode) => {
     if (preview || mode !== 'play') return;
@@ -812,7 +974,9 @@ export function InteractiveStage({
         void fireBehavior(beh.id);
         if (peekMode && peekIds.has(el.id)) setRevealed((r) => ({ ...r, [el.id]: true })); // 탭 → 전신 공개
         { const c = boxOf(el); fireBurst(c.x + c.w / 2, c.y + c.h / 2); } // 찾기 이펙트
-        if (seqIndexRef.current >= seqOrder.length && seqOrder.length > 0) fireComplete(); // 순서 게임 완료
+        // 순서 게임 완료 — 단, 수집형(액터가 이동해 줍는)은 '탭'이 아니라 액터가 마지막 아이템에 '도착'할 때
+        // 완료한다(아래 수집 완료 useEffect). 여기서 조기 완료하면 토끼 도착 전에 이펙트가 터져 싱크가 어긋난다.
+        if (!collectInfo.isCollect && seqIndexRef.current >= seqOrder.length && seqOrder.length > 0) fireComplete();
       } else {
         const inner = innerRefs.current[el.id];
         if (inner) runAnimate(inner, 'shake');
@@ -1032,12 +1196,51 @@ export function InteractiveStage({
             height: ch,
             transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
             transformOrigin: 'top left',
-            background: isAssetRef(doc.canvas.background) ? undefined : bgColor(doc.canvas.background),
+            // 실제 이미지 배경이면 그 위 <img>가 덮으므로 색 없음. 아니면 토큰/헥스 색(깨진 객체는 크림 폴백).
+            background: bgImageSrc(doc.canvas.background)
+              ? undefined
+              : bgColor(typeof doc.canvas.background === 'string' ? doc.canvas.background : 'pastel.cream'),
           }}
         >
-          {isAssetRef(doc.canvas.background) && <img className="ic-canvas-bg" src={doc.canvas.background.src} alt="" />}
+          {(() => {
+            const s = bgImageSrc(doc.canvas.background);
+            return s ? <img className="ic-canvas-bg" src={s} alt="" /> : null;
+          })()}
           {sorted.length === 0 && mode === 'edit' && !preview && (
             <div className="ic-empty">자료를 끌어다 놓거나 왼쪽 도구로 추가하세요</div>
+          )}
+
+          {/* 수집 트레이 — 획득한 아이템을 화면 상단 중앙에 '찾은 순서대로' 정렬해 보여준다(줍기/찾기 게임). */}
+          {collectInfo.isCollect && mode === 'play' && !preview && collected.length > 0 && (
+            <div
+              className="ic-collect-tray"
+              style={{ position: 'absolute', left: '50%', top: 116, transform: 'translateX(-50%)', display: 'flex', gap: 14, alignItems: 'center', zIndex: 30, pointerEvents: 'none' }}
+            >
+              {collected.map((id) => {
+                const el = doc.elements.find((e) => e.id === id);
+                const src = el?.src?.src;
+                return src ? (
+                  <img key={id} src={src} alt="" className="ic-collect-item" style={{ width: 74, height: 74, objectFit: 'contain' }} />
+                ) : null;
+              })}
+            </div>
+          )}
+
+          {/* 완료 축하 — 색종이(컨페티)가 잠깐 쏟아진다(게임 종료 이펙트). */}
+          {celebrating && mode === 'play' && !preview && (
+            <div className="ic-confetti" aria-hidden>
+              {Array.from({ length: 30 }).map((_, i) => (
+                <span
+                  key={i}
+                  style={{
+                    left: `${(i * 17 + 4) % 100}%`,
+                    background: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+                    animationDelay: `${(i % 9) * 110}ms`,
+                    animationDuration: `${1500 + (i % 5) * 230}ms`,
+                  }}
+                />
+              ))}
+            </div>
           )}
 
           {/* 요소 연결선 — 포트↔포트 곡선(클릭하면 해제) + 연결 드래그 중 임시 선.
@@ -1087,7 +1290,9 @@ export function InteractiveStage({
             const playable =
               mode === 'play' && !preview && (!!tapLike(el.id) || doc.behaviors.some((b) => b.target === el.id && b.trigger === 'pathTraverse'));
             // 숨김(hide/reveal)은 재생에서만 반영 — 편집에선 항상 보여 교사가 다룰 수 있게.
-            const isHidden = mode === 'play' && !preview && !!hidden[el.id];
+            // 수집형에서 '획득'한 아이템도 제자리에서 사라진다(중앙 트레이로 모인다).
+            const collectedAway = collectInfo.isCollect && mode === 'play' && !preview && collected.includes(el.id);
+            const isHidden = (mode === 'play' && !preview && !!hidden[el.id]) || collectedAway;
             const hl = highlighted[el.id];
             // 숨바꼭질 — 재생 중 아직 안 누른 peek 대상은 아랫부분을 그라데이션으로 가린다(풀 속에 숨은 듯).
             const peekMaskCss =

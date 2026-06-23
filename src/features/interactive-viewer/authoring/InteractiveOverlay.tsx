@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { newId } from '@/store/boardStore';
+import { newId, useBoardStore } from '@/store/boardStore';
 import { Icon } from '@/lib/icons';
 import { PromptBar } from '@/components/PromptBar';
 import { useUIStore } from '@/store/uiStore';
@@ -21,6 +21,8 @@ import { Inspector } from '../inspector/Inspector';
 import { StoryPanel } from './StoryPanel';
 import { HelpOverlay } from './HelpOverlay';
 import { AssetPicker, type AssetPick } from './AssetPicker';
+import { warmupAssets } from '@/board/assets';
+import { saveToLibrary } from '../store/library';
 import { applyInteractivePrompt } from './applyPrompt';
 import {
   fileToAssetRef,
@@ -52,6 +54,8 @@ interface Props {
   onExtend?: () => void;
   /** 게임 완료 후 '종료' — 인터랙티브 홈/갤러리로 이동(없으면 onClose 로 폴백). */
   onExit?: () => void;
+  /** 상단 '홈' — 인터랙티브 홈(저장 게임 목록·추천 프롬프트)으로 이동(없으면 버튼 숨김). */
+  onHome?: () => void;
 }
 
 const chromeBtn =
@@ -71,7 +75,7 @@ function cloneOf(el: ElementNode): ElementNode {
   return { ...el, id: newId('el'), transform: { ...el.transform, x: el.transform.x + 24, y: el.transform.y + 24 } };
 }
 
-export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExtend, onExit }: Props) {
+export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExtend, onExit, onHome }: Props) {
   const doc = useInteractiveStore((s) => s.docs[docId]);
   const ensure = useInteractiveStore((s) => s.ensure);
   const mutate = useInteractiveStore((s) => s.mutate);
@@ -79,6 +83,8 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
   const redo = useInteractiveStore((s) => s.redo);
   const [mode, setMode] = useState<'play' | 'edit'>(initialMode);
   const [selectedElIds, setSelectedElIds] = useState<string[]>([]);
+  // 편집 모드에선 게임 이미지 라이브러리(IDB)를 미리 데워(prefetch) — '게임 이미지' 피커가 로딩 없이 즉시.
+  useEffect(() => { if (mode === 'edit') warmupAssets(); }, [mode]);
   const [resetNonce, setResetNonce] = useState(0);
   // 게임 완료(순서 게임 클리어·이야기 끝) — 하단 완료 버튼바를 띄운다. 다시하기/모드전환/문서변경 시 해제.
   const [finished, setFinished] = useState(false);
@@ -127,13 +133,23 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
       const d = (e as CustomEvent).detail as { docId?: string; prompt?: string } | null;
       if (!d || d.docId !== docId || !d.prompt || applyingRef.current) return;
       applyingRef.current = true;
-      void applyInteractivePrompt(docId, d.prompt, selRef.current, setBusy)
+      // 진행을 '마이보드 프롬프트바'처럼 입력창에 라이브 스트리밍한다 — boardStore.generating 을
+      // 구동하면 공용 PromptBar 가 자동으로 스트리밍 표시(스피너+단계 메시지+타이핑 점)로 전환된다.
+      const board = useBoardStore.getState();
+      board.beginGen();
+      board.setGenerating('✏️ 고치는 중…');
+      const onBusy = (m: string | null) => {
+        setBusy(m);
+        if (m) board.setGenerating(m); // null은 endGen 이 정리(마지막 작업 끝날 때 메시지 비움)
+      };
+      void applyInteractivePrompt(docId, d.prompt, selRef.current, onBusy)
         .then((r) => {
           showToast(r.message, r.ok ? 'success' : 'error');
           if (r.ok && r.addedIds.length) setSelectedElIds(r.addedIds);
         })
         .finally(() => {
           applyingRef.current = false;
+          board.endGen();
         });
     };
     window.addEventListener('kv:inode-prompt', onPrompt as EventListener);
@@ -484,36 +500,54 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
     }
   };
 
-  const onPick = async (pick: AssetPick) => {
+  const onApply = async (picks: AssetPick[]) => {
     const forSwap = picker?.for === 'swap';
     const swapTarget = selectedElIds.length === 1 ? selectedElIds[0] : null;
     setPicker(null);
+    if (picks.length === 0) return;
     setBusy('자료 넣는 중…');
     try {
-      // 라이브러리에서 '배경' 태그 이미지를 고르면 → 요소가 아니라 캔버스 배경으로 적용.
-      if (!forSwap && pick.kind === 'library' && /배경|background/i.test(`${pick.asset.tag} ${pick.asset.group ?? ''}`)) {
-        const bgRef = await urlToAssetRef(pick.asset.url, 'generated');
-        mutate(docId, (d) => ({ ...d, canvas: { ...d.canvas, background: bgRef } }));
+      // 교체 모드 — 첫 선택 한 장으로 선택 요소의 그림을 바꾼다.
+      if (forSwap && swapTarget) {
+        const p = picks[0];
+        const ref = p.kind === 'file' ? await fileToAssetRef(p.file, 'teacher-upload') : await urlToAssetRef(p.asset.url, 'teacher-upload');
+        setBehaviorFor(swapTarget, { id: newId('beh'), target: swapTarget, trigger: 'tap', action: 'swap', params: { to: ref, mode: 'image' } });
         return;
       }
-      const ref =
-        pick.kind === 'file'
-          ? await fileToAssetRef(pick.file, 'teacher-upload')
-          : await urlToAssetRef(pick.asset.url, 'teacher-upload');
-      if (forSwap && swapTarget) {
-        setBehaviorFor(swapTarget, {
-          id: newId('beh'),
-          target: swapTarget,
-          trigger: 'tap',
-          action: 'swap',
-          params: { to: ref, mode: 'image' },
-        });
-      } else {
-        addImageRef(ref, pick.kind === 'file' ? 'upload' : 'board-copy', center());
+      // 추가 모드 — '배경' 태그는 캔버스 배경으로, 나머지는 요소로 누적 추가(겹치지 않게 계단식). 한 번의 mutate(한 번 실행취소).
+      let bgRef: Awaited<ReturnType<typeof urlToAssetRef>> | null = null;
+      const refs: Array<{ ref: Awaited<ReturnType<typeof urlToAssetRef>>; origin: 'upload' | 'board-copy' }> = [];
+      for (const p of picks) {
+        if (p.kind === 'library' && /배경|background/i.test(`${p.asset.tag} ${p.asset.group ?? ''}`)) {
+          bgRef = await urlToAssetRef(p.asset.url, 'generated');
+          continue;
+        }
+        const ref = p.kind === 'file' ? await fileToAssetRef(p.file, 'teacher-upload') : await urlToAssetRef(p.asset.url, 'teacher-upload');
+        refs.push({ ref, origin: p.kind === 'file' ? 'upload' : 'board-copy' });
       }
+      let at = center();
+      const els = refs.map(({ ref, origin }) => {
+        const el = makeImageElement(ref, origin, at, doc.canvas.size);
+        at = { x: at.x + 44, y: at.y + 44 };
+        return el;
+      });
+      mutate(docId, (d) => {
+        let nd = d;
+        if (bgRef) nd = { ...nd, canvas: { ...nd.canvas, background: bgRef } };
+        nd = els.reduce((acc, el) => withElementAdded(acc, el), nd);
+        return nd;
+      });
+      if (els.length) setSelectedElIds(els.map((e) => e.id));
     } finally {
       setBusy(null);
     }
+  };
+
+  // 이 게임을 라이브러리에 저장 — 인터랙티브 홈에서 바로 재생 + 비슷한 요청에 추천.
+  const onSaveGame = () => {
+    saveToLibrary(doc);
+    setBusy('⭐ 게임을 저장했어요 — 인터랙티브 홈에서 바로 재생할 수 있어요');
+    window.setTimeout(() => setBusy(null), 1800);
   };
 
   const removeBg = async () => {
@@ -557,10 +591,15 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
 
   return (
     <div className="absolute inset-0 flex flex-col" style={{ background: 'var(--bg-deep)' }}>
-      {/* 상단 크롬 */}
-      <div className="flex items-center justify-between gap-2 p-3">
+      {/* 상단 크롬 — 좌:홈(+편집도구) / 중앙:게임 제목(텍스트) / 우:모드·처음으로·도움말·닫기 */}
+      <div className="relative flex items-center justify-between gap-2 p-3">
+        {/* 좌 — 홈(가장 왼쪽) + 편집 도구 */}
         <div className="flex items-center gap-2">
-          <span className="rounded-pill bg-surface px-3 py-1.5 text-sm font-bold text-fg shadow-sm">{doc.title}</span>
+          {onHome && (
+            <button onClick={onHome} className={chromeBtn} title="인터랙티브 홈 — 저장한 게임 목록·추천" aria-label="홈">
+              <Icon name="home" size={16} /> 홈
+            </button>
+          )}
           {mode === 'edit' && (
             <>
               <button onClick={() => undo(docId)} className={chromeIconBtn} title="실행취소 (⌘/Ctrl+Z)" aria-label="실행취소">
@@ -590,7 +629,27 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
             </>
           )}
         </div>
+
+        {/* 중앙 — 게임 제목(버튼 아닌 큰 텍스트). 절대중앙 정렬. */}
+        <h1 className="pointer-events-none absolute left-1/2 top-1/2 max-w-[38%] -translate-x-1/2 -translate-y-1/2 truncate text-center font-serif text-xl font-bold text-fg">
+          {doc.title}
+        </h1>
+
+        {/* 우 — 편집/재생 · (재생)처음으로/(편집)저장·게임이미지 · 도움말 · 닫기 */}
         <div className="flex items-center gap-2">
+          <button onClick={toggleMode} className={chromeBtnAccent}>
+            {mode === 'edit' ? <><Icon name="play" size={16} /> 재생</> : <><Icon name="edit" size={16} /> 편집</>}
+          </button>
+          {mode === 'play' && (
+            <button onClick={() => setResetNonce((n) => n + 1)} className={chromeBtn} title="게임을 시작 상태로 되돌려요">
+              <Icon name="reset" size={16} /> 처음으로
+            </button>
+          )}
+          {mode === 'edit' && (
+            <button onClick={onSaveGame} className={chromeBtn} title="이 게임을 저장 — 인터랙티브 홈에서 바로 재생할 수 있어요" aria-label="저장">
+              <Icon name="star" size={16} /> 저장
+            </button>
+          )}
           {mode === 'edit' && (
             <button onClick={() => setPicker({ for: 'add' })} className={chromeBtn} title="저장된 게임 이미지·배경에서 골라 넣기" aria-label="게임 이미지">
               <Icon name="gallery" size={16} /> 게임 이미지
@@ -598,14 +657,6 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
           )}
           <button onClick={() => setHelpOpen(true)} className={chromeBtn} title="도움말 — 기능·단축키 안내" aria-label="도움말">
             <Icon name="help" size={16} /> 도움말
-          </button>
-          {mode === 'play' && (
-            <button onClick={() => setResetNonce((n) => n + 1)} className={chromeBtn}>
-              <Icon name="reset" size={16} /> 처음으로
-            </button>
-          )}
-          <button onClick={toggleMode} className={chromeBtnAccent}>
-            {mode === 'edit' ? <><Icon name="play" size={16} /> 재생</> : <><Icon name="edit" size={16} /> 편집</>}
           </button>
           <button onClick={onClose} className={chromeBtn} aria-label="닫기">
             <Icon name="x" size={16} /> 닫기
@@ -711,8 +762,9 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExt
       {picker && (
         <AssetPicker
           title={picker.for === 'swap' ? '바뀔 그림 고르기' : '게임 이미지'}
+          multi={picker.for !== 'swap'}
           onClose={() => setPicker(null)}
-          onPick={onPick}
+          onApply={onApply}
         />
       )}
 

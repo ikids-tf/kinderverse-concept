@@ -17,6 +17,8 @@ export interface ImageAsset {
   group?: string;
   /** kind==='video'일 때 — videoAssets 스토어의 영상 id(배치 시 이걸로 로드). */
   videoAssetId?: string;
+  /** 출처 — 'game'이면 인터랙티브 게임에서 생성(게임 이미지 탭으로 분리 표시). 없으면 일반 갤러리. */
+  source?: string;
 }
 
 export type AssetKind = ImageAsset['kind'];
@@ -47,6 +49,25 @@ export async function listAssets(kinds?: ImageAsset['kind'][]): Promise<ImageAss
   return out.sort((a, z) => z.createdAt - a.createdAt);
 }
 
+/** 이미 메모리 캐시에 로드돼 있으면 '동기로' 목록을 반환(없으면 null) — 피커를 로딩 없이 즉시 그릴 때. */
+export function peekAssets(kinds?: ImageAsset['kind'][]): ImageAsset[] | null {
+  if (!cache) return null;
+  const out: ImageAsset[] = [];
+  for (const arr of Object.values(cache)) {
+    for (const it of arr) {
+      if (!it.url) continue;
+      if (kinds && !kinds.includes(it.kind)) continue;
+      out.push(it);
+    }
+  }
+  return out.sort((a, z) => z.createdAt - a.createdAt);
+}
+
+/** 캐시 미리 로드(오버레이 열릴 때/유휴 시) — 첫 목록 조회를 즉시로 만든다. */
+export function warmupAssets(): void {
+  void load();
+}
+
 /** 캡션과 같은 태그의 최신 자산(종류 일치)을 찾는다 — 없으면 undefined. */
 export async function findAsset(caption: string, kind: ImageAsset['kind']): Promise<ImageAsset | undefined> {
   const lib = await load();
@@ -64,6 +85,7 @@ export async function saveAsset(
   url: string,
   group?: string,
   videoAssetId?: string,
+  source?: string,
 ): Promise<void> {
   if (!url || !caption.trim()) return;
   // 플레이스홀더(생성 실패 '개념' SVG 자리표시)는 저장하지 않는다 — 깨진 그림이 보관함에 고착돼
@@ -79,6 +101,7 @@ export async function saveAsset(
     createdAt: Date.now(),
     ...(group?.trim() ? { group: group.trim() } : {}),
     ...(videoAssetId ? { videoAssetId } : {}),
+    ...(source ? { source } : {}),
   });
   if (arr.length > MAX_PER_TAG) arr.splice(0, arr.length - MAX_PER_TAG);
   await idbSet(KEY, lib);

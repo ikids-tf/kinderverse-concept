@@ -20,17 +20,35 @@ const GEN_PREFIX = 'gen:';
 export const MAX_IMAGES = 8; // 한 게임당 토큰 그림 상한(비용/지연 가드)
 
 /** 토큰(개체) 공통 스타일 코어 — 3D 픽사풍·밝은 파스텔, 의인화 금지(교육용 정확성),
-    순백 단색 배경·그림자 없음·또렷한 외곽선 = 배경제거(누끼)가 깔끔하게 되도록. */
+    순백 단색 배경·그림자 없음·또렷한 외곽선 = 배경제거(누끼)가 깔끔하게 되도록.
+    ★ 아이 대면 콘텐츠 = 특별 지시 없으면 무조건 밝고 화사하고 예쁘게(어둡거나 칙칙·음침 금지). */
 const STYLE_CORE =
-  '3D 픽사풍 귀여운 렌더, 밝은 파스텔 색, 부드럽고 둥근 형태, ' +
+  '아이들이 보는 콘텐츠라 늘 밝고 화사하고 예쁘게(어둡거나 칙칙하거나 음침하거나 무서운 느낌 절대 금지), ' +
+  '3D 픽사풍 귀여운 렌더, 밝고 화사한 파스텔 색, 부드럽고 둥근 형태, ' +
   '완전 정면 금지 — 대상의 특징이 가장 잘 드러나는 3/4 측면 각도(동물·생물은 꼬리·다리까지 전신이 다 보이게, 사물·기구·건물은 형태가 분명한 입체 각도), ' +
   '사물·동물은 의인화하지 말 것(사람 얼굴·표정·옷·직립 보행 금지), 실제 모습 그대로 정확하게(아이들이 실제 정보를 배우도록), ' +
   '완전한 순백색 단색 배경, 그림자·바닥·반사 없음, 또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화';
 /** 단일 토큰 — 대상 '전체'가 잘리지 않고 프레임 안에 여유 있게(사방 여백). 타이트한 박스는 누끼 후 trimTransparent가 만든다(여기서 꽉 채우면 앞다리·꼬리가 잘림). */
 const TOKEN_STYLE = `대상 하나만, 머리·귀부터 꼬리·발끝까지 전체가 절대 잘리지 않고 프레임 안에 여유 있게 다 들어오도록(사방에 넉넉한 여백, 화면을 꽉 채우지 말 것), 화면 가운데에 또렷하게, 다른 사물 없음, ${STYLE_CORE}`;
-/** 장면 배경 — 풀블리드 3D 픽사풍, 은은하게(전경 가독 보호). 누끼하지 않음. */
+/** 숫자 토큰 — 수 세기·숫자 게임의 번호 아이템. 대상 위에 큰 아라비아 숫자를 또렷하게(‘글자 없음’ 해제). */
+const NUMBER_TOKEN_STYLE =
+  '대상 하나만, 전체가 잘리지 않고 프레임 안에 여유 있게, 대상 표면(또는 한가운데)에 크고 또렷하며 깔끔한 아라비아 숫자 하나가 분명히 보이게 적혀 있음(숫자 외 다른 글자는 없음), 화면 가운데, 다른 사물 없음, ' +
+  STYLE_CORE.replace('글자 없음, ', '');
+/** 라벨에 숫자(번호)가 들어간 토큰인가 — 그러면 숫자를 그려 넣는 스타일을 쓴다. */
+const isNumberedLabel = (label: string): boolean => /\d/.test(label) || /숫자|번호/.test(label);
+/** 정면 토큰 — 주인공(액터)을 시작/끝 정지 상태에서 쓸 '정면(아이를 바라보는)' 자세로 생성. */
+const FRONT_TOKEN_STYLE =
+  '대상 하나만, 정면(카메라·아이를 바라보는) 귀엽고 또렷한 자세로 좌우 균형 있게, 머리부터 발끝까지 전신이 잘리지 않고 프레임 안에 여유 있게(사방 여백), 화면 가운데, 다른 사물 없음, ' +
+  '아이들이 보는 콘텐츠라 늘 밝고 화사하고 예쁘게(어둡거나 칙칙·음침·무서운 느낌 절대 금지), 3D 픽사풍 귀여운 렌더, 밝고 화사한 파스텔 색, 부드럽고 둥근 형태, ' +
+  '사물·동물은 의인화하지 말 것(사람 얼굴·표정·옷·직립 보행 금지), 실제 모습 그대로 정확하게, 완전한 순백색 단색 배경, 그림자·바닥·반사 없음, 또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화';
+/** 장면 배경 — 풀블리드 3D 픽사풍, 풍부한 디테일·빛·깊이로 '아름답게'(아이 대면=밝고 예쁘게).
+    그 위에 놓일 토큰(아이템)과 같은 화풍으로 어우러지되, 가운데 놀이 영역은 차분히 비워 가독 보호. 누끼 안 함. */
 const SCENE_STYLE =
-  '3D 픽사풍 부드러운 배경 장면, 밝은 파스텔 색, 은은하고 단순, 가로 와이드 16:10, 인물·캐릭터·동물 없음, 글자 없음, 가운데는 비워 균형 잡힌 구도';
+  '3D 픽사·디즈니풍 고퀄리티 동화책 배경 일러스트, 밝고 화사하되 한 색에 치우치지 않은 균형 잡힌 파스텔 팔레트(과도한 빨강·단색 채도 금지 — 노랑·연두·하늘색 등이 산뜻하게 어우러지게), ' +
+  '따뜻한 자연광과 부드러운 그림자로 입체감과 빛이 또렷이 느껴지게(역광·공기원근·은은한 빛산란), ' +
+  '풍부한 디테일과 깊이감 — 전경·중경·원경 레이어, 다양한 형태의 자연물(똑같은 모양 반복 금지), 주제·계절에 맞는 바닥·환경 디테일을 정성껏(예: 가을이면 낙엽과 함께 나무 밑동의 풀더미·들꽃·이끼 등 소소한 식생), ' +
+  '아름답고 생동감 있게 — 단, 어둡거나 칙칙·음침·무서운 분위기는 절대 금지(아이들이 보는 밝고 예쁜 콘텐츠), ' +
+  '가로 와이드 16:10, 인물·캐릭터·동물·글자 없음, 가운데 놀이 영역은 살짝 차분하게 비워 전경 아이템이 잘 보이도록 균형 잡힌 구도';
 
 type RawEl = Record<string, unknown>;
 interface RawNode {
@@ -162,7 +180,7 @@ async function assignImage(el: RawEl, dataUri: string | null, doCutout: boolean)
  */
 export async function fillTokenImages(
   raw: RawNode,
-  opts: { cutout?: boolean; onBusy?: (m: string | null) => void; theme?: string },
+  opts: { cutout?: boolean; onBusy?: (m: string | null) => void; theme?: string; frontIds?: Set<string> },
 ): Promise<void> {
   const doCut = opts.cutout ?? true;
   const els = Array.isArray(raw.elements) ? raw.elements : [];
@@ -183,13 +201,20 @@ export async function fillTokenImages(
 
   await Promise.all(
     targets.map(async (t) => {
-      const img = await genImage(t.label, TOKEN_STYLE);
+      // 주인공(액터)은 정면, 번호 아이템은 숫자 새김, 그 외는 3/4 측면.
+      const elId = String((t.el as { id?: unknown }).id ?? '');
+      const style = opts.frontIds?.has(elId)
+        ? FRONT_TOKEN_STYLE
+        : isNumberedLabel(t.label)
+          ? NUMBER_TOKEN_STYLE
+          : TOKEN_STYLE;
+      const img = await genImage(t.label, style);
       await assignImage(t.el, img, doCut);
       // 라이브러리(IDB)에 저장 — 편집 시 '게임 이미지 갤러리'에서 재사용. 실제 PNG만(플레이스홀더 제외).
       const s = t.el.src;
       const uri = s && typeof s === 'object' ? (s as { src?: unknown }).src : undefined;
       if (typeof uri === 'string' && uri.startsWith('data:image/') && !uri.startsWith('data:image/svg')) {
-        void saveAsset(t.label, 'image', uri, opts.theme);
+        void saveAsset(t.label, 'image', uri, opts.theme, undefined, 'game');
       }
     }),
   );
@@ -203,7 +228,7 @@ export async function generateSceneBackground(prompt: string, theme?: string): P
     const ref = await urlToAssetRef(img, 'generated');
     // 배경도 라이브러리에 저장(재사용) — 태그에 '배경'을 넣어 갤러리/피커가 '배경으로 적용'을 식별.
     if (ref.src.startsWith('data:image/') && !ref.src.startsWith('data:image/svg')) {
-      void saveAsset(`${(theme || '게임').slice(0, 24)} 배경`, 'image', ref.src, `배경 ${theme ?? ''}`.trim());
+      void saveAsset(`${(theme || '게임').slice(0, 24)} 배경`, 'image', ref.src, `배경 ${theme ?? ''}`.trim(), undefined, 'game');
     }
     return ref;
   } catch {
