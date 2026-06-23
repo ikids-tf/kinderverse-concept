@@ -27,7 +27,7 @@ function readAll(): Persisted {
 function writeAll(all: Persisted): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(all));
+    localStorage.setItem(LS_KEY, JSON.stringify(all)); // localStorage 미러가 클라우드로 동기화
   } catch {
     /* quota/직렬화 실패 — 무시(세션 캐시는 유지된다) */
   }

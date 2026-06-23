@@ -100,9 +100,9 @@ async function write(): Promise<void> {
   // Fold the live board into its snapshot, write the light meta synchronously, then
   // mirror the heavy snapshots (images included) to IndexedDB.
   useBoardsStore.getState().saveActiveLive();
-  writeMeta();
+  writeMeta(); // localStorage 미러가 보드 목록(meta)을 클라우드로 올린다
   const { snapshots } = useBoardsStore.getState();
-  const ok = await idbSet(IDB_SNAPSHOTS, snapshots);
+  const ok = await idbSet(IDB_SNAPSHOTS, snapshots); // idbSet 래퍼가 스냅샷을 클라우드로 미러
   if (!ok) {
     // eslint-disable-next-line no-console
     console.warn('[persist] snapshot save to IndexedDB failed — board content not persisted this cycle');

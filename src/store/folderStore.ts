@@ -236,6 +236,6 @@ useFolderStore.subscribe((s) => {
   if (hydrating) return; // 복원 직후의 setState는 다시 쓰지 않는다
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
-    void idbSet(PERSIST_KEY, { saved: s.saved, bundles: s.bundles } satisfies PersistShape);
+    void idbSet(PERSIST_KEY, { saved: s.saved, bundles: s.bundles }); // idbSet 래퍼가 클라우드로 미러
   }, PERSIST_DEBOUNCE);
 });

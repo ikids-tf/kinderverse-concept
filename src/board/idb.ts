@@ -4,6 +4,8 @@
    loading 상태가 남아 무한 스피너가 됐다. IDB는 용량이 훨씬 커(보통 수백 MB~) 이를
    해결한다. 값은 구조화 복제로 저장되므로 JSON 직렬화도 불필요. */
 
+import { cloudPush } from '@/lib/cloud';
+
 const DB_NAME = 'kv-board';
 const STORE = 'kv';
 const VERSION = 1;
@@ -43,8 +45,8 @@ export async function idbGet<T = unknown>(key: string): Promise<T | undefined> {
   }
 }
 
-/** Write a value by key. Returns false if IDB is unavailable or the write fails. */
-export async function idbSet(key: string, value: unknown): Promise<boolean> {
+/** Write a value by key — '로컬만'. 클라우드 미러 없음(클라우드에서 받은 값을 되쓸 때 루프 방지용). */
+export async function idbSetRaw(key: string, value: unknown): Promise<boolean> {
   try {
     const db = await openDb();
     return await new Promise<boolean>((resolve, reject) => {
@@ -56,5 +58,29 @@ export async function idbSet(key: string, value: unknown): Promise<boolean> {
     });
   } catch {
     return false;
+  }
+}
+
+/** Write a value by key + 클라우드 미러('idb:'+key). 모든 IDB 쓰기가 이 함수를 거치므로
+    보드 스냅샷·폴더·갤러리 이미지(image-assets)·슬라이드 이미지·동영상·웹링크 등 IDB 자료 전체가
+    자동으로 공유 공간에 동기화된다(자격증명 없으면 cloudPush는 no-op). */
+export async function idbSet(key: string, value: unknown): Promise<boolean> {
+  const ok = await idbSetRaw(key, value);
+  cloudPush('idb:' + key, value);
+  return ok;
+}
+
+/** object store의 모든 키 — 시작 동기화에서 '클라우드에 없는 로컬 항목'을 올릴 때 쓴다. */
+export async function idbKeys(): Promise<string[]> {
+  try {
+    const db = await openDb();
+    return await new Promise<string[]>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).getAllKeys();
+      req.onsuccess = () => resolve((req.result as IDBValidKey[]).map(String));
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return [];
   }
 }

@@ -186,3 +186,66 @@ export function buildTenantContext(): string {
 
   return lines.join('\n');
 }
+
+/* ---- 영속화(localStorage) — 우리반 자료도 기기 간 공유되도록(클라우드 미러가 자동 동기화).
+   기존엔 시드 상태만 메모리에 두었으나, 저장하면 다른 기기에서도 같은 원아 정보가 보인다. ---- */
+
+const CLASS_KEY = 'kv:class:v1';
+interface ClassPersist {
+  classes: ClassRoom[];
+  children: Record<string, Child>;
+  selectedClassId: string;
+  selectedChildId: string | null;
+}
+
+let classHydrating = true;
+try {
+  const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CLASS_KEY) : null;
+  if (raw) {
+    const p = JSON.parse(raw) as Partial<ClassPersist>;
+    if (Array.isArray(p.classes) && p.children) {
+      useClassStore.setState({
+        classes: p.classes,
+        children: p.children,
+        selectedClassId: p.selectedClassId ?? p.classes[0]?.id ?? C1,
+        selectedChildId: p.selectedChildId ?? null,
+      });
+      // id 시퀀스를 복원본 최대값 뒤로 — 재시작 후 child_N/med_N 충돌 방지.
+      let max = 0;
+      for (const c of Object.values(p.children)) {
+        const m = /_(\d+)$/.exec(c.id);
+        if (m) max = Math.max(max, Number(m[1]));
+        for (const md of c.medications ?? []) {
+          const mm = /_(\d+)$/.exec(md.id);
+          if (mm) max = Math.max(max, Number(mm[1]));
+        }
+      }
+      seq = Math.max(seq, max);
+    }
+  }
+} catch {
+  /* 손상/없음 — 시드 유지 */
+}
+classHydrating = false;
+
+let classPersistTimer: ReturnType<typeof setTimeout> | undefined;
+useClassStore.subscribe((s) => {
+  if (classHydrating) return;
+  if (classPersistTimer) clearTimeout(classPersistTimer);
+  classPersistTimer = setTimeout(() => {
+    try {
+      // localStorage.setItem 패치(cloudMirror)가 이 쓰기를 클라우드로 미러한다.
+      localStorage.setItem(
+        CLASS_KEY,
+        JSON.stringify({
+          classes: s.classes,
+          children: s.children,
+          selectedClassId: s.selectedClassId,
+          selectedChildId: s.selectedChildId,
+        } satisfies ClassPersist),
+      );
+    } catch {
+      /* quota — 무시 */
+    }
+  }, 400);
+});

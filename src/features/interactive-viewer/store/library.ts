@@ -28,7 +28,7 @@ function readLib(): SavedGame[] {
 function writeLib(l: SavedGame[]): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(LIB_KEY, JSON.stringify(l));
+    localStorage.setItem(LIB_KEY, JSON.stringify(l)); // localStorage 미러가 클라우드로 동기화
   } catch {
     /* quota — 무시 */
   }
