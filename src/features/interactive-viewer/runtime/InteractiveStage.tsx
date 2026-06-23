@@ -15,6 +15,19 @@ import { linkSequence, compareLabels } from '@/board/links';
 import { Icon } from '@/lib/icons';
 import './inode.css';
 
+/** 레인 한 칸의 논리 폭(px). 노드는 넓은 캔버스의 LANE_W px x-밴드들로 구성된다(모델 2 무한 성장).
+    composeNode의 CANVAS.w(1280)와 일치 — 한 레인 = 기존 단일 캔버스 한 장. */
+const LANE_W = 1280;
+
+/** goToScene.params.sceneId(문자열 Id)를 목표 레인 인덱스로 해석.
+    규약: sceneId는 십진수 레인 번호 문자열('0','1',…). 숫자가 아니면 끝의 숫자, 없으면 0. */
+function laneFromSceneId(sceneId: string): number {
+  const n = Number(sceneId);
+  if (Number.isFinite(n)) return n;
+  const m = /(\d+)/.exec(sceneId);
+  return m ? Number(m[1]) : 0;
+}
+
 const COLOR_TOKENS: Record<string, string> = {
   'pastel.cream': 'var(--ic-cream)',
   'pastel.coral': 'var(--ic-coral)',
@@ -196,10 +209,78 @@ export function InteractiveStage({
 }: Props) {
   const cw = doc.canvas.size.w;
   const ch = doc.canvas.size.h;
-  const { ref: stageBoxRef, scale, box } = useStageFit(cw, ch, preview ? 6 : 24);
-  // 캔버스는 무대 안에서 가운데로 — translate를 직접 계산(거대 박스를 grid가 중앙정렬 못 하는 문제 회피).
-  const tx = Math.max(0, (box.w - cw * scale) / 2);
+  // 레인 = 넓은 캔버스의 LANE_W px x-밴드(모델 2). 화면엔 한 번에 한 레인만 맞춘다.
+  const laneCount = Math.max(1, Math.round(cw / LANE_W));
+  const laneW = cw / laneCount; // 보통 1280. 비정수 단일 폭 노드는 전체 폭(하위호환).
+  // 가로 카메라 — cameraAnim=보간된 표시 레인(부동). cameraLaneRef=확정 목표. 0이면 기존과 동일.
+  const [cameraAnim, setCameraAnim] = useState(0);
+  const cameraLaneRef = useRef(0);
+  const camTokenRef = useRef(0);
+  const { ref: stageBoxRef, scale, box } = useStageFit(laneW, ch, preview ? 6 : 24);
+  // 한 레인을 무대 안에서 가운데로(레터박스) + 카메라 오프셋(보이는 레인 선택).
+  // translate를 직접 계산(거대 박스를 grid가 중앙정렬 못 하는 문제 회피).
+  const tx = Math.max(0, (box.w - laneW * scale) / 2) - cameraAnim * laneW * scale;
   const ty = Math.max(0, (box.h - ch * scale) / 2);
+
+  // 카메라 상태 미러(안정 핸들러가 최신값을 ref로 읽음).
+  const cameraAnimRef = useRef(0);
+  useEffect(() => { cameraAnimRef.current = cameraAnim; }, [cameraAnim]);
+  const laneCountRef = useRef(1);
+  useEffect(() => { laneCountRef.current = laneCount; }, [laneCount]);
+
+  // 레인 카메라 패닝 — slideFrameToEmpty(workflow.ts)의 rAF+cubic-out 패턴을 로컬 복제.
+  // ⚠ MyBoard 전역 viewport는 만지지 않는다(노드 로컬 카메라 전용).
+  const panToLane = useCallback((target: number, animated = true) => {
+    const max = Math.max(0, laneCountRef.current - 1);
+    const to = Math.max(0, Math.min(max, Math.round(target)));
+    cameraLaneRef.current = to;
+    const from = cameraAnimRef.current;
+    const token = ++camTokenRef.current;
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduce || !animated || Math.abs(to - from) < 0.001) {
+      cameraAnimRef.current = to;
+      setCameraAnim(to);
+      return;
+    }
+    const dur = Math.min(700, Math.max(300, Math.abs(to - from) * 460));
+    const t0 = performance.now();
+    const ease = (p: number) => 1 - Math.pow(1 - p, 3); // cubic-out
+    const tick = (now: number) => {
+      if (token !== camTokenRef.current) return; // 새 패닝/리셋이 시작되면 취소
+      const p = Math.min(1, (now - t0) / dur);
+      const v = from + (to - from) * ease(p);
+      cameraAnimRef.current = v;
+      setCameraAnim(v);
+      if (p < 1) requestAnimationFrame(tick);
+      else {
+        cameraAnimRef.current = to;
+        setCameraAnim(to);
+      }
+    };
+    requestAnimationFrame(tick);
+  }, []);
+
+  // 재생 리셋·모드 전환 시 첫 레인으로 즉시 복귀(진행 중 패닝 취소). N=1은 0→0 무변화.
+  useEffect(() => {
+    camTokenRef.current++;
+    cameraLaneRef.current = 0;
+    cameraAnimRef.current = 0;
+    setCameraAnim(0);
+  }, [resetNonce, mode]);
+
+  // 외부(확장 등)에서 특정 레인으로 패닝 요청 — 노드 로컬 카메라만 움직인다(전역 viewport 미사용).
+  // 미리보기 썸네일은 무시(보드 카드).
+  useEffect(() => {
+    if (preview) return;
+    const onGoto = (e: Event) => {
+      const d = (e as CustomEvent).detail as { docId?: string; lane?: number } | null;
+      if (!d || d.docId !== doc.id || typeof d.lane !== 'number') return;
+      panToLane(d.lane);
+    };
+    window.addEventListener('kv:inode-goto-lane', onGoto as EventListener);
+    return () => window.removeEventListener('kv:inode-goto-lane', onGoto as EventListener);
+  }, [doc.id, preview, panToLane]);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const innerRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -613,7 +694,9 @@ export function InteractiveStage({
         return;
       }
       case 'goToScene':
-        // 장면 전환 — 장면 개념 미도입(P2). 충돌 없이 무시.
+        // 레인 전환 — sceneId(문자열 Id)를 목표 레인 인덱스로 해석해 카메라를 그 레인으로 패닝.
+        // 새 트리거·액션·params 스키마 신설 0(기존 goToScene 자리 재사용).
+        panToLane(laneFromSceneId(beh.params.sceneId));
         return;
       default:
         return;

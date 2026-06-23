@@ -8,7 +8,6 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '@/lib/icons';
 import { ZoomOverlay } from '@/components/board/ZoomOverlay';
-import { extendInteractiveActivity } from '@/board/composer';
 import { newDocId, useInteractiveStore } from '../store/interactiveStore';
 import { listLibrary, removeFromLibrary } from '../store/library';
 import { composeInteractiveNode } from './composeNode';
@@ -45,7 +44,6 @@ export function InteractiveGallery({ onClose }: { onClose: () => void }) {
   const [, setTick] = useState(0); // 삭제 후 목록 재렌더용(상태 변경으로 listLibrary 재호출)
   const ensure = useInteractiveStore((s) => s.ensure);
   const games = listLibrary();
-  const playing = games.find((g) => g.docId === playId) ?? null;
 
   // 저장 목록에서 게임 삭제 — 목록에서만 빼고(게임 문서·이미지는 보드에 그대로), 즉시 재렌더.
   const removeGame = (docId: string, title: string) => {
@@ -156,10 +154,6 @@ export function InteractiveGallery({ onClose }: { onClose: () => void }) {
               onClose={close}
               onExit={() => setPlayId(null)}
               onHome={() => setPlayId(null)}
-              onExtend={() => {
-                void extendInteractiveActivity(playing?.title ?? '인터랙티브 놀이');
-                onClose();
-              }}
             />
           )}
         </ZoomOverlay>

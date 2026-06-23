@@ -13,7 +13,6 @@ import { useInteractiveStore } from '../store/interactiveStore';
 import { InteractiveStage } from '../runtime/InteractiveStage';
 import { InteractiveOverlay } from '../authoring/InteractiveOverlay';
 import { InteractiveGallery } from '../authoring/InteractiveGallery';
-import { extendInteractiveActivity } from '@/board/composer';
 import { urlToAssetRef, makeImageElement, makeVideoElement, withElementAdded } from '../runtime/assetIngest';
 
 interface Props {
@@ -156,7 +155,6 @@ export function InteractiveNodeCard({ node, height, selected, presenting }: Prop
                 docId={docId}
                 initialMode={open.mode}
                 onClose={close}
-                onExtend={() => { close(); void extendInteractiveActivity(doc?.title ?? '인터랙티브 놀이', node.id); }}
                 onExit={() => { close(); setGalleryOpen(true); }}
                 onHome={() => { close(); setGalleryOpen(true); }}
               />
