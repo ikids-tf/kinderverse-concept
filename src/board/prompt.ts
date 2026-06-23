@@ -4,7 +4,7 @@ import { composeInteractiveNode } from '@/features/interactive-viewer/authoring/
 import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
 import { resolveIntent } from '@/features/interactive-viewer/resolver/resolveIntent';
 import { assembleAndPlace } from '@/features/interactive-viewer/resolver/place';
-import { recommendFromLibrary } from '@/features/interactive-viewer/store/library';
+import { recommendFromLibrary, saveToLibrary } from '@/features/interactive-viewer/store/library';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
@@ -88,6 +88,11 @@ async function createInteractiveGame(text: string): Promise<void> {
     }
     if (!r) r = await composeInteractiveNode(docId, text, onBusy);
     showToast(r.message, r.ok ? 'success' : 'error');
+    // 생성 성공 → 갤러리/인터랙티브 홈에 자동 리스트(라이브러리 등록).
+    if (r.ok) {
+      const doc = useInteractiveStore.getState().peek(docId);
+      if (doc && doc.elements.length > 0) saveToLibrary(doc);
+    }
   } finally {
     board.endGen();
   }

@@ -13,6 +13,7 @@ import { useInteractiveStore } from '../store/interactiveStore';
 import { composeInteractiveNode, editInteractiveNode } from './composeNode';
 import { resolveIntent } from '../resolver/resolveIntent';
 import { assembleAndPlace } from '../resolver/place';
+import { saveToLibrary } from '../store/library';
 
 export interface ApplyResult {
   ok: boolean;
@@ -38,14 +39,20 @@ export async function applyInteractivePrompt(
 
   // 새 컨셉 생성 — 먼저 Resolver(결정론 레시피)로 즉시·안정 합성을 시도하고,
   // 레시피 없는 의도(롱테일)거나 조립 실패면 기존 composeInteractiveNode(전체 LLM)로 폴백.
+  // 생성 성공 → 갤러리/인터랙티브 홈에 자동 리스트(라이브러리 등록).
+  const autosave = () => {
+    const d = store.peek(docId);
+    if (d && d.elements.length > 0) saveToLibrary(d);
+  };
   if (empty && createIntent) {
     const intent = await resolveIntent(prompt, onBusy);
     if (intent) {
       const placed = await assembleAndPlace(docId, intent.mechanism, intent.input, onBusy);
-      if (placed.ok) return { ok: true, addedIds: [], message: placed.message };
+      if (placed.ok) { autosave(); return { ok: true, addedIds: [], message: placed.message }; }
       // 레시피 조립 실패 → 폴백.
     }
     const c = await composeInteractiveNode(docId, prompt, onBusy);
+    if (c.ok) autosave();
     return { ok: c.ok, addedIds: [], message: c.message };
   }
 

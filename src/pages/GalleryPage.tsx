@@ -4,12 +4,16 @@ import { PageHero } from '@/components/PageHero';
 import {
   NotebookPen, Palette, Shapes, BookOpen, Image as ImageIcon, Tag, Sparkles,
   Cake, FileStack, FileText, Search, LayoutGrid, List, Maximize2, Wand2,
-  Share2, Bookmark, Download, X, Check, Video, Play, Link as LinkIcon, Heart, type LucideIcon,
+  Share2, Bookmark, Download, X, Check, Video, Play, Link as LinkIcon, Heart, Gamepad2, type LucideIcon,
 } from 'lucide-react';
 import { listAssets, type ImageAsset } from '@/board/assets';
 import { listWebLinks, type WebLink } from '@/board/webLinks';
 import { getVideoAsset } from '@/board/videoAssets';
 import { getThumb } from '@/board/thumbs';
+import { listLibrary, type SavedGame } from '@/features/interactive-viewer/store/library';
+import { loadInteractiveNode } from '@/features/interactive-viewer/store/interactiveStore';
+import { InteractiveOverlay } from '@/features/interactive-viewer/authoring/InteractiveOverlay';
+import { ZoomOverlay } from '@/components/board/ZoomOverlay';
 
 /* 좋아요 — 로컬 영속(백엔드 없이 새로고침해도 유지). id별 on/off. */
 const LIKES_KEY = 'kv:gallery:likes:v1';
@@ -139,6 +143,8 @@ type GalleryItem = {
   assetKind?: 'image' | 'video' | 'web';
   href?: string;
   videoAssetId?: string;
+  /** 인터랙티브 게임 — 설정되면 카드 클릭 시 플레이 오버레이를 연다(뷰어 모달 대신). */
+  gameDocId?: string;
 };
 
 const GALLERY_ITEMS: GalleryItem[] = [
@@ -166,7 +172,27 @@ const GALLERY_ITEMS: GalleryItem[] = [
   { id: 'g22', t: '현장학습 동의서', cat: '템플릿', sub: '안내·회신', icon: FileText, ratio: '3 / 4' },
 ];
 
-const GALLERY_CATS = ['전체', '도안', '동영상', '웹링크', '활동지', '스토리북', '포스터', '명찰', '환경꾸미기', '놀이기록', '템플릿'];
+const GALLERY_CATS = ['전체', '게임', '도안', '동영상', '웹링크', '활동지', '스토리북', '포스터', '명찰', '환경꾸미기', '놀이기록', '템플릿'];
+
+/** 저장된 인터랙티브 게임 → 갤러리 아이템. 썸네일은 장면 배경(있으면), 없으면 게임 아이콘 카드.
+    클릭 시 gameDocId 로 플레이 오버레이를 연다(생성 게임이 '계속 리스트'된다). */
+function buildGameItems(games: SavedGame[]): GalleryItem[] {
+  return games.map((g) => {
+    const doc = loadInteractiveNode(g.docId);
+    const bg = doc?.canvas.background;
+    const thumb = bg && typeof bg === 'object' ? bg.src : undefined;
+    return {
+      id: `game-${g.docId}`,
+      t: g.title || '인터랙티브 게임',
+      cat: '게임',
+      sub: '인터랙티브 게임',
+      icon: Gamepad2,
+      ratio: '16 / 10',
+      ...(thumb ? { thumb, assetKind: 'image' as const } : {}),
+      gameDocId: g.docId,
+    };
+  });
+}
 
 /** 웹 링크의 파비콘 URL(대표 이미지가 없을 때 폴백). */
 function faviconOf(href?: string): string {
@@ -541,6 +567,8 @@ export function GalleryPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [ai, setAi] = useState<{ label: string; ids: string[] } | null>(null);
   const [dynItems, setDynItems] = useState<GalleryItem[]>([]);
+  const [gameItems, setGameItems] = useState<GalleryItem[]>([]);
+  const [playDocId, setPlayDocId] = useState<string | null>(null);
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2200); return () => clearTimeout(t); }, [toast]);
 
@@ -556,6 +584,18 @@ export function GalleryPage() {
     return () => { alive = false; };
   }, []);
 
+  // 인터랙티브 게임 자동 로드(생성 게임이 계속 리스트). 방문 시 + 게임 저장 이벤트에 갱신.
+  useEffect(() => {
+    const refresh = () => setGameItems(buildGameItems(listLibrary()));
+    refresh();
+    window.addEventListener('kv:game-saved', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener('kv:game-saved', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
+
   // prompt bar drives the gallery: a prompt → gather matching resources into an "AI" filter
   useEffect(() => {
     const h = (e: Event) => {
@@ -566,8 +606,11 @@ export function GalleryPage() {
     return () => window.removeEventListener('kv:prompt', h);
   }, []);
 
-  // 실제 보관함 자산을 앞에, mock 데모 자료를 뒤에 둔다.
-  const allItems = useMemo(() => [...dynItems, ...GALLERY_ITEMS], [dynItems]);
+  // 게임 → 실제 보관함 자산 → mock 데모 자료 순.
+  const allItems = useMemo(() => [...gameItems, ...dynItems, ...GALLERY_ITEMS], [gameItems, dynItems]);
+
+  // 카드 클릭 — 게임이면 플레이 오버레이, 그 외엔 자료 뷰어.
+  const openItem = (it: GalleryItem) => { if (it.gameDocId) setPlayDocId(it.gameDocId); else setSel(it); };
 
   const exitAi = () => setAi(null);
   const items = ai
@@ -623,15 +666,29 @@ export function GalleryPage() {
         {items.length === 0 ? (
           <div style={{ textAlign: 'center', color: C.muted, marginTop: 80, fontSize: 14 }}>{ai ? `‘${ai.label}’에 어울리는 자료를 찾지 못했어요.` : `‘${q || cat}’에 해당하는 자료가 없어요.`}</div>
         ) : view === 'grid' ? (
-          <MasonryGrid items={items} onOpen={(it) => setSel(it)} />
+          <MasonryGrid items={items} onOpen={openItem} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 880, margin: '0 auto' }}>
-            {items.map((it) => <GalleryRow key={it.id} it={it} onOpen={() => setSel(it)} />)}
+            {items.map((it) => <GalleryRow key={it.id} it={it} onOpen={() => openItem(it)} />)}
           </div>
         )}
       </div>
 
       {sel && <GalleryViewer item={sel} onClose={() => setSel(null)} onAction={(m) => setToast(m)} />}
+      {/* 게임 카드 클릭 → 플레이 오버레이(인터랙티브 홈과 동일 경로). */}
+      {playDocId && (
+        <ZoomOverlay origin={null} onClose={() => setPlayDocId(null)} zIndex={150} backdropClassName="">
+          {(close) => (
+            <InteractiveOverlay
+              docId={playDocId}
+              initialMode="play"
+              onClose={close}
+              onExit={() => setPlayDocId(null)}
+              onHome={() => setPlayDocId(null)}
+            />
+          )}
+        </ZoomOverlay>
+      )}
       {toast && createPortal(
         <div style={{ position: 'fixed', bottom: 26, left: '50%', transform: 'translateX(-50%)', zIndex: 90, background: C.ink, color: '#fff', padding: '11px 18px', borderRadius: 999, fontSize: 13.5, fontWeight: 600, boxShadow: C.shadow2, display: 'flex', alignItems: 'center', gap: 8 }}><Check size={15} color={C.coral} /> {toast}</div>,
         document.body,

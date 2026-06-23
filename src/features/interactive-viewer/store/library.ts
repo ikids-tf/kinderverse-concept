@@ -51,6 +51,8 @@ export function saveToLibrary(doc: InteractiveNode): SavedGame {
   const rest = readLib().filter((s) => s.docId !== doc.id);
   const entry: SavedGame = { docId: doc.id, title: doc.title || '인터랙티브', savedAt: Date.now() };
   writeLib([entry, ...rest]);
+  // 갤러리 '게임' 탭이 즉시 갱신되도록 알림.
+  try { window.dispatchEvent(new CustomEvent('kv:game-saved')); } catch { /* no-op */ }
   return entry;
 }
 

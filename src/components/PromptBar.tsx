@@ -8,7 +8,7 @@ import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import type { ImageAsset } from '@/board/assets';
 import type { WebLink } from '@/board/webLinks';
 import { FavoriteCardRail } from './FavoriteCardRail';
-import { GameSuggestStrip } from './board/GameSuggestStrip';
+import { gameSuggestions, hasGameKeyword, type GameSuggestion } from '@/features/interactive-viewer/resolver/gameSuggest';
 
 /* Board engine modules (prompt/workflow/assets) are heavy and only needed on My
    Board, so they're loaded on demand (keeps them out of the initial bundle). */
@@ -305,16 +305,28 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     [],
   );
-  const libHasContent = assetSugs.length > 0 || webSugs.length > 0;
-  const libCount = Math.max(assetSugs.length, webSugs.length);
-  // 보이는 박스 수와 각 박스의 '아래(프롬프트바)부터' 순번 — 렌더 순서는 이미지(위)→웹(아래).
-  const libBoxCount = (assetSugs.length > 0 ? 1 : 0) + (webSugs.length > 0 ? 1 : 0);
-  const assetBoxOrder = libBoxCount - 1; // 이미지 박스는 가장 위
-  const webBoxOrder = libBoxCount - 1 - (assetSugs.length > 0 ? 1 : 0); // 웹 박스는 아래(있으면 0)
+  // 게임 추천 — 입력에 게임 키워드가 있으면 테마×메커니즘 추천 카드(보관함 박스와 동일 스타일).
+  const gameSugs = useMemo<GameSuggestion[]>(
+    () => (location.pathname.startsWith('/board') && !inodeFs && hasGameKeyword(draft) ? gameSuggestions(draft) : []),
+    [draft, location.pathname, inodeFs],
+  );
+  const libHasContent = assetSugs.length > 0 || webSugs.length > 0 || gameSugs.length > 0;
+  const libCount = Math.max(assetSugs.length, webSugs.length, gameSugs.length);
+  // 보이는 박스 수와 각 박스의 '아래(프롬프트바)부터' 순번 — 렌더 순서는 게임(위)→이미지→웹(아래).
+  const libBoxCount = (gameSugs.length > 0 ? 1 : 0) + (assetSugs.length > 0 ? 1 : 0) + (webSugs.length > 0 ? 1 : 0);
+  const gameBoxOrder = libBoxCount - 1; // 게임 박스는 가장 위
+  const assetBoxOrder = libBoxCount - 1 - (gameSugs.length > 0 ? 1 : 0);
+  const webBoxOrder = libBoxCount - 1 - (gameSugs.length > 0 ? 1 : 0) - (assetSugs.length > 0 ? 1 : 0);
   const [libDismissed, setLibDismissed] = useState(false);
   const [libRender, setLibRender] = useState(false);
   const [libShown, setLibShown] = useState(false);
   const libActive = libHasContent && !collapsed && !favRender && !libDismissed;
+  // 게임 추천 카드 클릭 → Resolver 즉시 합성(새 게임 노드). 입력 비우고 스트립 닫음.
+  const pickGame = (s: GameSuggestion) => {
+    setDraft('');
+    setLibDismissed(true);
+    void import('@/board/prompt').then((m) => m.startInteractiveGame(s.prompt));
+  };
   // 키워드가 바뀌면 '닫음' 해제 — 다시 입력하면 열린다.
   useEffect(() => { setLibDismissed(false); }, [draft]);
   useEffect(() => {
@@ -665,6 +677,38 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                 )}
               </div>
             )}
+            {/* 게임 추천 — 키워드 매칭 시 테마×메커니즘 카드(가로 줄바꿈+스크롤). 클릭 → 즉시 합성. */}
+            {gameSugs.length > 0 && (
+              <div className="relative w-max" style={{ maxWidth: `calc(100vw - ${(leftInset || 64) + 48}px)` }}>
+                <div
+                  className="absolute inset-0 rounded-lg border border-border bg-surface/95 shadow-lg backdrop-blur"
+                  style={libBoxStyle(gameSugs.length, libShown, prefersReduced, gameBoxOrder, libBoxCount)}
+                />
+                <div className="relative p-t2">
+                  <span
+                    className="mb-t1 flex items-center gap-t1 px-1 text-overline text-fg-2"
+                    style={libBoxStyle(gameSugs.length, libShown, prefersReduced, gameBoxOrder, libBoxCount)}
+                  >
+                    <Icon name="sparkle" size={12} className="text-accent" /> 게임
+                  </span>
+                  <div className="flex flex-wrap items-start gap-t2 overflow-y-auto" style={{ maxHeight: 140 }}>
+                    {gameSugs.map((s, i) => (
+                      <div key={s.key} className="shrink-0" style={libItemStyle(i, gameSugs.length, libShown, prefersReduced, gameBoxOrder, libBoxCount)}>
+                        <button
+                          type="button"
+                          title={`'${s.label}' 게임 바로 만들기`}
+                          onClick={() => pickGame(s)}
+                          className="flex items-center gap-t1 rounded-pill border border-border bg-surface px-t3 py-t1 text-xs font-semibold text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+                        >
+                          <span aria-hidden className="text-sm leading-none">{s.emoji}</span>
+                          <span className="whitespace-nowrap">{s.label}</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             {/* 보관함 이미지 — w-max로 콘텐츠 핏(가운데 정렬), 넘치면 max-width에서 줄바꿈.
                 배경(테두리·그림자)은 별 레이어라 아이템이 다 나온 뒤 페이드인한다. */}
             {assetSugs.length > 0 && (
@@ -783,18 +827,6 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
             )}
           </div>
         )}
-
-        {/* 게임 추천 스트립 — 보드에서 입력이 비고 유휴일 때 '이런 놀이 어때요?' 카드를 띄운다.
-            클릭하면 Resolver가 즉시 합성. 입력/다른 스트립/생성 중에는 숨긴다. */}
-        {location.pathname.startsWith('/board') &&
-          !inodeFs &&
-          !hasText &&
-          !collapsed &&
-          !favRender &&
-          !libRender &&
-          !videoCompose &&
-          !statusInline &&
-          attachments.length === 0 && <GameSuggestStrip />}
 
         {/* 분리된 진행 스트립 — 입력창을 클릭해 되찾으면 스트리밍이 바 '바로 위'에서
             계속된다. 입력창은 플레이스홀더로 복귀, 제출하면 생성이 병렬로 추가. */}
