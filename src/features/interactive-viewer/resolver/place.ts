@@ -44,12 +44,14 @@ async function fillSwapImages(raw: { behaviors?: Array<Record<string, unknown>> 
   const behs = Array.isArray(raw.behaviors) ? raw.behaviors : [];
   const targets = behs.filter((b) => {
     const to = b.action === 'swap' ? (b.params as { to?: { src?: unknown } } | undefined)?.to : undefined;
-    return typeof to?.src === 'string' && to.src.startsWith('gen:');
+    return typeof to?.src === 'string' && (to.src.startsWith('gen:') || to.src.startsWith('genf:'));
   });
   await Promise.all(
     targets.map(async (b) => {
       const to = (b.params as { to: { src: string } }).to;
-      const ref = await generateCutoutAsset(to.src.slice(4).trim());
+      const front = to.src.startsWith('genf:'); // 정면 캐릭터(옷입히기 착장) → CHARACTER_FRONT_STYLE
+      const label = to.src.slice(front ? 5 : 4).trim();
+      const ref = await generateCutoutAsset(label, true, front);
       (b.params as { to: unknown }).to = ref;
     }),
   );

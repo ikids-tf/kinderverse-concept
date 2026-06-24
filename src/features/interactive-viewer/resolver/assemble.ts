@@ -52,6 +52,19 @@ export function imageEl(id: string, label: string, t: Partial<Transform> = {}): 
   };
 }
 
+/** 정면 캐릭터 이미지 요소 — `genf:라벨` 로 두면 fillTokenImages 가 CHARACTER_FRONT_STYLE
+    (정면·얼굴 또렷·옷 착장)로 채운다. 옷입히기처럼 아이가 정면을 보고 얼굴이 보여야 하는 게임용. */
+export function frontImageEl(id: string, label: string, t: Partial<Transform> = {}): ElementNode {
+  return {
+    id,
+    kind: 'image',
+    src: { id: `a_${id}`, src: `genf:${label}`, assetKind: 'generated' },
+    origin: 'upload',
+    assetKind: 'generated',
+    transform: tf({ w: 300, h: 390, ...t }),
+  };
+}
+
 /** 단색 도형(분류 통·빈칸 판 등). src 없음. */
 export function shapeEl(id: string, t: Partial<Transform> = {}): ElementNode {
   return {

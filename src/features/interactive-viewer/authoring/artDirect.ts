@@ -17,6 +17,7 @@ import { removeBackground, cleanupBackground, warmupBackgroundRemoval } from '@/
 import type { AssetRef } from '../schema/interactiveNode';
 
 const GEN_PREFIX = 'gen:';
+const GENF_PREFIX = 'genf:'; // 정면 캐릭터(얼굴 보이게) — dress-up 등. CHARACTER_FRONT_STYLE 사용.
 export const MAX_IMAGES = 12; // 한 게임당 '서로 다른' 토큰 그림 상한(비용/지연 가드 — 같은 라벨은 1장 공유)
 
 /** ★ 누끼(배경제거) 최적화 클로즈 — 온디바이스 RMBG가 '주 피사체만' 깔끔히 따도록 생성
@@ -52,6 +53,13 @@ const FRONT_TOKEN_STYLE =
   '대상 하나만, 정면(카메라·아이를 바라보는) 귀엽고 또렷한 자세로 좌우 균형 있게, 머리부터 발끝까지 전신이 잘리지 않고 프레임 안에 여유 있게(사방 여백), 화면 가운데, 다른 사물 없음, ' +
   '아이들이 보는 콘텐츠라 늘 밝고 화사하고 예쁘게(어둡거나 칙칙·음침·무서운 느낌 절대 금지), 3D 픽사풍 귀여운 렌더, 밝고 화사한 파스텔 색, 부드럽고 둥근 형태, ' +
   '사물·동물은 의인화하지 말 것(사람 얼굴·표정·옷·직립 보행 금지), 실제 모습 그대로 정확하게, 또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화, ' + CUTOUT_CLAUSE;
+/** 정면 캐릭터(옷입히기 등) — 아이가 정면을 바라보고, 얼굴이 또렷이 보이며, 요청한 옷차림을 정확히 입은 전신.
+    (인물이므로 의인화 금지 같은 사물용 제약은 빼고, '옷 입은 사람'을 자연스럽게 그린다.) */
+const CHARACTER_FRONT_STYLE =
+  '요청한 인물 한 명만 — 카메라(아이)를 똑바로 바라보는 완전한 정면 자세로 좌우 균형 있게, 머리부터 발끝까지 전신이 잘리지 않고 프레임 안에 여유 있게(사방 여백), 화면 가운데, 다른 사물·배경 없음, ' +
+  '★얼굴(두 눈·코·입)이 또렷하고 환하게 보이게 한다 — 모자·후드·목도리·마스크 등이 얼굴(특히 눈)을 가리지 않도록 얼굴을 비워 두고, 정면을 향한 밝고 자연스러운 표정, ' +
+  '요청한 옷차림·소품을 몸에 정확히 입은(착용한) 모습으로(공중에 뜬 옷이 아니라 실제로 입은), ' +
+  '아이들이 보는 콘텐츠라 늘 밝고 화사하고 예쁘게(어둡거나 무섭지 않게), 3D 픽사풍 귀여운 렌더, 밝고 화사한 파스텔 색, 부드럽고 둥근 형태, 또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화, ' + CUTOUT_CLAUSE;
 /** 장면 배경 — 풀블리드 3D 픽사풍, 풍부한 디테일·빛·깊이로 '아름답게'(아이 대면=밝고 예쁘게).
     그 위에 놓일 토큰(아이템)과 같은 화풍으로 어우러지되, 가운데 놀이 영역은 차분히 비워 가독 보호. 누끼 안 함. */
 const SCENE_STYLE =
@@ -204,19 +212,23 @@ export async function generateActorPoses(label: string, doCutout: boolean): Prom
   }
 }
 
-/** 요소의 src에서 "gen:라벨"을 뽑는다(문자열 또는 {src} 객체 모두 허용). 없으면 null. */
-function genLabelOf(el: RawEl): string | null {
+/** 요소 src 문자열(문자열 또는 {src} 객체) — 없으면 null. */
+function rawSrc(el: RawEl): string | null {
   const s = el.src;
-  if (typeof s === 'string' && s.startsWith(GEN_PREFIX)) return s.slice(GEN_PREFIX.length).trim();
-  if (
-    s &&
-    typeof s === 'object' &&
-    typeof (s as { src?: unknown }).src === 'string' &&
-    (s as { src: string }).src.startsWith(GEN_PREFIX)
-  ) {
-    return (s as { src: string }).src.slice(GEN_PREFIX.length).trim();
-  }
+  if (typeof s === 'string') return s;
+  if (s && typeof s === 'object' && typeof (s as { src?: unknown }).src === 'string') return (s as { src: string }).src;
   return null;
+}
+/** "gen:라벨" 또는 "genf:라벨"(정면)에서 라벨을 뽑는다. 없으면 null. */
+function genLabelOf(el: RawEl): string | null {
+  const raw = rawSrc(el);
+  if (raw?.startsWith(GENF_PREFIX)) return raw.slice(GENF_PREFIX.length).trim();
+  if (raw?.startsWith(GEN_PREFIX)) return raw.slice(GEN_PREFIX.length).trim();
+  return null;
+}
+/** genf:(정면 캐릭터·얼굴 보이게) 토큰인가. */
+function isFrontEl(el: RawEl): boolean {
+  return !!rawSrc(el)?.startsWith(GENF_PREFIX);
 }
 
 /** data URI(또는 null)를 요소에 적용 — 누끼 후 AssetRef. 생성 실패 시 부드러운 플레이스홀더 그림. */
@@ -249,8 +261,8 @@ export async function fillTokenImages(
 ): Promise<void> {
   const doCut = opts.cutout ?? true;
   const els = Array.isArray(raw.elements) ? raw.elements : [];
-  // gen: 이미지 대상 수집(라벨 없는 이미지는 도형 폴백).
-  type Target = { el: RawEl; label: string; elId: string };
+  // gen:/genf: 이미지 대상 수집(라벨 없는 이미지는 도형 폴백). front=정면 캐릭터(genf).
+  type Target = { el: RawEl; label: string; front: boolean; elId: string };
   const all: Target[] = [];
   for (const el of els) {
     if (el.kind !== 'image') continue;
@@ -259,7 +271,7 @@ export async function fillTokenImages(
       if (!el.src) { el.kind = 'shape'; delete el.src; } // 그림 지정 없음 → 도형(빈 이미지 방지)
       continue;
     }
-    all.push({ el, label, elId: String((el as { id?: unknown }).id ?? '') });
+    all.push({ el, label, front: isFrontEl(el), elId: String((el as { id?: unknown }).id ?? '') });
   }
   if (!all.length) return;
 
@@ -270,9 +282,10 @@ export async function fillTokenImages(
   const normals = all.filter((t) => !opts.frontIds?.has(t.elId));
   const byLabel = new Map<string, Target[]>();
   for (const t of normals) {
-    const g = byLabel.get(t.label);
+    const key = `${t.front ? 'f:' : ''}${t.label}`; // 정면/일반은 스타일이 달라 분리(같은 라벨이라도)
+    const g = byLabel.get(key);
     if (g) g.push(t);
-    else byLabel.set(t.label, [t]);
+    else byLabel.set(key, [t]);
   }
 
   // 생성 단위(액터 + distinct 라벨)에 상한 적용 — 초과분은 도형 폴백.
@@ -321,8 +334,9 @@ export async function fillTokenImages(
   });
 
   // 일반 토큰 — distinct 라벨당 1회 생성·누끼 → 같은 라벨 요소 전부에 공유 적용.
-  const labelJobs = keptLabels.map(([label, group]) => async () => {
-    const style = isNumberedLabel(label) ? NUMBER_TOKEN_STYLE : TOKEN_STYLE;
+  const labelJobs = keptLabels.map(([, group]) => async () => {
+    const label = group[0].label; // (키엔 front 프리픽스가 붙어 있어 깨끗한 라벨은 group에서)
+    const style = group[0].front ? CHARACTER_FRONT_STYLE : isNumberedLabel(label) ? NUMBER_TOKEN_STYLE : TOKEN_STYLE;
     const img = await genImage(label, style);
     const cut = img ? (doCut ? await cutout(img) : img) : null;
     for (const t of group) await assignImage(t.el, cut, false); // 이미 누끼 처리됨(중복 누끼 방지)
@@ -339,9 +353,10 @@ export async function fillTokenImages(
  * 'gen:라벨' 이미지를 채울 때 쓴다(fillTokenImages 는 elements 만 훑으므로 그 사각지대 보강).
  * 실패해도 부드러운 플레이스홀더 ref 를 돌려 '깨진 gen: 문자열'이 렌더되지 않게 한다.
  */
-export async function generateCutoutAsset(label: string, doCutout = true): Promise<AssetRef> {
+export async function generateCutoutAsset(label: string, doCutout = true, front = false): Promise<AssetRef> {
   if (doCutout) warmupBackgroundRemoval();
-  const img = await genImage(label, isNumberedLabel(label) ? NUMBER_TOKEN_STYLE : TOKEN_STYLE);
+  const style = front ? CHARACTER_FRONT_STYLE : isNumberedLabel(label) ? NUMBER_TOKEN_STYLE : TOKEN_STYLE;
+  const img = await genImage(label, style);
   const uri = img ? (doCutout ? await cutout(img) : img) : PLACEHOLDER;
   try {
     const ref = await urlToAssetRef(uri, 'generated');

@@ -47,6 +47,12 @@ function detectWeather(p: string): '눈' | '비' | '미세먼지' {
   if (/비\s*오|비가|장마|우산|빗물|비\s*내리|소나기/.test(p)) return '비';
   return '눈';
 }
+/** 성별 추출 — 캐릭터(맨몸·착장)를 일관되게 그리려고 라벨에 박는다(따로 생성 시 성별이 달라지는 문제 방지).
+    미지정이면 '남자'(기본). 여자아이는 "여자아이 …"로 요청. */
+function detectGender(p: string): '남자아이' | '여자아이' {
+  if (/여자|여아|소녀|딸|공주|걸\b/.test(p)) return '여자아이';
+  return '남자아이';
+}
 
 /** dress-up 교사 활동 카드(결정론 — 날씨별). 에이전트를 건너뛰는 dress-up 경로에서 saveGameCard 로 동반 저장. */
 export function dressUpTeacherCard(prompt: string): TeacherCard {
@@ -121,8 +127,9 @@ export async function fillSlots(
     // ── 날씨 옷입히기(결정론 — 날씨 테이블) ──
     case 'dress-up': {
       const d = WEATHER[detectWeather(prompt)];
+      // 성별을 캐릭터 라벨로 박아 맨몸·착장이 같은 성별로 일관되게 나오게(미지정=남자아이).
       // 실내/실외 배경은 dress-up 전용 필드로 직접 지정(withScene 폴백 안 씀).
-      return { title: d.title, actorLabel: d.actor, items: d.items.map((x) => ({ ...x })), sceneDesc: d.indoor, sceneOutDesc: d.outdoor };
+      return { title: d.title, actorLabel: detectGender(prompt), items: d.items.map((x) => ({ ...x })), sceneDesc: d.indoor, sceneOutDesc: d.outdoor };
     }
     // ── 의미 필요 → narrow LLM(캐시) ──
     default:
