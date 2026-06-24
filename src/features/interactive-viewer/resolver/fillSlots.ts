@@ -127,9 +127,17 @@ export async function fillSlots(
     // ── 날씨 옷입히기(결정론 — 날씨 테이블) ──
     case 'dress-up': {
       const d = WEATHER[detectWeather(prompt)];
-      // 성별을 캐릭터 라벨로 박아 맨몸·착장이 같은 성별로 일관되게 나오게(미지정=남자아이).
+      const gender = detectGender(prompt); // '남자아이' | '여자아이'
+      const gShort = gender === '여자아이' ? '여아' : '남아';
+      // 캐릭터 성별을 라벨에 박아 맨몸·착장 일관 + 옷 라벨에도 성별을 박아 캐릭터와 매칭(예: 남아 수영복=수영팬츠).
       // 실내/실외 배경은 dress-up 전용 필드로 직접 지정(withScene 폴백 안 씀).
-      return { title: d.title, actorLabel: detectGender(prompt), items: d.items.map((x) => ({ ...x })), sceneDesc: d.indoor, sceneOutDesc: d.outdoor };
+      return {
+        title: d.title,
+        actorLabel: gender,
+        items: d.items.map((x) => ({ ...x, label: `${gShort} ${x.label}` })),
+        sceneDesc: d.indoor,
+        sceneOutDesc: d.outdoor,
+      };
     }
     // ── 의미 필요 → narrow LLM(캐시) ──
     default:
