@@ -28,6 +28,7 @@ import { extendActivityInNode } from './extendLane';
 import { resolverExtend } from '../resolver/extend';
 import { getGameCard } from '../store/gameCards';
 import { TeacherCardPanel } from './TeacherCardPanel';
+import { AppearanceStrip, type Appearance } from './AppearanceStrip';
 import type { TeacherCard } from '../resolver/designAgent';
 import {
   fileToAssetRef,
@@ -78,6 +79,19 @@ function cloneOf(el: ElementNode): ElementNode {
   return { ...el, id: newId('el'), transform: { ...el.transform, x: el.transform.x + 24, y: el.transform.y + 24 } };
 }
 
+/** 요소의 '여러 모습' — 기본 src + 그 요소를 대상으로 하는 swap 동작들의 to.src. 편집 스트립용. */
+function appearancesOf(doc: InteractiveNode, elId: string): Appearance[] {
+  const baseSrc = doc.elements.find((e) => e.id === elId)?.src?.src;
+  if (!baseSrc) return [];
+  const out: Appearance[] = [{ key: 'base', src: baseSrc, behId: null }];
+  for (const b of doc.behaviors) {
+    if (b.action === 'swap' && b.target === elId && typeof b.params?.to?.src === 'string') {
+      out.push({ key: b.id, src: b.params.to.src, behId: b.id });
+    }
+  }
+  return out;
+}
+
 export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExit, onHome }: Props) {
   const doc = useInteractiveStore((s) => s.docs[docId]);
   const ensure = useInteractiveStore((s) => s.ensure);
@@ -100,7 +114,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
   const [cardOpen, setCardOpen] = useState(false);
   const [card, setCard] = useState<TeacherCard | null>(null);
   // 이미지 요소 편집/풀스크린 모달(마이보드 카드와 동일 컴포넌트 재사용).
-  const [editImg, setEditImg] = useState<{ elId: string; src: string; caption: string; origin: OriginRect | null } | null>(null);
+  const [editImg, setEditImg] = useState<{ elId: string; behId?: string | null; src: string; caption: string; origin: OriginRect | null } | null>(null);
   const [fsImg, setFsImg] = useState<{ src: string; caption: string; origin: OriginRect | null } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -479,6 +493,19 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
         e.id === elId && e.src ? { ...e, src: { ...e.src, id: newId('asset'), src: url } } : e,
       ),
     }));
+  // swap(교체) 동작의 'to'(바뀐 모습) 이미지 교체 — 다중 모습 편집(AppearanceStrip)에서 되돌려 쓴다.
+  const setSwapToSrc = (behId: string, url: string) =>
+    mutate(docId, (d) => ({
+      ...d,
+      behaviors: d.behaviors.map((b) =>
+        b.id === behId && b.action === 'swap'
+          ? { ...b, params: { ...b.params, to: { ...b.params.to, id: newId('asset'), src: url } } }
+          : b,
+      ),
+    }));
+  // 다중 모습 스트립에서 한 모습을 골라 편집 — 그 모습의 src로 이미지 편집 모달을 연다(되돌릴 대상 behId 보존).
+  const pickAppearance = (a: Appearance) =>
+    setEditImg({ elId: selectedElIds[0], behId: a.behId, src: a.src, caption: '캐릭터 모습', origin: null });
   // 떼어내 다른 요소로 옮기기 — 자기연결이면 무시, 이미 같은 쌍이 있으면 이 연결은 제거(중복 방지).
   const relinkConnection = (id: string, from: string, to: string) =>
     mutate(docId, (d) => {
@@ -825,6 +852,12 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
       {/* 교사용 활동 안내 드로어 — 게임 디자인 에이전트가 만든 카드(있을 때만). 재생·편집 양쪽. */}
       {card && cardOpen && <TeacherCardPanel card={card} onClose={() => setCardOpen(false)} />}
 
+      {/* 캐릭터 다중 모습 편집 스트립 — 편집모드 + 단일선택 + 여러 모습(swap)을 가진 요소일 때. */}
+      {mode === 'edit' && selectedElIds.length === 1 && (() => {
+        const apps = appearancesOf(doc, selectedElIds[0]);
+        return apps.length > 1 ? <AppearanceStrip appearances={apps} onPick={pickAppearance} onClose={() => setSelectedElIds([])} /> : null;
+      })()}
+
       {/* 이미지 편집 모달 — 마이보드와 동일 컴포넌트. target.onApply로 요소 src 교체.
           🔴 z-200 래퍼로 감싸 ZoomOverlay(z-130) 위에 띄운다(안 그러면 오버레이 뒤로 가려 안 보인다). */}
       {editImg &&
@@ -835,7 +868,7 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
                 src: editImg.src,
                 caption: editImg.caption,
                 allowExtract: false,
-                onApply: (url) => setElementSrc(editImg.elId, url),
+                onApply: (url) => (editImg.behId ? setSwapToSrc(editImg.behId, url) : setElementSrc(editImg.elId, url)),
               }}
               origin={editImg.origin}
               onClose={() => setEditImg(null)}
