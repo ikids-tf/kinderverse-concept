@@ -15,14 +15,6 @@ type Content = Omit<RecipeInput, 'docId'>;
 
 const SEMANTIC = new Set<MechanismId>(['sort-to-bin', 'slot-fill', 'pair-match', 'branch-choose', 'combine']);
 
-/** 꾸미기 — 주제(예: 토끼)의 '여러 모습' 템플릿. 각 슬롯이 두 모습을 번갈아(탭) 보인다. */
-const DECOR_VARIANTS: Array<[string, string]> = [
-  ['빨간 모자 쓴', '파란 모자 쓴'],
-  ['활짝 웃는', '윙크하는'],
-  ['꽃을 든', '풍선을 든'],
-  ['분홍색', '노란색'],
-];
-
 /** vocab에서 중복 없이 n개(모자라면 순환). */
 function pickDistinct(pack: ThemePack, n: number): string[] {
   return pack.vocabulary.length >= n ? pack.vocabulary.slice(0, n) : pickVocab(pack, n);
@@ -52,10 +44,23 @@ export async function fillSlots(
     case 'path-trace':
       return withScene({ title, actorLabel: noun !== '사물' ? noun : '토끼', goalLabel: '집', items: Array.from({ length: 3 }, () => ({ label: '징검돌' })) });
     case 'free-create': {
-      // 주제(토끼 등)를 여러 모습으로 — 각 슬롯이 같은 주제의 두 모습을 번갈아 보인다(탭).
+      // 레이어드 꾸미기 — 주인공(noun)을 고정하고 범용 부위(모자·목도리)에서 골라 입힌다.
       const subject = noun !== '사물' ? noun : '친구';
-      const pairs = DECOR_VARIANTS.map(([a, b]) => ({ left: `${a} ${subject}`, right: `${b} ${subject}` }));
-      return withScene({ title, pairs });
+      return withScene({
+        title,
+        actorLabel: subject,
+        bins: [
+          { key: 'hat', label: '모자' },
+          { key: 'scarf', label: '목도리' },
+        ],
+        items: [
+          { label: '빨간 모자', binKey: 'hat' },
+          { label: '파란 모자', binKey: 'hat' },
+          { label: '노란 모자', binKey: 'hat' },
+          { label: '분홍 목도리', binKey: 'scarf' },
+          { label: '초록 목도리', binKey: 'scarf' },
+        ],
+      });
     }
     // ── 의미 필요 → narrow LLM(캐시) ──
     default:

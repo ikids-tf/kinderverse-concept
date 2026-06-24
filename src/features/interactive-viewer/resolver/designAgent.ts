@@ -77,7 +77,7 @@ const MECH_SPEC = `[고를 수 있는 놀이 방식 — 정확히 하나만 mech
 - combine        : A+B를 합쳐 C 만들기(색 섞기·자연 변화·요리). content.items=[{label:A},{label:B}], content.goalLabel=결과 C.
 - sort-to-bin    : 끌어서 정답 통에 분류. content.bins=[{key,label}](2~3통), content.items=[{label,binKey}](각 통에 고르게).
 - slot-fill      : 끌어서 빈칸 채우기(분류와 같은 형식). content.bins, content.items[binKey].
-- free-create    : 탭하면 모습이 바뀌는 꾸미기(승패 없는 열린 놀이). content.pairs=[{left,right}] — 각 슬롯에서 번갈아 보일 두 모습(예: 빨간 모자/파란 모자).
+- free-create    : 캐릭터 꾸미기(승패 없는 열린 놀이). content.actorLabel=꾸밀 주인공(예: 토끼), content.bins=[{key,label}] 꾸밀 부위 카테고리(머리 위→아래 순, 예: 모자·목도리·신발, 2~3개), content.items=[{label,binKey}] 각 부위의 선택지(예: 빨간 모자·파란 모자, binKey=부위). 아이가 팔레트에서 골라 캐릭터에 입힌다.
 - memory-flip    : 카드를 뒤집어 그림 공개·세기. content.items=[{label}] — 카드에 그릴 그림들.`;
 
 function system(): string {
@@ -194,8 +194,25 @@ function toContent(mech: MechanismId, title: string, sceneDesc: string | null, c
       return list.length >= 1 ? { ...base, pairs: list } : null;
     }
     case 'free-create': {
-      const list = prs.slice(0, 4);
-      return list.length >= 1 ? { ...base, pairs: list } : null;
+      // 레이어드 꾸미기 — actorLabel + bins(부위) + items(선택지). bins 없으면 pairs 토글 폴백.
+      const bins = arr(c.bins)
+        .map((b, i) => {
+          const o = b as Record<string, unknown>;
+          const label = str(o.label);
+          return label ? { key: str(o.key) ?? `c${i + 1}`, label } : null;
+        })
+        .filter(Boolean)
+        .slice(0, 3) as { key: string; label: string }[];
+      if (bins.length >= 1 && its.length >= 1) {
+        const keys = new Set(bins.map((b) => b.key));
+        const list = its.slice(0, 12).map((it, i) => ({
+          label: it.label,
+          binKey: it.binKey && keys.has(it.binKey) ? it.binKey : bins[i % bins.length].key,
+        }));
+        return { ...base, actorLabel: str(c.actorLabel) ?? '친구', bins, items: list };
+      }
+      const prs2 = prs.slice(0, 4);
+      return prs2.length >= 1 ? { ...base, pairs: prs2 } : null;
     }
     case 'branch-choose': {
       const list = its.slice(0, 4);
