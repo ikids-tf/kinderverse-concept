@@ -17,8 +17,10 @@
  */
 import type { Behavior, ElementNode, InteractiveNode } from '../../schema/interactiveNode';
 import type { Recipe, RecipeInput } from '../recipeTypes';
+import type { Connection } from '../../schema/interactiveNode';
 import {
   assembleNode,
+  conn,
   flag,
   imageEl,
   onAnimate,
@@ -54,7 +56,7 @@ function buildDressUp(input: RecipeInput): InteractiveNode {
   const elements: ElementNode[] = [
     sceneImageEl(BG_OUT, input.sceneOutDesc || '바깥 풍경', { z: 2 }), // 실외(숨김→밖에 나가기)
     textEl(TITLE, input.title, { x: 300, y: 22, w: 680, h: 54, z: 30 }),
-    textEl('howto', '날씨에 맞는 옷을 골라 입혀 주세요', { x: 300, y: 80, w: 680, h: 34, z: 30 }),
+    textEl('howto', '날씨에 맞는 옷을 골라 탭하거나 끌어다 입혀 주세요', { x: 300, y: 80, w: 680, h: 34, z: 30 }),
     imageEl(KID, actor, { x: 490, y: 190, w: 300, h: 390, z: 5 }),
     ...items.map((it, i) => imageEl(itemId(i), it.label, { x: itemX(i), y: 615, w: 150, h: 150, z: 8 })),
     shapeEl('gobtn_bg', { x: 1006, y: 624, w: 236, h: 84, z: 19 }),
@@ -65,8 +67,10 @@ function buildDressUp(input: RecipeInput): InteractiveNode {
   items.forEach((it, i) => {
     const id = itemId(i);
     if (i === correctIdx) {
-      // 정답 → flag set → 어린이를 '그 옷 입은 모습'으로 swap → 옷 전부 숨김 → 칭찬.
+      // 정답 — 클릭(tap) 또는 드래그(pathTraverse)로 입힌다. 둘 다 같은 '착장' 체인(swap)으로.
+      //   드래그: 옷을 캐릭터(연결된 KID) 위로 끌어다 놓으면 onPathUp이 아이템을 숨기고 이 동작을 발화.
       behaviors.push(onSetFlag(`pick_${i + 1}`, id, 'tap', DRESSED, true, { then: [`swap_${i + 1}`] }));
+      behaviors.push(onSetFlag(`drag_${i + 1}`, id, 'pathTraverse', DRESSED, true, { then: [`swap_${i + 1}`] }));
       behaviors.push(
         onSwap(`swap_${i + 1}`, KID, 'afterComplete', { id: 'dressed_img', src: `gen:${dressedLabel}`, assetKind: 'generated' }, { then: [`clr_${i + 1}`] }),
       );
@@ -84,7 +88,9 @@ function buildDressUp(input: RecipeInput): InteractiveNode {
   behaviors.push(onSpeak('talk', KID, 'afterComplete', '밖으로 나왔어요! 무엇이 보이나요? 오늘 날씨는 어떤가요? 함께 이야기해 봐요.'));
   behaviors.push(onSpeak('needdress', 'gobtn', 'tap', '먼저 날씨에 맞는 옷을 입어요!', { when: whenFlag(DRESSED, false) }));
 
-  return assembleNode(input, { elements, behaviors, flags: [flag(DRESSED)] });
+  // 드래그용 연결(정답 옷 → 캐릭터). hitConnectedAt 가 이 연결로 '캐릭터 위 드롭'을 판정한다.
+  const connections: Connection[] = [conn('c_dress', 'path', itemId(correctIdx), KID)];
+  return assembleNode(input, { elements, connections, behaviors, flags: [flag(DRESSED)] });
 }
 
 export const dressUp: Recipe = { id: 'dress-up', build: buildDressUp, manualLayout: true };
