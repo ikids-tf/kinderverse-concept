@@ -24,8 +24,6 @@ import { AssetPicker, type AssetPick } from './AssetPicker';
 import { warmupAssets } from '@/board/assets';
 import { saveToLibrary } from '../store/library';
 import { applyInteractivePrompt } from './applyPrompt';
-import { extendActivityInNode } from './extendLane';
-import { resolverExtend } from '../resolver/extend';
 import { getGameCard } from '../store/gameCards';
 import { TeacherCardPanel } from './TeacherCardPanel';
 import { AppearanceStrip, type Appearance } from './AppearanceStrip';
@@ -105,7 +103,6 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
   const [resetNonce, setResetNonce] = useState(0);
   // 게임 완료(순서 게임 클리어·이야기 끝) — 하단 완료 버튼바를 띄운다. 다시하기/모드전환/문서변경 시 해제.
   const [finished, setFinished] = useState(false);
-  const [extending, setExtending] = useState(false); // 확장 레인 생성 중(완료바 스피너용)
   const [picker, setPicker] = useState<null | { for: 'add' | 'swap' }>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
@@ -596,29 +593,6 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
     window.setTimeout(() => setBusy(null), 1800);
   };
 
-  // 확장 — 같은 노드에 새 레인을 추가하고 그 레인으로 패닝(MyBoard로 안 나감, 모델 2 무한 성장).
-  // v0.2 Resolver(결정론 레시피 + 기본 body 사슬)가 '무슨 확장인지'를 주입한다. 추정/충전 실패 시
-  // 기존 composeInteractiveNode(extendActivityInNode) 폴백. 생성→병합→패닝 순서.
-  const runExtend = async () => {
-    if (extending) return;
-    setExtending(true);
-    const extendPrompt = `"${doc.title || '인터랙티브 놀이'}" 다음에 이어서 할 새로운 확장 놀이를 만들어줘`;
-    try {
-      let res = await resolverExtend(docId, setBusy); // 레시피별 기본 body 로 다음 레인
-      if (!res.ok) res = await extendActivityInNode(docId, extendPrompt, setBusy); // 폴백(전체 LLM)
-      if (res.ok) {
-        setFinished(false);
-        // 노드 로컬 카메라를 새 레인으로(InteractiveStage가 kv:inode-goto-lane 수신).
-        window.dispatchEvent(new CustomEvent('kv:inode-goto-lane', { detail: { docId, lane: res.lane } }));
-      } else {
-        setBusy(res.message);
-        window.setTimeout(() => setBusy(null), 2000);
-      }
-    } finally {
-      setExtending(false);
-    }
-  };
-
   const removeBg = async () => {
     const id = selectedElIds.length === 1 ? selectedElIds[0] : null;
     if (!id) return;
@@ -894,33 +868,20 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
         </div>
       )}
 
-      {/* 게임 완료 — 하단 버튼바. 다시하기 · (다음 게임: 다음 레벨 있을 때만 · 지금은 레벨 시스템 없어 숨김)
-          · 확장 활동(보드 오른쪽으로) · 종료(인터랙티브 홈). */}
+      {/* 게임 완료 — 하단 버튼바. 다시하기 · 종료(인터랙티브 홈). (확장 활동은 사용자 요청으로 제거.) */}
       {mode === 'play' && finished && (
         <div className="pointer-events-none absolute inset-x-0 bottom-6 z-30 flex justify-center px-4">
           <div className="kv-fsbar-enter pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-[28px] border border-border bg-surface/95 px-3 py-2 shadow-lg backdrop-blur">
-            {extending ? (
-              <span className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-fg-2">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-surface-3 border-t-accent" />
-                {busy ?? '확장 활동을 만드는 중…'}
-              </span>
-            ) : (
-              <>
-                <button
-                  onClick={() => { setResetNonce((n) => n + 1); setFinished(false); }}
-                  className={chromeBtn}
-                  title="처음부터 다시"
-                >
-                  <Icon name="reset" size={16} /> 다시하기
-                </button>
-                <button onClick={runExtend} className={chromeBtn} title="이어지는 확장 놀이를 옆 레인에 만들기">
-                  <Icon name="sparkle" size={16} /> 확장 활동
-                </button>
-                <button onClick={() => (onExit ? onExit() : onClose())} className={chromeBtnAccent} title="인터랙티브 홈으로">
-                  <Icon name="x" size={16} /> 종료
-                </button>
-              </>
-            )}
+            <button
+              onClick={() => { setResetNonce((n) => n + 1); setFinished(false); }}
+              className={chromeBtn}
+              title="처음부터 다시"
+            >
+              <Icon name="reset" size={16} /> 다시하기
+            </button>
+            <button onClick={() => (onExit ? onExit() : onClose())} className={chromeBtnAccent} title="인터랙티브 홈으로">
+              <Icon name="x" size={16} /> 종료
+            </button>
           </div>
         </div>
       )}

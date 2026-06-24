@@ -103,14 +103,6 @@ const RECIPE_GROUPS: Array<{ cat: string; note: string; items: Array<{ title: st
           '종료 → 인터랙티브 홈(지금까지 만든 놀이 모음)으로 가요',
         ],
       },
-      {
-        title: '✨ 확장 활동',
-        age: '교사용',
-        steps: [
-          '확장 활동 → 보드가 오른쪽으로 넓어지면서',
-          '이 놀이 주제로 이어갈 교사용 활동 카드(이야기 나누기·함께 해보기·가정 연계)가 자동으로 생겨요',
-        ],
-      },
     ],
   },
   {
