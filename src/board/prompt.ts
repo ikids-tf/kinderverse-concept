@@ -7,7 +7,7 @@ import { selectRecipe } from '@/features/interactive-viewer/resolver/selectRecip
 import { dressUpTeacherCard } from '@/features/interactive-viewer/resolver/fillSlots';
 import { designGame, type TeacherCard } from '@/features/interactive-viewer/resolver/designAgent';
 import { assembleAndPlace } from '@/features/interactive-viewer/resolver/place';
-import { recommendFromLibrary, findReusableGame, saveToLibrary } from '@/features/interactive-viewer/store/library';
+import { saveToLibrary } from '@/features/interactive-viewer/store/library';
 import { saveGameCard } from '@/features/interactive-viewer/store/gameCards';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
@@ -73,21 +73,8 @@ function cleanGameTopic(text: string): string {
     카드는 store.docs[docId]를 구독하므로 구성이 끝나면 게임이 자동으로 나타난다.
     구성은 store.mutate라 카드 풀스크린의 실행취소로도 되돌릴 수 있다. */
 async function createInteractiveGame(text: string): Promise<void> {
-  // 비슷한 저장 게임이 '강하게' 일치하면 → 새로 만들지 않고 그 게임을 보드에 바로 띄운다(즉시 활동).
-  const reuse = findReusableGame(text);
-  if (reuse) {
-    useInteractiveStore.getState().ensure(reuse.docId); // 영속분을 스토어로 로드 → 카드가 즉시 렌더
-    const rc = viewportCenterBoardPoint();
-    const rNodeId = addPresetNodeCmd('interactive', rc.x, rc.y, { w: 720, h: 450, autoH: false, data: { docId: reuse.docId } }, reuse.title);
-    const rb = useBoardStore.getState();
-    rb.focusNode(rNodeId);
-    slideFrameToEmpty(rNodeId); // 겹치지 않게 빈자리로
-    showToast(`💡 비슷한 게임 "${reuse.title}"을(를) 바로 불러왔어요 — 새로 만들지 않았어요(다르게 입력하면 새로 생성)`, 'success', 5000);
-    return;
-  }
-  // 약하게 비슷한 저장 게임이 있으면 알려만 준다(생성은 진행) — 인터랙티브 홈에서도 재사용 가능.
-  const rec = recommendFromLibrary(text, 1)[0];
-  if (rec) showToast(`💡 비슷한 저장 게임 "${rec.title}"이 있어요 — 인터랙티브 홈에서 바로 쓸 수 있어요`, 'success', 4500);
+  // 제출 = 항상 '새 게임 생성'. (비슷한 저장 게임 재사용은 프롬프트바 추천 썸네일 클릭으로만 —
+  //  gameSuggestions 의 reuse 카드 → pickGame → spawnSavedGameOnBoard. 썸네일을 무시하고 제출하면 새로 만든다.)
   const c = viewportCenterBoardPoint();
   const docId = newId('inode');
   const nodeId = addPresetNodeCmd(

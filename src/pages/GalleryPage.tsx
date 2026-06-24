@@ -325,11 +325,30 @@ function GalleryCard({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => 
   // 그리드용 작은 썸네일(긴 변 384px ≈ 30KB) — 풀해상도(it.thumb)는 뷰어/다운로드에서만.
   const [thumbSrc, setThumbSrc] = useState<string | undefined>();
   useEffect(() => {
-    if (!inView || !isImage || !it.thumb) return;
+    if (!inView || !isImage || !it.thumb || it.gameDocId) return; // 게임은 아래 '첫 화면' 합성으로 처리
     let alive = true;
     void getThumb(it.id, it.thumb).then((t) => { if (alive) setThumbSrc(t); });
     return () => { alive = false; };
-  }, [inView, isImage, it.thumb, it.id]);
+  }, [inView, isImage, it.thumb, it.id, it.gameDocId]);
+  // 게임 카드 — 빈 배경 대신 '실제 게임 첫 화면'(배경 + 보이는 캐릭터·아이템)을 합성해 보여준다.
+  //   합성 실패(CORS 등) 시 배경 썸네일로 폴백.
+  useEffect(() => {
+    if (!inView || !it.gameDocId) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const { loadInteractiveNode } = await import('@/features/interactive-viewer/store/interactiveStore');
+        const doc = loadInteractiveNode(it.gameDocId!);
+        if (!doc) return;
+        const { renderGameFirstFrame } = await import('@/features/interactive-viewer/runtime/firstFrame');
+        const frame = await renderGameFirstFrame(doc);
+        if (!alive) return;
+        if (frame) { setThumbSrc(frame); return; }
+        if (it.thumb) { const t = await getThumb(it.id, it.thumb); if (alive) setThumbSrc(t); } // 폴백: 배경
+      } catch { /* 합성 실패 — 무시(빈 카드) */ }
+    })();
+    return () => { alive = false; };
+  }, [inView, it.gameDocId, it.id, it.thumb]);
   // 예전 저해상도 포스터 → 저장된 mp4에서 선명한 포스터로 교체(보일 때만 디코딩).
   const [poster, setPoster] = useState<string | undefined>(it.thumb);
   useEffect(() => {

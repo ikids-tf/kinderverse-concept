@@ -330,9 +330,16 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     [],
   );
   // 게임 추천 — 입력에 게임 키워드가 있으면 테마×메커니즘 추천 카드(보관함 박스와 동일 스타일).
+  //   ★ 입력이 멈춘 뒤(디바운스)에만 계산한다 — gameSuggestions 는 라이브러리 노드(base64 이미지 포함)를
+  //   통째로 로드·파싱하므로, 키 입력마다 돌리면 타이핑이 끊긴다(asset/web 추천과 동일하게 디바운스).
+  const [debouncedDraft, setDebouncedDraft] = useState(draft);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedDraft(draft), 200);
+    return () => clearTimeout(t);
+  }, [draft]);
   const gameSugs = useMemo<GameSuggestion[]>(
-    () => (location.pathname.startsWith('/board') && !inodeFs && hasGameKeyword(draft) ? gameSuggestions(draft) : []),
-    [draft, location.pathname, inodeFs],
+    () => (location.pathname.startsWith('/board') && !inodeFs && hasGameKeyword(debouncedDraft) ? gameSuggestions(debouncedDraft) : []),
+    [debouncedDraft, location.pathname, inodeFs],
   );
   const libHasContent = assetSugs.length > 0 || webSugs.length > 0 || gameSugs.length > 0;
   const libCount = Math.max(assetSugs.length, webSugs.length, gameSugs.length);
