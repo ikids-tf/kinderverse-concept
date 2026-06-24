@@ -116,7 +116,9 @@ function buildWeatherRounds(input: RecipeInput): InteractiveNode {
   const KIDBOX = { x: 490, y: 168, w: 300, h: 388 };
   const dId = (i: number) => `dressed_${i + 1}`;
   const cId = (i: number) => `item_${i + 1}`;
-  const itemX = (i: number) => 250 + i * 180;
+  // 옷은 아이(490~790) 양옆으로 — 가운데 아이와 겹치지 않게 좌/우로 나눠 건다.
+  const half = Math.ceil(clothes.length / 2);
+  const itemX = (i: number) => (i < half ? 95 + i * 175 : 845 + (i - half) * 175);
   const thumbX = (i: number) => Math.round((CANVAS.w - weathers.length * 178) / 2) + i * 178;
 
   const allBgin = weathers.map((w) => `bgin_${w.key}`);
