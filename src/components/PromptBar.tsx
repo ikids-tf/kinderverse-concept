@@ -691,17 +691,22 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                   >
                     <Icon name="sparkle" size={12} className="text-accent" /> 게임
                   </span>
-                  <div className="flex flex-wrap items-start gap-t2 overflow-y-auto" style={{ maxHeight: 140 }}>
+                  {/* 보관함 이미지 카드와 동일한 톤앤매너 — 썸네일(메커니즘 타일) + 이름. */}
+                  <div className="flex w-full flex-wrap items-start gap-t2 overflow-y-auto p-1" style={{ maxHeight: 200 }}>
                     {gameSugs.map((s, i) => (
                       <div key={s.key} className="shrink-0" style={libItemStyle(i, gameSugs.length, libShown, prefersReduced, gameBoxOrder, libBoxCount)}>
                         <button
                           type="button"
                           title={`'${s.label}' 게임 바로 만들기`}
                           onClick={() => pickGame(s)}
-                          className="flex items-center gap-t1 rounded-pill border border-border bg-surface px-t3 py-t1 text-xs font-semibold text-fg-2 shadow-sm transition-colors duration-150 ease-soft hover:border-accent hover:text-accent"
+                          className="group w-[76px] rounded-sm border border-border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft hover:border-accent"
                         >
-                          <span aria-hidden className="text-sm leading-none">{s.emoji}</span>
-                          <span className="whitespace-nowrap">{s.label}</span>
+                          <span className="flex h-14 w-full items-center justify-center rounded-xs bg-surface-2">
+                            <span aria-hidden className="text-2xl leading-none">{s.emoji}</span>
+                          </span>
+                          <span className="mt-0.5 block truncate text-[10px] font-medium text-fg-2 group-hover:text-accent">
+                            {s.label}
+                          </span>
                         </button>
                       </div>
                     ))}
