@@ -256,7 +256,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const [assetSel, setAssetSel] = useState<string[]>([]); // 클릭 순서 유지(배치 순서)
   const assetKey = (a: ImageAsset) => `${a.tag}-${a.createdAt}`;
   useEffect(() => {
-    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2) {
+    // 게임 키워드(게임·놀이·퀴즈…)면 자료(아이템·배경 이미지) 대신 게임 추천만 보여 준다 — 자료 검색 생략.
+    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2 || hasGameKeyword(draft)) {
       setAssetSugs([]);
       setAssetSel([]);
       return;
@@ -289,7 +290,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const [webSugs, setWebSugs] = useState<WebLink[]>([]);
   const [webSel, setWebSel] = useState<string[]>([]); // url 기준 복수 선택
   useEffect(() => {
-    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2) {
+    // 게임 키워드면 웹링크 자료도 생략(게임 추천만).
+    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2 || hasGameKeyword(draft)) {
       setWebSugs([]);
       setWebSel([]);
       return;

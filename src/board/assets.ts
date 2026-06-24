@@ -138,33 +138,61 @@ function queryTokens(query: string): string[] {
   return [...tokens];
 }
 
-/** 입력 중 추천 검색 — 태그/주제(group)가 질의와 부분 일치하는 자산(태그당 최신 1장).
-    "물고기"는 '여러 물고기'(주제)로, "브라키오와 문어"는 단어별로 각각 매칭된다. */
+/** 상위어(카테고리) 검색 — "동물"을 입력하면 토끼·여우… 같은 멤버 태그를 모두 찾도록 확장한다.
+    태그에는 개별 이름만 들어 있으므로(여우), 검색 시 카테고리→멤버로 펴서 매칭한다(LLM 없음·결정론).
+    멤버는 '태그에 이 글자가 들어가면 그 카테고리'로 보는 부분일치 키워드(유아 콘텐츠 위주). */
+const LAND_ANIMALS = ['토끼', '여우', '곰', '사자', '호랑이', '코끼리', '하마', '기린', '강아지', '개', '고양이', '다람쥐', '원숭이', '판다', '너구리', '사슴', '양', '돼지', '소', '말', '얼룩말', '코알라', '캥거루', '낙타', '늑대', '두더지', '고슴도치', '햄스터'];
+const BIRDS = ['새', '참새', '까치', '비둘기', '파랑새', '부엉이', '올빼미', '독수리', '앵무새', '제비', '닭', '오리', '거위', '백조', '학', '플라밍고', '펭귄'];
+const BUGS = ['나비', '잠자리', '무당벌레', '개미', '벌', '메뚜기', '사슴벌레', '장수풍뎅이', '거미', '달팽이', '애벌레', '귀뚜라미'];
+const DINOS = ['공룡', '티라노', '브라키오', '트리케라', '스테고', '프테라'];
+const SEA = ['물고기', '문어', '오징어', '고래', '상어', '게', '새우', '거북', '거북이', '돌고래', '불가사리', '해마', '조개', '가오리'];
+const CATEGORY: Record<string, string[]> = {
+  // '동물'은 상위어 — 땅짐승·새·곤충·바다동물·공룡을 모두 포함(파랑새도 '동물' 검색에 잡히게).
+  동물: [...LAND_ANIMALS, ...BIRDS, ...BUGS, ...DINOS, ...SEA],
+  새: BIRDS,
+  곤충: BUGS,
+  공룡: DINOS,
+  바다동물: SEA,
+  과일: ['사과', '바나나', '딸기', '포도', '오렌지', '귤', '수박', '참외', '복숭아', '배', '키위', '체리', '레몬', '망고', '파인애플', '감', '자두'],
+  채소: ['당근', '오이', '토마토', '가지', '양파', '감자', '고구마', '호박', '브로콜리', '옥수수', '버섯', '파프리카', '배추', '무'],
+  탈것: ['자동차', '버스', '기차', '비행기', '배', '트럭', '소방차', '구급차', '경찰차', '오토바이', '자전거', '헬리콥터', '지하철', '택시', '포클레인'],
+  악기: ['피아노', '북', '드럼', '기타', '바이올린', '실로폰', '트라이앵글', '탬버린', '캐스터네츠', '리코더', '하모니카'],
+  도형: ['동그라미', '세모', '네모', '별', '하트', '원', '삼각형', '사각형'],
+};
+
+/** 입력 중 추천 검색 — 태그가 질의어를 포함하거나(주: 토끼), 질의가 카테고리(동물·과일…)면 그 멤버를
+    포함하는 자산을 찾는다(태그당 최신 1장). ★정밀화: group(게임 테마)·역방향 부분일치는 매칭에서 제외해
+    '토끼 꾸미기'로 묶인 부품(모자·코)이 "토끼"에 끌려오지 않게. 배경 자산은 '배경' 질의가 아니면 제외. */
 export async function searchAssets(
   query: string,
   kind: ImageAsset['kind'] | ImageAsset['kind'][] = 'image',
   limit = Infinity, // 개수 제한 없음 — 추천 스트립이 줄바꿈+스크롤로 모두 보여준다
 ): Promise<ImageAsset[]> {
   const kinds = Array.isArray(kind) ? kind : [kind];
-  const tokens = queryTokens(query);
+  const tokens = queryTokens(query).filter((t) => t.length >= 2);
   if (tokens.length === 0) return [];
+  const wantsBg = /배경/.test(query); // '배경' 질의일 때만 배경 자산 포함
   const lib = await load();
   const out: ImageAsset[] = [];
   for (const arr of Object.values(lib)) {
-    // 태그당 '종류별 최신 1장' — 같은 캡션에 이미지·영상이 함께 있어도 둘 다 노출되게
-    // (한 종류만 보던 기존 동작이 영상을 가리지 않도록).
     const seenKinds = new Set<string>();
     for (let i = arr.length - 1; i >= 0; i--) {
       const it = arr[i];
       if (!kinds.includes(it.kind) || !it.url || seenKinds.has(it.kind)) continue;
       seenKinds.add(it.kind);
       const t = norm(it.tag);
-      const g = norm(it.group ?? '');
-      const matched = tokens.some(
-        (tok) => t.includes(tok) || tok.includes(t) || (g.length > 0 && (g.includes(tok) || tok.includes(g))),
-      );
+      // 배경 자산('X 배경')은 객체 검색에서 제외(토끼 → 토끼 객체이지 배경이 아님).
+      if (!wantsBg && (t.includes('배경') || norm(it.group ?? '').includes('배경'))) {
+        if (seenKinds.size >= kinds.length) break;
+        continue;
+      }
+      const matched = tokens.some((tok) => {
+        if (t.includes(tok)) return true; // 태그가 질의어 포함(노란색'토끼' ← 토끼)
+        const members = CATEGORY[tok]; // 카테고리 질의(동물·과일…) → 멤버 태그 매칭
+        return !!members && members.some((m) => t.includes(norm(m)));
+      });
       if (matched) out.push(it);
-      if (seenKinds.size >= kinds.length) break; // 요청한 종류를 모두 1장씩 봤으면 종료
+      if (seenKinds.size >= kinds.length) break;
     }
   }
   return out.sort((a, z) => z.createdAt - a.createdAt).slice(0, limit);
