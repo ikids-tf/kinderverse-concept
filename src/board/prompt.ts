@@ -55,6 +55,16 @@ function isNewInteractiveGame(text: string): boolean {
   return SOFT_GAME_RE.test(text) && !WORKSHEET_RE.test(text) && !PLAN_RE.test(text) && !/도안|색칠/.test(text);
 }
 
+/** 진행 표시용 '주제' — 생성 동사·군더더기를 걷어내고 교사가 입력한 핵심만 남긴다(길면 줄임). */
+function cleanGameTopic(text: string): string {
+  const t = (text || '')
+    .replace(/만들어줘|만들어|만들기|만들|구성해줘|구성|생성해줘|생성|새로|짜줘|짜|해줘|주세요|줘/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const topic = t || (text || '').trim() || '인터랙티브';
+  return topic.length > 20 ? topic.slice(0, 20) + '…' : topic;
+}
+
 /** 보드에 인터랙티브 노드를 만들고 프롬프트로 게임 전체를 구성한다(디렉터).
     카드는 store.docs[docId]를 구독하므로 구성이 끝나면 게임이 자동으로 나타난다.
     구성은 store.mutate라 카드 풀스크린의 실행취소로도 되돌릴 수 있다. */
@@ -75,8 +85,10 @@ async function createInteractiveGame(text: string): Promise<void> {
   board.focusNode(nodeId);
   slideFrameToEmpty(nodeId); // 다른 요소와 겹치지 않게 가까운 빈자리로
   board.beginGen();
-  board.setGenerating('🎮 인터랙티브 게임을 만들고 있어요…');
-  const onBusy = (m: string | null) => board.setGenerating(m ?? '🎮 인터랙티브 게임을 만들고 있어요…');
+  // 진행 표시 — 교사가 입력한 '주제'를 항상 앞에 보여 주고, 파이프라인의 구체적 단계를 뒤에 잇는다.
+  const topic = cleanGameTopic(text);
+  board.setGenerating(`🎮 「${topic}」 놀이를 준비하는 중…`);
+  const onBusy = (m: string | null) => board.setGenerating(m ? `「${topic}」 ${m}` : `🎮 「${topic}」 놀이를 만드는 중…`);
   try {
     useInteractiveStore.getState().ensure(docId);
     // v0.2 Resolver(결정론 레시피) 우선 — 매칭 의도는 즉시·안정 합성. 롱테일/실패는 compose 폴백.

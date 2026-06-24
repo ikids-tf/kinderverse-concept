@@ -104,7 +104,7 @@ async function fillSemantic(
   const cached = cacheGet(key);
   if (cached) return { ...cached, title };
 
-  onBusy?.('내용을 고르는 중…');
+  onBusy?.('🧩 놀이에 넣을 내용을 고르는 중…');
   const ask = (provider: 'auto' | 'gemini') =>
     callGateway({
       task: 'interactive-compose',

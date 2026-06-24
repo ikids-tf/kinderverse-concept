@@ -258,7 +258,11 @@ export async function fillTokenImages(
     targets.push({ el, label });
   }
   if (!targets.length) return;
-  opts.onBusy?.('그림을 만드는 중…');
+  // 진행률 — 교사가 '몇 개 중 몇 개째'인지 보며 기다리게(추상적 '그림 만드는 중' 대신 구체적 단계).
+  const total = targets.length;
+  let done = 0;
+  const tick = () => opts.onBusy?.(`🖼️ 놀이 그림 그리는 중… (${done}/${total})`);
+  tick();
   if (doCut) warmupBackgroundRemoval(); // 모델 미리 로드(누끼 대기 단축)
 
   await Promise.all(
@@ -276,6 +280,8 @@ export async function fillTokenImages(
             t.el.kind = 'shape';
             delete t.el.src;
           }
+          done++;
+          tick();
           return;
         }
         // 2포즈 생성 실패 → 아래 정면 단독 생성으로 폴백.
@@ -294,6 +300,8 @@ export async function fillTokenImages(
       if (typeof uri === 'string' && uri.startsWith('data:image/') && !uri.startsWith('data:image/svg')) {
         void saveAsset(t.label, 'image', uri, opts.theme, undefined, 'game');
       }
+      done++;
+      tick();
     }),
   );
 }

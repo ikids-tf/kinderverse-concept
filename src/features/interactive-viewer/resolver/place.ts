@@ -99,7 +99,7 @@ async function runTail(
   let laid = manualLayout ? parsed.data : autoLayout(parsed.data);
   // 생성된 장면 배경이 있으면 캔버스에 깐다(실패 시 색 토큰 유지).
   if (bgPromise) {
-    onBusy?.('배경을 그리는 중…');
+    onBusy?.('🎨 장면 배경을 그리는 중…');
     const bgRef = await bgPromise;
     if (bgRef) laid = { ...laid, canvas: { ...laid.canvas, background: bgRef } };
   }
@@ -132,13 +132,13 @@ export async function assembleAndPlace(
   if (!built.ok || !built.node) return { ok: false, lane: 0, message: built.errors ?? '레시피 조립 실패' };
 
   // 2) 꼬리(그림·배치·배경) — 독립 게임에만. manualLayout 레시피는 autoLayout 생략.
-  onBusy?.('게임을 그리는 중…');
+  onBusy?.('✏️ 놀이 화면을 짜는 중…');
   const game = await runTail(built.node, !!getRecipe(mechanism)?.manualLayout, input.sceneDesc, onBusy);
   if (!game) return { ok: false, lane: 0, message: '게임 생성에 실패했어요(검증)' };
 
   // 3) 레인 배치.
   const isEmpty = base.elements.length === 0;
-  onBusy?.('적용하는 중…');
+  onBusy?.('✨ 화면에 예쁘게 배치하는 중…');
   if (isEmpty) {
     // 레인 0 — 게임이 곧 노드(평행이동 없음). id 는 docId 로 맞춰져 있음.
     store.mutate(docId, () => game);
