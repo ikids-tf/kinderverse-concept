@@ -9,6 +9,30 @@ import type { ImageAsset } from '@/board/assets';
 import type { WebLink } from '@/board/webLinks';
 import { FavoriteCardRail } from './FavoriteCardRail';
 import { gameSuggestions, hasGameKeyword, type GameSuggestion } from '@/features/interactive-viewer/resolver/gameSuggest';
+import { getThumb } from '@/board/thumbs';
+
+/** 게임 추천 카드 썸네일 — 저장 게임 장면 배경(실제 게임화면)을 작게 굽고, 없으면 이모지 폴백.
+    캐시 키는 src 내용 기반(getThumb 은 id로만 캐시 → 같은 그림 재사용, 다른 그림은 새로 굽기). */
+function GameSuggestThumb({ src, emoji }: { src?: string; emoji: string }) {
+  const [thumb, setThumb] = useState<string | undefined>();
+  useEffect(() => {
+    if (!src) { setThumb(undefined); return; }
+    let alive = true;
+    let h = 0;
+    for (let i = 0; i < src.length; i += 997) h = (h * 31 + src.charCodeAt(i)) >>> 0; // 거대 data URI 표본 해시
+    void getThumb(`gamesug-${h}-${src.length}`, src).then((t) => { if (alive) setThumb(t); }).catch(() => {});
+    return () => { alive = false; };
+  }, [src]);
+  return (
+    <span className="flex h-14 w-full items-center justify-center overflow-hidden rounded-xs bg-surface-2">
+      {thumb ? (
+        <img src={thumb} alt="" draggable={false} className="h-full w-full object-cover" />
+      ) : (
+        <span aria-hidden className="text-2xl leading-none">{emoji}</span>
+      )}
+    </span>
+  );
+}
 
 /* Board engine modules (prompt/workflow/assets) are heavy and only needed on My
    Board, so they're loaded on demand (keeps them out of the initial bundle). */
@@ -701,9 +725,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                           onClick={() => pickGame(s)}
                           className="group w-[76px] rounded-sm border border-border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft hover:border-accent"
                         >
-                          <span className="flex h-14 w-full items-center justify-center rounded-xs bg-surface-2">
-                            <span aria-hidden className="text-2xl leading-none">{s.emoji}</span>
-                          </span>
+                          <GameSuggestThumb src={s.thumb} emoji={s.emoji} />
                           <span className="mt-0.5 block truncate text-[10px] font-medium text-fg-2 group-hover:text-accent">
                             {s.label}
                           </span>
