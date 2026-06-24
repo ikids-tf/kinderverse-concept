@@ -4,13 +4,13 @@ import { PageHero } from '@/components/PageHero';
 import {
   NotebookPen, Palette, Shapes, BookOpen, Image as ImageIcon, Tag, Sparkles,
   Cake, FileStack, FileText, Search, LayoutGrid, List, Maximize2, Wand2,
-  Share2, Bookmark, Download, X, Check, Video, Play, Link as LinkIcon, Heart, Gamepad2, type LucideIcon,
+  Share2, Bookmark, Download, X, Check, Video, Play, Link as LinkIcon, Heart, Gamepad2, Trash2, type LucideIcon,
 } from 'lucide-react';
-import { listAssets, type ImageAsset } from '@/board/assets';
-import { listWebLinks, type WebLink } from '@/board/webLinks';
+import { listAssets, removeAsset, type ImageAsset } from '@/board/assets';
+import { listWebLinks, removeWebLink, type WebLink } from '@/board/webLinks';
 import { getVideoAsset } from '@/board/videoAssets';
 import { getThumb } from '@/board/thumbs';
-import { listLibrary, type SavedGame } from '@/features/interactive-viewer/store/library';
+import { listLibrary, removeFromLibrary, type SavedGame } from '@/features/interactive-viewer/store/library';
 import { loadInteractiveNode } from '@/features/interactive-viewer/store/interactiveStore';
 import { InteractiveOverlay } from '@/features/interactive-viewer/authoring/InteractiveOverlay';
 import { ZoomOverlay } from '@/components/board/ZoomOverlay';
@@ -145,6 +145,11 @@ type GalleryItem = {
   videoAssetId?: string;
   /** 인터랙티브 게임 — 설정되면 카드 클릭 시 플레이 오버레이를 연다(뷰어 모달 대신). */
   gameDocId?: string;
+  /** 호버 삭제 식별자 — 게임/자산/웹. 없으면 삭제 불가(mock 데모 자료). */
+  del?:
+    | { type: 'game'; docId: string }
+    | { type: 'asset'; tag: string; createdAt: number; kind: ImageAsset['kind'] }
+    | { type: 'web'; url: string };
 };
 
 const GALLERY_ITEMS: GalleryItem[] = [
@@ -190,6 +195,7 @@ function buildGameItems(games: SavedGame[]): GalleryItem[] {
       ratio: '16 / 10',
       ...(thumb ? { thumb, assetKind: 'image' as const } : {}),
       gameDocId: g.docId,
+      del: { type: 'game' as const, docId: g.docId },
     };
   });
 }
@@ -220,6 +226,7 @@ function buildArchiveItems(assets: ImageAsset[], links: WebLink[]): GalleryItem[
       thumb: x.url,
       assetKind: isVideo ? 'video' : 'image',
       ...(x.videoAssetId ? { videoAssetId: x.videoAssetId } : {}),
+      del: { type: 'asset', tag: x.tag, createdAt: x.createdAt, kind: x.kind },
     });
   }
   for (const l of links) {
@@ -233,6 +240,7 @@ function buildArchiveItems(assets: ImageAsset[], links: WebLink[]): GalleryItem[
       ...(l.thumb ? { thumb: l.thumb } : {}),
       assetKind: 'web',
       href: l.url,
+      del: { type: 'web', url: l.url },
     });
   }
   return out;
@@ -271,7 +279,7 @@ function useInView<T extends HTMLElement>(rootMargin = '500px'): { ref: React.Re
 /* 마조너리(높이 가변)지만 '행 우선' 정렬 — 항목을 열에 라운드로빈으로 분배해
    맨 윗줄이 왼→오로 최신순이 되게 한다. CSS columns는 세로 우선이라 왼쪽 열부터
    채워져(최신이 왼쪽 열에 쌓임) 이 동작을 못 한다. */
-function MasonryGrid({ items, onOpen }: { items: GalleryItem[]; onOpen: (it: GalleryItem) => void }) {
+function MasonryGrid({ items, onOpen, onDelete }: { items: GalleryItem[]; onOpen: (it: GalleryItem) => void; onDelete: (it: GalleryItem) => void }) {
   const COL = 228;
   const GAP = 16;
   const ref = useRef<HTMLDivElement>(null);
@@ -295,14 +303,14 @@ function MasonryGrid({ items, onOpen }: { items: GalleryItem[]; onOpen: (it: Gal
     <div ref={ref} style={{ display: 'flex', gap: GAP, alignItems: 'flex-start' }}>
       {buckets.map((bucket, ci) => (
         <div key={ci} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: GAP }}>
-          {bucket.map((it) => <GalleryCard key={it.id} it={it} onOpen={() => onOpen(it)} />)}
+          {bucket.map((it) => <GalleryCard key={it.id} it={it} onOpen={() => onOpen(it)} onDelete={it.del ? () => onDelete(it) : undefined} />)}
         </div>
       ))}
     </div>
   );
 }
 
-function GalleryCard({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
+function GalleryCard({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => void; onDelete?: () => void }) {
   const a = C.coral;
   const Icon = it.icon;
   const isVideo = it.assetKind === 'video';
@@ -397,7 +405,18 @@ function GalleryCard({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
           </span>
         )}
         <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: a, background: '#fff', borderRadius: 999, padding: '3px 9px', boxShadow: C.shadow1 }}>{it.cat}</span>
-        {/* 호버 시 — 다운로드 + 확대 */}
+        {/* 호버 시 — 삭제(삭제 가능 자료만) + 다운로드 + 확대 */}
+        {onDelete && (
+          <span
+            className="kv-galmax"
+            role="button"
+            title="삭제"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            style={{ position: 'absolute', top: 10, right: 78, width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,.92)', display: 'grid', placeItems: 'center', color: '#D8442F', boxShadow: C.shadow1 }}
+          >
+            <Trash2 size={14} />
+          </span>
+        )}
         <span
           className="kv-galmax"
           role="button"
@@ -431,7 +450,7 @@ function GalleryCard({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
   );
 }
 
-function GalleryRow({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
+function GalleryRow({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => void; onDelete?: () => void }) {
   const a = C.coral;
   const Icon = it.icon;
   const isImage = it.assetKind === 'image';
@@ -472,6 +491,16 @@ function GalleryRow({ it, onOpen }: { it: GalleryItem; onOpen: () => void }) {
         <div style={{ fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.t}</div>
         <div style={{ fontSize: 12.5, color: C.muted, marginTop: 3 }}>{it.cat} · {it.sub}</div>
       </div>
+      {onDelete && (
+        <span
+          role="button"
+          title="삭제"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          style={{ flexShrink: 0, display: 'grid', placeItems: 'center', width: 30, height: 30, borderRadius: 8, color: '#D8442F' }}
+        >
+          <Trash2 size={15} />
+        </span>
+      )}
       <Maximize2 size={16} color={C.muted} style={{ flexShrink: 0, marginRight: 6 }} />
     </button>
   );
@@ -612,6 +641,27 @@ export function GalleryPage() {
   // 카드 클릭 — 게임이면 플레이 오버레이, 그 외엔 자료 뷰어.
   const openItem = (it: GalleryItem) => { if (it.gameDocId) setPlayDocId(it.gameDocId); else setSel(it); };
 
+  // 호버 삭제 — 종류별로 보관함에서 제거하고 목록을 갱신. (게임은 라이브러리 목록에서만, 문서는 보드에 남음.)
+  const deleteItem = (it: GalleryItem) => {
+    const d = it.del;
+    if (!d) return;
+    // 게임은 목록에서만 빼므로(문서·보드는 유지) 확인 없이, 자산·웹은 영구 삭제라 확인.
+    if (d.type !== 'game' && typeof window !== 'undefined' && !window.confirm(`'${it.t}'을(를) 보관함에서 삭제할까요?`)) return;
+    void (async () => {
+      if (d.type === 'game') {
+        removeFromLibrary(d.docId);
+        setGameItems(buildGameItems(listLibrary())); // 라이브러리(정본)에서 다시 빌드 → 확실히 사라짐
+      } else if (d.type === 'asset') {
+        await removeAsset(d.tag, d.createdAt, d.kind);
+        setDynItems((x) => x.filter((y) => y.id !== it.id));
+      } else if (d.type === 'web') {
+        await removeWebLink(d.url);
+        setDynItems((x) => x.filter((y) => y.id !== it.id));
+      }
+      setToast(`'${it.t}'을(를) 갤러리에서 지웠어요`);
+    })();
+  };
+
   const exitAi = () => setAi(null);
   const items = ai
     ? allItems.filter((i) => ai.ids.includes(i.id))
@@ -666,10 +716,10 @@ export function GalleryPage() {
         {items.length === 0 ? (
           <div style={{ textAlign: 'center', color: C.muted, marginTop: 80, fontSize: 14 }}>{ai ? `‘${ai.label}’에 어울리는 자료를 찾지 못했어요.` : `‘${q || cat}’에 해당하는 자료가 없어요.`}</div>
         ) : view === 'grid' ? (
-          <MasonryGrid items={items} onOpen={openItem} />
+          <MasonryGrid items={items} onOpen={openItem} onDelete={deleteItem} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 880, margin: '0 auto' }}>
-            {items.map((it) => <GalleryRow key={it.id} it={it} onOpen={() => openItem(it)} />)}
+            {items.map((it) => <GalleryRow key={it.id} it={it} onOpen={() => openItem(it)} onDelete={it.del ? () => deleteItem(it) : undefined} />)}
           </div>
         )}
       </div>

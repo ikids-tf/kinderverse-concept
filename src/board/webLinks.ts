@@ -58,6 +58,21 @@ export async function saveWebLinks(
   await idbSet(KEY, lib);
 }
 
+/** 웹 링크 한 개 삭제(갤러리 호버 삭제) — url 로 식별(모든 태그에서 제거). */
+export async function removeWebLink(url: string): Promise<void> {
+  const lib = await load();
+  let changed = false;
+  for (const k of Object.keys(lib)) {
+    const next = lib[k].filter((l) => l.url !== url);
+    if (next.length !== lib[k].length) {
+      changed = true;
+      if (next.length) lib[k] = next;
+      else delete lib[k];
+    }
+  }
+  if (changed) await idbSet(KEY, lib);
+}
+
 /** 저장된 모든 웹 링크를 최신순으로(URL 중복 제거). 갤러리 자동 표시용. */
 export async function listWebLinks(): Promise<WebLink[]> {
   const lib = await load();

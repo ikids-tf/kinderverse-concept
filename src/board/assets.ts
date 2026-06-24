@@ -68,6 +68,18 @@ export function warmupAssets(): void {
   void load();
 }
 
+/** 자산 한 개 삭제(갤러리 호버 삭제) — tag(캡션)+createdAt[+kind]로 식별. 비면 키 제거. */
+export async function removeAsset(tag: string, createdAt: number, kind?: ImageAsset['kind']): Promise<void> {
+  const lib = await load();
+  const k = norm(tag);
+  const arr = lib[k];
+  if (!arr) return;
+  const next = arr.filter((it) => !(it.createdAt === createdAt && (!kind || it.kind === kind)));
+  if (next.length) lib[k] = next;
+  else delete lib[k];
+  await idbSet(KEY, lib);
+}
+
 /** 캡션과 같은 태그의 최신 자산(종류 일치)을 찾는다 — 없으면 undefined. */
 export async function findAsset(caption: string, kind: ImageAsset['kind']): Promise<ImageAsset | undefined> {
   const lib = await load();
