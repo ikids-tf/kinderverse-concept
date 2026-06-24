@@ -53,6 +53,10 @@ function detectGender(p: string): '남자아이' | '여자아이' {
   if (/여자|여아|소녀|딸|공주|걸\b/.test(p)) return '여자아이';
   return '남자아이';
 }
+/** 특정 날씨가 콕 집혔나 — 그러면 그 날씨 단일 게임, 아니면(일반 '날씨 옷입기') 3날씨 전환 통합. */
+function hasSpecificWeather(p: string): boolean {
+  return /눈\s*오|눈\s*내|첫눈|겨울|비\s*오|비가|장마|소나기|빗|미세\s*먼지|먼지|황사|여름|봄\b|가을/.test(p);
+}
 
 /** dress-up 교사 활동 카드(결정론 — 날씨별). 에이전트를 건너뛰는 dress-up 경로에서 saveGameCard 로 동반 저장. */
 export function dressUpTeacherCard(prompt: string): TeacherCard {
@@ -126,14 +130,25 @@ export async function fillSlots(
     }
     // ── 날씨 옷입히기(결정론 — 날씨 테이블) ──
     case 'dress-up': {
-      const d = WEATHER[detectWeather(prompt)];
       const gender = detectGender(prompt); // '남자아이' | '여자아이'
-      // 옷 라벨은 '옷 이름'만(사람·성별어를 안 박는다 — '남아 수영복'이면 AI가 아이를 그려 버림).
-      // 성별은 캐릭터(actorLabel)가 가지고, 수영복만 성별이 드러나는 '옷 종류'로 구분.
+      // 옷 라벨은 '옷 이름'만(사람·성별어 안 박음 — '남아 수영복'이면 AI가 아이를 그림). 성별은 캐릭터가 가짐.
       const swim = gender === '여자아이' ? '원피스 수영복' : '수영 반바지';
-      const items = d.items.map((x) => ({ ...x, label: x.label === '수영복' ? swim : x.label }));
-      return { title: d.title, actorLabel: gender, items, sceneDesc: d.indoor, sceneOutDesc: d.outdoor };
+      // 특정 날씨가 집히면 그 날씨 단일 게임(밖에 나가기 포함), 일반이면 3날씨 전환 통합.
+      if (hasSpecificWeather(prompt)) {
+        const d = WEATHER[detectWeather(prompt)];
+        const items = d.items.map((x) => ({ ...x, label: x.label === '수영복' ? swim : x.label }));
+        return { title: d.title, actorLabel: gender, items, sceneDesc: d.indoor, sceneOutDesc: d.outdoor };
+      }
+      // 통합 — 같은 아이 + 공용 옷 4벌 + 하단 날씨 썸네일(눈·비·미세먼지)로 창밖 날씨 전환.
+      const shared = [{ label: '두꺼운 패딩 점퍼' }, { label: '노란 우비' }, { label: '하얀 마스크' }, { label: swim }];
+      const weathers = [
+        { key: 'snow', indoor: WEATHER['눈'].indoor, title: '눈 오는 날, 뭘 입을까?', emoji: '❄️', name: '눈' },
+        { key: 'rain', indoor: WEATHER['비'].indoor, title: '비 오는 날, 뭘 입을까?', emoji: '🌧️', name: '비' },
+        { key: 'dust', indoor: WEATHER['미세먼지'].indoor, title: '미세먼지 날, 뭘 챙길까?', emoji: '😷', name: '미세먼지' },
+      ];
+      return { title: '날씨에 맞는 옷 입기', actorLabel: gender, items: shared, weathers };
     }
+
     // ── 의미 필요 → narrow LLM(캐시) ──
     default:
       return SEMANTIC.has(parse.mechanism) ? withScene(await fillSemantic(parse.mechanism, prompt, count, title, onBusy)) : null;
