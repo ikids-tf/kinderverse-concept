@@ -11,6 +11,7 @@ import { listWebLinks, removeWebLink, type WebLink } from '@/board/webLinks';
 import { getVideoAsset } from '@/board/videoAssets';
 import { getThumb } from '@/board/thumbs';
 import { listLibrary, removeFromLibrary, type SavedGame } from '@/features/interactive-viewer/store/library';
+import { removeGameCard } from '@/features/interactive-viewer/store/gameCards';
 import { loadInteractiveNode } from '@/features/interactive-viewer/store/interactiveStore';
 import { InteractiveOverlay } from '@/features/interactive-viewer/authoring/InteractiveOverlay';
 import { ZoomOverlay } from '@/components/board/ZoomOverlay';
@@ -650,6 +651,7 @@ export function GalleryPage() {
     void (async () => {
       if (d.type === 'game') {
         removeFromLibrary(d.docId);
+        removeGameCard(d.docId); // 교사 활동 카드 동반 정리
         setGameItems(buildGameItems(listLibrary())); // 라이브러리(정본)에서 다시 빌드 → 확실히 사라짐
       } else if (d.type === 'asset') {
         await removeAsset(d.tag, d.createdAt, d.kind);

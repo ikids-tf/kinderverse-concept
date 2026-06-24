@@ -3,8 +3,10 @@ import { useInteractiveStore } from '@/features/interactive-viewer/store/interac
 import { composeInteractiveNode } from '@/features/interactive-viewer/authoring/composeNode';
 import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
 import { resolveIntent } from '@/features/interactive-viewer/resolver/resolveIntent';
+import { designGame, type TeacherCard } from '@/features/interactive-viewer/resolver/designAgent';
 import { assembleAndPlace } from '@/features/interactive-viewer/resolver/place';
 import { recommendFromLibrary, saveToLibrary } from '@/features/interactive-viewer/store/library';
+import { saveGameCard } from '@/features/interactive-viewer/store/gameCards';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
@@ -91,19 +93,37 @@ async function createInteractiveGame(text: string): Promise<void> {
   const onBusy = (m: string | null) => board.setGenerating(m ? `「${topic}」 ${m}` : `🎮 「${topic}」 놀이를 만드는 중…`);
   try {
     useInteractiveStore.getState().ensure(docId);
-    // v0.2 Resolver(결정론 레시피) 우선 — 매칭 의도는 즉시·안정 합성. 롱테일/실패는 compose 폴백.
-    const intent = await resolveIntent(text, onBusy);
     let r: { ok: boolean; message: string } | null = null;
-    if (intent) {
-      const placed = await assembleAndPlace(docId, intent.mechanism, intent.input, onBusy);
-      if (placed.ok) r = { ok: true, message: placed.message };
+    let card: TeacherCard | null = null;
+
+    // 1) 게임 디자인 에이전트(Tier1 지능층) — 메커니즘 선택 + 풍부한 내용 + 교사 활동 카드.
+    //    구조는 만들지 않는다 — 받은 '내용'을 결정론 Resolver(assembleAndPlace)가 조립·검증한다.
+    const designed = await designGame(text, onBusy);
+    if (designed) {
+      const placed = await assembleAndPlace(docId, designed.mechanism, designed.input, onBusy);
+      if (placed.ok) {
+        r = { ok: true, message: placed.message };
+        card = designed.card;
+      }
     }
+    // 2) 결정론 Resolver(규칙 매칭) — 에이전트 실패/한도 시 바닥을 받친다(즉시·안정).
+    if (!r) {
+      const intent = await resolveIntent(text, onBusy);
+      if (intent) {
+        const placed = await assembleAndPlace(docId, intent.mechanism, intent.input, onBusy);
+        if (placed.ok) r = { ok: true, message: placed.message };
+      }
+    }
+    // 3) compose 폴백(롱테일 — 동사 매칭 실패).
     if (!r) r = await composeInteractiveNode(docId, text, onBusy);
     showToast(r.message, r.ok ? 'success' : 'error');
-    // 생성 성공 → 갤러리/인터랙티브 홈에 자동 리스트(라이브러리 등록).
+    // 생성 성공 → 갤러리/인터랙티브 홈에 자동 리스트(라이브러리 등록) + 교사 카드 동반 저장.
     if (r.ok) {
       const doc = useInteractiveStore.getState().peek(docId);
-      if (doc && doc.elements.length > 0) saveToLibrary(doc);
+      if (doc && doc.elements.length > 0) {
+        saveToLibrary(doc);
+        if (card) saveGameCard(docId, card);
+      }
     }
   } finally {
     board.endGen();

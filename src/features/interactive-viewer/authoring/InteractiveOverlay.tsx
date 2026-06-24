@@ -26,6 +26,9 @@ import { saveToLibrary } from '../store/library';
 import { applyInteractivePrompt } from './applyPrompt';
 import { extendActivityInNode } from './extendLane';
 import { resolverExtend } from '../resolver/extend';
+import { getGameCard } from '../store/gameCards';
+import { TeacherCardPanel } from './TeacherCardPanel';
+import type { TeacherCard } from '../resolver/designAgent';
 import {
   fileToAssetRef,
   makeImageElement,
@@ -93,6 +96,9 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
   const [busy, setBusy] = useState<string | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  // 교사 활동 카드(게임 디자인 에이전트 산출) — 우측 드로어, 재생·편집 양쪽에서 토글.
+  const [cardOpen, setCardOpen] = useState(false);
+  const [card, setCard] = useState<TeacherCard | null>(null);
   // 이미지 요소 편집/풀스크린 모달(마이보드 카드와 동일 컴포넌트 재사용).
   const [editImg, setEditImg] = useState<{ elId: string; src: string; caption: string; origin: OriginRect | null } | null>(null);
   const [fsImg, setFsImg] = useState<{ src: string; caption: string; origin: OriginRect | null } | null>(null);
@@ -101,6 +107,18 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
   useEffect(() => {
     ensure(docId);
   }, [docId, ensure]);
+
+  // 교사 카드 로드 — docId 기준, 생성 직후(kv:game-card-saved) 갱신.
+  useEffect(() => {
+    const load = () => setCard(getGameCard(docId));
+    load();
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail as { docId?: string } | null;
+      if (!d || d.docId === docId) load();
+    };
+    window.addEventListener('kv:game-card-saved', on as EventListener);
+    return () => window.removeEventListener('kv:game-card-saved', on as EventListener);
+  }, [docId]);
 
   // 다시하기/모드 전환/문서 변경 시 완료 버튼바 숨김.
   useEffect(() => {
@@ -679,6 +697,16 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
               <Icon name="gallery" size={16} /> 게임 이미지
             </button>
           )}
+          {card && (
+            <button
+              onClick={() => setCardOpen((v) => !v)}
+              className={cardOpen ? chromeBtnAccent : chromeBtn}
+              title="교사용 활동 안내 — 목표·발문·진행·확장·평가"
+              aria-label="교사 안내"
+            >
+              <Icon name="book" size={16} /> 교사 안내
+            </button>
+          )}
           <button onClick={() => setHelpOpen(true)} className={chromeBtn} title="도움말 — 기능·단축키 안내" aria-label="도움말">
             <Icon name="help" size={16} /> 도움말
           </button>
@@ -793,6 +821,9 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
       )}
 
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+
+      {/* 교사용 활동 안내 드로어 — 게임 디자인 에이전트가 만든 카드(있을 때만). 재생·편집 양쪽. */}
+      {card && cardOpen && <TeacherCardPanel card={card} onClose={() => setCardOpen(false)} />}
 
       {/* 이미지 편집 모달 — 마이보드와 동일 컴포넌트. target.onApply로 요소 src 교체.
           🔴 z-200 래퍼로 감싸 ZoomOverlay(z-130) 위에 띄운다(안 그러면 오버레이 뒤로 가려 안 보인다). */}
