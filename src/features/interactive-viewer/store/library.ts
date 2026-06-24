@@ -61,13 +61,18 @@ export function removeFromLibrary(docId: string): void {
   writeLib(readLib().filter((s) => s.docId !== docId));
 }
 
-/** 질의(게임 만들기 프롬프트)와 제목이 겹치는 저장 게임 추천 — 없으면 빈 배열. */
-export function recommendFromLibrary(query: string, limit = 3): SavedGame[] {
-  const toks = (query || '')
+/** 질의를 의미 토큰으로(조사·'게임/놀이/만들기' 같은 군더더기 제거, 2자 이상). */
+function tokenize(query: string): string[] {
+  return (query || '')
     .toLowerCase()
     .split(/[\s,!?.·]+/)
     .map((w) => w.replace(/(을|를|이|가|은|는|에|의|로|와|과|게임|퀴즈|만들어줘|만들기|만들|놀이|활동|찾아|눌러|세기)$/u, ''))
     .filter((w) => w.length >= 2);
+}
+
+/** 질의(게임 만들기 프롬프트)와 제목이 겹치는 저장 게임 추천 — 없으면 빈 배열. */
+export function recommendFromLibrary(query: string, limit = 3): SavedGame[] {
+  const toks = tokenize(query);
   if (!toks.length) return [];
   return listLibrary()
     .map((s) => ({ s, score: toks.reduce((n, t) => n + (s.title.toLowerCase().includes(t) ? 1 : 0), 0) }))
@@ -75,4 +80,19 @@ export function recommendFromLibrary(query: string, limit = 3): SavedGame[] {
     .sort((a, z) => z.score - a.score || z.s.savedAt - a.s.savedAt)
     .slice(0, limit)
     .map((x) => x.s);
+}
+
+/** 질의가 저장 게임과 '강하게' 일치하면(핵심 토큰 2개 이상 + 67% 이상이 제목에 있음) 그 게임을 반환 —
+    이 경우 새로 만들지 않고 기존 게임을 보드에 바로 띄워 즉시 활동(createInteractiveGame). 약한 일치는 null. */
+export function findReusableGame(query: string): SavedGame | null {
+  const toks = tokenize(query);
+  if (toks.length < 2) return null;
+  const best = listLibrary()
+    .map((s) => {
+      const title = s.title.toLowerCase().replace(/\s+/g, ''); // '옷 입기'≈'옷입기' — 공백 무시 매칭
+      return { s, hit: toks.filter((t) => title.includes(t)).length };
+    })
+    .filter((x) => x.hit >= 2 && x.hit / toks.length >= 0.6)
+    .sort((a, z) => z.hit - a.hit || z.s.savedAt - a.s.savedAt);
+  return best[0]?.s ?? null;
 }
