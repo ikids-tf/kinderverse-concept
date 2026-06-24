@@ -17,7 +17,7 @@ import { removeBackground, cleanupBackground, warmupBackgroundRemoval } from '@/
 import type { AssetRef } from '../schema/interactiveNode';
 
 const GEN_PREFIX = 'gen:';
-export const MAX_IMAGES = 8; // 한 게임당 토큰 그림 상한(비용/지연 가드)
+export const MAX_IMAGES = 12; // 한 게임당 '서로 다른' 토큰 그림 상한(비용/지연 가드 — 같은 라벨은 1장 공유)
 
 /** ★ 누끼(배경제거) 최적화 클로즈 — 온디바이스 RMBG가 '주 피사체만' 깔끔히 따도록 생성
     단계에서 강하게 강제한다. 스티커/다이컷처럼 피사체는 100% 불투명, 배경은 완전 평면 순백,
@@ -37,8 +37,9 @@ const STYLE_CORE =
   '완전 정면 금지 — 대상의 특징이 가장 잘 드러나는 3/4 측면 각도(동물·생물은 꼬리·다리까지 전신이 다 보이게, 사물·기구·건물은 형태가 분명한 입체 각도), ' +
   '사물·동물은 의인화하지 말 것(사람 얼굴·표정·옷·직립 보행 금지), 실제 모습 그대로 정확하게(아이들이 실제 정보를 배우도록), ' +
   '또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화, ' + CUTOUT_CLAUSE;
-/** 단일 토큰 — 대상 '전체'가 잘리지 않고 프레임 안에 여유 있게(사방 여백). 타이트한 박스는 누끼 후 trimTransparent가 만든다(여기서 꽉 채우면 앞다리·꼬리가 잘림). */
-const TOKEN_STYLE = `대상 하나만, 머리·귀부터 꼬리·발끝까지 전체가 절대 잘리지 않고 프레임 안에 여유 있게 다 들어오도록(사방에 넉넉한 여백, 화면을 꽉 채우지 말 것), 화면 가운데에 또렷하게, 다른 사물 없음, ${STYLE_CORE}`;
+/** 단일 토큰 — 대상 '전체'가 잘리지 않고 프레임 안에 여유 있게(사방 여백). 타이트한 박스는 누끼 후 trimTransparent가 만든다(여기서 꽉 채우면 앞다리·꼬리가 잘림).
+    ★ 대상-불문: '머리·꼬리' 같은 동물 전제 표현을 쓰지 않는다 — 모자·목도리·사물 라벨이 동물/캐릭터로 둔갑하던 버그 차단. */
+const TOKEN_STYLE = `요청한 대상 하나만 — 그 대상의 실제 모습 그대로 그린다(모자는 모자, 목도리는 목도리, 신발은 신발처럼 사물이면 그 사물 자체를; 동물·캐릭터·사람으로 절대 바꾸지 말 것), 대상의 위·아래·좌우 끝까지 전체가 절대 잘리지 않고 프레임 안에 여유 있게(사방에 넉넉한 여백, 화면을 꽉 채우지 말 것), 화면 가운데에 또렷하게, 다른 사물 없음, ${STYLE_CORE}`;
 /** 숫자 토큰 — 수 세기·숫자 게임의 번호 아이템. 대상 위에 큰 아라비아 숫자를 또렷하게(‘글자 없음’ 해제). */
 const NUMBER_TOKEN_STYLE =
   '대상 하나만, 전체가 잘리지 않고 프레임 안에 여유 있게, 대상 표면(또는 한가운데)에 크고 또렷하며 깔끔한 아라비아 숫자 하나가 분명히 보이게 적혀 있음(숫자 외 다른 글자는 없음), 화면 가운데, 다른 사물 없음, ' +
@@ -246,7 +247,9 @@ export async function fillTokenImages(
 ): Promise<void> {
   const doCut = opts.cutout ?? true;
   const els = Array.isArray(raw.elements) ? raw.elements : [];
-  const targets: Array<{ el: RawEl; label: string }> = [];
+  // gen: 이미지 대상 수집(라벨 없는 이미지는 도형 폴백).
+  type Target = { el: RawEl; label: string; elId: string };
+  const all: Target[] = [];
   for (const el of els) {
     if (el.kind !== 'image') continue;
     const label = genLabelOf(el);
@@ -254,56 +257,79 @@ export async function fillTokenImages(
       if (!el.src) { el.kind = 'shape'; delete el.src; } // 그림 지정 없음 → 도형(빈 이미지 방지)
       continue;
     }
-    if (targets.length >= MAX_IMAGES) { el.kind = 'shape'; delete el.src; continue; } // 상한 초과
-    targets.push({ el, label });
+    all.push({ el, label, elId: String((el as { id?: unknown }).id ?? '') });
   }
-  if (!targets.length) return;
-  // 진행률 — 교사가 '몇 개 중 몇 개째'인지 보며 기다리게(추상적 '그림 만드는 중' 대신 구체적 단계).
-  const total = targets.length;
+  if (!all.length) return;
+
+  // 액터(정면+측면 2포즈)는 개별 생성. 나머지는 '같은 라벨 1회 생성→공유'로 중복 제거 —
+  // 예: 꾸미기의 팔레트 썸네일과 캐릭터 위 오버레이가 같은 라벨이면 한 번만 그려 둘 다에 적용
+  // (시드가 없어 따로 그리면 서로 다른 그림이 나오던 문제까지 해결 = 팔레트와 입혀진 모습이 일치).
+  const fronts = all.filter((t) => opts.frontIds?.has(t.elId));
+  const normals = all.filter((t) => !opts.frontIds?.has(t.elId));
+  const byLabel = new Map<string, Target[]>();
+  for (const t of normals) {
+    const g = byLabel.get(t.label);
+    if (g) g.push(t);
+    else byLabel.set(t.label, [t]);
+  }
+
+  // 생성 단위(액터 + distinct 라벨)에 상한 적용 — 초과분은 도형 폴백.
+  const keptFronts = fronts.slice(0, MAX_IMAGES);
+  for (const t of fronts.slice(MAX_IMAGES)) { t.el.kind = 'shape'; delete t.el.src; }
+  let budget = MAX_IMAGES - keptFronts.length;
+  const keptLabels: Array<[string, Target[]]> = [];
+  for (const entry of byLabel) {
+    if (budget > 0) { keptLabels.push(entry); budget--; }
+    else for (const t of entry[1]) { t.el.kind = 'shape'; delete t.el.src; }
+  }
+
+  // 진행률 — 교사가 '몇 개 중 몇 개째'인지 보며 기다리게(서로 다른 그림 수 기준).
+  const total = keptFronts.length + keptLabels.length;
   let done = 0;
   const tick = () => opts.onBusy?.(`🖼️ 놀이 그림 그리는 중… (${done}/${total})`);
   tick();
   if (doCut) warmupBackgroundRemoval(); // 모델 미리 로드(누끼 대기 단축)
 
-  await Promise.all(
-    targets.map(async (t) => {
-      const elId = String((t.el as { id?: unknown }).id ?? '');
-      // 주인공(액터) — 정면+측면 2포즈를 한 장에서 분할 생성(같은 캐릭터). 정면=메인 src, 측면=onActorSide로 저장.
-      if (opts.frontIds?.has(elId)) {
-        const poses = await generateActorPoses(t.label, doCut);
-        if (poses) {
-          try {
-            t.el.src = await urlToAssetRef(poses.front, 'generated');
-            t.el.assetKind = 'generated';
-            opts.onActorSide?.(elId, poses.side);
-          } catch {
-            t.el.kind = 'shape';
-            delete t.el.src;
-          }
-          done++;
-          tick();
-          return;
-        }
-        // 2포즈 생성 실패 → 아래 정면 단독 생성으로 폴백.
+  const saveIfReal = (label: string, uri: unknown) => {
+    if (typeof uri === 'string' && uri.startsWith('data:image/') && !uri.startsWith('data:image/svg')) {
+      void saveAsset(label, 'image', uri, opts.theme, undefined, 'game');
+    }
+  };
+
+  // 액터 — 정면+측면 2포즈를 한 장에서 분할 생성(같은 캐릭터). 실패 시 정면 단독 폴백.
+  const frontJobs = keptFronts.map((t) => async () => {
+    const poses = await generateActorPoses(t.label, doCut);
+    if (poses) {
+      try {
+        t.el.src = await urlToAssetRef(poses.front, 'generated');
+        t.el.assetKind = 'generated';
+        opts.onActorSide?.(t.elId, poses.side);
+      } catch {
+        t.el.kind = 'shape';
+        delete t.el.src;
       }
-      // 번호 아이템은 숫자 새김, 액터 폴백은 정면, 그 외는 3/4 측면.
-      const style = opts.frontIds?.has(elId)
-        ? FRONT_TOKEN_STYLE
-        : isNumberedLabel(t.label)
-          ? NUMBER_TOKEN_STYLE
-          : TOKEN_STYLE;
-      const img = await genImage(t.label, style);
+    } else {
+      const img = await genImage(t.label, FRONT_TOKEN_STYLE);
       await assignImage(t.el, img, doCut);
-      // 라이브러리(IDB)에 저장 — 편집 시 '게임 이미지 갤러리'에서 재사용. 실제 PNG만(플레이스홀더 제외).
       const s = t.el.src;
-      const uri = s && typeof s === 'object' ? (s as { src?: unknown }).src : undefined;
-      if (typeof uri === 'string' && uri.startsWith('data:image/') && !uri.startsWith('data:image/svg')) {
-        void saveAsset(t.label, 'image', uri, opts.theme, undefined, 'game');
-      }
-      done++;
-      tick();
-    }),
-  );
+      saveIfReal(t.label, s && typeof s === 'object' ? (s as { src?: unknown }).src : undefined);
+    }
+    done++;
+    tick();
+  });
+
+  // 일반 토큰 — distinct 라벨당 1회 생성·누끼 → 같은 라벨 요소 전부에 공유 적용.
+  const labelJobs = keptLabels.map(([label, group]) => async () => {
+    const style = isNumberedLabel(label) ? NUMBER_TOKEN_STYLE : TOKEN_STYLE;
+    const img = await genImage(label, style);
+    const cut = img ? (doCut ? await cutout(img) : img) : null;
+    for (const t of group) await assignImage(t.el, cut, false); // 이미 누끼 처리됨(중복 누끼 방지)
+    saveIfReal(label, cut); // 라이브러리(IDB) 저장 — 라벨당 1회, 실제 PNG만
+    done++;
+    tick();
+  });
+
+  await Promise.all([...frontJobs, ...labelJobs].map((job) => job()));
 }
 
 /**
