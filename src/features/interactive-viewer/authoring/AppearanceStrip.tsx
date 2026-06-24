@@ -25,7 +25,7 @@ export function AppearanceStrip({
   onClose: () => void;
 }) {
   return (
-    <div className="kv-fsbar-enter pointer-events-auto absolute left-1/2 top-3 z-40 flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-border bg-surface/95 px-3 py-2 shadow-lg backdrop-blur">
+    <div className="kv-fsbar-enter pointer-events-auto absolute left-1/2 top-[68px] z-40 flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-border bg-surface/95 px-3 py-2 shadow-lg backdrop-blur">
       <span className="px-1 text-xs font-bold text-fg-2">이 캐릭터의 모습 — 눌러서 편집</span>
       {appearances.map((a, i) => (
         <button
