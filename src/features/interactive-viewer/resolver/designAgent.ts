@@ -33,6 +33,8 @@ export interface TeacherCard {
   domains: string[];
   /** 도입 발문/안내(교사가 여는 말). */
   intro: string;
+  /** ★발문 — 교사가 '게임을 아이들과 함께 보며' 던지는 열린 질문(과정 중). 모든 카드에 채운다. */
+  prompts: string[];
   /** 진행 — 교사가 '하는 말·행동' 기준 3~4단계. */
   steps: string[];
   /** 확장 활동(심화·연계). */
@@ -112,6 +114,7 @@ ${MECH_SPEC}
   },
   "teacherCard": {
     "intro": "<도입 발문>",
+    "prompts": ["<함께 보며 아이에게 묻는 열린 발문>", "..."],
     "steps": ["<진행 단계>", "..."],
     "extensions": ["<확장 활동>", "..."],
     "assessment": "<관찰·평가 포인트>"
@@ -306,6 +309,7 @@ export async function designGame(prompt: string, onBusy?: (m: string | null) => 
     objective: str(raw.objective) ?? '놀이에 즐겁게 참여하며 주제에 관심을 가진다.',
     domains: domains.length ? domains : ['자연탐구'],
     intro: str(tc.intro) ?? '오늘은 어떤 놀이를 해 볼까요? 그림을 함께 살펴봅니다.',
+    prompts: strList(tc.prompts, 5), // 비면 호출부(createInteractiveGame)가 ensurePrompts 로 채운다
     steps: strList(tc.steps, 6).length ? strList(tc.steps, 6) : ['그림을 함께 보며 무엇이 있는지 이야기 나눈다.', '교사가 먼저 한 번 보여 준 뒤 유아가 직접 해 보게 한다.'],
     extensions: strList(tc.extensions, 4),
     assessment: str(tc.assessment) ?? '놀이에 관심을 보이며 끝까지 참여하는지 관찰한다.',

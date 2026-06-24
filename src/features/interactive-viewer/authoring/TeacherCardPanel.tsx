@@ -56,6 +56,19 @@ export function TeacherCardPanel({ card, onClose }: { card: TeacherCard; onClose
           <p className="text-sm leading-relaxed text-fg-2">{card.intro}</p>
         </Section>
 
+        {card.prompts && card.prompts.length > 0 && (
+          <Section icon="message" title="함께 보며 묻는 말 (발문)">
+            <ul className="flex flex-col gap-2">
+              {card.prompts.map((q, i) => (
+                <li key={i} className="flex gap-2 rounded-xl bg-accent-soft/60 px-3 py-2 text-sm leading-relaxed text-fg">
+                  <span aria-hidden className="flex-none font-bold text-accent">Q.</span>
+                  <span>{q}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
         <Section icon="check" title="진행">
           <ol className="flex flex-col gap-2">
             {card.steps.map((s, i) => (

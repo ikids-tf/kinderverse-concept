@@ -6,6 +6,8 @@ import { resolveIntent } from '@/features/interactive-viewer/resolver/resolveInt
 import { selectRecipe } from '@/features/interactive-viewer/resolver/selectRecipe';
 import { dressUpTeacherCard } from '@/features/interactive-viewer/resolver/fillSlots';
 import { designGame, type TeacherCard } from '@/features/interactive-viewer/resolver/designAgent';
+import { buildTeacherCard, ensurePrompts } from '@/features/interactive-viewer/resolver/teacherCard';
+import type { MechanismId } from '@/features/interactive-viewer/resolver/recipeTypes';
 import { assembleAndPlace } from '@/features/interactive-viewer/resolver/place';
 import { saveToLibrary } from '@/features/interactive-viewer/store/library';
 import { saveGameCard } from '@/features/interactive-viewer/store/gameCards';
@@ -96,6 +98,7 @@ async function createInteractiveGame(text: string): Promise<void> {
     useInteractiveStore.getState().ensure(docId);
     let r: { ok: boolean; message: string } | null = null;
     let card: TeacherCard | null = null;
+    let mechanism: MechanismId | null = null;
 
     // 1) 게임 디자인 에이전트(Tier1 지능층) — 메커니즘 선택 + 풍부한 내용 + 교사 활동 카드.
     //    구조는 만들지 않는다 — 받은 '내용'을 결정론 Resolver(assembleAndPlace)가 조립·검증한다.
@@ -107,6 +110,7 @@ async function createInteractiveGame(text: string): Promise<void> {
       if (placed.ok) {
         r = { ok: true, message: placed.message };
         card = designed.card;
+        mechanism = designed.mechanism;
       }
     }
     // 2) 결정론 Resolver(규칙 매칭) — 에이전트 실패/한도 시 바닥을 받친다(즉시·안정).
@@ -116,6 +120,7 @@ async function createInteractiveGame(text: string): Promise<void> {
         const placed = await assembleAndPlace(docId, intent.mechanism, intent.input, onBusy);
         if (placed.ok) {
           r = { ok: true, message: placed.message };
+          mechanism = intent.mechanism;
           if (isDressUp) card = dressUpTeacherCard(text); // 옷입히기 교사 카드(결정론·날씨별)
         }
       }
@@ -128,7 +133,10 @@ async function createInteractiveGame(text: string): Promise<void> {
       const doc = useInteractiveStore.getState().peek(docId);
       if (doc && doc.elements.length > 0) {
         saveToLibrary(doc);
-        if (card) saveGameCard(docId, card);
+        // ★ 모든 게임은 항상 교사 카드를 갖는다 — 에이전트 카드가 없으면 결정론 생성, 발문은 늘 채운다.
+        if (!card) card = isDressUp ? dressUpTeacherCard(text) : buildTeacherCard(mechanism ?? 'tap-select', topic, doc.title);
+        card = ensurePrompts(card, topic);
+        saveGameCard(docId, card);
       }
     }
   } finally {
