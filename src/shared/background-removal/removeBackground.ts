@@ -221,7 +221,7 @@ export async function cleanupBackground(
     // ── 주 피사체만 남기기(누끼 노이즈 자동 정리) ──────────────────────────
     // 복잡한 배경의 매트는 피사체가 가는 '다리'로 배경 노이즈와 연결돼 있어 단순 라벨링으론
     // 못 끊는다. 모폴로지 오프닝(침식→가장 큰 덩어리→팽창)으로 다리를 끊고 주 피사체만 복원한다.
-    const FLOOR = Math.round(0.30 * 255); // 희미한 노이즈·연결다리 제거(피사체 외곽은 보존)
+    const FLOOR = Math.round(0.42 * 255); // 희미한 노이즈·헤일로·연결다리 제거(외곽 반투명 fringe를 더 깎음)
     const E = 3; // 침식/팽창 횟수(다리 두께 < 2E면 끊김)
     const orig = new Uint8Array(N);
     for (let i = 0; i < N; i++) {

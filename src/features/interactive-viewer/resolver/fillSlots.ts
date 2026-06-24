@@ -10,6 +10,7 @@ import { extractJson } from '@/ai/json';
 import { pickVocab, resolveTheme, type ThemePack } from './themePacks';
 import type { IntentParse } from './selectRecipe';
 import type { MechanismId, RecipeInput } from './recipeTypes';
+import type { TeacherCard } from './designAgent';
 
 type Content = Omit<RecipeInput, 'docId'>;
 
@@ -45,6 +46,29 @@ function detectWeather(p: string): '눈' | '비' | '미세먼지' {
   if (/미세\s*먼지|먼지|황사/.test(p)) return '미세먼지';
   if (/비\s*오|비가|장마|우산|빗물|비\s*내리|소나기/.test(p)) return '비';
   return '눈';
+}
+
+/** dress-up 교사 활동 카드(결정론 — 날씨별). 에이전트를 건너뛰는 dress-up 경로에서 saveGameCard 로 동반 저장. */
+export function dressUpTeacherCard(prompt: string): TeacherCard {
+  const w = detectWeather(prompt);
+  const d = WEATHER[w];
+  const correct = d.items.find((i) => i.correct)?.label ?? '알맞은 옷';
+  return {
+    title: d.title,
+    age: 4,
+    mechanism: 'dress-up',
+    objective: `${w} 날씨를 살펴보고 그에 어울리는 옷차림을 골라 보며, 날씨와 옷의 관계에 관심을 가진다.`,
+    domains: ['자연탐구', '신체운동·건강'],
+    intro: '창밖을 함께 보며 "오늘 날씨는 어떤가요? 이런 날엔 무엇을 입어야 할까요?" 하고 묻는다.',
+    steps: [
+      '창밖 날씨를 함께 살펴보며 어떤 날씨인지 이야기 나눈다.',
+      `옷 세 가지를 보며 "어떤 옷이 ${w} 오는 날에 맞을까?" 묻고 유아가 골라 입혀 보게 한다.`,
+      '알맞은 옷을 입으면 "밖에 나가기"를 눌러 밖에 나간 모습을 함께 본다.',
+      '밖에 나간 장면을 보며 "기분이 어때요? 왜 이 옷이 좋을까요?" 이야기 나눈다.',
+    ],
+    extensions: ['다른 날씨(비·눈·미세먼지)도 만들어 옷차림을 비교해 본다.', '오늘 실제 날씨를 확인하고 등·하원 옷차림을 이야기해 본다.'],
+    assessment: `날씨와 옷차림의 관계를 이해하고 '${correct}'처럼 알맞은 옷을 고르는지, 그 이유를 말하는지 관찰한다.`,
+  };
 }
 
 /** vocab에서 중복 없이 n개(모자라면 순환). */

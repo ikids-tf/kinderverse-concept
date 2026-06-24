@@ -4,6 +4,7 @@ import { composeInteractiveNode } from '@/features/interactive-viewer/authoring/
 import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
 import { resolveIntent } from '@/features/interactive-viewer/resolver/resolveIntent';
 import { selectRecipe } from '@/features/interactive-viewer/resolver/selectRecipe';
+import { dressUpTeacherCard } from '@/features/interactive-viewer/resolver/fillSlots';
 import { designGame, type TeacherCard } from '@/features/interactive-viewer/resolver/designAgent';
 import { assembleAndPlace } from '@/features/interactive-viewer/resolver/place';
 import { recommendFromLibrary, saveToLibrary } from '@/features/interactive-viewer/store/library';
@@ -114,7 +115,10 @@ async function createInteractiveGame(text: string): Promise<void> {
       const intent = await resolveIntent(text, onBusy);
       if (intent) {
         const placed = await assembleAndPlace(docId, intent.mechanism, intent.input, onBusy);
-        if (placed.ok) r = { ok: true, message: placed.message };
+        if (placed.ok) {
+          r = { ok: true, message: placed.message };
+          if (isDressUp) card = dressUpTeacherCard(text); // 옷입히기 교사 카드(결정론·날씨별)
+        }
       }
     }
     // 3) compose 폴백(롱테일 — 동사 매칭 실패).
