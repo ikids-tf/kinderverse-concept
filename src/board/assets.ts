@@ -163,36 +163,56 @@ const CATEGORY: Record<string, string[]> = {
 /** 입력 중 추천 검색 — 태그가 질의어를 포함하거나(주: 토끼), 질의가 카테고리(동물·과일…)면 그 멤버를
     포함하는 자산을 찾는다(태그당 최신 1장). ★정밀화: group(게임 테마)·역방향 부분일치는 매칭에서 제외해
     '토끼 꾸미기'로 묶인 부품(모자·코)이 "토끼"에 끌려오지 않게. 배경 자산은 '배경' 질의가 아니면 제외. */
+/** 종류(갤러리 탭) 키워드 — 이 단어를 입력하면 그 종류 '전체'를 추천한다('이미지'→모든 이미지 등).
+    갤러리 탭: 이미지/그림=사진 자산, 도안, 동영상, 자료/전체=모두. (게임·웹링크는 별도 추천 스트립.) */
+const KIND_KEYWORDS: Record<string, ImageAsset['kind'][]> = {
+  이미지: ['image', '도안'],
+  그림: ['image', '도안'],
+  사진: ['image', '도안'],
+  도안: ['도안', 'image'],
+  색칠: ['도안'],
+  동영상: ['video'],
+  영상: ['video'],
+  비디오: ['video'],
+  자료: ['image', '도안', 'video'],
+  전체: ['image', '도안', 'video'],
+};
+
 export async function searchAssets(
   query: string,
   kind: ImageAsset['kind'] | ImageAsset['kind'][] = 'image',
   limit = Infinity, // 개수 제한 없음 — 추천 스트립이 줄바꿈+스크롤로 모두 보여준다
 ): Promise<ImageAsset[]> {
   const kinds = Array.isArray(kind) ? kind : [kind];
+  const nq = norm(query.trim());
+  const kindKw = KIND_KEYWORDS[nq]; // 질의가 종류 키워드면 그 종류 '전체'를 반환(토큰 매칭 생략)
+  const allow = kindKw ? kinds.filter((k) => kindKw.includes(k)) : kinds;
   const tokens = queryTokens(query).filter((t) => t.length >= 2);
-  if (tokens.length === 0) return [];
-  const wantsBg = /배경/.test(query); // '배경' 질의일 때만 배경 자산 포함
+  if (!kindKw && tokens.length === 0) return [];
+  const wantsBg = kindKw ? true : /배경/.test(query); // 종류 키워드(모든 이미지)는 배경도 포함
   const lib = await load();
   const out: ImageAsset[] = [];
   for (const arr of Object.values(lib)) {
     const seenKinds = new Set<string>();
     for (let i = arr.length - 1; i >= 0; i--) {
       const it = arr[i];
-      if (!kinds.includes(it.kind) || !it.url || seenKinds.has(it.kind)) continue;
+      if (!allow.includes(it.kind) || !it.url || seenKinds.has(it.kind)) continue;
       seenKinds.add(it.kind);
       const t = norm(it.tag);
-      // 배경 자산('X 배경')은 객체 검색에서 제외(토끼 → 토끼 객체이지 배경이 아님).
+      // 배경 자산('X 배경')은 객체 검색에서 제외(토끼 → 토끼 객체이지 배경이 아님). 종류 키워드는 포함.
       if (!wantsBg && (t.includes('배경') || norm(it.group ?? '').includes('배경'))) {
-        if (seenKinds.size >= kinds.length) break;
+        if (seenKinds.size >= allow.length) break;
         continue;
       }
-      const matched = tokens.some((tok) => {
-        if (t.includes(tok)) return true; // 태그가 질의어 포함(노란색'토끼' ← 토끼)
-        const members = CATEGORY[tok]; // 카테고리 질의(동물·과일…) → 멤버 태그 매칭
-        return !!members && members.some((m) => t.includes(norm(m)));
-      });
+      const matched =
+        !!kindKw || // 종류 키워드면 그 종류 전부
+        tokens.some((tok) => {
+          if (t.includes(tok)) return true; // 태그가 질의어 포함(노란색'토끼' ← 토끼)
+          const members = CATEGORY[tok]; // 카테고리 질의(동물·과일…) → 멤버 태그 매칭
+          return !!members && members.some((m) => t.includes(norm(m)));
+        });
       if (matched) out.push(it);
-      if (seenKinds.size >= kinds.length) break;
+      if (seenKinds.size >= allow.length) break;
     }
   }
   return out.sort((a, z) => z.createdAt - a.createdAt).slice(0, limit);

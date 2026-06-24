@@ -264,7 +264,7 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     }
     const t = setTimeout(() => {
       void import('@/board/assets')
-        .then((m) => m.searchAssets(draft.trim(), ['image', 'video']))
+        .then((m) => m.searchAssets(draft.trim(), ['image', '도안', 'video']))
         .then((sugs) => {
           setAssetSugs(sugs);
           // 목록이 바뀌면 더 이상 보이지 않는 선택은 비운다.
