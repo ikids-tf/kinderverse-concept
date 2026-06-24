@@ -6,7 +6,7 @@
  * 라이브러리가 늘수록(자동 저장) 실물 썸네일 커버리지가 올라간다. 보관함 이미지·웹링크 추천처럼
  * 키워드 매칭으로 바 위에 뜬다(PromptBar). 결정론(LLM 콜 없음).
  */
-import { listLibrary } from '../store/library';
+import { listLibrary, recommendFromLibrary } from '../store/library';
 import { loadInteractiveNode } from '../store/interactiveStore';
 import type { InteractiveNode } from '../schema/interactiveNode';
 import type { MechanismId } from './recipeTypes';
@@ -30,13 +30,17 @@ const MECHS: Array<{ emoji: string; verb: string; mech: MechanismId }> = [
 
 export interface GameSuggestion {
   key: string;
+  /** 'create' = 레시피로 새로 합성 · 'reuse' = 저장된 게임을 보드에 올려 바로 사용. */
+  kind: 'create' | 'reuse';
   emoji: string;
-  mechanism: MechanismId;
-  /** 같은 메커니즘 저장 게임의 장면 배경(실제 게임화면 썸네일). 없으면 undefined → 이모지. */
+  mechanism?: MechanismId;
+  /** 실제 게임화면 썸네일(저장 게임 장면 배경). 없으면 undefined → 이모지 폴백. */
   thumb?: string;
   label: string;
-  /** 클릭 시 startInteractiveGame 에 넘길 프롬프트(동사 포함 → selectRecipe 가 메커니즘 결정). */
-  prompt: string;
+  /** create — startInteractiveGame 에 넘길 프롬프트(동사 포함 → selectRecipe). */
+  prompt?: string;
+  /** reuse — 보드에 올릴 저장 게임 docId. */
+  docId?: string;
 }
 
 /* ── 메커니즘별 실제 썸네일(저장 게임 장면 배경) — 라이브러리에서 1회 스캔·캐시 ── */
@@ -102,17 +106,35 @@ function themeOf(query: string): string {
   return first && first.length >= 1 ? first : '';
 }
 
-/** 게임 추천 카드(메커니즘 × 테마) — 실제 썸네일 또는 이모지. */
+/** 게임 추천 — (1) 키워드와 맞는 저장 게임(재사용, 실물 썸네일) + (2) 메커니즘 추천(새로 만들기).
+    보관함 이미지·웹링크 추천처럼 매칭 수만큼 가변(10개 고정 아님). 모두 썸네일+이름 카드. */
 export function gameSuggestions(query: string): GameSuggestion[] {
   const theme = themeOf(query);
   const { map, pool } = mechanismThumbs();
-  return MECHS.map((m, i) => ({
-    key: m.verb,
+
+  // 1) 저장 게임 매칭 — 제목이 겹치는 게임을 재사용 카드로(실제 게임화면 썸네일).
+  const reuse: GameSuggestion[] = recommendFromLibrary(query, 12).map((g) => {
+    const bg = loadInteractiveNode(g.docId)?.canvas.background;
+    return {
+      key: `reuse-${g.docId}`,
+      kind: 'reuse' as const,
+      emoji: '🎮',
+      thumb: bg && typeof bg === 'object' && bg.src ? bg.src : undefined,
+      label: g.title || '인터랙티브 게임',
+      docId: g.docId,
+    };
+  });
+
+  // 2) 메커니즘 추천 — 같은 메커니즘 저장 게임 장면, 없으면 보유 장면 풀에서 돌려 쓴다(없으면 이모지).
+  const create: GameSuggestion[] = MECHS.map((m, i) => ({
+    key: `new-${m.verb}`,
+    kind: 'create' as const,
     emoji: m.emoji,
     mechanism: m.mech,
-    // 같은 메커니즘 저장 게임이 있으면 그 장면, 없으면 보유 장면 풀에서 돌려 쓴다(없으면 이모지).
     thumb: map[m.mech] ?? (pool.length ? pool[i % pool.length] : undefined),
     label: theme ? `${theme} ${m.verb}` : m.verb,
     prompt: theme ? `${theme} ${m.verb} 게임` : `${m.verb} 게임`,
   }));
+
+  return [...reuse, ...create];
 }

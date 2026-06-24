@@ -345,11 +345,14 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const [libRender, setLibRender] = useState(false);
   const [libShown, setLibShown] = useState(false);
   const libActive = libHasContent && !collapsed && !favRender && !libDismissed;
-  // 게임 추천 카드 클릭 → Resolver 즉시 합성(새 게임 노드). 입력 비우고 스트립 닫음.
+  // 게임 추천 카드 클릭 — 재사용(저장 게임)은 보드에 올리고, 생성은 Resolver 즉시 합성. 입력 비우고 닫음.
   const pickGame = (s: GameSuggestion) => {
     setDraft('');
     setLibDismissed(true);
-    void import('@/board/prompt').then((m) => m.startInteractiveGame(s.prompt));
+    void import('@/board/prompt').then((m) => {
+      if (s.kind === 'reuse' && s.docId) m.spawnSavedGameOnBoard(s.docId);
+      else if (s.prompt) m.startInteractiveGame(s.prompt);
+    });
   };
   // 키워드가 바뀌면 '닫음' 해제 — 다시 입력하면 열린다.
   useEffect(() => { setLibDismissed(false); }, [draft]);
@@ -715,15 +718,15 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
                   >
                     <Icon name="sparkle" size={12} className="text-accent" /> 게임
                   </span>
-                  {/* 보관함 이미지 카드와 동일한 톤앤매너 — 썸네일(메커니즘 타일) + 이름. */}
-                  <div className="flex w-full flex-wrap items-start gap-t2 overflow-y-auto p-1" style={{ maxHeight: 200 }}>
+                  {/* 보관함 이미지 카드와 동일한 톤앤매너 — 썸네일 + 게임 이름(w-72px). */}
+                  <div className="flex flex-wrap items-start gap-t2 overflow-y-auto" style={{ maxHeight: 200 }}>
                     {gameSugs.map((s, i) => (
                       <div key={s.key} className="shrink-0" style={libItemStyle(i, gameSugs.length, libShown, prefersReduced, gameBoxOrder, libBoxCount)}>
                         <button
                           type="button"
-                          title={`'${s.label}' 게임 바로 만들기`}
+                          title={s.kind === 'reuse' ? `'${s.label}' 보드에 올리기` : `'${s.label}' 게임 바로 만들기`}
                           onClick={() => pickGame(s)}
-                          className="group w-[76px] rounded-sm border border-border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft hover:border-accent"
+                          className="group w-[72px] rounded-sm border border-border bg-surface p-1 text-center shadow-sm transition-colors duration-150 ease-soft hover:border-accent"
                         >
                           <GameSuggestThumb src={s.thumb} emoji={s.emoji} />
                           <span className="mt-0.5 block truncate text-[10px] font-medium text-fg-2 group-hover:text-accent">

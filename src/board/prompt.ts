@@ -115,6 +115,16 @@ export function startInteractiveGame(text: string): void {
   void createInteractiveGame(normalizeInput(text));
 }
 
+/** 저장된 게임(docId)을 보드에 올려 바로 쓰게 한다 — 추천 '재사용' 카드 클릭. 생성 없음. */
+export function spawnSavedGameOnBoard(docId: string): void {
+  useInteractiveStore.getState().ensure(docId); // 문서 보장(없으면 빈 기본)
+  const c = viewportCenterBoardPoint();
+  const nodeId = addPresetNodeCmd('interactive', c.x, c.y, { w: 720, h: 450, autoH: false, data: { docId } }, '인터랙티브 게임');
+  const board = useBoardStore.getState();
+  board.focusNode(nodeId);
+  slideFrameToEmpty(nodeId);
+}
+
 /** 보드에서 인터랙티브 노드가 단독 선택된 채 프롬프트 — 그 노드(docId)에 바로 게임을
     구성/수정한다. applyInteractivePrompt가 분기: 빈 노드 + 생성 의도 → 전체 구성,
     그 외 → 맥락 인지 편집. 풀스크린(kv:inode-prompt)과 완전히 동일한 경로. */
