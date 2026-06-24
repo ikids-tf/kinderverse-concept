@@ -24,21 +24,21 @@ const WEATHER: Record<'눈' | '비' | '미세먼지', { title: string; indoor: s
     indoor: '창밖에 함박눈이 내리는 겨울, 아늑하고 따뜻한 실내 거실',
     outdoor: '함박눈이 소복이 내리는 겨울 바깥, 눈사람과 눈 쌓인 나무',
     actor: '어린이',
-    items: [{ label: '두꺼운 패딩 점퍼', correct: true }, { label: '반팔 티셔츠' }, { label: '수영복' }],
+    items: [{ label: '빨간 패딩 점퍼', correct: true }, { label: '줄무늬 반팔 티셔츠' }, { label: '수영복' }],
   },
   비: {
     title: '비 오는 날, 뭘 입을까?',
     indoor: '창밖에 비가 내리고 창문에 빗방울이 맺힌 아늑한 실내',
     outdoor: '비가 내리는 바깥 거리, 물웅덩이와 촉촉한 나뭇잎',
     actor: '어린이',
-    items: [{ label: '노란 우비', correct: true }, { label: '반팔 티셔츠' }, { label: '두꺼운 패딩' }],
+    items: [{ label: '노란 우비', correct: true }, { label: '줄무늬 반팔 티셔츠' }, { label: '빨간 패딩 점퍼' }],
   },
   미세먼지: {
     title: '미세먼지가 가득한 날, 뭘 챙길까?',
     indoor: '창밖이 뿌옇게 흐린 미세먼지 많은 날의 실내',
     outdoor: '뿌연 미세먼지로 흐릿한 바깥 거리',
     actor: '어린이',
-    items: [{ label: '하얀 마스크', correct: true }, { label: '선글라스' }, { label: '수영복' }],
+    items: [{ label: '하얀 마스크', correct: true }, { label: '검은 선글라스' }, { label: '수영복' }],
   },
 };
 /** 프롬프트에서 날씨 추출(미세먼지→비→눈 순, 기본 눈). */
@@ -151,7 +151,7 @@ export async function fillSlots(
     case 'dress-up': {
       const gender = detectGender(prompt); // '남자아이' | '여자아이'
       // 옷 라벨은 '옷 이름'만(사람·성별어 안 박음 — '남아 수영복'이면 AI가 아이를 그림). 성별은 캐릭터가 가짐.
-      const swim = gender === '여자아이' ? '원피스 수영복' : '수영 반바지';
+      const swim = gender === '여자아이' ? '분홍 원피스 수영복' : '파란 수영 반바지';
       // 특정 날씨가 집히면 그 날씨 단일 게임(밖에 나가기 포함), 일반이면 3날씨 전환 통합.
       if (hasSpecificWeather(prompt)) {
         const d = WEATHER[detectWeather(prompt)];
@@ -159,7 +159,7 @@ export async function fillSlots(
         return { title: d.title, actorLabel: gender, items, sceneDesc: d.indoor, sceneOutDesc: d.outdoor };
       }
       // 통합 — 같은 아이 + 공용 옷 4벌 + 하단 날씨 썸네일(눈·비·미세먼지)로 창밖 날씨 전환.
-      const shared = [{ label: '두꺼운 패딩 점퍼' }, { label: '노란 우비' }, { label: '하얀 마스크' }, { label: swim }];
+      const shared = [{ label: '빨간 패딩 점퍼' }, { label: '노란 우비' }, { label: '하얀 마스크' }, { label: swim }];
       const weathers = [
         { key: 'snow', indoor: WEATHER['눈'].indoor, outdoor: WEATHER['눈'].outdoor, title: '눈 오는 날, 뭘 입을까?', emoji: '❄️', name: '눈' },
         { key: 'rain', indoor: WEATHER['비'].indoor, outdoor: WEATHER['비'].outdoor, title: '비 오는 날, 뭘 입을까?', emoji: '🌧️', name: '비' },

@@ -61,7 +61,7 @@ function buildDressUp(input: RecipeInput): InteractiveNode {
     sceneImageEl(BG_OUT, input.sceneOutDesc || '바깥 풍경', { z: 2 }),
     textEl(TITLE, input.title, { x: 300, y: 22, w: 680, h: 54, z: 30 }),
     textEl(HOWTO, '날씨에 맞는 옷을 골라 탭하거나 끌어다 입혀 주세요', { x: 300, y: 80, w: 680, h: 34, z: 30 }),
-    // 맨몸 + 착장들 = '모두 같은 아이' 한 장 시트로 생성(sheet:) → 얼굴 일관. 착장들은 숨김.
+    // 맨몸 + 착장들 = '모두 같은 아이' 한 장 시트(sheet:) → 같은 얼굴. 옷 아이템은 개별(gen:).
     sheetImageEl(KID, `실내복 입은 ${actor}`, { ...KIDBOX, z: 5 }),
     ...items.map((it, i) => sheetImageEl(dressedId(i), `${it.label} 입은 ${actor}`, { ...KIDBOX, z: 6 })),
     ...items.map((it, i) => imageEl(itemId(i), it.label, { x: itemX(i), y: 615, w: 150, h: 150, z: 8 })),
@@ -137,9 +137,9 @@ function buildWeatherRounds(input: RecipeInput): InteractiveNode {
     ...weathers.map((w) => sceneImageEl(`bgout_${w.key}`, w.outdoor, { z: 2 })), // 날씨별 실외('밖에 나가기')
     ...weathers.map((w) => textEl(`title_${w.key}`, w.title, { x: 260, y: 22, w: 720, h: 54, z: 30 })),
     textEl(HOWTO, '날씨에 맞는 옷을 골라 입혀 주세요', { x: 260, y: 80, w: 720, h: 34, z: 30 }),
-    sheetImageEl(KID, `실내복 입은 ${actor}`, { ...KIDBOX, z: 5 }), // 맨몸
+    sheetImageEl(KID, `실내복 입은 ${actor}`, { ...KIDBOX, z: 5 }), // 맨몸(같은 아이 시트)
     ...clothes.map((c, i) => sheetImageEl(dId(i), `${c.label} 입은 ${actor}`, { ...KIDBOX, z: 6 })), // 착장(숨김)
-    ...clothes.map((c, i) => imageEl(cId(i), c.label, { x: itemX(i), y: 562, w: 130, h: 130, z: 8 })), // 공용 옷
+    ...clothes.map((c, i) => imageEl(cId(i), c.label, { x: itemX(i), y: 562, w: 130, h: 130, z: 8 })), // 공용 옷(아이템)
     ...weathers.flatMap((w, i) => [
       shapeEl(`tbg_${w.key}`, { x: thumbX(i), y: 706, w: 162, h: 66, z: 28 }),
       textEl(`thumb_${w.key}`, `${w.emoji} ${w.name}`, { x: thumbX(i), y: 728, w: 162, h: 30, z: 29 }),

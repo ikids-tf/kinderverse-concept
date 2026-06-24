@@ -144,10 +144,11 @@ export async function removeBackground(input: RBInput, opts: RemoveBgOptions): P
    (3) 가장자리 침식 을 단계적으로 적용해 흩어진 점·헤일로만 정확히 깎는다. */
 export async function cleanupBackground(
   input: RBInput,
-  opts: { level?: number; keepMainOnly?: boolean } = {},
+  opts: { level?: number; keepMainOnly?: boolean; gentle?: boolean } = {},
 ): Promise<{ dataUrl: string; removed: number }> {
   const level = Math.max(1, Math.floor(opts.level ?? 1));
   const keepMainOnly = opts.keepMainOnly ?? false;
+  const gentle = opts.gentle ?? false; // 캐릭터(아이) — 침식으로 손·발·흰옷이 깎이지 않게 약하게
   const bmp = await normalizeToBitmap(input);
   const scale = Math.min(1, MAX_EDGE / Math.max(bmp.width, bmp.height));
   const w = Math.max(1, Math.round(bmp.width * scale));
@@ -217,7 +218,25 @@ export async function cleanupBackground(
 
   const label = new Int32Array(N);
 
-  if (keepMainOnly) {
+  if (keepMainOnly && gentle) {
+    // ── 캐릭터(아이) 전용 — 침식 없이 '가장 큰 덩어리'만 남긴다 ────────────
+    // 오프닝(침식)은 손가락·발·얇은 부위와 흰옷을 깎아 '내부 면이 제거'되는 원인이 된다.
+    // gentle 은 침식하지 않고(부위 보존) 작은 노이즈 섬만 제거 — 내부 구멍은 아래 imfill 이 메운다.
+    const FLOOR = Math.round(0.3 * 255); // 흰옷·밝은 면도 살아남게 임계 낮춤
+    const mask = new Uint8Array(N);
+    for (let i = 0; i < N; i++) {
+      const a = data[i * 4 + 3];
+      if (a > FLOOR) mask[i] = 1;
+      else if (a > 0) { data[i * 4 + 3] = 0; removed++; }
+    }
+    const sizes = labelOf(mask, label);
+    let maxC = 0, maxS = 0;
+    for (let c = 1; c < sizes.length; c++) if (sizes[c] > maxS) { maxS = sizes[c]; maxC = c; }
+    // 가장 큰 덩어리(주 피사체) 밖의 떨어진 섬만 투명화(피사체 자체는 침식 없이 온전히 보존).
+    for (let p = 0; p < N; p++) {
+      if (mask[p] === 1 && maxC > 0 && label[p] !== maxC && data[p * 4 + 3] !== 0) { data[p * 4 + 3] = 0; removed++; }
+    }
+  } else if (keepMainOnly) {
     // ── 주 피사체만 남기기(누끼 노이즈 자동 정리) ──────────────────────────
     // 복잡한 배경의 매트는 피사체가 가는 '다리'로 배경 노이즈와 연결돼 있어 단순 라벨링으론
     // 못 끊는다. 모폴로지 오프닝(침식→가장 큰 덩어리→팽창)으로 다리를 끊고 주 피사체만 복원한다.
