@@ -1287,7 +1287,18 @@ export function InteractiveStage({
       !preview &&
       ((collectInfo.isCollect && el.id === collectInfo.actorId && !actorMoving) ||
         (peekMode && peekIds.has(el.id)));
-    return <img src={src} alt={el.text ?? ''} draggable={false} className={idle ? 'ic-idle' : undefined} />;
+    // 전체 화면 크기 이미지(배경 — dress-up 실외 등)는 cover 로 꽉 채운다(토큰은 기본 contain 유지).
+    //   생성 이미지가 정사각이라 16:10 캔버스에서 좌우로 레터박스되던 문제 해결.
+    const isFullBg = el.transform.w >= cw * 0.98 && el.transform.h >= ch * 0.98;
+    return (
+      <img
+        src={src}
+        alt={el.text ?? ''}
+        draggable={false}
+        className={idle ? 'ic-idle' : undefined}
+        style={isFullBg ? { objectFit: 'cover' } : undefined}
+      />
+    );
   };
 
   /** 요소의 현재 박스(드래그/리사이즈 라이브 우선). */

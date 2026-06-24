@@ -3,6 +3,7 @@ import { useInteractiveStore } from '@/features/interactive-viewer/store/interac
 import { composeInteractiveNode } from '@/features/interactive-viewer/authoring/composeNode';
 import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
 import { resolveIntent } from '@/features/interactive-viewer/resolver/resolveIntent';
+import { selectRecipe } from '@/features/interactive-viewer/resolver/selectRecipe';
 import { designGame, type TeacherCard } from '@/features/interactive-viewer/resolver/designAgent';
 import { assembleAndPlace } from '@/features/interactive-viewer/resolver/place';
 import { recommendFromLibrary, saveToLibrary } from '@/features/interactive-viewer/store/library';
@@ -98,7 +99,9 @@ async function createInteractiveGame(text: string): Promise<void> {
 
     // 1) 게임 디자인 에이전트(Tier1 지능층) — 메커니즘 선택 + 풍부한 내용 + 교사 활동 카드.
     //    구조는 만들지 않는다 — 받은 '내용'을 결정론 Resolver(assembleAndPlace)가 조립·검증한다.
-    const designed = await designGame(text, onBusy);
+    //    단, 옷입히기(dress-up)는 결정론 레시피(날씨 테이블)가 정답이라 에이전트를 건너뛴다(LLM 변동 회피).
+    const isDressUp = selectRecipe(text)?.mechanism === 'dress-up';
+    const designed = isDressUp ? null : await designGame(text, onBusy);
     if (designed) {
       const placed = await assembleAndPlace(docId, designed.mechanism, designed.input, onBusy);
       if (placed.ok) {

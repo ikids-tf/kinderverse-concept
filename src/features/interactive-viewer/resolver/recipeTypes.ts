@@ -21,7 +21,8 @@ export type MechanismId =
   | 'branch-choose'
   | 'combine'
   | 'memory-flip'
-  | 'free-create';
+  | 'free-create'
+  | 'dress-up';
 
 /** 한 항목(내용 슬롯). label 이 곧 'gen:label' 이미지 또는 텍스트가 된다. */
 export interface RecipeItem {
@@ -70,6 +71,8 @@ export interface RecipeInput {
   /** 장면 배경(이미지) 설명 — 있으면 꼬리에서 generateSceneBackground 로 그려 캔버스에 깐다.
       없으면 노드 title 로 폴백(compose 와 동일). 색 토큰 배경일 때만 적용. */
   sceneDesc?: string;
+  /** dress-up — '밖에 나가기' 시 깔 실외 배경 설명(비-누끼 전체 이미지 요소, fillSceneImages 가 채움). */
+  sceneOutDesc?: string;
 }
 
 /** 메커니즘 한 종 — 결정론 build. */

@@ -16,6 +16,8 @@ export interface IntentParse {
 
 /** §5 동사 → 메커니즘. 위에서부터 첫 매칭(구체적 동사 먼저). */
 const VERB_MAP: Array<{ re: RegExp; mech: MechanismId }> = [
+  // 옷입히기(날씨) — 가장 구체적이라 맨 앞. '꾸미기'보다 우선.
+  { re: /옷\s*입히|옷\s*입혀|옷\s*입는|옷차림|입을까|챙길까|(뭐|뭘|무엇을)\s*(입|챙)|날씨.*(옷|입|챙)|(눈|비|미세먼지|황사|겨울|추운|더운)\s*날.*(입|챙|옷)/, mech: 'dress-up' },
   { re: /분류|나누기|나눠|나누어|모으기|모아|담기|골라\s*담/, mech: 'sort-to-bin' },
   { re: /빈칸|완성|채우기|채워|끼우기|끼워/, mech: 'slot-fill' },
   { re: /순서|차례|순서대로|세기|세어|세는|개수|숫자\s*세/, mech: 'sequence-order' },

@@ -48,6 +48,7 @@ const BODY_CHAIN: Record<MechanismId, string> = {
   'memory-flip': '짝 짓기 놀이',
   'branch-choose': '순서대로 세기 놀이',
   'free-create': '짝 짓기 놀이',
+  'dress-up': '분류하기 놀이',
 };
 
 /**

@@ -15,6 +15,38 @@ type Content = Omit<RecipeInput, 'docId'>;
 
 const SEMANTIC = new Set<MechanismId>(['sort-to-bin', 'slot-fill', 'pair-match', 'branch-choose', 'combine']);
 
+/** 날씨별 옷입히기 데이터(dress-up) — 라운드당 정답 1 + 오답 2. 결정론(LLM 불필요).
+    indoor=실내(창밖에 그 날씨) 캔버스 배경, outdoor='밖에 나가기' 실외 배경. */
+const WEATHER: Record<'눈' | '비' | '미세먼지', { title: string; indoor: string; outdoor: string; actor: string; items: Array<{ label: string; correct?: boolean }> }> = {
+  눈: {
+    title: '눈 오는 날, 뭘 입을까?',
+    indoor: '창밖에 함박눈이 내리는 겨울, 아늑하고 따뜻한 실내 거실',
+    outdoor: '함박눈이 소복이 내리는 겨울 바깥, 눈사람과 눈 쌓인 나무',
+    actor: '어린이',
+    items: [{ label: '두꺼운 패딩 점퍼', correct: true }, { label: '반팔 티셔츠' }, { label: '수영복' }],
+  },
+  비: {
+    title: '비 오는 날, 뭘 입을까?',
+    indoor: '창밖에 비가 내리고 창문에 빗방울이 맺힌 아늑한 실내',
+    outdoor: '비가 내리는 바깥 거리, 물웅덩이와 촉촉한 나뭇잎',
+    actor: '어린이',
+    items: [{ label: '노란 우비', correct: true }, { label: '반팔 티셔츠' }, { label: '두꺼운 패딩' }],
+  },
+  미세먼지: {
+    title: '미세먼지가 가득한 날, 뭘 챙길까?',
+    indoor: '창밖이 뿌옇게 흐린 미세먼지 많은 날의 실내',
+    outdoor: '뿌연 미세먼지로 흐릿한 바깥 거리',
+    actor: '어린이',
+    items: [{ label: '하얀 마스크', correct: true }, { label: '선글라스' }, { label: '수영복' }],
+  },
+};
+/** 프롬프트에서 날씨 추출(미세먼지→비→눈 순, 기본 눈). */
+function detectWeather(p: string): '눈' | '비' | '미세먼지' {
+  if (/미세\s*먼지|먼지|황사/.test(p)) return '미세먼지';
+  if (/비\s*오|비가|장마|우산|빗물|비\s*내리|소나기/.test(p)) return '비';
+  return '눈';
+}
+
 /** vocab에서 중복 없이 n개(모자라면 순환). */
 function pickDistinct(pack: ThemePack, n: number): string[] {
   return pack.vocabulary.length >= n ? pack.vocabulary.slice(0, n) : pickVocab(pack, n);
@@ -61,6 +93,12 @@ export async function fillSlots(
           { label: '초록 목도리', binKey: 'scarf' },
         ],
       });
+    }
+    // ── 날씨 옷입히기(결정론 — 날씨 테이블) ──
+    case 'dress-up': {
+      const d = WEATHER[detectWeather(prompt)];
+      // 실내/실외 배경은 dress-up 전용 필드로 직접 지정(withScene 폴백 안 씀).
+      return { title: d.title, actorLabel: d.actor, items: d.items.map((x) => ({ ...x })), sceneDesc: d.indoor, sceneOutDesc: d.outdoor };
     }
     // ── 의미 필요 → narrow LLM(캐시) ──
     default:

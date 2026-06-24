@@ -12,6 +12,7 @@ import { pairMatch, pathTrace, sequenceOrder } from './recipes/native';
 import { branchChoose, combine, tapSelect } from './recipes/combos';
 import { slotFill, sortToBin } from './recipes/dragSort';
 import { freeCreate, memoryFlip } from './recipes/freeCreate';
+import { dressUp } from './recipes/dressUp';
 
 export type { MechanismId, Recipe, RecipeInput, RecipeItem, RecipeBin, RecipePair, BuildResult } from './recipeTypes';
 
@@ -27,6 +28,7 @@ export const RECIPES: Partial<Record<MechanismId, Recipe>> = {
   'slot-fill': slotFill,
   'free-create': freeCreate,
   'memory-flip': memoryFlip,
+  'dress-up': dressUp,
 };
 
 export function getRecipe(id: MechanismId): Recipe | undefined {

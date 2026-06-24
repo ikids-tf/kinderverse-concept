@@ -82,6 +82,19 @@ export function fixedImageEl(id: string, srcUri: string, t: Partial<Transform> =
   };
 }
 
+/** 전체 화면 '배경' 이미지 요소 — `bggen:라벨` 로 두면 fillSceneImages(place.ts)가 누끼 없이
+    풀블리드 장면 이미지로 채운다(토큰 누끼와 구분 — 배경은 잘라내면 안 됨). dress-up '밖에 나가기' 등. */
+export function sceneImageEl(id: string, label: string, t: Partial<Transform> = {}): ElementNode {
+  return {
+    id,
+    kind: 'image',
+    src: { id: `a_${id}`, src: `bggen:${label}`, assetKind: 'generated' },
+    origin: 'upload',
+    assetKind: 'generated',
+    transform: tf({ x: 0, y: 0, w: CANVAS.w, h: CANVAS.h, z: 1, ...t }),
+  };
+}
+
 /* ─── 행동(트리거→액션) 생성자 — discriminated union 을 정확히 만든다 ─── */
 
 interface Ctl {

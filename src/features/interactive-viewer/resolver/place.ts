@@ -55,6 +55,33 @@ async function fillSwapImages(raw: { behaviors?: Array<Record<string, unknown>> 
   );
 }
 
+/**
+ * ★ 배경 이미지 패스(별도) — src 가 'bggen:라벨' 인 요소(전체 화면 배경 — dress-up '실외' 등)를
+ *   generateSceneBackground(누끼 없음·풀블리드)로 채운다. fillTokenImages 는 'gen:'만 누끼 처리하므로
+ *   배경은 여기서 따로 채운다(배경을 누끼하면 하늘·바닥이 잘려 깨진다). 실패 시 도형 폴백.
+ */
+async function fillSceneImages(raw: { elements?: Array<Record<string, unknown>> }): Promise<void> {
+  const els = Array.isArray(raw.elements) ? raw.elements : [];
+  const srcOf = (e: Record<string, unknown>): string | null => {
+    const s = e.src;
+    if (typeof s === 'string' && s.startsWith('bggen:')) return s.slice(6).trim();
+    if (s && typeof s === 'object' && typeof (s as { src?: unknown }).src === 'string' && (s as { src: string }).src.startsWith('bggen:')) {
+      return (s as { src: string }).src.slice(6).trim();
+    }
+    return null;
+  };
+  await Promise.all(
+    els
+      .map((e) => ({ e, label: srcOf(e) }))
+      .filter((t): t is { e: Record<string, unknown>; label: string } => !!t.label)
+      .map(async ({ e, label }) => {
+        const ref = await generateSceneBackground(label);
+        if (ref) e.src = ref;
+        else { e.kind = 'shape'; delete e.src; }
+      }),
+  );
+}
+
 /** 좌표 클램프(화면 밖 이탈 방지) — composeNode.clampNode 와 동일. */
 function clampNode(node: InteractiveNode): InteractiveNode {
   const { w: cw, h: ch } = node.canvas.size;
@@ -93,6 +120,7 @@ async function runTail(
     onActorSide: (elId, uri) => saveActorSide(node.id, elId, uri),
   });
   await fillSwapImages(raw as { behaviors?: Array<Record<string, unknown>> }); // behavior swap.to 의 gen: 라벨 채우기
+  await fillSceneImages(raw as { elements?: Array<Record<string, unknown>> }); // bggen: 전체화면 배경 채우기(누끼 없음)
   const parsed = safeParseInteractiveNode(raw);
   if (!parsed.success) return null;
   // manualLayout 레시피(드래그 분류 등)는 autoLayout 을 건너뛰고 레시피 좌표를 그대로 쓴다.
