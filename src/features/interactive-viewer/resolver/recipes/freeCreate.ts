@@ -43,7 +43,9 @@ function buildFreeCreate(input: RecipeInput): InteractiveNode {
   const tfs = rowTransforms(pairs.length, { y: 300, size: 210 });
 
   const elements: ElementNode[] = [
-    textEl(TITLE, input.title, { x: 280, y: 40, w: 720, h: 90, z: 20 }),
+    textEl(TITLE, input.title, { x: 280, y: 40, w: 720, h: 84, z: 20 }),
+    // 안내 — 승리조건 없는 열린 놀이라 '무엇을 하는지'를 분명히 보여 준다.
+    textEl('howto', '탭하면 모습이 바뀌어요 ✨ 마음대로 꾸며 보세요!', { x: 220, y: 130, w: 840, h: 46, z: 19 }),
     ...pairs.map((p, i) => imageEl(slotId(i + 1), p.left, tfs[i])),
   ];
   // 슬롯 tap → 옵션 A(메인 src)↔B(swap.to) 토글. fillSwapImages 가 to.src 'gen:' 를 채움.
