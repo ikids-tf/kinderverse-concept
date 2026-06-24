@@ -11,7 +11,8 @@
  * ⚠ composeInteractiveNode/buildNode 는 호출하지 않는다(LLM 포함 — 롱테일 폴백 전용).
  *   export 된 꼬리 함수(fillTokenImages/autoLayout/safeParse)만 직접 태운다.
  */
-import { fillTokenImages, generateCutoutAsset, generateSceneBackground } from '../authoring/artDirect';
+import { fillTokenImages, generateCharacterSheet, generateCutoutAsset, generateSceneBackground } from '../authoring/artDirect';
+import { urlToAssetRef } from '../runtime/assetIngest';
 import { autoLayout } from '../authoring/layout';
 import { offsetLane } from '../authoring/extendLane';
 import { safeParseInteractiveNode } from '../schema/parse';
@@ -84,6 +85,33 @@ async function fillSceneImages(raw: { elements?: Array<Record<string, unknown>> 
   );
 }
 
+/**
+ * ★ 캐릭터 시트 패스 — src 가 'sheet:라벨' 인 요소들(옷입히기의 맨몸·각 착장 = 모두 같은 아이)을
+ *   한 장 시트로 한꺼번에 그려(같은 얼굴 보장) 컷별로 채운다. 시트 실패 시 개별 정면 생성 폴백.
+ *   (요소 배열 순서 = 시트 컷 순서 = 라벨 순서. 옷입히기 레시피가 맨몸→착장 순으로 추가.)
+ */
+async function fillCharacterSheets(raw: { elements?: Array<Record<string, unknown>> }): Promise<void> {
+  const els = Array.isArray(raw.elements) ? raw.elements : [];
+  const labelOf = (e: Record<string, unknown>): string | null => {
+    const s = e.src;
+    const v = typeof s === 'string' ? s : s && typeof s === 'object' && typeof (s as { src?: unknown }).src === 'string' ? (s as { src: string }).src : null;
+    return typeof v === 'string' && v.startsWith('sheet:') ? v.slice(6).trim() : null;
+  };
+  const targets = els.map((e) => ({ e, label: labelOf(e) })).filter((t): t is { e: Record<string, unknown>; label: string } => !!t.label);
+  if (targets.length < 2) {
+    // 1개뿐이면 시트가 의미 없음 — 개별 정면 생성.
+    await Promise.all(targets.map(async (t) => { t.e.src = await generateCutoutAsset(t.label, true, true); }));
+    return;
+  }
+  const sheet = await generateCharacterSheet(targets.map((t) => t.label));
+  if (sheet && sheet.length === targets.length) {
+    await Promise.all(targets.map(async (t, i) => { try { t.e.src = await urlToAssetRef(sheet[i], 'generated'); } catch { t.e.kind = 'shape'; delete t.e.src; } }));
+  } else {
+    // 시트 생성 실패 → 개별 정면 생성(일관성↓이지만 깨지지 않게).
+    await Promise.all(targets.map(async (t) => { t.e.src = await generateCutoutAsset(t.label, true, true); }));
+  }
+}
+
 /** 좌표 클램프(화면 밖 이탈 방지) — composeNode.clampNode 와 동일. */
 function clampNode(node: InteractiveNode): InteractiveNode {
   const { w: cw, h: ch } = node.canvas.size;
@@ -123,6 +151,7 @@ async function runTail(
   });
   await fillSwapImages(raw as { behaviors?: Array<Record<string, unknown>> }); // behavior swap.to 의 gen: 라벨 채우기
   await fillSceneImages(raw as { elements?: Array<Record<string, unknown>> }); // bggen: 전체화면 배경 채우기(누끼 없음)
+  await fillCharacterSheets(raw as { elements?: Array<Record<string, unknown>> }); // sheet: 같은 아이 여러 착장 한 장 시트
   const parsed = safeParseInteractiveNode(raw);
   if (!parsed.success) return null;
   // manualLayout 레시피(드래그 분류 등)는 autoLayout 을 건너뛰고 레시피 좌표를 그대로 쓴다.

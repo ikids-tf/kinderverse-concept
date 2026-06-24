@@ -128,16 +128,11 @@ export async function fillSlots(
     case 'dress-up': {
       const d = WEATHER[detectWeather(prompt)];
       const gender = detectGender(prompt); // '남자아이' | '여자아이'
-      const gShort = gender === '여자아이' ? '여아' : '남아';
-      // 캐릭터 성별을 라벨에 박아 맨몸·착장 일관 + 옷 라벨에도 성별을 박아 캐릭터와 매칭(예: 남아 수영복=수영팬츠).
-      // 실내/실외 배경은 dress-up 전용 필드로 직접 지정(withScene 폴백 안 씀).
-      return {
-        title: d.title,
-        actorLabel: gender,
-        items: d.items.map((x) => ({ ...x, label: `${gShort} ${x.label}` })),
-        sceneDesc: d.indoor,
-        sceneOutDesc: d.outdoor,
-      };
+      // 옷 라벨은 '옷 이름'만(사람·성별어를 안 박는다 — '남아 수영복'이면 AI가 아이를 그려 버림).
+      // 성별은 캐릭터(actorLabel)가 가지고, 수영복만 성별이 드러나는 '옷 종류'로 구분.
+      const swim = gender === '여자아이' ? '원피스 수영복' : '수영 반바지';
+      const items = d.items.map((x) => ({ ...x, label: x.label === '수영복' ? swim : x.label }));
+      return { title: d.title, actorLabel: gender, items, sceneDesc: d.indoor, sceneOutDesc: d.outdoor };
     }
     // ── 의미 필요 → narrow LLM(캐시) ──
     default:

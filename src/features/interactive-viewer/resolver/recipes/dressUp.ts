@@ -22,7 +22,6 @@ import {
   assembleNode,
   conn,
   flag,
-  frontImageEl,
   imageEl,
   onHide,
   onReveal,
@@ -30,6 +29,7 @@ import {
   onSpeak,
   sceneImageEl,
   shapeEl,
+  sheetImageEl,
   textEl,
   whenFlag,
 } from '../assemble';
@@ -60,9 +60,9 @@ function buildDressUp(input: RecipeInput): InteractiveNode {
     sceneImageEl(BG_OUT, input.sceneOutDesc || '바깥 풍경', { z: 2 }),
     textEl(TITLE, input.title, { x: 300, y: 22, w: 680, h: 54, z: 30 }),
     textEl(HOWTO, '날씨에 맞는 옷을 골라 탭하거나 끌어다 입혀 주세요', { x: 300, y: 80, w: 680, h: 34, z: 30 }),
-    frontImageEl(KID, actor, { ...KIDBOX, z: 5 }), // 맨몸(실내복)
-    // 착장별 캐릭터(숨김) — 옷 클릭 시 해당 착장만 reveal.
-    ...items.map((it, i) => frontImageEl(dressedId(i), `${it.label} 입은 ${actor}`, { ...KIDBOX, z: 6 })),
+    // 맨몸 + 착장들 = '모두 같은 아이' 한 장 시트로 생성(sheet:) → 얼굴 일관. 착장들은 숨김.
+    sheetImageEl(KID, `실내복 입은 ${actor}`, { ...KIDBOX, z: 5 }),
+    ...items.map((it, i) => sheetImageEl(dressedId(i), `${it.label} 입은 ${actor}`, { ...KIDBOX, z: 6 })),
     ...items.map((it, i) => imageEl(itemId(i), it.label, { x: itemX(i), y: 615, w: 150, h: 150, z: 8 })),
     shapeEl(GO_BG, { x: 1006, y: 624, w: 236, h: 84, z: 19 }),
     textEl(GO, '밖에 나가기 →', { x: 1006, y: 650, w: 236, h: 34, z: 20 }),

@@ -41,7 +41,7 @@ const STYLE_CORE =
   '또렷하고 깨끗한 외곽선, 글자 없음, 유아 친화, ' + CUTOUT_CLAUSE;
 /** 단일 토큰 — 대상 '전체'가 잘리지 않고 프레임 안에 여유 있게(사방 여백). 타이트한 박스는 누끼 후 trimTransparent가 만든다(여기서 꽉 채우면 앞다리·꼬리가 잘림).
     ★ 대상-불문: '머리·꼬리' 같은 동물 전제 표현을 쓰지 않는다 — 모자·목도리·사물 라벨이 동물/캐릭터로 둔갑하던 버그 차단. */
-const TOKEN_STYLE = `요청한 대상 하나만 — 요청한 바로 그 대상을 실제 모습 그대로 정확히 그린다(예: '모자'면 모자, '어린이'면 어린이, '강아지'면 강아지 — 요청과 다른 엉뚱한 사물·동물로 바꾸지 말 것), 대상의 위·아래·좌우 끝까지 전체가 절대 잘리지 않고 프레임 안에 여유 있게(사방에 넉넉한 여백, 화면을 꽉 채우지 말 것), 화면 가운데에 또렷하게, 다른 사물 없음, ${STYLE_CORE}`;
+const TOKEN_STYLE = `요청한 대상 하나만 — 요청한 바로 그 대상을 실제 모습 그대로 정확히 그린다(예: '모자'면 모자, '강아지'면 강아지 — 요청과 다른 엉뚱한 사물·동물로 바꾸지 말 것), ★요청이 옷·티셔츠·바지·점퍼·수영복·신발·모자 등 '의류·소지품'이면 그 물건 한 점만 보기 좋게 그리고(평평하게 펼치거나 살짝 입체로), 그것을 입거나 착용한 사람·어린이·인물·마네킹은 절대 그리지 말 것(옷만, 사람 없이), 대상의 위·아래·좌우 끝까지 전체가 절대 잘리지 않고 프레임 안에 여유 있게(사방에 넉넉한 여백, 화면을 꽉 채우지 말 것), 화면 가운데에 또렷하게, 다른 사물 없음, ${STYLE_CORE}`;
 /** 숫자 토큰 — 수 세기·숫자 게임의 번호 아이템. 대상 위에 큰 아라비아 숫자를 또렷하게(‘글자 없음’ 해제). */
 const NUMBER_TOKEN_STYLE =
   '대상 하나만, 전체가 잘리지 않고 프레임 안에 여유 있게, 대상 표면(또는 한가운데)에 크고 또렷하며 깔끔한 아라비아 숫자 하나가 분명히 보이게 적혀 있음(숫자 외 다른 글자는 없음), 화면 가운데, 다른 사물 없음, ' +
@@ -207,6 +207,55 @@ export async function generateActorPoses(label: string, doCutout: boolean): Prom
     const front = doCutout ? await cutout(left) : left;
     const side = doCutout ? await cutout(right) : right;
     return { front, side };
+  } catch {
+    return null;
+  }
+}
+
+/** 한 장(가로 N컷)을 N개의 data URI로 균등 분할. 캐릭터 시트(같은 아이 여러 착장) 분할용. */
+async function sliceN(dataUri: string, n: number): Promise<string[]> {
+  const blob = await (await fetch(dataUri)).blob();
+  const bmp = await createImageBitmap(blob);
+  const w = bmp.width;
+  const h = bmp.height;
+  const pw = Math.floor(w / n);
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const sx = i * pw;
+    const sw = i === n - 1 ? w - sx : pw;
+    const cv = document.createElement('canvas');
+    cv.width = sw;
+    cv.height = h;
+    const ctx = cv.getContext('2d');
+    if (ctx) ctx.drawImage(bmp, sx, 0, sw, h, 0, 0, sw, h);
+    out.push(cv.toDataURL('image/png'));
+  }
+  bmp.close?.();
+  return out;
+}
+
+/**
+ * 캐릭터 시트 — '완전히 같은 한 아이'를 옷차림만 바꿔 가로 N컷 한 장에 그려(시드 없는 모델에서
+ * 따로 그리면 얼굴이 다 달라지는 문제 해결) 컷별로 분할·누끼해 돌려준다(라벨 순서 = 반환 순서).
+ * 옷입히기처럼 '맨몸 + 여러 착장이 모두 같은 아이'여야 할 때 쓴다. 실패 시 null(호출부가 개별 생성 폴백).
+ */
+export async function generateCharacterSheet(labels: string[]): Promise<string[] | null> {
+  if (labels.length < 2) return null;
+  warmupBackgroundRemoval();
+  const n = labels.length;
+  const panels = labels.map((l, i) => `${i + 1}) ${l}`).join('  ');
+  const sheet = await genImage(
+    `옷차림만 다른 같은 아이 ${n}컷`,
+    `★완전히 똑같은 한 아이(동일한 얼굴·이목구비·머리모양·머리색·피부·체형)를 가로로 ${n}컷 나란히 그린다 — 모든 컷이 같은 인물이고, 옷차림(의상)만 컷마다 다르다: ${panels}. ` +
+      `각 컷의 아이는 카메라(정면)를 바라보고, 얼굴(두 눈·코·입)이 또렷하고 환하게 보이며(모자·후드가 얼굴을 가리지 않게), 머리부터 발끝까지 전신이 잘리지 않게 한 컷 안에 담는다. ` +
+      `컷들은 가로로 정확히 균등한 너비로 나뉘고 각 컷 가운데에 아이가 오며 컷 사이 넉넉한 간격으로 서로 겹치지 않는다. ` +
+      `아이들이 보는 콘텐츠라 밝고 화사하고 예쁘게, 3D 픽사풍 귀여운 렌더, 부드럽고 둥근 형태, ${CUTOUT_CLAUSE}`,
+    1,
+  );
+  if (!sheet) return null;
+  try {
+    const slices = await sliceN(sheet, n);
+    return await Promise.all(slices.map((s) => cutout(s)));
   } catch {
     return null;
   }

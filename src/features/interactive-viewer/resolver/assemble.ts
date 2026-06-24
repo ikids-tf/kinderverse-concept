@@ -65,6 +65,19 @@ export function frontImageEl(id: string, label: string, t: Partial<Transform> = 
   };
 }
 
+/** 캐릭터 시트 요소 — `sheet:라벨` 로 두면 place.fillCharacterSheets 가 '같은 아이 한 장 시트'를
+    한꺼번에 그려(같은 얼굴 보장) 컷별로 채운다. 옷입히기의 맨몸·각 착장(모두 같은 아이)용. */
+export function sheetImageEl(id: string, label: string, t: Partial<Transform> = {}): ElementNode {
+  return {
+    id,
+    kind: 'image',
+    src: { id: `a_${id}`, src: `sheet:${label}`, assetKind: 'generated' },
+    origin: 'upload',
+    assetKind: 'generated',
+    transform: tf({ w: 300, h: 390, ...t }),
+  };
+}
+
 /** 단색 도형(분류 통·빈칸 판 등). src 없음. */
 export function shapeEl(id: string, t: Partial<Transform> = {}): ElementNode {
   return {
