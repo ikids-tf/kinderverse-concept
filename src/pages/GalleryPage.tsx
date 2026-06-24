@@ -14,6 +14,7 @@ import { listLibrary, removeFromLibrary, type SavedGame } from '@/features/inter
 import { removeGameCard } from '@/features/interactive-viewer/store/gameCards';
 import { loadInteractiveNode } from '@/features/interactive-viewer/store/interactiveStore';
 import { InteractiveOverlay } from '@/features/interactive-viewer/authoring/InteractiveOverlay';
+import { InteractiveGallery } from '@/features/interactive-viewer/authoring/InteractiveGallery';
 import { ZoomOverlay } from '@/components/board/ZoomOverlay';
 
 /* 좋아요 — 로컬 영속(백엔드 없이 새로고침해도 유지). id별 on/off. */
@@ -599,6 +600,7 @@ export function GalleryPage() {
   const [dynItems, setDynItems] = useState<GalleryItem[]>([]);
   const [gameItems, setGameItems] = useState<GalleryItem[]>([]);
   const [playDocId, setPlayDocId] = useState<string | null>(null);
+  const [iHomeOpen, setIHomeOpen] = useState(false); // 게임 '홈' → 인터랙티브 홈(저장 게임 목록·추천)
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2200); return () => clearTimeout(t); }, [toast]);
 
@@ -736,11 +738,13 @@ export function GalleryPage() {
               initialMode="play"
               onClose={close}
               onExit={() => setPlayDocId(null)}
-              onHome={() => setPlayDocId(null)}
+              onHome={() => { setPlayDocId(null); setIHomeOpen(true); }}
             />
           )}
         </ZoomOverlay>
       )}
+      {/* 인터랙티브 홈(저장 게임 목록·추천) — 게임 '홈' 버튼에서 진입. 자기완결 포털. */}
+      {iHomeOpen && <InteractiveGallery onClose={() => setIHomeOpen(false)} />}
       {toast && createPortal(
         <div style={{ position: 'fixed', bottom: 26, left: '50%', transform: 'translateX(-50%)', zIndex: 90, background: C.ink, color: '#fff', padding: '11px 18px', borderRadius: 999, fontSize: 13.5, fontWeight: 600, boxShadow: C.shadow2, display: 'flex', alignItems: 'center', gap: 8 }}><Check size={15} color={C.coral} /> {toast}</div>,
         document.body,

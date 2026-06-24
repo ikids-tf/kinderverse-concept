@@ -123,12 +123,20 @@ function buildWeatherRounds(input: RecipeInput): InteractiveNode {
 
   const allBgin = weathers.map((w) => `bgin_${w.key}`);
   const allTitle = weathers.map((w) => `title_${w.key}`);
+  const allBgout = weathers.map((w) => `bgout_${w.key}`);
   const allDressed = clothes.map((_, i) => dId(i));
+  const goEls = (k: string) => [`go_${k}`, `gobg_${k}`]; // 밖에 나가기(텍스트+배경)
+  const bkEls = (k: string) => [`bk_${k}`, `bkbg_${k}`]; // 들어가기(텍스트+배경)
+  const allGo = weathers.flatMap((w) => goEls(w.key));
+  const allBk = weathers.flatMap((w) => bkEls(w.key));
+  const THUMBS = weathers.flatMap((w) => [`thumb_${w.key}`, `tbg_${w.key}`]);
+  const ITEMS = clothes.map((_, i) => cId(i)); // 옷장(밖에 나가면 같이 숨김)
 
   const elements: ElementNode[] = [
     ...weathers.map((w) => sceneImageEl(`bgin_${w.key}`, w.indoor, { z: 1 })), // 날씨별 실내(창밖 날씨)
-    ...weathers.map((w) => textEl(`title_${w.key}`, w.title, { x: 280, y: 22, w: 720, h: 54, z: 30 })),
-    textEl(HOWTO, '날씨에 맞는 옷을 골라 입혀 주세요', { x: 280, y: 80, w: 720, h: 34, z: 30 }),
+    ...weathers.map((w) => sceneImageEl(`bgout_${w.key}`, w.outdoor, { z: 2 })), // 날씨별 실외('밖에 나가기')
+    ...weathers.map((w) => textEl(`title_${w.key}`, w.title, { x: 260, y: 22, w: 720, h: 54, z: 30 })),
+    textEl(HOWTO, '날씨에 맞는 옷을 골라 입혀 주세요', { x: 260, y: 80, w: 720, h: 34, z: 30 }),
     sheetImageEl(KID, `실내복 입은 ${actor}`, { ...KIDBOX, z: 5 }), // 맨몸
     ...clothes.map((c, i) => sheetImageEl(dId(i), `${c.label} 입은 ${actor}`, { ...KIDBOX, z: 6 })), // 착장(숨김)
     ...clothes.map((c, i) => imageEl(cId(i), c.label, { x: itemX(i), y: 562, w: 130, h: 130, z: 8 })), // 공용 옷
@@ -136,22 +144,32 @@ function buildWeatherRounds(input: RecipeInput): InteractiveNode {
       shapeEl(`tbg_${w.key}`, { x: thumbX(i), y: 706, w: 162, h: 66, z: 28 }),
       textEl(`thumb_${w.key}`, `${w.emoji} ${w.name}`, { x: thumbX(i), y: 728, w: 162, h: 30, z: 29 }),
     ]),
+    // 밖에 나가기 / 들어가기 — 날씨별(현재 날씨의 실외로). 우상단 고정, 같은 자리에서 토글.
+    ...weathers.flatMap((w) => [
+      shapeEl(`gobg_${w.key}`, { x: 1002, y: 22, w: 244, h: 58, z: 24 }),
+      textEl(`go_${w.key}`, '🚪 밖에 나가기', { x: 1002, y: 40, w: 244, h: 30, z: 25 }),
+      shapeEl(`bkbg_${w.key}`, { x: 1002, y: 22, w: 244, h: 58, z: 24 }),
+      textEl(`bk_${w.key}`, '🏠 들어가기', { x: 1002, y: 40, w: 244, h: 30, z: 25 }),
+    ]),
   ];
 
-  // 시작 — 첫 날씨만 보이고 나머지 실내·제목 + 모든 착장 숨김.
   const first = weathers[0];
+  // 시작 — 첫 날씨 실내·제목·밖에나가기 + 맨몸만. 나머지 날씨·실외·들어가기·착장 전부 숨김.
   const hideStart = [
     ...allBgin.filter((x) => x !== `bgin_${first.key}`),
     ...allTitle.filter((x) => x !== `title_${first.key}`),
+    ...allBgout,
     ...allDressed,
+    ...allGo.filter((x) => !goEls(first.key).includes(x)),
+    ...allBk,
   ];
   const behaviors: Behavior[] = [onHide('hidestart', KID, 'sceneEnter', hideStart)];
 
-  // 날씨 썸네일 — 모든 실내·제목·착장 숨김 → 그 날씨 실내·제목 + 맨몸 공개(옷 다시 고르게).
+  // 날씨 썸네일 — 모든 날씨 요소·착장 숨김 → 그 날씨 실내·제목·밖에나가기 + 맨몸 공개(옷 다시 고르게).
   weathers.forEach((w) => {
-    const tid = `thumb_${w.key}`;
-    behaviors.push(onHide(`sw_${w.key}`, tid, 'tap', [...allBgin, ...allTitle, ...allDressed], { then: [`swr_${w.key}`] }));
-    behaviors.push(onReveal(`swr_${w.key}`, tid, 'afterComplete', [`bgin_${w.key}`, `title_${w.key}`, KID]));
+    const k = w.key;
+    behaviors.push(onHide(`sw_${k}`, `thumb_${k}`, 'tap', [...allBgin, ...allTitle, ...allBgout, ...allDressed, ...allGo, ...allBk], { then: [`swr_${k}`] }));
+    behaviors.push(onReveal(`swr_${k}`, `thumb_${k}`, 'afterComplete', [`bgin_${k}`, `title_${k}`, ...goEls(k), KID]));
   });
 
   // 옷 — 클릭하면 맨몸·다른 착장 숨김 → 그 착장 공개 + 한마디(이 날씨에 어울릴지 이야기).
@@ -163,6 +181,16 @@ function buildWeatherRounds(input: RecipeInput): InteractiveNode {
     behaviors.push(onHide(`dress_${k}`, id, 'tap', others, { then: [`rev_${k}`] }));
     behaviors.push(onReveal(`rev_${k}`, id, 'afterComplete', [did], { then: [`say_${k}`] }));
     behaviors.push(onSpeak(`say_${k}`, did, 'afterComplete', `${c.label}을(를) 입었어요! 이 날씨에 어울릴까요?`));
+  });
+
+  // 밖에 나가기 / 들어가기(돌아가기) — 날씨별. 나갈 땐 실내·제목·안내·썸네일 숨김 → 실외 + 들어가기(아이는 입은 채로).
+  weathers.forEach((w) => {
+    const k = w.key;
+    behaviors.push(onHide(`gout_${k}`, `go_${k}`, 'tap', [`bgin_${k}`, `title_${k}`, HOWTO, ...ITEMS, ...goEls(k), ...THUMBS], { then: [`goutr_${k}`] }));
+    behaviors.push(onReveal(`goutr_${k}`, `go_${k}`, 'afterComplete', [`bgout_${k}`, ...bkEls(k)], { then: [`gouts_${k}`] }));
+    behaviors.push(onSpeak(`gouts_${k}`, `bgout_${k}`, 'afterComplete', '밖에 나왔어요! 지금 입은 옷이 이 날씨에 괜찮을까요?'));
+    behaviors.push(onHide(`bkin_${k}`, `bk_${k}`, 'tap', [`bgout_${k}`, ...bkEls(k)], { then: [`bkinr_${k}`] }));
+    behaviors.push(onReveal(`bkinr_${k}`, `bk_${k}`, 'afterComplete', [`bgin_${k}`, `title_${k}`, HOWTO, ...ITEMS, ...goEls(k), ...THUMBS]));
   });
 
   return assembleNode(input, { elements, behaviors });

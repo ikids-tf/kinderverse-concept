@@ -74,8 +74,8 @@ export interface RecipeInput {
   /** dress-up — '밖에 나가기' 시 깔 실외 배경 설명(비-누끼 전체 이미지 요소, fillSceneImages 가 채움). */
   sceneOutDesc?: string;
   /** dress-up(통합 날씨 전환) — 있으면 한 게임에 여러 날씨를 두고 하단 썸네일로 창밖 날씨를 바꾼다.
-      각 날씨: key(고유)·indoor(실내 배경 설명)·title(제목)·emoji+name(썸네일). 옷(items)은 공용. */
-  weathers?: Array<{ key: string; indoor: string; title: string; emoji: string; name: string }>;
+      각 날씨: key(고유)·indoor(실내 배경)·outdoor('밖에 나가기' 실외 배경)·title·emoji+name(썸네일). 옷(items)은 공용. */
+  weathers?: Array<{ key: string; indoor: string; outdoor: string; title: string; emoji: string; name: string }>;
 }
 
 /** 메커니즘 한 종 — 결정론 build. */

@@ -60,6 +60,25 @@ function hasSpecificWeather(p: string): boolean {
 
 /** dress-up 교사 활동 카드(결정론 — 날씨별). 에이전트를 건너뛰는 dress-up 경로에서 saveGameCard 로 동반 저장. */
 export function dressUpTeacherCard(prompt: string): TeacherCard {
+  // 통합(특정 날씨 미지정) — 3날씨 전환 게임 카드.
+  if (!hasSpecificWeather(prompt)) {
+    return {
+      title: '날씨에 맞는 옷 입기',
+      age: 4,
+      mechanism: 'dress-up',
+      objective: '눈·비·미세먼지 등 여러 날씨를 살펴보고 각 날씨에 어울리는 옷차림을 골라 보며, 날씨와 옷의 관계에 관심을 가진다.',
+      domains: ['자연탐구', '신체운동·건강'],
+      intro: '하단의 날씨(눈·비·미세먼지)를 함께 누르며 "오늘은 어떤 날씨일까? 이런 날엔 무엇을 입을까?" 하고 묻는다.',
+      steps: [
+        '하단 날씨 썸네일을 눌러 창밖 날씨를 바꿔 보며 어떤 날씨인지 이야기 나눈다.',
+        '그 날씨에 어울리는 옷을 골라 아이에게 입혀 본다(틀린 옷도 입어 보며 이야기해도 좋다).',
+        '"밖에 나가기"를 눌러 밖에 나간 모습을 보고, "들어가기"로 다시 들어온다.',
+        '날씨를 바꿔 가며 같은 옷이 어떤 날엔 맞고 어떤 날엔 안 맞는지 비교해 이야기 나눈다.',
+      ],
+      extensions: ['오늘 실제 날씨를 확인하고 등·하원 옷차림을 정해 본다.', '계절별 옷차림을 그림으로 그려 분류해 본다.'],
+      assessment: '여러 날씨에서 알맞은 옷을 고르고, 왜 그 옷이 좋은지 까닭을 말하는지 관찰한다.',
+    };
+  }
   const w = detectWeather(prompt);
   const d = WEATHER[w];
   const correct = d.items.find((i) => i.correct)?.label ?? '알맞은 옷';
@@ -142,9 +161,9 @@ export async function fillSlots(
       // 통합 — 같은 아이 + 공용 옷 4벌 + 하단 날씨 썸네일(눈·비·미세먼지)로 창밖 날씨 전환.
       const shared = [{ label: '두꺼운 패딩 점퍼' }, { label: '노란 우비' }, { label: '하얀 마스크' }, { label: swim }];
       const weathers = [
-        { key: 'snow', indoor: WEATHER['눈'].indoor, title: '눈 오는 날, 뭘 입을까?', emoji: '❄️', name: '눈' },
-        { key: 'rain', indoor: WEATHER['비'].indoor, title: '비 오는 날, 뭘 입을까?', emoji: '🌧️', name: '비' },
-        { key: 'dust', indoor: WEATHER['미세먼지'].indoor, title: '미세먼지 날, 뭘 챙길까?', emoji: '😷', name: '미세먼지' },
+        { key: 'snow', indoor: WEATHER['눈'].indoor, outdoor: WEATHER['눈'].outdoor, title: '눈 오는 날, 뭘 입을까?', emoji: '❄️', name: '눈' },
+        { key: 'rain', indoor: WEATHER['비'].indoor, outdoor: WEATHER['비'].outdoor, title: '비 오는 날, 뭘 입을까?', emoji: '🌧️', name: '비' },
+        { key: 'dust', indoor: WEATHER['미세먼지'].indoor, outdoor: WEATHER['미세먼지'].outdoor, title: '미세먼지 날, 뭘 챙길까?', emoji: '😷', name: '미세먼지' },
       ];
       return { title: '날씨에 맞는 옷 입기', actorLabel: gender, items: shared, weathers };
     }
