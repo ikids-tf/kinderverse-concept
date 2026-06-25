@@ -11,8 +11,13 @@ import { loadInteractiveNode } from '../store/interactiveStore';
 import type { InteractiveNode } from '../schema/interactiveNode';
 import type { MechanismId } from './recipeTypes';
 
-export const GAME_KEYWORD_RE = /게임|놀이|인터렉티브|인터랙티브|액티비티|퀴즈/;
+// '놀이'는 단어 경계로만(물놀이·역할놀이·바깥놀이 같은 합성 토픽어는 게임 의도가 아님 → 제외).
+export const GAME_KEYWORD_RE = /게임|퀴즈|인터렉티브|인터랙티브|액티비티|(?:^|[^가-힣])놀이/;
 export const hasGameKeyword = (text: string): boolean => GAME_KEYWORD_RE.test(text || '');
+/** '자료(아이템·배경)를 숨기고 게임만' 보여 줄 강한 게임어 — '놀이'(광의: 게임+놀이이미지+놀이동영상…)는
+    제외해, '놀이'를 입력하면 게임과 자료가 함께 추천되게 한다. */
+export const GAME_STRONG_RE = /게임|퀴즈|인터렉티브|인터랙티브|액티비티/;
+export const isStrongGameKeyword = (text: string): boolean => GAME_STRONG_RE.test(text || '');
 
 /** 추천에 노출할 메커니즘(동사 + 이모지 폴백). 동사가 Resolver selectRecipe 매핑 키와 일치한다. */
 const MECHS: Array<{ emoji: string; verb: string; mech: MechanismId }> = [

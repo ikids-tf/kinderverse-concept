@@ -8,7 +8,7 @@ import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import type { ImageAsset } from '@/board/assets';
 import type { WebLink } from '@/board/webLinks';
 import { FavoriteCardRail } from './FavoriteCardRail';
-import { gameSuggestions, hasGameKeyword, type GameSuggestion } from '@/features/interactive-viewer/resolver/gameSuggest';
+import { gameSuggestions, hasGameKeyword, isStrongGameKeyword, type GameSuggestion } from '@/features/interactive-viewer/resolver/gameSuggest';
 import { getThumb } from '@/board/thumbs';
 
 /** 게임 추천 카드 썸네일 — 저장 게임 장면 배경(실제 게임화면)을 작게 굽고, 없으면 이모지 폴백.
@@ -256,8 +256,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const [assetSel, setAssetSel] = useState<string[]>([]); // 클릭 순서 유지(배치 순서)
   const assetKey = (a: ImageAsset) => `${a.tag}-${a.createdAt}`;
   useEffect(() => {
-    // 게임 키워드(게임·놀이·퀴즈…)면 자료(아이템·배경 이미지) 대신 게임 추천만 보여 준다 — 자료 검색 생략.
-    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2 || hasGameKeyword(draft)) {
+    // 강한 게임어(게임·퀴즈·인터랙티브)면 자료(아이템·배경) 대신 게임 추천만. '놀이'는 광의라 자료도 함께 보여 준다.
+    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2 || isStrongGameKeyword(draft)) {
       setAssetSugs([]);
       setAssetSel([]);
       return;
@@ -290,8 +290,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const [webSugs, setWebSugs] = useState<WebLink[]>([]);
   const [webSel, setWebSel] = useState<string[]>([]); // url 기준 복수 선택
   useEffect(() => {
-    // 게임 키워드면 웹링크 자료도 생략(게임 추천만).
-    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2 || hasGameKeyword(draft)) {
+    // 강한 게임어면 웹링크도 생략(게임만). '놀이'는 자료와 함께.
+    if (!location.pathname.startsWith('/board') || inodeFs || draft.trim().length < 2 || isStrongGameKeyword(draft)) {
       setWebSugs([]);
       setWebSel([]);
       return;
