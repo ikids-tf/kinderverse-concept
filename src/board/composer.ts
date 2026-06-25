@@ -45,6 +45,7 @@ import { callGateway } from '@/ai/client';
 import { streamChat } from '@/ai/chat';
 import { buildAgentContext } from '@/ai/context';
 import { PAGE_ACTIONS } from '@/ai/actions';
+import { showToast } from '@/lib/toast';
 import { SUGGESTION_HIDE_BELOW, type RouterOutput, type RecordMode, type RouteTarget } from '@/ai/contract';
 import type { RegistryPayload } from '@/ui-registry/contracts';
 
@@ -57,7 +58,7 @@ import type { RegistryPayload } from '@/ui-registry/contracts';
 export interface ComposerChip {
   id: string;
   label: string;
-  action: FillAgent | 'generate';
+  action: FillAgent | 'generate' | 'idea_plan' | 'idea_mindmap' | 'idea_image';
   prompt?: string;
   status: 'idle' | 'running' | 'done';
 }
@@ -946,7 +947,15 @@ export async function generateIdeaList(topic: string): Promise<void> {
     const md = lines.length
       ? `# 💡 ${t} 놀이 아이디어 ${lines.length}가지\n\n${lines.join('\n')}`
       : `# 💡 ${t} 놀이 아이디어\n\n아이디어 생성에 실패했어요. 다시 시도해 주세요.`;
-    spawnDocCard(frameId, md, 'idea', 560);
+    // role 'idealist' → NodeView가 선택형 행으로 렌더(각 아이디어 클릭 선택). text는 내보내기·폴백용.
+    const cardId = spawnDocCard(frameId, md, 'idealist', 560);
+    if (ideas.length) {
+      const cur = useBoardStore.getState().nodes[cardId];
+      useBoardStore.getState().updateNodeRaw(cardId, {
+        data: { ...(cur?.data ?? {}), ideaItems: ideas, selectedIdeaId: null, ideaTitle: `${t} 놀이 아이디어` },
+      });
+      attachIdeaChips(frameId); // 프레임 하단 추천: 놀이계획·마인드맵·활동 이미지(선택/자동선택 아이디어 기준)
+    }
     slideFrameToEmpty(frameId);
     recordSpawnedNodes([frameId], '아이디어 리스트');
   } finally {
@@ -954,6 +963,49 @@ export async function generateIdeaList(topic: string): Promise<void> {
     if (cur) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(cur.data ?? {}), loading: false, working: false } });
     useBoardStore.getState().endGen();
   }
+}
+
+/** 아이디어 리스트 프레임 하단 추천 칩 — 선택(또는 자동선택) 아이디어로 확장. */
+function attachIdeaChips(frameId: string): void {
+  const b = useBoardStore.getState();
+  const frame = b.nodes[frameId];
+  if (!frame) return;
+  const chips: ComposerChip[] = [
+    { id: newId('chip'), label: '놀이계획 생성', action: 'idea_plan', status: 'idle' },
+    { id: newId('chip'), label: '마인드맵', action: 'idea_mindmap', status: 'idle' },
+    { id: newId('chip'), label: '활동 이미지', action: 'idea_image', status: 'idle' },
+  ];
+  b.updateNodeRaw(frameId, { data: { ...(frame.data ?? {}), nextSteps: chips } });
+}
+
+const IDEA_ACTION_LABEL: Record<string, string> = {
+  idea_plan: '놀이계획을 만들어요',
+  idea_mindmap: '마인드맵을 그려요',
+  idea_image: '활동 이미지를 그려요',
+};
+
+/** 아이디어 리스트 추천 칩 실행 — 선택한 아이디어(없으면 자동 선택) 기준으로 확장 생성.
+    생성물은 기존 경로(composeFromPrompt forceRoute) 재사용해 자체 프레임으로 만든다. */
+async function runIdeaExpansion(frameId: string, chipId: string, action: ComposerChip['action']): Promise<void> {
+  const b = useBoardStore.getState();
+  const card = Object.values(b.nodes).find((n) => n.data?.frameId === frameId && n.data?.role === 'idealist');
+  const items = (card?.data?.ideaItems as IdeaItem[] | undefined) ?? [];
+  if (!items.length) {
+    setChipStatus(frameId, chipId, 'idle');
+    showToast('먼저 아이디어를 생성해 주세요', 'error');
+    return;
+  }
+  const selId = (card?.data?.selectedIdeaId as string | null) ?? null;
+  let idea = items.find((it) => it.id === selId);
+  const auto = !idea;
+  if (!idea) idea = items[Math.floor(Date.now() / 1000) % items.length]; // 미선택 → 20개 중 자동 선택
+  setChipStatus(frameId, chipId, 'idle'); // 즉시 재사용 가능(생성은 자체 로딩 프레임에서 진행)
+  showToast(`${auto ? '자동 선택 ' : ''}‘${idea.label}’(으)로 ${IDEA_ACTION_LABEL[action] ?? '생성해요'}`, 'success');
+  // 라벨 중심 프롬프트 — 계획/마인드맵/이미지가 선택 아이디어에 정확히 초점을 맞추게 한다
+  // (desc까지 같이 넘기면 plan 에이전트의 주제 추출이 흐트러져 엉뚱한 활동으로 드리프트했음).
+  if (action === 'idea_plan') void composeFromPrompt(`${idea.label} 놀이계획`, 'plan');
+  else if (action === 'idea_mindmap') void composeFromPrompt(idea.label, 'mindmap');
+  else if (action === 'idea_image') void composeFromPrompt(`${idea.label} 활동 장면 그림`, 'studio');
 }
 
 /** Make a full A4 주간 놀이계획안 from a selected idea/branch and connect it — the
@@ -1567,6 +1619,11 @@ export async function runComposerChip(frameId: string, chipId: string): Promise<
   const chip = (frame?.data?.nextSteps as ComposerChip[] | undefined)?.find((c) => c.id === chipId);
   if (!chip || chip.status === 'running') return;
   setChipStatus(frameId, chipId, 'running');
+  // 아이디어 리스트 추천 칩 — 선택(또는 자동선택)한 아이디어 기준으로 확장(놀이계획·마인드맵·활동 이미지).
+  if (chip.action === 'idea_plan' || chip.action === 'idea_mindmap' || chip.action === 'idea_image') {
+    await runIdeaExpansion(frameId, chipId, chip.action);
+    return;
+  }
   // 활동 이미지 추가(studio.images) + 프레임에 계획안이 있으면 — 일반 갤러리 대신
   // '계획 활동마다 1장씩(최대 5)'을 프레임 오른쪽에 세로로 그린다(활동 정확 분석).
   const hasPlan = Object.values(b.nodes).some(

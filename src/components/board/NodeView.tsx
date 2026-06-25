@@ -1662,6 +1662,20 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     }
     const isDoc = !!node.data?.doc;
     const isIdea = node.data?.role === 'idea'; // selectable idea pick (in the 아이디어 sub-frame)
+    // 아이디어 리스트(선택형 문서) — 각 행을 클릭해 하나 고르면 프레임 하단 추천이 그 아이디어로 생성.
+    const ideaItems =
+      node.data?.role === 'idealist' && Array.isArray(node.data?.ideaItems)
+        ? (node.data.ideaItems as Array<{ id: string; label: string; desc?: string }>)
+        : null;
+    const isIdeaList = !!ideaItems;
+    const selectedIdeaId = (node.data?.selectedIdeaId as string | null) ?? null;
+    const ideaListTitle = (node.data?.ideaTitle as string | undefined) ?? '놀이 아이디어';
+    const pickIdea = (id: string) => {
+      const cur = useBoardStore.getState().nodes[node.id];
+      if (!cur) return;
+      const next = cur.data?.selectedIdeaId === id ? null : id; // 같은 행 다시 클릭 → 선택 해제
+      useBoardStore.getState().updateNodeRaw(node.id, { data: { ...cur.data, selectedIdeaId: next } });
+    };
     const coverImage = node.data?.coverImage as string | undefined; // newsletter cover
     // 활동지 = 인쇄용 A4 한 장. 제목·안내는 텍스트 레이어, 그림은 생성 이미지.
     const wsPayload = node.data?.payload as RegistryPayload | undefined;
@@ -1816,6 +1830,42 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 </button>
               </div>
             )}
+          </div>
+        ) : isIdeaList ? (
+          <div className="kv-doc-md text-sm leading-relaxed text-fg">
+            <h3 className="mb-t3 font-serif text-base font-bold text-fg">
+              💡 {ideaListTitle}{' '}
+              <span className="text-xs font-normal text-fg-muted">— 아이디어를 고르면 아래 추천이 그 아이디어로 생성돼요</span>
+            </h3>
+            <ol className="space-y-1">
+              {ideaItems!.map((it, i) => {
+                const sel = it.id === selectedIdeaId;
+                return (
+                  <li key={it.id}>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); pickIdea(it.id); }}
+                      className={`flex w-full items-start gap-t2 rounded-lg border px-t3 py-t2 text-left transition-colors duration-150 ease-soft ${
+                        sel ? 'border-accent bg-accent-soft' : 'border-transparent hover:border-border hover:bg-surface-2'
+                      }`}
+                    >
+                      <span
+                        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                          sel ? 'bg-accent text-on-accent' : 'bg-surface-2 text-fg-muted'
+                        }`}
+                      >
+                        {sel ? '✓' : i + 1}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="font-bold text-fg">{it.label}</span>
+                        {it.desc && <span className="mt-0.5 block text-xs leading-relaxed text-fg-2">{it.desc}</span>}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
           </div>
         ) : isDoc ? (
           <div className="kv-doc-md text-sm leading-relaxed text-fg">
