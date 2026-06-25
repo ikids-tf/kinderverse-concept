@@ -119,9 +119,31 @@ export interface PlanResult {
   warning?: string;
 }
 
-export async function runPlan(request: string, selected: string[], ctx?: string): Promise<PlanResult> {
+export async function runPlan(
+  request: string,
+  selected: string[],
+  ctx?: string,
+  opts?: { project?: boolean },
+): Promise<PlanResult> {
   const sel = selected.length ? `선택된 활동: ${selected.join(' / ')}` : '';
-  const user = `요청: "${request}"\n${sel}
+  // ── 프로젝트 수업 ── 일반 주간계획과 달리 하나의 주제를 1주~한 달 '단계별'로 깊이 탐구한다
+  //   (프로젝트 접근법: 준비→도입→전개→마무리). days를 요일이 아니라 '단계'로 채운다.
+  const projectUser = `요청: "${request}"\n${sel}
+유아 '프로젝트 접근법(Project Approach)'에 따른 프로젝트 수업 계획을 작성하라. 일반 주간 놀이계획과 다르다 — 요일별이 아니라 하나의 주제를 1주~한 달간 '단계별로 점점 깊이' 탐구한다.
+[프로젝트 단계 — 반드시 이 흐름으로 days를 구성]
+- 준비·도입: 주제 선정 배경, 유아의 사전 경험·흥미 표현, 교사–유아 공동 '주제망' 구성, '궁금한 것(질문거리)' 찾기.
+- 전개: 질문을 탐구로 — 현장학습(견학)·산책 관찰, 전문가/부모·지역인사 면담, 자료 조사, 관찰·실험, 표상활동(그림·만들기·글·구성물로 표현), 결과 공유. (전개는 보통 2~3단계로 점점 깊어진다)
+- 마무리: 작품·결과물 전시와 발표, 유아와 함께 과정 회상·평가.
+[작성 규칙]
+- days = '단계' 5~6개. 각 day는 "주차 · 단계명" 형식(예: "1주차 · 도입", "2주차 · 전개(현장학습)", "3주차 · 전개(표상활동)", "4주차 · 마무리(전시·평가)").
+- area = 그 단계의 성격·누리과정 연계(예: "주제망·질문", "탐구·관찰", "표상·예술", "전시·평가").
+- activity = 유아가 주어인 구체적 탐구·표상 활동 1~2문장(교사 주도 금지). 단계가 진행될수록 깊어지게.
+- materials = 그 단계에 필요한 자원(현장·전문가·관찰도구·표상재료 등).
+- goal = 기대하는 경험.
+- title = "(주제) 프로젝트". notes = ① 기간은 유아 흥미·탐구 깊이에 따라 1주~한 달로 유연 ② 안전 유의점 ③ 가정·지역사회 연계.
+JSON만 출력:
+{ "type": "WeeklyPlanGrid", "props": { "title": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "days": [ { "day": string, "area": string, "activity": string, "materials": string, "goal": string } ], "notes": string } }`;
+  const playUser = `요청: "${request}"\n${sel}
 유아 교사가 실제로 사용하는 수준의 주간 놀이계획을 작성하라.
 [2019 개정 누리과정 결 — 반드시 지킬 것]
 - 유아·놀이 중심: activity는 "유아가 무엇을 하며 노는지"가 주어가 되게 쓴다(예: "비닐봉지 연을 만들어 바람 따라 달리며 날려 본다"). "교사가 ~을 가르친다/시킨다" 같은 교사 주도 서술 금지.
@@ -132,6 +154,7 @@ export async function runPlan(request: string, selected: string[], ctx?: string)
 - notes: ① "유아의 흥미와 놀이 흐름에 따라 계획은 융통성 있게 변경·확장합니다" 취지의 문장 ② 이 주제 놀이의 안전 유의점 1가지 ③ (컨텍스트에 있으면) 알레르기·개별 배려.
 JSON만 출력:
 { "type": "WeeklyPlanGrid", "props": { "title": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "days": [ { "day": string, "area": string, "activity": string, "materials": string, "goal": string } ], "notes": string } }`;
+  const user = opts?.project ? projectUser : playUser;
 
   const first = await callGateway({
     task: 'plan',
@@ -142,7 +165,9 @@ JSON만 출력:
     system: system(ctx),
     messages: [{ role: 'user', content: user }],
     meta: { kind: 'plan', title: request, selected },
-    maxTokens: 2200,
+    // 프로젝트 계획은 단계가 많고 활동 서술이 길어 토큰이 더 든다 — 잘려서 JSON 파싱이 깨지면
+    // "정보부족" 폴백으로 빠지므로 넉넉히 준다.
+    maxTokens: opts?.project ? 3600 : 2200,
   });
 
   if (!first.ok || !first.text) {

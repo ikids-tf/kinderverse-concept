@@ -8,7 +8,7 @@ const META: Record<FormatChoice, { emoji: string; label: string; desc: string; s
   'idea-list': { emoji: '💡', label: '아이디어 리스트', desc: '놀이 아이디어 20가지를 간단한 목록 문서로' },
   mindmap: { emoji: '🧠', label: '마인드맵', desc: '대주제 → 소주제 → 활동을 가지로 펼친 생각그물' },
   'plan-doc': { emoji: '📋', label: '놀이계획 문서', desc: '바로 쓰는 주간 놀이계획안 한 장(A4)' },
-  package: { emoji: '📦', label: '놀이 패키지', desc: '리스트·계획·이미지·웹링크·활동지·동영상·게임 세트', soon: true },
+  package: { emoji: '📦', label: '놀이 패키지', desc: '아이디어·계획안·활동이미지·시청각자료·활동지·동영상·게임 한 세트', soon: false },
 };
 
 export function FormatChoiceOverlay() {
@@ -18,9 +18,10 @@ export function FormatChoiceOverlay() {
   const choices = MODE_CHOICES[pending.mode];
   const topic = pending.topic || '놀이';
 
+  const kind = pending.kind;
   const pick = (c: FormatChoice) => {
     close();
-    void import('@/board/prompt').then((m) => m.runFormatChoice(c, topic));
+    void import('@/board/prompt').then((m) => m.runFormatChoice(c, topic, kind));
   };
 
   return createPortal(

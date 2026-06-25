@@ -17,7 +17,7 @@ import { ASSET_KINDS, type AssetKind } from '@/shared/assetKind';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
 import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior, generateIdeaList, buildPlayPackage } from './composer';
-import { useFormatChoiceStore, type FormatMode, type FormatChoice } from '@/store/formatChoiceStore';
+import { useFormatChoiceStore, type FormatMode, type FormatChoice, type LessonKind } from '@/store/formatChoiceStore';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import { useUIStore } from '@/store/uiStore';
 import {
@@ -99,16 +99,19 @@ function fmtTopic(text: string): string {
     .trim();
   return t || text.trim();
 }
+// 프로젝트 수업 — 하나의 주제를 1주~한 달 깊이 탐구. 계획 문서가 일반 주간계획과 다르다.
+const FMT_PROJECT_RE = /프로젝트\s*수업|프로젝트\s*활동|프로젝트(?!\s*수업)/;
 /** 아이디어/놀이계획·수업 요청이면 모드를 돌려준다(포맷 선택 오버레이 트리거). 아니면 null. */
-function detectFormatChoice(text: string): { mode: FormatMode; topic: string } | null {
+function detectFormatChoice(text: string): { mode: FormatMode; topic: string; kind: LessonKind } | null {
   if (!FMT_GEN_RE.test(text)) return null;
   if (FMT_SPECIFIC_RE.test(text)) return null; // 구체적 산출물(활동지·이미지·슬라이드 등)은 전용 경로로
-  if (FMT_PLAN_RE.test(text)) return { mode: 'plan', topic: fmtTopic(text) };
-  if (FMT_IDEA_RE.test(text)) return { mode: 'idea', topic: fmtTopic(text) };
+  const kind: LessonKind = FMT_PROJECT_RE.test(text) ? 'project' : 'play';
+  if (FMT_PLAN_RE.test(text)) return { mode: 'plan', topic: fmtTopic(text), kind };
+  if (FMT_IDEA_RE.test(text)) return { mode: 'idea', topic: fmtTopic(text), kind };
   return null;
 }
 /** 포맷 선택 오버레이에서 고른 형식으로 생성한다(FormatChoiceOverlay → 여기). */
-export function runFormatChoice(choice: FormatChoice, topic: string): void {
+export function runFormatChoice(choice: FormatChoice, topic: string, kind: LessonKind = 'play'): void {
   const t = (topic || '놀이').trim();
   switch (choice) {
     case 'idea-list':
@@ -118,10 +121,11 @@ export function runFormatChoice(choice: FormatChoice, topic: string): void {
       void composeFromPrompt(`${t} 마인드맵`, 'mindmap');
       break;
     case 'plan-doc':
-      void composeFromPrompt(`${t} 놀이계획`, 'plan');
+      // 프로젝트면 프로젝트 계획 문서로(단계별 심화), 아니면 일반 주간 놀이계획.
+      void composeFromPrompt(kind === 'project' ? `${t} 프로젝트 수업 계획` : `${t} 놀이계획`, 'plan');
       break;
     case 'package':
-      void buildPlayPackage(t);
+      void buildPlayPackage(t, kind);
       break;
   }
 }
@@ -518,7 +522,7 @@ export function handleBoardPrompt(text: string): boolean {
     // (게임 분기보다 먼저 — "물놀이 놀이 계획"의 둘째 '놀이'가 게임 키워드로 오인돼 게임이 만들어지지 않게.)
     const fmt = detectFormatChoice(text);
     if (fmt) {
-      useFormatChoiceStore.getState().open(fmt.mode, fmt.topic, text);
+      useFormatChoiceStore.getState().open(fmt.mode, fmt.topic, text, fmt.kind);
       return true;
     }
     if (isNewInteractiveGame(text)) {

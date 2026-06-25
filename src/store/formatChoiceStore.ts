@@ -7,6 +7,8 @@ import { create } from 'zustand';
 
 export type FormatMode = 'idea' | 'plan';
 export type FormatChoice = 'idea-list' | 'mindmap' | 'plan-doc' | 'package';
+/** 놀이계획 vs 프로젝트 수업 — 프로젝트는 하나의 주제를 1주~한 달 단계별로 깊이 탐구(다른 계획 문서). */
+export type LessonKind = 'play' | 'project';
 
 /** 모드별 노출 선택지 — 아이디어=리스트·마인드맵, 놀이계획=+계획문서·패키지. */
 export const MODE_CHOICES: Record<FormatMode, FormatChoice[]> = {
@@ -15,13 +17,13 @@ export const MODE_CHOICES: Record<FormatMode, FormatChoice[]> = {
 };
 
 interface FormatChoiceState {
-  pending: { mode: FormatMode; topic: string; raw: string } | null;
-  open: (mode: FormatMode, topic: string, raw: string) => void;
+  pending: { mode: FormatMode; topic: string; raw: string; kind: LessonKind } | null;
+  open: (mode: FormatMode, topic: string, raw: string, kind?: LessonKind) => void;
   close: () => void;
 }
 
 export const useFormatChoiceStore = create<FormatChoiceState>((set) => ({
   pending: null,
-  open: (mode, topic, raw) => set({ pending: { mode, topic, raw } }),
+  open: (mode, topic, raw, kind = 'play') => set({ pending: { mode, topic, raw, kind } }),
   close: () => set({ pending: null }),
 }));

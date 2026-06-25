@@ -310,6 +310,46 @@ export function planDocMarkdown(p: RegistryPayload): string {
   return out.join('\n');
 }
 
+/** 프로젝트 수업 계획 렌더 — '요일별'이 아니라 '단계별(준비→도입→전개→마무리)'로 하나의 주제를
+    1주~한 달 깊이 탐구하는 흐름으로 정리한다(프로젝트 접근법). WeeklyPlanGrid payload의 days를
+    '프로젝트 단계'로 해석해 표로 렌더(runPlan project 모드가 단계 행을 만든다). */
+export function projectDocMarkdown(p: RegistryPayload): string {
+  if (p.type !== 'WeeklyPlanGrid') return planText(p);
+  const pr = p.props;
+  const band = pr.age_band === '0-2' ? '영아(0–2세)' : '유아(3–5세)';
+  const cur = pr.curriculum === 'standard' ? '표준보육과정' : '누리과정';
+  const cell = (s?: string) => (s && s.trim() ? s.replace(/\|/g, '/').replace(/\n+/g, ' ').trim() : '—');
+  const areas = [...new Set(pr.days.map((d) => d.area).filter((a) => !!a && !!a.trim()))];
+  const goals = [...new Set(pr.days.map((d) => d.goal).filter((g): g is string => !!g && !!g.trim()))];
+  const title = /프로젝트/.test(pr.title) ? pr.title : `${pr.title} 프로젝트`;
+
+  const out: string[] = [];
+  out.push(`# ${title}`);
+  out.push(`**대상** ${band} · **교육과정** ${cur} · **운영 기간** 주제·유아 흥미에 따라 1주~한 달(하나의 주제를 깊이 탐구)`);
+  if (goals.length) {
+    out.push('');
+    out.push('## 프로젝트 목표');
+    goals.forEach((g) => out.push(`- ${g}`));
+  }
+  out.push('');
+  out.push('## 단계별 프로젝트 전개');
+  out.push('| 단계 | 영역·성격 | 탐구·표상 활동 | 준비물·자원 | 기대 경험 |');
+  out.push('| --- | --- | --- | --- | --- |');
+  pr.days.forEach((d) => out.push(`| ${cell(d.day)} | ${cell(d.area)} | ${cell(d.activity)} | ${cell(d.materials)} | ${cell(d.goal)} |`));
+  if (areas.length) {
+    out.push('');
+    out.push('---');
+    out.push('## 누리과정 영역 연계');
+    out.push(areas.join(' · '));
+  }
+  if (pr.notes && pr.notes.trim()) {
+    out.push('');
+    out.push('## 운영 시 유의점');
+    pr.notes.trim().split(/\n+/).forEach((line) => out.push(`> ${line}`));
+  }
+  return out.join('\n');
+}
+
 export function worksheetText(p: RegistryPayload): string {
   if (p.type === 'WorksheetCard') {
     const meta = [p.props.type, p.props.style_label].filter(Boolean).join(' · ');
@@ -1070,15 +1110,30 @@ export async function generateActivityImages(sourceId: string): Promise<void> {
   // 프레임이 새 이미지 열을 감싸도록 즉시 한 번 늘려 둔다(생성 전에도 자리 확보).
   if (frameId) fitFrameToChildren(frameId);
 
-  // 2) 활동별로 '그 활동을 하는 유아의 모습'을 그려 앞에서부터 채운다.
+  // 2) 활동별로 채운다 — 먼저 보관함/갤러리에 유사 자료가 있으면 가져다 쓰고(생성 비용 0),
+  //    없을 때만 '그 활동을 하는 유아의 모습'을 새로 그린다.
   for (let i = 0; i < list.length; i++) {
     const act = list[i];
+    if (!useBoardStore.getState().nodes[ids[i]]) continue; // 사용자가 지운 경우
+    // 재사용은 '정확히 같은 활동명'일 때만(findAsset). 퍼지/카테고리 검색은 '동물' 같은 단어가
+    // 든 활동에 엉뚱한 그림(예: 숲 주제에 오리)을 끌어와 금지 — 정확히 맞지 않으면 새로 그린다.
+    const reuse = await findAsset(act, 'image').catch(() => undefined);
+    if (reuse?.url) {
+      const cur = useBoardStore.getState().nodes[ids[i]];
+      useBoardStore.getState().updateNodeRaw(ids[i], {
+        loading: false,
+        src: reuse.url,
+        text: act.slice(0, 40),
+        data: { ...(cur?.data ?? {}), fromLibrary: true },
+      });
+      continue;
+    }
     b.setGenerating(`🎨 '${act.slice(0, 18)}' 활동 이미지를 그리는 중… (${i + 1}/${list.length})`);
     try {
       const prompt =
         `유아(어린이)들이 '${act}' 놀이/활동을 즐겁고 활기차게 하고 있는 장면. 활동하는 동작이 분명히 드러나게. ${KV_ART_STYLE}`;
       const res = await callGateway({ task: 'image', provider: 'auto', messages: [], meta: { prompt, caption: act } });
-      if (!useBoardStore.getState().nodes[ids[i]]) continue; // 사용자가 지운 경우
+      if (!useBoardStore.getState().nodes[ids[i]]) continue; // 생성 사이 사용자가 지운 경우
       useBoardStore.getState().updateNodeRaw(ids[i], { loading: false, src: res.image, text: act.slice(0, 40) });
       if (res.image && !res.mocked) void saveAsset(act, 'image', res.image, planNode ? String(planNode.data?.title ?? '놀이 활동') : undefined);
     } catch {
@@ -1571,6 +1626,65 @@ export async function searchVideosForViewer(viewerId: string, text: string, coun
     recordSpawnedNodes([noteId], '영상 검색 실패 안내');
   } finally {
     useBoardStore.getState().endGen();
+  }
+}
+
+/** 놀이 패키지용 — 활동 목록만큼 '활동별' 영상 썸네일을 만든다. 활동마다 유튜브에서 1개씩
+    찾아(없으면 그 칸은 거둔다) yt-result 카드로 채우고, 클릭하면 그 영상이 같은 유튜브 뷰어에서
+    바로 재생된다(kv:yt-play). 검색은 무키 결과 파싱이라 추가 비용 없음.
+    ★ spawnVideoRow를 쓰지 않고 카드를 '패키지 frameId의 멤버로 직접' 만든다 — spawnVideoRow는
+    뷰어를 별도 '동영상 모음' 프레임으로 재부모화해 패키지에서 떼어냈다. 멤버로 두면
+    designComposedFrame의 동영상 띠가 뷰어와 함께 한 프레임 안에 배치한다. */
+export async function fillActivityVideos(viewerId: string, frameId: string, topic: string, activities: string[]): Promise<string[]> {
+  const b = useBoardStore.getState();
+  const viewer = b.nodes[viewerId];
+  if (!viewer) return [];
+  const acts = activities.map((a) => a.trim()).filter(Boolean).slice(0, 6);
+  if (!acts.length) return [];
+  const signal = genSignal();
+  // 로딩 썸네일을 프레임 멤버로 직접 배치(뷰어 아래 임시 위치 — 최종 정렬은 designComposedFrame).
+  const ids = acts.map((_, i) => {
+    const id = newId('image');
+    b.addNodeRaw({
+      id, type: 'image',
+      x: Math.round(viewer.x + i * (YT_W + YT_GAPX)), y: Math.round(viewer.y + viewer.h + YT_TOP_GAP),
+      w: YT_W, h: YT_H, loading: true,
+      data: { role: 'yt-result', ytTarget: viewerId, frameId },
+    });
+    return id;
+  });
+  try {
+    // 활동별 1개씩 병렬 검색(짧은 질의 = 주제 + 활동명).
+    const results = await Promise.all(
+      acts.map((a) =>
+        fetch(`/api/youtube/search?q=${encodeURIComponent(`${topic} ${a}`.trim().slice(0, 60))}&n=1`, { signal })
+          .then((r) => r.json() as Promise<{ ok: boolean; results?: { id: string; title: string }[] }>)
+          .then((j) => (j.ok && j.results?.length ? j.results[0] : null))
+          .catch(() => null),
+      ),
+    );
+    const bb = useBoardStore.getState();
+    ids.forEach((cardId, i) => {
+      if (!bb.nodes[cardId]) return; // 기다리는 동안 지워진 카드
+      const v = results[i];
+      if (!v) {
+        bb.removeNodeRaw(cardId); // 결과 없는 활동은 빈 카드를 거둔다
+        return;
+      }
+      const prev = bb.nodes[cardId];
+      bb.updateNodeRaw(cardId, {
+        src: `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+        text: v.title,
+        loading: false,
+        data: { ...(prev?.data ?? {}), role: 'yt-result', ytTarget: viewerId, ytId: v.id, frameId, thumb: '' },
+      });
+    });
+    return ids.filter((id) => useBoardStore.getState().nodes[id]);
+  } catch {
+    // 실패/중단 — 로딩 썸네일만 조용히 거둔다(패키지 전체는 계속).
+    const bb = useBoardStore.getState();
+    ids.forEach((id) => { if (bb.nodes[id]?.loading) bb.removeNodeRaw(id); });
+    return [];
   }
 }
 

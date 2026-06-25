@@ -248,8 +248,8 @@ export function designComposedFrame(frameId: string, variant: LayoutVariant = 'd
   const ideas = [...byRole('idea'), ...nestedIdeas];
   const idealist = firstRole('idealist'); // 놀이 패키지의 선택형 아이디어 리스트(맨 왼쪽 컬럼)
   const mainDoc = firstRole('plan') || firstRole('letter') || firstRole('record') || firstRole('worksheet');
-  const worksheet = firstRole('worksheet');
-  const extraDoc = worksheet && worksheet !== mainDoc ? worksheet : undefined;
+  // 활동지는 여러 장일 수 있다(놀이 패키지=활동별 ≥2장) — mainDoc로 쓴 1장만 빼고 모두 우측에 쌓는다.
+  const worksheets = byRole('worksheet').filter((w) => w !== mainDoc);
   const images = byRole('image');
   const source = firstRole('source');
   const clarify = firstRole('clarify');
@@ -334,27 +334,73 @@ export function designComposedFrame(frameId: string, variant: LayoutVariant = 'd
   }
 
   // Column 3 — concept images / 도안, stacked vertically beside the plan
-  // (skipped when already laid out as a gallery-first band above).
+  // (skipped when already laid out as a gallery-first band above). 많으면(>5)
+  // 2열로 감싸 한 열이 지나치게 길어지지 않게 한다(놀이 패키지의 시청각자료+활동 예시 이미지).
   if (images.length && !imagesPlaced) {
-    let iy = rowY;
-    let imgW = 0;
-    for (const img of images) {
-      b.updateNodeRaw(img.id, { x: colX, y: iy });
-      iy += layoutH(img) + D_VGAP;
-      imgW = Math.max(imgW, img.w);
-    }
-    colX += imgW + D_COLGAP;
+    const perCol = images.length > 5 ? Math.ceil(images.length / 2) : images.length;
+    const stepX = Math.max(...images.map((im) => im.w)) + D_COLGAP;
+    const colY: number[] = [];
+    let usedCols = 1;
+    images.forEach((img, i) => {
+      const col = Math.floor(i / perCol);
+      usedCols = Math.max(usedCols, col + 1);
+      if (colY[col] === undefined) colY[col] = rowY;
+      b.updateNodeRaw(img.id, { x: colX + col * stepX, y: colY[col] });
+      colY[col] += layoutH(img) + D_VGAP;
+    });
+    colX += usedCols * stepX;
   }
 
   // Column 4 — companion materials beside the plan (per the teacher's request):
   // 활동지 · 웹 자료 카드 · 안내 메모, stacked top-down (NOT a row below the plan).
-  const rightStack = [extraDoc, newsletter, source, clarify, ...memos].filter(Boolean) as BoardNode[];
+  const rightStack = [...worksheets, newsletter, source, clarify, ...memos].filter(Boolean) as BoardNode[];
   if (rightStack.length) {
     let sy = rowY;
     for (const it of rightStack) {
       b.updateNodeRaw(it.id, { x: colX, y: sy });
       sy += layoutH(it) + D_VGAP;
     }
+  }
+
+  // Bottom band — 놀이 패키지의 동영상(유튜브 뷰어 + 활동별 썸네일 행)과 게임 뷰어.
+  // 컬럼 행 '아래'에 가로 띠로 둔다(뷰어 왼쪽 + 썸네일은 뷰어 바로 아래 한 줄, 게임은 오른쪽).
+  // 뷰어는 role 'video', 썸네일은 'yt-result', 게임은 interactive — 위 컬럼 규칙에서 모두 제외되므로
+  // 여기서만 배치한다(컬럼과 안 섞이게). 동영상/게임이 없으면(일반 컴포저) 건너뛴다.
+  const viewer = members.find(
+    (n) => n.data?.role === 'video' || String(n.data?.embed ?? '').includes('youtube-viewer'),
+  );
+  const ytThumbs = byRole('yt-result');
+  const game = members.find((n) => n.type === 'interactive');
+  if (viewer || game) {
+    // 컬럼 행의 실제 바닥 — 방금 배치한 노드들의 최신 위치를 스토어에서 다시 읽어 계산
+    // (캡처한 members 스냅샷의 y는 updateNodeRaw 후 낡았다). 동영상/게임/썸네일 자신은 제외.
+    const live = useBoardStore.getState().nodes;
+    const colBottom = Math.max(
+      oy,
+      ...members
+        .filter((n) => n !== viewer && n !== game && n.data?.role !== 'yt-result')
+        .map((n) => live[n.id])
+        .filter((n): n is BoardNode => !!n)
+        .map((n) => n.y + layoutH(n)),
+    );
+    const bandY = colBottom + D_VGAP + 12;
+    let bandX = ox;
+    if (viewer) {
+      b.updateNodeRaw(viewer.id, { x: bandX, y: bandY });
+      let bandW = viewer.w;
+      if (ytThumbs.length) {
+        ytThumbs.sort((a, z) => a.x - z.x); // 현재 가로 순서 보존
+        let tx = bandX;
+        const ty = bandY + layoutH(viewer) + 14;
+        for (const t of ytThumbs) {
+          b.updateNodeRaw(t.id, { x: tx, y: ty });
+          tx += t.w + 12;
+        }
+        bandW = Math.max(bandW, tx - bandX - 12);
+      }
+      bandX += bandW + D_COLGAP;
+    }
+    if (game) b.updateNodeRaw(game.id, { x: bandX, y: bandY });
   }
 
   // Fit the inner sub-frame first, then the parent (fitFrameToChildren bubbles up).

@@ -301,7 +301,7 @@ export function gridDeOverlap(frameId: string, seen = new Set<string>()): void {
   for (const n of order) {
     const w = n.w;
     const h = rh(n);
-    let x = snap(n.x);
+    const x = snap(n.x);
     let y = snap(n.y);
     let guard = 0;
     for (;;) {
@@ -327,10 +327,13 @@ export function alignFrameCmd(frameId: string): boolean {
   const ids = [...new Set([...collectAffectedIds(frameId), ...frameSubtree(frameId)])];
   const before = captureNodes(ids);
   // 동영상 모음 프레임(유튜브 뷰어 + 썸네일)은 고유 규칙(뷰어 상단 중앙 + 썸네일 행)을
-  // 복원한다 — 범용 행/열 정돈 대신.
-  const isVideoFrame = Object.values(b.nodes).some(
-    (n) => n.data?.frameId === frameId && String(n.data?.embed ?? '').includes('youtube-viewer'),
-  );
+  // 복원한다 — 범용 행/열 정돈 대신. 단, 놀이 패키지(composer)는 뷰어가 한 구성요소일 뿐이라
+  // 순수 동영상 프레임으로 오인하면 안 된다(designComposedFrame가 동영상 띠를 따로 배치).
+  const isVideoFrame =
+    !frame.data?.composer &&
+    Object.values(b.nodes).some(
+      (n) => n.data?.frameId === frameId && String(n.data?.embed ?? '').includes('youtube-viewer'),
+    );
   if (isVideoFrame && relayoutVideoFrame(frameId)) {
     pushRedesign(ids, before, '동영상 프레임 정렬');
     return true;
