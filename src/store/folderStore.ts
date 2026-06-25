@@ -35,13 +35,15 @@ export interface SavedFile {
   id: string;
   /** 확장자 포함 표시 이름 — 예: "봄 꽃밭.jpg". */
   name: string;
-  type: 'image' | 'doc' | 'note' | 'board';
-  /** image: src(URL/dataURL) · doc: 마크다운 · note: 평문 · board: BoardSnap JSON. */
+  type: 'image' | 'doc' | 'note' | 'board' | 'embed';
+  /** image: src(URL/dataURL) · doc: 마크다운 · note: 평문 · board: BoardSnap JSON · embed: 임베드 경로(예: /video-player.html). */
   content: string;
   /** board: 원본 프레임 id — 뷰어의 '마이보드에서 보기'가 이 프레임으로 점프한다. */
   frameId?: string;
   /** doc: 보드 카드의 표지 배너(coverImage) — 뷰어가 보드와 같은 모습으로 그린다. */
   cover?: string;
+  /** embed: 뷰어에 로드된 미디어 src(영상 URL 등) — 폴더 뷰어가 ?src=로 복원해 그 자리에서 재생한다. */
+  embedSrc?: string;
 }
 
 /* board.board — 저장 당시 프레임의 '보드 모습 그대로' 스냅샷. 노드들을 프레임
@@ -51,11 +53,12 @@ export interface BoardSnapNode {
   y: number;
   w: number;
   h: number;
-  kind: 'image' | 'doc' | 'memo' | 'frame';
-  src?: string; // image
-  text?: string; // doc 마크다운 · memo 평문 · frame 제목
+  kind: 'image' | 'doc' | 'memo' | 'frame' | 'embed';
+  src?: string; // image · embed 포스터/썸네일
+  text?: string; // doc 마크다운 · memo 평문 · frame 제목 · embed 뷰어 제목
   color?: string; // memo 색 토큰명(paper/accent-soft/surface-2…)
   cover?: string; // doc 표지 배너 — 보드 모습 그대로 재현
+  embed?: string; // embed 경로(예: /video-player.html) — 뷰어 종류 식별·아이콘
 }
 
 export interface BoardSnap {
@@ -220,12 +223,38 @@ function bumpSeqs(p: PersistShape): void {
   seq = Math.max(seq, maxBundle);
 }
 
+/* 구버전 저장본 마이그레이션 — 동영상·슬라이드 등 뷰어가 note(.txt)로 저장돼 있던 것을
+   embed 파일로 바꿔 폴더에서 그대로 재생/본다. 실제 메모를 건드리지 않게, 이름이 뷰어 라벨이고
+   내용이 그 라벨뿐(또는 빈)인 placeholder 노트만 변환한다. */
+const VIEWER_NOTE_EMBED: Array<[RegExp, string]> = [
+  [/^동영상\s*플레이어|^동영상$/, '/video-player.html'],
+  [/^슬라이드/, '/slides-viewer.html'],
+  [/^유튜브|^매직\s*뷰어/, '/magic-viewer.html'],
+  [/^3D\s*뷰어/, '/glb-viewer.html'],
+];
+function migrateViewerNotes(entries: SavedEntry[]): SavedEntry[] {
+  return entries.map((e) => {
+    if (e.kind === 'folder') return { ...e, children: migrateViewerNotes(e.children) };
+    if (e.type !== 'note') return e;
+    const base = e.name.replace(/\.txt$/i, '').trim();
+    const body = (e.content ?? '').trim();
+    const isPlaceholder = body === '' || body === base; // 라벨뿐인 뷰어 placeholder만(실제 메모 보존)
+    const hit = VIEWER_NOTE_EMBED.find(([re]) => re.test(base));
+    if (hit && isPlaceholder) {
+      return { kind: 'file', id: e.id, name: base, type: 'embed', content: hit[1] };
+    }
+    return e;
+  });
+}
+
 void (async () => {
   try {
     const p = await idbGet<PersistShape>(PERSIST_KEY);
     if (p && Array.isArray(p.saved)) {
       bumpSeqs(p);
-      useFolderStore.setState({ saved: p.saved, bundles: Array.isArray(p.bundles) ? p.bundles : [] });
+      // 최상위는 항상 폴더 — 자식만 마이그레이션(뷰어 note→embed)해 SavedFolder[] 형태 유지.
+      const migrated = p.saved.map((f) => ({ ...f, children: migrateViewerNotes(f.children) }));
+      useFolderStore.setState({ saved: migrated, bundles: Array.isArray(p.bundles) ? p.bundles : [] });
     }
   } finally {
     hydrating = false;

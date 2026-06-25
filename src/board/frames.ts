@@ -386,6 +386,10 @@ export function frameBoardSnap(frameId: string): BoardSnap | null {
         nodes.push({ ...base, kind: 'image', src: n.src, text: n.text ?? '' });
       } else if (n.data?.doc) {
         nodes.push({ ...base, kind: 'doc', text: n.text ?? '', cover: n.data?.coverImage as string | undefined });
+      } else if (typeof n.data?.embed === 'string' || n.type === 'interactive') {
+        // 동영상·슬라이드·게임 등 뷰어 — 보드 모습 그대로 보이게 'embed'로 담는다(메모 텍스트로 새지 않게).
+        const embed = typeof n.data?.embed === 'string' ? (n.data.embed as string) : 'interactive';
+        nodes.push({ ...base, kind: 'embed', embed, src: n.data?.viewerSrc as string | undefined, text: (n.data?.title as string) || n.text || '뷰어' });
       } else if (n.type === 'sticky' || n.type === 'text') {
         nodes.push({ ...base, kind: 'memo', text: n.text ?? '', color: n.color });
       }
@@ -427,13 +431,27 @@ export function folderFromFrame(frameId: string): SavedFolder | null {
     if (n.type === 'image' && n.src) {
       children.push({ kind: 'file', id: savedEntryId(), name: `${safeName(n.text ?? '', '이미지')}.jpg`, type: 'image', content: n.src });
     } else if (n.data?.doc) {
+      // 활동지(WorksheetCard)는 본문이 A4 그림이라 그 이미지를 표지로 함께 담아 보드 모습 그대로 보이게.
+      const wsImg = (n.data?.payload as { type?: string; props?: { image_url?: string } } | undefined)?.type === 'WorksheetCard'
+        ? (n.data.payload as { props?: { image_url?: string } }).props?.image_url
+        : undefined;
       children.push({
         kind: 'file',
         id: savedEntryId(),
         name: `${safeName(n.text ?? '', '문서')}.pdf`,
         type: 'doc',
         content: n.text ?? '',
-        cover: n.data?.coverImage as string | undefined,
+        cover: (n.data?.coverImage as string | undefined) ?? wsImg,
+      });
+    } else if (typeof n.data?.embed === 'string') {
+      // 동영상·슬라이드 등 뷰어 — note(.txt)가 아니라 'embed' 파일로 저장해 폴더에서 그대로 재생/본다.
+      children.push({
+        kind: 'file',
+        id: savedEntryId(),
+        name: safeName((n.data?.title as string) || n.text || '뷰어', '뷰어'),
+        type: 'embed',
+        content: n.data.embed as string,
+        embedSrc: n.data?.viewerSrc as string | undefined,
       });
     } else if (n.data?.role === 'source' && Array.isArray(n.data?.links)) {
       const links = n.data.links as Array<{ title: string; url: string }>;

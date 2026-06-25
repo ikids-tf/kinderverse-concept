@@ -173,15 +173,29 @@ function printDocPdf(f: SavedFile) {
 }
 
 function downloadSavedFile(f: SavedFile) {
-  if (f.type === 'board') return; // 보드 스냅샷은 뷰어 전용
+  if (f.type === 'board' || f.type === 'embed') return; // 보드 스냅샷·뷰어는 보기 전용
   if (f.type === 'image') void downloadImageJpg(f);
   else if (f.type === 'note') downloadNoteTxt(f);
   else printDocPdf(f);
 }
 
+/** 임베드 뷰어를 NodeView와 동일하게 복원 — 로드된 미디어(embedSrc)가 있으면 ?src=, 없으면 ?title=. */
+function embedViewerSrc(f: SavedFile): string {
+  const base = f.content || '/video-player.html';
+  const sep = base.includes('?') ? '&' : '?';
+  if (f.embedSrc) return `${base}${sep}src=${encodeURIComponent(f.embedSrc)}`;
+  return `${base}${sep}title=${encodeURIComponent(f.name)}`;
+}
+
+/** 임베드 종류 — 동영상 계열인지(아이콘·라벨용). */
+function isVideoEmbed(content: string): boolean {
+  return /video-player|youtube|magic-viewer/.test(content);
+}
+
 /** 대략적 파일 크기 라벨(컨텐츠 기준 — 원격 이미지는 표기 생략). */
 function sizeLabel(f: SavedFile): string {
   if (f.type === 'board') return '보드 스냅샷';
+  if (f.type === 'embed') return isVideoEmbed(f.content) ? '동영상' : '뷰어';
   if (f.type === 'image' && !f.content.startsWith('data:')) return 'JPG';
   const bytes = f.content.startsWith('data:')
     ? Math.round((f.content.length * 3) / 4)
@@ -271,6 +285,23 @@ function BoardPreview({ content, maxW, maxH, radius = 12 }: { content: string; m
                   <img src={n.cover} alt="" style={{ display: 'block', width: '100%', maxHeight: 110, objectFit: 'cover', borderRadius: 8, border: `1px solid ${C.line}`, marginBottom: 10 }} />
                 )}
                 <div className="kv-snapdoc" dangerouslySetInnerHTML={{ __html: mdToHtml((n.text ?? '').slice(0, 4000)) }} />
+              </div>
+            );
+          }
+          if (n.kind === 'embed') {
+            const video = isVideoEmbed(n.embed ?? '');
+            return (
+              <div key={i} style={{ ...box, background: 'var(--accent-soft, #FBE8DB)', border: `1px solid ${C.line}`, borderRadius: 10, overflow: 'hidden', display: 'grid', placeItems: 'center', position: 'relative' }}>
+                {n.src && <img src={n.src} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+                <span style={{ position: 'relative', display: 'grid', placeItems: 'center', gap: 6, textAlign: 'center', padding: 8 }}>
+                  {video ? <Film size={26} color={C.coral} /> : <Frame size={26} color={C.coral} />}
+                  <span style={{ fontSize: 12, fontWeight: 700, color: C.ink, maxWidth: '94%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.text || (video ? '동영상' : '뷰어')}</span>
+                </span>
+                {video && (
+                  <span style={{ position: 'absolute', right: 8, bottom: 8, width: 34, height: 34, borderRadius: 999, background: 'rgba(20,19,17,.5)', display: 'grid', placeItems: 'center' }}>
+                    <Play size={15} color="#fff" fill="#fff" />
+                  </span>
+                )}
               </div>
             );
           }
@@ -447,7 +478,7 @@ export function FolderPage() {
               >
                 <Frame size={14} color="#fff" /> 마이보드에서 보기
               </button>
-            ) : (
+            ) : viewer.type === 'embed' ? null : (
               <button
                 onClick={() => downloadSavedFile(viewer)}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 15px', borderRadius: 999, border: 'none', background: a, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600 }}
@@ -492,6 +523,14 @@ export function FolderPage() {
                 content={viewer.content}
                 maxW={typeof window !== 'undefined' ? window.innerWidth * 0.86 : 1100}
                 maxH={typeof window !== 'undefined' ? window.innerHeight * 0.78 : 680}
+              />
+            ) : viewer.type === 'embed' ? (
+              // 동영상·슬라이드 등 뷰어 — 보드와 똑같은 iframe으로 그 자리에서 재생/본다.
+              <iframe
+                src={embedViewerSrc(viewer)}
+                title={viewer.name}
+                style={{ width: 'min(960px, 94vw)', height: 'min(620px, 82vh)', border: 'none', borderRadius: 14, background: '#000', boxShadow: '0 24px 64px rgba(0,0,0,.4)' }}
+                allow="autoplay; fullscreen; encrypted-media; clipboard-write"
               />
             ) : viewer.type === 'doc' ? (
               // 보드에서 생성된 모습 그대로 — 표지 배너 + kv-doc-md 편집 디자인.
@@ -587,6 +626,12 @@ export function FolderPage() {
                         <img src={e.content} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 10 }} />
                       ) : e.type === 'board' ? (
                         <BoardPreview content={e.content} maxW={150} maxH={106} radius={8} />
+                      ) : e.type === 'embed' ? (
+                        <div style={{ position: 'absolute', inset: 0, background: 'var(--accent-soft, #FBE8DB)', display: 'grid', placeItems: 'center' }}>
+                          <span style={{ width: 44, height: 44, borderRadius: 999, background: 'rgba(20,19,17,.55)', display: 'grid', placeItems: 'center' }}>
+                            {isVideoEmbed(e.content) ? <Play size={20} color="#fff" fill="#fff" /> : <Frame size={20} color="#fff" />}
+                          </span>
+                        </div>
                       ) : e.type === 'doc' ? (
                         <div style={{ position: 'absolute', inset: 0, background: '#fff', overflow: 'hidden' }}>
                           <div style={{ transform: 'scale(0.46)', transformOrigin: 'top left' }}>
