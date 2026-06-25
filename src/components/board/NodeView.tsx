@@ -1837,35 +1837,35 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               💡 {ideaListTitle}{' '}
               <span className="text-xs font-normal text-fg-muted">— 아이디어를 고르면 아래 추천이 그 아이디어로 생성돼요</span>
             </h3>
-            <ol className="space-y-1">
+            {/* div/button 으로 렌더 — ol/li 의 기본 번호(1.2.3.)와 배지 번호가 겹쳐 중복되던 것 제거. */}
+            <div className="space-y-1">
               {ideaItems!.map((it, i) => {
                 const sel = it.id === selectedIdeaId;
                 return (
-                  <li key={it.id}>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => { e.stopPropagation(); pickIdea(it.id); }}
-                      className={`flex w-full items-start gap-t2 rounded-lg border px-t3 py-t2 text-left transition-colors duration-150 ease-soft ${
-                        sel ? 'border-accent bg-accent-soft' : 'border-transparent hover:border-border hover:bg-surface-2'
+                  <button
+                    key={it.id}
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); pickIdea(it.id); }}
+                    className={`flex w-full items-start gap-t2 rounded-lg border px-t3 py-t2 text-left transition-colors duration-150 ease-soft ${
+                      sel ? 'border-accent bg-accent-soft' : 'border-transparent hover:border-border hover:bg-surface-2'
+                    }`}
+                  >
+                    <span
+                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                        sel ? 'bg-accent text-on-accent' : 'bg-surface-2 text-fg-muted'
                       }`}
                     >
-                      <span
-                        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
-                          sel ? 'bg-accent text-on-accent' : 'bg-surface-2 text-fg-muted'
-                        }`}
-                      >
-                        {sel ? '✓' : i + 1}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="font-bold text-fg">{it.label}</span>
-                        {it.desc && <span className="mt-0.5 block text-xs leading-relaxed text-fg-2">{it.desc}</span>}
-                      </span>
-                    </button>
-                  </li>
+                      {sel ? '✓' : i + 1}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="font-bold text-fg">{it.label}</span>
+                      {it.desc && <span className="mt-0.5 block text-xs leading-relaxed text-fg-2">{it.desc}</span>}
+                    </span>
+                  </button>
                 );
               })}
-            </ol>
+            </div>
           </div>
         ) : isDoc ? (
           <div className="kv-doc-md text-sm leading-relaxed text-fg">
