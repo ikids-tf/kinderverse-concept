@@ -11,7 +11,9 @@ import type { MechanismId } from '@/features/interactive-viewer/resolver/recipeT
 import { assembleAndPlace } from '@/features/interactive-viewer/resolver/place';
 import { saveToLibrary } from '@/features/interactive-viewer/store/library';
 import { saveGameCard } from '@/features/interactive-viewer/store/gameCards';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage } from './workflow';
+import { urlToAssetRef, makeImageElement, makeTextElement, withElementAdded } from '@/features/interactive-viewer/runtime/assetIngest';
+import { ASSET_KINDS, type AssetKind } from '@/shared/assetKind';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
 import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior, generateIdeaList, buildPlayPackage } from './composer';
@@ -65,6 +67,8 @@ function isNewInteractiveGame(text: string): boolean {
 /** 진행 표시용 '주제' — 생성 동사·군더더기를 걷어내고 교사가 입력한 핵심만 남긴다(길면 줄임). */
 function cleanGameTopic(text: string): string {
   const t = (text || '')
+    // "이 이미지(들)로 / 이 사진으로 / 이걸로" 등 지시어 접두 제거(이미지 선택 게임 제목이 장황해짐).
+    .replace(/이\s*(이미지|사진|그림)들?(으)?로|이것?들?(으)?로|이걸로|선택한?\s*(이미지|사진|그림)들?(으)?로/g, ' ')
     .replace(/만들어줘|만들어|만들기|만들|구성해줘|구성|생성해줘|생성|새로|짜줘|짜|해줘|주세요|줘/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -198,6 +202,70 @@ async function createInteractiveGame(text: string): Promise<void> {
 /** 추천 스트립·외부에서 '게임 만들기'를 직접 트리거 — 새 인터랙티브 노드 생성 + Resolver 합성. */
 export function startInteractiveGame(text: string): void {
   void createInteractiveGame(normalizeInput(text));
+}
+
+function validAssetKind(k?: string): AssetKind {
+  return k && (ASSET_KINDS as readonly string[]).includes(k) ? (k as AssetKind) : 'teacher-upload';
+}
+
+/** "이 이미지(들)로 ○○ 게임 만들어줘" — 선택 이미지를 인터랙티브 노드 요소로 배치한 뒤 그 이미지들로
+    게임을 구성한다. applyInteractivePrompt는 요소가 있으면 editInteractiveNode로 분기해 기존 이미지를
+    보존(toSafeDoc가 src를 KEEP로 치환 → 픽셀을 LLM에 미전송, 아동 프라이버시 안전)하며 상호작용을 입힌다.
+    게임뷰어 iframe 대신 보드 네이티브 인터랙티브 노드로 일원화. */
+async function createInteractiveGameFromImages(imgs: Array<{ src: string; kind?: string }>, text: string): Promise<void> {
+  const c = viewportCenterBoardPoint();
+  const docId = newId('inode');
+  const nodeId = addPresetNodeCmd('interactive', c.x, c.y, { w: 720, h: 450, autoH: false, data: { docId } }, '인터랙티브 게임');
+  const board = useBoardStore.getState();
+  board.focusNode(nodeId);
+  slideFrameToEmpty(nodeId);
+  board.beginGen();
+  const topic = cleanGameTopic(text);
+  board.setGenerating(`🎮 「${topic}」 놀이를 준비하는 중…`);
+  try {
+    const store = useInteractiveStore.getState();
+    store.ensure(docId);
+    // 1) 선택 이미지를 1280×800 캔버스에 그리드로 배치(보드 복사 — 원본은 보드에 유지).
+    const CANVAS = { w: 1280, h: 800 };
+    const list = imgs.slice(0, 8); // 과밀 방지
+    const cols = Math.max(1, Math.ceil(Math.sqrt(list.length)));
+    const rows = Math.max(1, Math.ceil(list.length / cols));
+    const cw = CANVAS.w / (cols + 1);
+    const ch = (CANVAS.h - 140) / (rows + 1);
+    for (let i = 0; i < list.length; i++) {
+      const ref = await urlToAssetRef(list[i].src, validAssetKind(list[i].kind));
+      const at = { x: Math.round(cw * ((i % cols) + 1)), y: Math.round(110 + ch * (Math.floor(i / cols) + 1)) };
+      const el = makeImageElement(ref, 'board-copy', at, CANVAS);
+      store.mutate(docId, (doc) => withElementAdded(doc, el));
+    }
+    // 2) 배치된 이미지로 '탭 놀이'를 결정론으로 배선한다. 인터랙티브 노드 시스템은 '제공 이미지로
+    //    자동 게임 구성'을 지원하지 않으므로(compose·resolver는 라벨로 이미지를 새로 생성, 엔진 frozen,
+    //    editInteractiveNode는 최소수정이라 게임을 안 만듦) — 탭하면 통통 튀고 칭찬하는 보편 상호작용을
+    //    코드로 입혀 그 자리에서 바로 즐길 수 있게 한다(교사는 노드 프롬프트바로 규칙을 더 다듬을 수 있음).
+    const PRAISE = ['잘했어요! 🎉', '멋져요! 👏', '최고예요! ⭐', '와, 좋아요! 😊', '신나요! 🥳', '대단해요! 💖'];
+    board.setGenerating(`🎮 「${topic}」 놀이를 만드는 중…`);
+    store.mutate(docId, (doc) => {
+      const imgEls = doc.elements.filter((e) => e.kind === 'image' && e.origin === 'board-copy');
+      const title = makeTextElement(`${topic} — 그림을 눌러 보세요!`, { x: CANVAS.w / 2, y: 70 });
+      const behaviors = imgEls.flatMap((el, i) => {
+        const sayId = `say_${el.id}`;
+        return [
+          { id: `tap_${el.id}`, target: el.id, trigger: 'tap' as const, action: 'animate' as const, params: { preset: 'bounce' as const }, then: [sayId] },
+          { id: sayId, target: el.id, trigger: 'afterComplete' as const, action: 'speak' as const, params: { text: PRAISE[i % PRAISE.length], mode: 'bubble' as const } },
+        ];
+      });
+      return { ...doc, title: `${topic} 놀이`, elements: [title, ...doc.elements], behaviors: [...(doc.behaviors ?? []), ...behaviors] };
+    });
+    showToast('고른 이미지로 놀이를 만들었어요 — 그림을 누르면 반응해요', 'success');
+    // 라이브러리 등록 + 교사 카드(모든 게임은 교사 카드를 갖는다).
+    const doc = useInteractiveStore.getState().peek(docId);
+    if (doc && doc.elements.length > 0) {
+      saveToLibrary(doc);
+      saveGameCard(docId, ensurePrompts(buildTeacherCard('tap-select', topic, doc.title), topic));
+    }
+  } finally {
+    board.endGen();
+  }
 }
 
 /** 저장된 게임(docId)을 보드에 올려 바로 쓰게 한다 — 추천 '재사용' 카드 클릭. 생성 없음. */
@@ -589,12 +657,13 @@ export function handleBoardPrompt(text: string): boolean {
     return true;
   }
 
-  // 이미지(들) 선택 + "이 이미지로 ○○ 게임 만들어줘" → 게임 뷰어를 깔고 선택 이미지를 시드로
-  // 보내 그 자리에서 게임을 생성한다(감정 사진 → 마음알기 게임). 뷰어가 이미지를 분석해 조립.
+  // 이미지(들) 선택 + "이 이미지로 ○○ 게임 만들어줘" → 인터랙티브 노드를 만들고 선택 이미지를
+  // 그 노드의 요소로 배치한 뒤 그 이미지들로 게임을 구성한다(감정 사진 → 마음알기 게임).
+  // 게임뷰어 iframe 미사용 — 보드 네이티브 인터랙티브 노드로 일원화.
   // 일반 이미지 재생성(applyContentIntent)으로 새지 않도록 콘텐츠 분기보다 먼저 처리.
   const gameImgs = sel.filter((n) => n.type === 'image' && n.src);
   if (gameImgs.length > 0 && gameImgs.length === sel.length && GAME_WORD_RE.test(text) && GAME_GEN_RE.test(text)) {
-    spawnGameFromImages(gameImgs.map((n) => n.src as string), text);
+    void createInteractiveGameFromImages(gameImgs.map((n) => ({ src: n.src as string, kind: n.data?.assetKind as string | undefined })), text);
     showToast('고른 이미지로 게임을 만들고 있어요', 'success');
     return true;
   }

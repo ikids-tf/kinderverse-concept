@@ -12,7 +12,6 @@ import { showToast } from '@/lib/toast';
 import { saveWebLinks } from './webLinks';
 import { fitFrameToChildren, frameSubtree } from './frames';
 import { recordSpawnedNodes, replaceImageCmd, addImageNodeCmd } from './commands';
-import { queueGameCreate } from './gameHandoff';
 import { worldBox } from './geometry';
 import { linkedComponent } from './links';
 import type { RegistryPayload } from '@/ui-registry/contracts';
@@ -1311,35 +1310,9 @@ export function spawnVideoPlayer(nearId?: string): string {
   return id;
 }
 
-/** 게임 뷰어 카드를 깔고, 보드에서 고른 이미지를 시드로 넣어 그 자리에서 게임을 생성한다.
-    "이 이미지들로 감정 맞추기 게임 만들어줘"의 실행부 — 뷰어가 시드 이미지를 분석해
-    마음알기(감정 맞추기) 게임으로 조립한다(orchestrator의 emotionFromImages 경로).
-    NodeView가 iframe 준비(kv-game-ready) 후 prompt+seedImages 를 전달 → 뷰어가 생성. */
-export function spawnGameFromImages(srcs: string[], prompt: string): string {
-  const b = useBoardStore.getState();
-  const W = 760;
-  const H = 560;
-  const c = viewportCenterBoardPoint();
-  const id = newId('sticky');
-  b.addNodeRaw({
-    id,
-    type: 'sticky',
-    x: Math.round(c.x - W / 2),
-    y: Math.round(c.y - H / 2),
-    w: W,
-    h: H,
-    autoH: false,
-    text: '놀이 만들기',
-    data: { embed: '/game-viewer.html', title: '놀이 만들기' },
-  });
-  recordSpawnedNodes([id], '게임 뷰어 추가');
-  b.focusNode(id);
-  slideFrameToEmpty(id); // 다른 요소와 겹치지 않게 가장 가까운 오른쪽 빈자리로
-  // 생성 요청을 카드에 큐잉 — NodeView가 iframe 준비(kv-game-ready) 시 1회 consume해 전달한다
-  // (window 이벤트로 곧장 쏘면 갓 깐 카드의 리스너 미부착으로 유실될 수 있어 큐로 안전 인계).
-  queueGameCreate(id, { prompt, seedImages: srcs });
-  return id;
-}
+// (제거됨) spawnGameFromImages — 게임뷰어(/game-viewer.html) iframe 카드 스포너. "이 이미지로 게임"은
+// 이제 board/prompt.createInteractiveGameFromImages가 보드 네이티브 인터랙티브 노드로 만든다(게임뷰어 미사용).
+// game-viewer.html 엔트리·NodeView 임베드 렌더는 기존 보드 호환용으로만 잔존.
 
 /** 웹 자료 뷰어를 깐다 — 외부 웹페이지를 iframe(web-viewer.html)으로 카드 안에 띄운다.
     카드 옆(near) 또는 화면 중앙에 생성한 뒤 포커스 + 가장 가까운 빈자리로 슬라이드(겹침 방지).
