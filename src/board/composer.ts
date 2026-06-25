@@ -952,7 +952,7 @@ export async function generateIdeaList(topic: string): Promise<void> {
     if (ideas.length) {
       const cur = useBoardStore.getState().nodes[cardId];
       useBoardStore.getState().updateNodeRaw(cardId, {
-        data: { ...(cur?.data ?? {}), ideaItems: ideas, selectedIdeaId: null, ideaTitle: `${t} 놀이 아이디어` },
+        data: { ...(cur?.data ?? {}), ideaItems: ideas, selectedIdeaIds: [], ideaTitle: `${t} 놀이 아이디어` },
       });
       attachIdeaChips(frameId); // 프레임 하단 추천: 놀이계획·마인드맵·활동 이미지(선택/자동선택 아이디어 기준)
     }
@@ -995,17 +995,20 @@ async function runIdeaExpansion(frameId: string, chipId: string, action: Compose
     showToast('먼저 아이디어를 생성해 주세요', 'error');
     return;
   }
-  const selId = (card?.data?.selectedIdeaId as string | null) ?? null;
-  let idea = items.find((it) => it.id === selId);
-  const auto = !idea;
-  if (!idea) idea = items[Math.floor(Date.now() / 1000) % items.length]; // 미선택 → 20개 중 자동 선택
+  const selIds = (card?.data?.selectedIdeaIds as string[] | undefined) ?? [];
+  let selected = items.filter((it) => selIds.includes(it.id)); // 복수 선택
+  const auto = selected.length === 0;
+  if (auto) selected = [items[Math.floor(Date.now() / 1000) % items.length]]; // 미선택 → 20개 중 자동 선택 1개
   setChipStatus(frameId, chipId, 'idle'); // 즉시 재사용 가능(생성은 자체 로딩 프레임에서 진행)
-  showToast(`${auto ? '자동 선택 ' : ''}‘${idea.label}’(으)로 ${IDEA_ACTION_LABEL[action] ?? '생성해요'}`, 'success');
-  // 라벨 중심 프롬프트 — 계획/마인드맵/이미지가 선택 아이디어에 정확히 초점을 맞추게 한다
-  // (desc까지 같이 넘기면 plan 에이전트의 주제 추출이 흐트러져 엉뚱한 활동으로 드리프트했음).
-  if (action === 'idea_plan') void composeFromPrompt(`${idea.label} 놀이계획`, 'plan');
-  else if (action === 'idea_mindmap') void composeFromPrompt(idea.label, 'mindmap');
-  else if (action === 'idea_image') void composeFromPrompt(`${idea.label} 활동 장면 그림`, 'studio');
+  const labels = selected.map((s) => s.label);
+  const joined = labels.join(', ');
+  const who = auto ? `자동 선택 ‘${labels[0]}’` : labels.length > 1 ? `선택한 ${labels.length}개 아이디어` : `‘${labels[0]}’`;
+  showToast(`${who}(으)로 ${IDEA_ACTION_LABEL[action] ?? '생성해요'}`, 'success');
+  // 라벨 중심 프롬프트 — 선택 아이디어(들)에 정확히 초점을 맞춘다(desc 동봉 시 plan 주제가 드리프트했음).
+  // 복수 선택이면 라벨을 묶어 한 결과물에 함께 반영(주간 계획=여러 활동, 마인드맵=여러 가지, 이미지=함께 그린 장면).
+  if (action === 'idea_plan') void composeFromPrompt(`${joined} 놀이계획`, 'plan');
+  else if (action === 'idea_mindmap') void composeFromPrompt(joined, 'mindmap');
+  else if (action === 'idea_image') void composeFromPrompt(`${joined} 활동 장면 그림`, 'studio');
 }
 
 /** Make a full A4 주간 놀이계획안 from a selected idea/branch and connect it — the

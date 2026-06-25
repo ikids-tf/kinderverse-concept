@@ -1668,13 +1668,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
         ? (node.data.ideaItems as Array<{ id: string; label: string; desc?: string }>)
         : null;
     const isIdeaList = !!ideaItems;
-    const selectedIdeaId = (node.data?.selectedIdeaId as string | null) ?? null;
+    // 복수 선택 — 여러 아이디어를 골라 추천(놀이계획·마인드맵·활동 이미지)에 함께 넘긴다.
+    const selectedIdeaIds = Array.isArray(node.data?.selectedIdeaIds) ? (node.data.selectedIdeaIds as string[]) : [];
     const ideaListTitle = (node.data?.ideaTitle as string | undefined) ?? '놀이 아이디어';
     const pickIdea = (id: string) => {
       const cur = useBoardStore.getState().nodes[node.id];
       if (!cur) return;
-      const next = cur.data?.selectedIdeaId === id ? null : id; // 같은 행 다시 클릭 → 선택 해제
-      useBoardStore.getState().updateNodeRaw(node.id, { data: { ...cur.data, selectedIdeaId: next } });
+      const prev = Array.isArray(cur.data?.selectedIdeaIds) ? (cur.data.selectedIdeaIds as string[]) : [];
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]; // 토글
+      useBoardStore.getState().updateNodeRaw(node.id, { data: { ...cur.data, selectedIdeaIds: next } });
     };
     const coverImage = node.data?.coverImage as string | undefined; // newsletter cover
     // 활동지 = 인쇄용 A4 한 장. 제목·안내는 텍스트 레이어, 그림은 생성 이미지.
@@ -1835,12 +1837,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           <div className="kv-doc-md text-sm leading-relaxed text-fg">
             <h3 className="mb-t3 font-serif text-base font-bold text-fg">
               💡 {ideaListTitle}{' '}
-              <span className="text-xs font-normal text-fg-muted">— 아이디어를 고르면 아래 추천이 그 아이디어로 생성돼요</span>
+              <span className="text-xs font-normal text-fg-muted">— 아이디어를 여러 개 고르면 아래 추천이 함께 반영돼요</span>
             </h3>
             {/* div/button 으로 렌더 — ol/li 의 기본 번호(1.2.3.)와 배지 번호가 겹쳐 중복되던 것 제거. */}
             <div className="space-y-1">
               {ideaItems!.map((it, i) => {
-                const sel = it.id === selectedIdeaId;
+                const sel = selectedIdeaIds.includes(it.id);
                 return (
                   <button
                     key={it.id}
