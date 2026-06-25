@@ -1035,74 +1035,73 @@ export async function buildPlayPackage(topic: string): Promise<void> {
   });
   b.focusNode(frameId);
   const created: string[] = [frameId];
+  const fX = Math.round(vc.x - 700);
+  const fY = Math.round(vc.y - 360);
+  const VID_W = 480, VID_H = 300, GAME_W = 720, GAME_H = 450;
   try {
-    // 1) 아이디어 리스트(선택형 doc) — 먼저 만들어 바로 보이게.
-    say('💡 놀이 아이디어를 모으고 있어요…');
-    const ideas = await runPlanIdeas(t, ctx, 12).catch(() => [] as IdeaItem[]);
-    if (ideas.length) {
-      const md = `# 💡 ${t} 놀이 아이디어 ${ideas.length}가지\n\n` + ideas.map((it, i) => `${i + 1}. **${it.label}**${it.desc ? ` — ${it.desc}` : ''}`).join('\n');
-      const cid = spawnDocCard(frameId, md, 'idealist', 520);
-      const cur = useBoardStore.getState().nodes[cid];
-      useBoardStore.getState().updateNodeRaw(cid, { data: { ...(cur?.data ?? {}), ideaItems: ideas, selectedIdeaIds: [], ideaTitle: `${t} 놀이 아이디어` } });
-      created.push(cid);
+    // ── 스켈레톤 먼저 ── 프레임 + 모든 섹션이 '로딩 자리'를 즉시 잡는다(전체 구조가 바로 보이고
+    //    각 섹션이 생성되는 대로 그 자리에서 채워진다 — 기다리는 동안 화면이 계속 살아 있게).
+    say('📦 패키지 자리를 잡는 중 — 각 자료가 채워집니다…');
+    // 아이디어 리스트(선택형) — 로딩 placeholder. 채워지면 ideaItems가 들어가 행으로 렌더된다.
+    const ideaCardId = spawnDocCard(frameId, `# 💡 ${t} 놀이 아이디어\n\n아이디어를 모으는 중…`, 'idealist', 520);
+    {
+      const c = useBoardStore.getState().nodes[ideaCardId];
+      useBoardStore.getState().updateNodeRaw(ideaCardId, { data: { ...(c?.data ?? {}), loadingDoc: true, ideaTitle: `${t} 놀이 아이디어` } });
     }
-    // 2) 놀이계획·활동 이미지·활동지 — 병렬 생성(서로 독립, 최종 레이아웃에서 정렬).
-    //    웹자료는 별도 source.web 프레임 대신 아래에서 '유튜브 뷰어 + 활동별 링크'로 직접 구성한다.
-    say('📦 계획·이미지·활동지를 함께 만들고 있어요…');
-    const results = await Promise.all([
-      fillRegion(frameId, 'plan.grid', t, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
-      fillRegion(frameId, 'studio.images', `${t} 활동 장면`, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
-      fillRegion(frameId, 'studio.worksheet', t, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
+    created.push(ideaCardId);
+    // 동영상(유튜브 뷰어) + 활동별 링크 placeholder — 하단에 자리 잡고, 링크는 계획이 나오면 채운다.
+    const ytId = newId('sticky');
+    b.addNodeRaw({ id: ytId, type: 'sticky', x: fX + 24, y: fY + 560, w: VID_W, h: VID_H, autoH: false, text: '유튜브', data: { embed: '/youtube-viewer.html', title: `${t} 동영상`, frameId } });
+    const linkId = newId('sticky');
+    b.addNodeRaw({ id: linkId, type: 'sticky', x: fX + 24, y: fY + 560 + VID_H + 24, w: VID_W, h: 200, autoH: true, color: 'surface-2', data: { role: 'source', frameId, summary: '🔗 활동별 동영상·이미지 자료를 모으는 중…', links: [], thumbs: [] } });
+    // 게임 — 인터랙티브 노드 placeholder(빈 노드, 생성 후 채워짐).
+    const gameDocId = newId('inode');
+    const gameNodeId = addPresetNodeCmd('interactive', fX + 24 + VID_W + 40 + GAME_W / 2, fY + 560 + GAME_H / 2, { w: GAME_W, h: GAME_H, autoH: false, data: { docId: gameDocId, frameId } }, '인터랙티브 게임');
+    created.push(ytId, linkId, gameNodeId);
+    b.setSelection([frameId]); // addPresetNodeCmd가 게임 노드를 선택 → 프레임 선택으로 되돌림
+    gridDeOverlap(frameId); // 스켈레톤 1차 정돈(자리 안정)
+
+    // ── 병렬 채움 ── 아이디어·계획·이미지·활동지를 동시에 생성, 각 섹션이 제 자리에서 로딩→완성.
+    let ideas: IdeaItem[] = [];
+    await Promise.all([
+      runPlanIdeas(t, ctx, 12)
+        .then((res) => {
+          ideas = res;
+          if (!res.length) return;
+          const md = `# 💡 ${t} 놀이 아이디어 ${res.length}가지\n\n` + res.map((it, i) => `${i + 1}. **${it.label}**${it.desc ? ` — ${it.desc}` : ''}`).join('\n');
+          const c = useBoardStore.getState().nodes[ideaCardId];
+          if (c) useBoardStore.getState().updateNodeRaw(ideaCardId, { text: md, data: { ...(c.data ?? {}), ideaItems: res, selectedIdeaIds: [], loadingDoc: false } });
+        })
+        .catch(() => {}),
+      fillRegion(frameId, 'plan.grid', t, ctx, undefined, 'story').then((r) => created.push(...r.ids)).catch(() => {}),
+      fillRegion(frameId, 'studio.images', `${t} 활동 장면`, ctx, undefined, 'story').then((r) => created.push(...r.ids)).catch(() => {}),
+      fillRegion(frameId, 'studio.worksheet', t, ctx, undefined, 'story').then((r) => created.push(...r.ids)).catch(() => {}),
     ]);
-    results.forEach((r) => created.push(...r.ids));
-    // 3) 자료 카드 정렬 → 그 아래 한 줄에 동영상·게임을 둔다(실제 렌더 높이 기준이라 겹치지 않게).
-    say('🪄 패키지를 정리하고 있어요…');
-    designComposedFrame(frameId, asLayoutVariant(undefined));
-    await new Promise((r) => setTimeout(r, 340)); // 카드 실제 높이(renderH) 반영 대기
-    const st = useBoardStore.getState();
-    const kids = Object.values(st.nodes).filter((n) => n.data?.frameId === frameId);
-    const fr = st.nodes[frameId];
-    const rh = (n: BoardNode) => Math.max(typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : 0, n.h || 0);
-    const bottomY = kids.length ? Math.max(...kids.map((n) => n.y + rh(n))) : (fr?.y ?? 0) + 60;
-    const leftX = kids.length ? Math.min(...kids.map((n) => n.x)) : (fr?.x ?? 0) + 24;
-    const COL_GAP = 40, VID_W = 480, VID_H = 300, GAME_W = 720, GAME_H = 450;
-    const rowY = bottomY + 48;
-    // 동영상·웹자료 — 별도 웹프레임 대신 패키지 안에 '유튜브 뷰어 + 활동별 동영상/이미지 링크'로 구성.
-    //   계획의 활동 목록을 뽑아 활동 갯수만큼 링크를 만든다(없으면 아이디어 라벨로 폴백).
+
+    // 활동별 링크 채우기 — 계획(WeeklyPlanGrid) 활동 목록(없으면 아이디어 라벨)으로 갯수만큼.
     const planCard = Object.values(useBoardStore.getState().nodes).find((n) => n.data?.frameId === frameId && n.data?.role === 'plan');
     const planPay = planCard?.data?.payload as { type?: string; props?: { days?: Array<{ activity?: string }> } } | undefined;
-    let activities = planPay?.type === 'WeeklyPlanGrid'
-      ? (planPay.props?.days ?? []).map((d) => String(d.activity ?? '').trim()).filter(Boolean)
-      : [];
+    let activities = planPay?.type === 'WeeklyPlanGrid' ? (planPay.props?.days ?? []).map((d) => String(d.activity ?? '').trim()).filter(Boolean) : [];
     if (!activities.length) activities = ideas.slice(0, 5).map((it) => it.label);
     activities = activities.slice(0, 6);
-    // 활동 문장은 길다 — 제목은 짧게 줄이고, 검색어는 '주제 + 활동 앞부분'으로(롱쿼리는 검색이 부정확).
     const shortAct = (a: string) => (a.length > 22 ? `${a.slice(0, 22)}…` : a);
     const q = (a: string) => encodeURIComponent(`${t} ${a.slice(0, 28)}`);
     const videoLinks = activities.map((a) => ({ title: `▶ ${shortAct(a)}`, url: `https://www.youtube.com/results?search_query=${q(a)}`, domain: 'youtube.com' }));
     const imageLinks = activities.map((a) => ({ title: `🖼 ${shortAct(a)}`, url: `https://www.google.com/search?tbm=isch&q=${q(a)}`, domain: 'google.com' }));
-    // 유튜브 뷰어(위) — 검색·재생. 그 아래 활동별 링크 카드(동영상 → 이미지 순, 클릭=해당 사이트).
-    const ytId = newId('sticky');
-    b.addNodeRaw({ id: ytId, type: 'sticky', x: leftX, y: rowY, w: VID_W, h: VID_H, autoH: false, text: '유튜브', data: { embed: '/youtube-viewer.html', title: `${t} 동영상`, frameId } });
-    const linkId = newId('sticky');
-    b.addNodeRaw({ id: linkId, type: 'sticky', x: leftX, y: rowY + VID_H + 24, w: VID_W, h: 240, autoH: true, color: 'surface-2', data: { role: 'source', frameId, summary: `${t} 활동별 동영상·이미지 자료 (활동 ${activities.length}개) — 클릭하면 해당 사이트에서 열려요`, links: [...videoLinks, ...imageLinks], thumbs: [] } });
-    created.push(ytId, linkId);
-    // 게임 — 인터랙티브 노드(게임뷰어 iframe 아님). 주제 게임은 패키지 완성 뒤 비동기로 채운다.
-    const gameDocId = newId('inode');
-    const gameNodeId = addPresetNodeCmd(
-      'interactive',
-      leftX + VID_W + COL_GAP + GAME_W / 2,
-      rowY + GAME_H / 2,
-      { w: GAME_W, h: GAME_H, autoH: false, data: { docId: gameDocId, frameId } },
-      '인터랙티브 게임',
-    );
-    created.push(gameNodeId);
-    // 겹침 보장 해소 — 자료 카드(designComposedFrame)와 하단 동영상·게임이 어떤 경우에도
-    // 겹치지 않게 제자리 정돈 + 프레임을 내용에 맞춰 확장(병렬 채움 레이스 안전망).
+    const lc = useBoardStore.getState().nodes[linkId];
+    if (lc) useBoardStore.getState().updateNodeRaw(linkId, { data: { ...(lc.data ?? {}), summary: `${t} 활동별 동영상·이미지 자료 (활동 ${activities.length}개) — 클릭하면 해당 사이트에서 열려요`, links: [...videoLinks, ...imageLinks] } });
+
+    // ── 마무리 정돈 ── 채워진 문서 높이(renderH)가 안정된 뒤 컬럼 정렬 + 전체 겹침 해소 + 프레임 핏.
+    say('🪄 패키지를 정리하고 있어요…');
+    await new Promise((r) => setTimeout(r, 480)); // 방금 채워진 autoH 문서의 실제 높이 측정 대기
+    designComposedFrame(frameId, asLayoutVariant(undefined));
+    await new Promise((r) => setTimeout(r, 360));
     gridDeOverlap(frameId);
-    b.setSelection([frameId]); // addPresetNodeCmd가 게임 노드를 선택 → 프레임 선택으로 되돌림
+    b.setSelection([frameId]);
     slideFrameToEmpty(frameId);
     recordSpawnedNodes(created.filter((id) => useBoardStore.getState().nodes[id]), '놀이 패키지');
+    // 이미지 로드·문서 높이가 더 늦게 바뀔 수 있어 잠시 뒤 한 번 더 정돈(비동기·블로킹 없음) — 겹침 잔여 제거.
+    setTimeout(() => { if (useBoardStore.getState().nodes[frameId]) gridDeOverlap(frameId); }, 1000);
     // 게임 생성(인터랙티브 노드) — 비동기. 자체 gen 카운터로 진행 표시를 유지한다.
     useInteractiveStore.getState().ensure(gameDocId);
     const gb = useBoardStore.getState();
