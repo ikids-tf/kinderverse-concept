@@ -1046,13 +1046,13 @@ export async function buildPlayPackage(topic: string): Promise<void> {
       useBoardStore.getState().updateNodeRaw(cid, { data: { ...(cur?.data ?? {}), ideaItems: ideas, selectedIdeaIds: [], ideaTitle: `${t} 놀이 아이디어` } });
       created.push(cid);
     }
-    // 2) 놀이계획·활동 이미지·활동지·웹링크 — 병렬 생성(서로 독립, 최종 레이아웃에서 정렬).
-    say('📦 계획·이미지·활동지·웹자료를 함께 만들고 있어요…');
+    // 2) 놀이계획·활동 이미지·활동지 — 병렬 생성(서로 독립, 최종 레이아웃에서 정렬).
+    //    웹자료는 별도 source.web 프레임 대신 아래에서 '유튜브 뷰어 + 활동별 링크'로 직접 구성한다.
+    say('📦 계획·이미지·활동지를 함께 만들고 있어요…');
     const results = await Promise.all([
       fillRegion(frameId, 'plan.grid', t, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
       fillRegion(frameId, 'studio.images', `${t} 활동 장면`, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
       fillRegion(frameId, 'studio.worksheet', t, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
-      fillRegion(frameId, 'source.web', t, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
     ]);
     results.forEach((r) => created.push(...r.ids));
     // 3) 자료 카드 정렬 → 그 아래 한 줄에 동영상·게임을 둔다(실제 렌더 높이 기준이라 겹치지 않게).
@@ -1067,10 +1067,26 @@ export async function buildPlayPackage(topic: string): Promise<void> {
     const leftX = kids.length ? Math.min(...kids.map((n) => n.x)) : (fr?.x ?? 0) + 24;
     const COL_GAP = 40, VID_W = 480, VID_H = 300, GAME_W = 720, GAME_H = 450;
     const rowY = bottomY + 48;
-    // 동영상 — video-player 카드(프레임 자식)
-    const vidId = newId('sticky');
-    b.addNodeRaw({ id: vidId, type: 'sticky', x: leftX, y: rowY, w: VID_W, h: VID_H, autoH: false, text: '동영상', data: { embed: '/video-player.html', title: `${t} 동영상`, frameId } });
-    created.push(vidId);
+    // 동영상·웹자료 — 별도 웹프레임 대신 패키지 안에 '유튜브 뷰어 + 활동별 동영상/이미지 링크'로 구성.
+    //   계획의 활동 목록을 뽑아 활동 갯수만큼 링크를 만든다(없으면 아이디어 라벨로 폴백).
+    const planCard = Object.values(useBoardStore.getState().nodes).find((n) => n.data?.frameId === frameId && n.data?.role === 'plan');
+    const planPay = planCard?.data?.payload as { type?: string; props?: { days?: Array<{ activity?: string }> } } | undefined;
+    let activities = planPay?.type === 'WeeklyPlanGrid'
+      ? (planPay.props?.days ?? []).map((d) => String(d.activity ?? '').trim()).filter(Boolean)
+      : [];
+    if (!activities.length) activities = ideas.slice(0, 5).map((it) => it.label);
+    activities = activities.slice(0, 6);
+    // 활동 문장은 길다 — 제목은 짧게 줄이고, 검색어는 '주제 + 활동 앞부분'으로(롱쿼리는 검색이 부정확).
+    const shortAct = (a: string) => (a.length > 22 ? `${a.slice(0, 22)}…` : a);
+    const q = (a: string) => encodeURIComponent(`${t} ${a.slice(0, 28)}`);
+    const videoLinks = activities.map((a) => ({ title: `▶ ${shortAct(a)}`, url: `https://www.youtube.com/results?search_query=${q(a)}`, domain: 'youtube.com' }));
+    const imageLinks = activities.map((a) => ({ title: `🖼 ${shortAct(a)}`, url: `https://www.google.com/search?tbm=isch&q=${q(a)}`, domain: 'google.com' }));
+    // 유튜브 뷰어(위) — 검색·재생. 그 아래 활동별 링크 카드(동영상 → 이미지 순, 클릭=해당 사이트).
+    const ytId = newId('sticky');
+    b.addNodeRaw({ id: ytId, type: 'sticky', x: leftX, y: rowY, w: VID_W, h: VID_H, autoH: false, text: '유튜브', data: { embed: '/youtube-viewer.html', title: `${t} 동영상`, frameId } });
+    const linkId = newId('sticky');
+    b.addNodeRaw({ id: linkId, type: 'sticky', x: leftX, y: rowY + VID_H + 24, w: VID_W, h: 240, autoH: true, color: 'surface-2', data: { role: 'source', frameId, summary: `${t} 활동별 동영상·이미지 자료 (활동 ${activities.length}개) — 클릭하면 해당 사이트에서 열려요`, links: [...videoLinks, ...imageLinks], thumbs: [] } });
+    created.push(ytId, linkId);
     // 게임 — 인터랙티브 노드(게임뷰어 iframe 아님). 주제 게임은 패키지 완성 뒤 비동기로 채운다.
     const gameDocId = newId('inode');
     const gameNodeId = addPresetNodeCmd(
