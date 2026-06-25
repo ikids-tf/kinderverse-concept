@@ -72,11 +72,16 @@ function cleanGameTopic(text: string): string {
   return topic.length > 20 ? topic.slice(0, 20) + '…' : topic;
 }
 
-/* ─── 포맷 선택(아이디어 / 놀이계획) ─── "○○ 아이디어/놀이계획 만들어줘"는 바로 생성하지 않고
-   리스트·마인드맵·계획문서·패키지 중 무엇으로 만들지 화면 중앙 오버레이로 고르게 한다(1단계). */
+/* ─── 포맷 선택(아이디어 / 놀이계획·수업) ─── "○○ 아이디어/놀이계획/수업/활동/프로젝트 수업
+   만들어줘"는 바로 생성하지 않고 리스트·마인드맵·계획문서·패키지 중 무엇으로 만들지 화면 중앙
+   오버레이로 고르게 한다. 단 활동지·이미지·슬라이드 등 '구체적 산출물'이 함께 지정되면
+   그 전용 경로로 보낸다(아래 FMT_SPECIFIC_RE 가드). */
 const FMT_GEN_RE = /만들|만드|생성|짜\s*줘|구성|기획|추천|뽑아|줘|해\s*줘/;
-const FMT_PLAN_RE = /놀이\s*계획|계획안|주간\s*계획|수업\s*계획|일일\s*계획|연간\s*계획|주안|월안|교육\s*계획/;
+const FMT_PLAN_RE = /놀이\s*계획|계획안|주간\s*계획|수업\s*계획|일일\s*계획|연간\s*계획|주안|월안|교육\s*계획|프로젝트\s*수업|프로젝트|수업|활동(?!지)/;
 const FMT_IDEA_RE = /아이디어|생각\s*그물|브레인\s*스토밍|놀이\s*거리/;
+// 더 구체적인 산출물이 지정된 요청은 오버레이로 가로채지 않고 각자 경로로 보낸다
+// (예: "수업 슬라이드", "활동 이미지", "활동지", "수업 동영상").
+const FMT_SPECIFIC_RE = /슬라이드|장표|이미지|사진|일러스트|삽화|동영상|영상|비디오|클립|활동지|워크시트|도안|색칠|컬러링|통신문|안내문|안내장|공지|편지|소식지|관찰|게임|퀴즈|환경판|게시판|포스터/;
 function fmtTopic(text: string): string {
   // coreTopic 은 끝 '이/가'를 조사로 깎아 '물놀이'→'물놀' 식으로 명사를 훼손한다 →
   // 여기선 포맷/주제어/생성동사만 직접 제거해 주제 명사를 보존한다.
@@ -90,9 +95,10 @@ function fmtTopic(text: string): string {
     .trim();
   return t || text.trim();
 }
-/** 아이디어/놀이계획 요청이면 모드를 돌려준다(포맷 선택 오버레이 트리거). 아니면 null. */
+/** 아이디어/놀이계획·수업 요청이면 모드를 돌려준다(포맷 선택 오버레이 트리거). 아니면 null. */
 function detectFormatChoice(text: string): { mode: FormatMode; topic: string } | null {
   if (!FMT_GEN_RE.test(text)) return null;
+  if (FMT_SPECIFIC_RE.test(text)) return null; // 구체적 산출물(활동지·이미지·슬라이드 등)은 전용 경로로
   if (FMT_PLAN_RE.test(text)) return { mode: 'plan', topic: fmtTopic(text) };
   if (FMT_IDEA_RE.test(text)) return { mode: 'idea', topic: fmtTopic(text) };
   return null;
