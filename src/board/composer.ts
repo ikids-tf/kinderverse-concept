@@ -1024,21 +1024,29 @@ export async function buildPlayPackage(topic: string): Promise<void> {
   const ctx = buildAgentContext('plan');
   const vc = viewportCenterBoardPoint();
   const frameId = newId('frame');
+  // 패키지 예상 최종 크기로 미리 만든다 — 작은 초기 크기로 만들면 아래로 자라며 화면 밖(아래)으로
+  // 넘쳐 "아래쪽에서 생성"되는 것처럼 보였다. 큰 크기 + focusNode로 처음부터 전체가 화면에 보이게.
+  const W0 = 2100, H0 = 1700;
   b.addNodeRaw({
     id: frameId,
     type: 'frame',
-    x: Math.round(vc.x - 700),
-    y: Math.round(vc.y - 360),
-    w: 1400,
-    h: 760,
-    data: { title: `${t} 놀이 패키지`, composer: true, loading: true, working: true, loadingLabel: '📦 놀이 패키지를 모으고 있어요…', sourcePrompt: topic },
+    x: Math.round(vc.x - W0 / 2),
+    y: Math.round(vc.y - H0 / 2),
+    w: W0,
+    h: H0,
+    data: { title: `${t} 놀이 패키지`, composer: true, loading: true, working: true, loadingLabel: '📦 놀이 패키지를 준비하는 중…', sourcePrompt: topic },
   });
-  b.focusNode(frameId);
   const created: string[] = [frameId];
-  const fX = Math.round(vc.x - 700);
-  const fY = Math.round(vc.y - 360);
   const VID_W = 480, VID_H = 300, GAME_W = 720, GAME_H = 450;
   try {
+    // 미리 오른쪽 빈 공간으로 옮겨(다른 자료와 안 겹치게) 그 자리에서 생성 시작 + 카메라가 프레임
+    // 전체를 화면 중앙에 담게 한다(이동 애니메이션이 끝난 뒤 자식을 배치해야 위치가 맞는다).
+    slideFrameToEmpty(frameId);
+    await new Promise((r) => setTimeout(r, 880));
+    useBoardStore.getState().focusNode(frameId);
+    const frNow = useBoardStore.getState().nodes[frameId];
+    const fX = frNow ? frNow.x : Math.round(vc.x - W0 / 2);
+    const fY = frNow ? frNow.y : Math.round(vc.y - H0 / 2);
     // ── 스켈레톤 먼저 ── 프레임 + 모든 섹션이 '로딩 자리'를 즉시 잡는다(전체 구조가 바로 보이고
     //    각 섹션이 생성되는 대로 그 자리에서 채워진다 — 기다리는 동안 화면이 계속 살아 있게).
     say('📦 패키지 자리를 잡는 중 — 각 자료가 채워집니다…');
@@ -1098,10 +1106,14 @@ export async function buildPlayPackage(topic: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 360));
     gridDeOverlap(frameId);
     b.setSelection([frameId]);
-    slideFrameToEmpty(frameId);
     recordSpawnedNodes(created.filter((id) => useBoardStore.getState().nodes[id]), '놀이 패키지');
-    // 이미지 로드·문서 높이가 더 늦게 바뀔 수 있어 잠시 뒤 한 번 더 정돈(비동기·블로킹 없음) — 겹침 잔여 제거.
-    setTimeout(() => { if (useBoardStore.getState().nodes[frameId]) gridDeOverlap(frameId); }, 1000);
+    // 이미지 로드·문서 높이가 더 늦게 바뀔 수 있어 잠시 뒤 한 번 더 정돈하고, 완성된 프레임 전체가
+    // 화면 중앙에 보이도록 다시 핏(비동기·블로킹 없음) — 겹침 잔여 제거 + 최종 크기에 맞춘 줌.
+    setTimeout(() => {
+      if (!useBoardStore.getState().nodes[frameId]) return;
+      gridDeOverlap(frameId);
+      useBoardStore.getState().focusNode(frameId);
+    }, 1000);
     // 게임 생성(인터랙티브 노드) — 비동기. 자체 gen 카운터로 진행 표시를 유지한다.
     useInteractiveStore.getState().ensure(gameDocId);
     const gb = useBoardStore.getState();
