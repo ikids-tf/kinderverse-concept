@@ -477,18 +477,51 @@ export function folderFromFrame(frameId: string): SavedFolder | null {
   };
 }
 
+/** 프레임 내용 시그니처 — 저장 시점 대비 변경을 감지해 '재저장 가능' 여부를 판단한다.
+    자식 집합(id)·텍스트·이미지 src·뷰어를 얕게 해시한다(중첩 프레임 포함). */
+export function frameContentSig(frameId: string): string {
+  const b = useBoardStore.getState();
+  const parts: string[] = [];
+  const walk = (fid: string) => {
+    Object.values(b.nodes)
+      .filter((n) => n.data?.frameId === fid)
+      .sort((a, z) => (a.id < z.id ? -1 : 1))
+      .forEach((n) => {
+        if (n.type === 'runner' || n.type === 'motion') return;
+        if (n.type === 'frame') { parts.push(`F:${n.id}:${(n.data?.title as string) ?? ''}`); walk(n.id); return; }
+        const t = n.text ?? '';
+        const payT = (n.data?.payload as { type?: string } | undefined)?.type ?? '';
+        parts.push(`${n.id}:${n.type}:${t.length}:${t.slice(0, 24)}:${t.slice(-24)}:${(n.src ?? '').slice(-24)}:${payT}:${(n.data?.embed as string) ?? ''}:${(n.data?.viewerSrc as string) ?? ''}`);
+      });
+  };
+  walk(frameId);
+  return parts.join('|');
+}
+
 /** Save a frame's child cards as one folder bundle; mark the frame saved.
     Returns the new bundle id (or null if the frame is empty/invalid).
-    동시에 폴더 페이지용 '계층 폴더 트리'(folderFromFrame)도 함께 저장한다. */
+    동시에 폴더 페이지용 '계층 폴더 트리'(folderFromFrame)도 함께 저장한다.
+    이미 저장된 프레임을 다시 저장하면(내용 변경 후) 기존 폴더를 제자리 교체한다(중복 방지). */
 export function saveFrameToFolder(frameId: string): string | null {
   const bundle = bundleFromFrame(frameId);
   if (!bundle) return null;
-  useFolderStore.getState().addBundle(bundle);
   const tree = folderFromFrame(frameId);
-  if (tree) useFolderStore.getState().addSavedFolder(tree);
+  if (!tree) return null;
   const b = useBoardStore.getState();
   const frame = b.nodes[frameId];
-  if (frame) b.updateNodeRaw(frameId, { data: { ...(frame.data ?? {}), savedBundleId: bundle.id } });
+  const fstore = useFolderStore.getState();
+  const prevFolderId = frame?.data?.savedFolderId as string | undefined;
+  const prevBundleId = frame?.data?.savedBundleId as string | undefined;
+  if (prevFolderId && fstore.saved.some((f) => f.id === prevFolderId)) {
+    tree.id = prevFolderId; // 같은 id로 제자리 교체
+    fstore.updateSavedFolder(tree);
+    if (prevBundleId) fstore.removeBundle(prevBundleId);
+    fstore.addBundle(bundle);
+  } else {
+    fstore.addBundle(bundle);
+    fstore.addSavedFolder(tree);
+  }
+  if (frame) b.updateNodeRaw(frameId, { data: { ...(frame.data ?? {}), savedBundleId: bundle.id, savedFolderId: tree.id, savedSig: frameContentSig(frameId) } });
   return bundle.id;
 }
 

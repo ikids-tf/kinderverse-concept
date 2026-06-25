@@ -9,7 +9,7 @@ import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { editTextCmd, captureNodes, pushRedesign, deleteNodesCmd } from '@/board/commands';
 import { runWorkflowStep, spawnWebViewer, type RunnerData, type StepKind } from '@/board/workflow';
 import { consumeGameCreate } from '@/board/gameHandoff';
-import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren } from '@/board/frames';
+import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren, frameContentSig } from '@/board/frames';
 import { alignFrameCmd } from '@/board/align';
 import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
 import type { RouteTarget } from '@/ai/contract';
@@ -941,6 +941,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   if (node.type === 'frame') {
     const title = (node.data?.title as string) ?? '프레임';
     const savedBundleId = node.data?.savedBundleId as string | undefined;
+    // 저장 후에도 프레임 내용이 바뀌면 다시 저장할 수 있게 — 저장 시점 시그니처와 현재를 비교.
+    const savedSig = node.data?.savedSig as string | undefined;
+    const isSaved = !!savedBundleId && savedSig === frameContentSig(node.id);
     const chips = (node.data?.nextSteps as ComposerChip[] | undefined) ?? [];
     const isSub = !!node.data?.sub; // nested section frame (e.g. 아이디어) — no save/chips chrome
     const renameTitle = (v: string) =>
@@ -953,7 +956,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     // 좁은 프레임 — 상단의 제목 탭(좌)과 정렬·저장 버튼(우)이 겹치지 않게 동적
     // 축소: 버튼은 아이콘만 남기고, 제목은 남는 폭만큼만 차지하고 말줄임.
     const narrow = node.w < 380;
-    const saveBtnW = !isSub ? (narrow ? 44 : savedBundleId ? 92 : 116) : 0; // px 근사
+    const saveBtnW = !isSub ? (narrow ? 44 : isSaved ? 84 : 96) : 0; // px 근사("저장됨"/"자료보관")
     const alignBtnW = isTopFrame ? (narrow ? 44 : 72) + 8 /* 버튼 간격 */ : 0;
     const titleMaxW = Math.max(64, node.w - 40 /* 좌우 들여쓰기 */ - saveBtnW - alignBtnW - 16 /* 간격 */);
     return (
@@ -1037,25 +1040,26 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
-            if (savedBundleId) return;
+            if (isSaved) return; // 이미 저장됨(내용 그대로) — 변경 전까지는 재저장 안 함
             // 진행 → 완료 토스트. 저장 자체는 동기지만(스냅샷+스토어) 진행 상태가
-            // 인지될 짧은 간격을 두고 완료 메시지로 교체한다.
-            showToast('폴더에 저장하는 중…', 'progress');
+            // 인지될 짧은 간격을 두고 완료 메시지로 교체한다. 재저장이면 기존 폴더를 갱신한다.
+            const resave = !!savedBundleId;
+            showToast('자료보관함에 저장하는 중…', 'progress');
             const ok = saveFrameToFolder(node.id);
             setTimeout(() => {
-              showToast(ok ? `'${title}' 폴더에 저장했어요` : '저장에 실패했어요 — 프레임이 비어 있어요', ok ? 'success' : 'error');
+              showToast(ok ? `'${title}' 자료보관함에 ${resave ? '다시 ' : ''}저장했어요` : '저장에 실패했어요 — 프레임이 비어 있어요', ok ? 'success' : 'error');
             }, 450);
           }}
-          title={savedBundleId ? '폴더에 저장됨' : '이 프레임을 폴더에 저장'}
+          title={isSaved ? '저장됨 — 프레임 내용이 바뀌면 다시 저장할 수 있어요' : savedBundleId ? '내용이 바뀌었어요 — 자료보관함에 다시 저장' : '이 프레임을 자료보관함에 저장'}
           className={`inline-flex items-center gap-t2 whitespace-nowrap rounded-pill border px-t4 py-t2 text-sm font-medium shadow-sm ${
-            savedBundleId
+            isSaved
               ? 'border-success/40 bg-success-soft text-success'
               : 'border-border bg-surface text-fg-2 hover:border-accent hover:text-accent'
           }`}
           style={{ pointerEvents: 'auto', cursor: 'pointer' }}
           >
-          <Icon name={savedBundleId ? 'check' : 'folder'} size={16} className="shrink-0" />
-          {!narrow && (savedBundleId ? '저장됨' : '폴더에 저장')}
+          <Icon name={isSaved ? 'check' : 'folder'} size={16} className="shrink-0" />
+          {!narrow && (isSaved ? '저장됨' : '자료보관')}
           </button>
         </div>
         )}

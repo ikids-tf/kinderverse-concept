@@ -88,6 +88,8 @@ interface FolderState {
   /** 프레임에서 저장된 폴더 트리(최신이 앞). */
   saved: SavedFolder[];
   addSavedFolder: (f: SavedFolder) => void;
+  /** 같은 id의 저장 폴더를 제자리 교체(재저장 — 중복 폴더 방지). */
+  updateSavedFolder: (f: SavedFolder) => void;
   removeSavedFolder: (id: string) => void;
 }
 
@@ -186,6 +188,7 @@ export const useFolderStore = create<FolderState>((set) => ({
   removeBundle: (bid) => set((s) => ({ bundles: s.bundles.filter((x) => x.id !== bid) })),
   saved: [],
   addSavedFolder: (f) => set((s) => ({ saved: [f, ...s.saved] })),
+  updateSavedFolder: (f) => set((s) => ({ saved: s.saved.map((x) => (x.id === f.id ? f : x)) })),
   removeSavedFolder: (fid) => set((s) => ({ saved: s.saved.filter((x) => x.id !== fid) })),
 }));
 
