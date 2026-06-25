@@ -46,6 +46,7 @@ import { streamChat } from '@/ai/chat';
 import { buildAgentContext } from '@/ai/context';
 import { PAGE_ACTIONS } from '@/ai/actions';
 import { showToast } from '@/lib/toast';
+import { queueGameCreate } from './gameHandoff';
 import { SUGGESTION_HIDE_BELOW, type RouterOutput, type RecordMode, type RouteTarget } from '@/ai/contract';
 import type { RegistryPayload } from '@/ui-registry/contracts';
 
@@ -1009,6 +1010,72 @@ async function runIdeaExpansion(frameId: string, chipId: string, action: Compose
   if (action === 'idea_plan') void composeFromPrompt(`${joined} 놀이계획`, 'plan');
   else if (action === 'idea_mindmap') void composeFromPrompt(joined, 'mindmap');
   else if (action === 'idea_image') void composeFromPrompt(`${joined} 활동 장면 그림`, 'studio');
+}
+
+/** 놀이 패키지(포맷 선택 2단계) — 한 주제 프레임에 아이디어 리스트·놀이계획 문서·활동 이미지·
+    활동지·웹링크·동영상·게임을 한 세트로 모은다. 새 에이전트 없이 기존 fillRegion/스폰 헬퍼 재사용
+    + 동영상/게임은 임베드 카드. 자료(LLM·이미지)는 병렬 생성해 대기시간을 줄인다. */
+export async function buildPlayPackage(topic: string): Promise<void> {
+  const b = useBoardStore.getState();
+  b.beginGen();
+  const t = (topic || '놀이').trim();
+  const ctx = buildAgentContext('plan');
+  const vc = viewportCenterBoardPoint();
+  const frameId = newId('frame');
+  b.addNodeRaw({
+    id: frameId,
+    type: 'frame',
+    x: Math.round(vc.x - 700),
+    y: Math.round(vc.y - 360),
+    w: 1400,
+    h: 760,
+    data: { title: `${t} 놀이 패키지`, composer: true, loading: true, working: true, loadingLabel: '📦 놀이 패키지를 모으고 있어요…', sourcePrompt: topic },
+  });
+  b.focusNode(frameId);
+  const created: string[] = [frameId];
+  try {
+    // 1) 아이디어 리스트(선택형 doc) — 먼저 만들어 바로 보이게.
+    say('💡 놀이 아이디어를 모으고 있어요…');
+    const ideas = await runPlanIdeas(t, ctx, 12).catch(() => [] as IdeaItem[]);
+    if (ideas.length) {
+      const md = `# 💡 ${t} 놀이 아이디어 ${ideas.length}가지\n\n` + ideas.map((it, i) => `${i + 1}. **${it.label}**${it.desc ? ` — ${it.desc}` : ''}`).join('\n');
+      const cid = spawnDocCard(frameId, md, 'idealist', 520);
+      const cur = useBoardStore.getState().nodes[cid];
+      useBoardStore.getState().updateNodeRaw(cid, { data: { ...(cur?.data ?? {}), ideaItems: ideas, selectedIdeaIds: [], ideaTitle: `${t} 놀이 아이디어` } });
+      created.push(cid);
+    }
+    // 2) 놀이계획·활동 이미지·활동지·웹링크 — 병렬 생성(서로 독립, 최종 레이아웃에서 정렬).
+    say('📦 계획·이미지·활동지·웹자료를 함께 만들고 있어요…');
+    const results = await Promise.all([
+      fillRegion(frameId, 'plan.grid', t, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
+      fillRegion(frameId, 'studio.images', `${t} 활동 장면`, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
+      fillRegion(frameId, 'studio.worksheet', t, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
+      fillRegion(frameId, 'source.web', t, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
+    ]);
+    results.forEach((r) => created.push(...r.ids));
+    // 3) 자료 카드 정렬 → 그 아래 한 줄에 동영상·게임 임베드 카드를 둔다.
+    say('🪄 패키지를 정리하고 있어요…');
+    designComposedFrame(frameId, asLayoutVariant(undefined));
+    await new Promise((r) => setTimeout(r, 240)); // 카드 실제 높이 측정 대기
+    const st = useBoardStore.getState();
+    const kids = Object.values(st.nodes).filter((n) => n.data?.frameId === frameId);
+    const fr = st.nodes[frameId];
+    const rowY = kids.length ? Math.max(...kids.map((n) => n.y + (n.h || 120))) + 40 : (fr?.y ?? 0) + 60;
+    const leftX = kids.length ? Math.min(...kids.map((n) => n.x)) : (fr?.x ?? 0) + 24;
+    const vidId = newId('sticky');
+    b.addNodeRaw({ id: vidId, type: 'sticky', x: leftX, y: rowY, w: 480, h: 300, autoH: false, text: '동영상', data: { embed: '/video-player.html', title: `${t} 동영상`, frameId } });
+    const gameId = newId('sticky');
+    b.addNodeRaw({ id: gameId, type: 'sticky', x: leftX + 520, y: rowY, w: 560, h: 420, autoH: false, text: '놀이 만들기', data: { embed: '/game-viewer.html', title: `${t} 게임`, frameId } });
+    queueGameCreate(gameId, { prompt: t }); // 뷰어 준비되면 이 주제로 게임 생성
+    created.push(vidId, gameId);
+    fitFrameToChildren(frameId); // 동영상·게임까지 감싸도록 프레임 확장
+    slideFrameToEmpty(frameId);
+    recordSpawnedNodes(created.filter((id) => useBoardStore.getState().nodes[id]), '놀이 패키지');
+  } finally {
+    const cur = useBoardStore.getState().nodes[frameId];
+    if (cur) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(cur.data ?? {}), loading: false, working: false } });
+    useBoardStore.getState().endGen();
+  }
 }
 
 /** Make a full A4 주간 놀이계획안 from a selected idea/branch and connect it — the

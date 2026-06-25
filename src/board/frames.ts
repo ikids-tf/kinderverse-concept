@@ -246,6 +246,7 @@ export function designComposedFrame(frameId: string, variant: LayoutVariant = 'd
     ? Object.values(b.nodes).filter((n) => n.data?.frameId === ideaFrameId && n.data?.role === 'idea')
     : [];
   const ideas = [...byRole('idea'), ...nestedIdeas];
+  const idealist = firstRole('idealist'); // 놀이 패키지의 선택형 아이디어 리스트(맨 왼쪽 컬럼)
   const mainDoc = firstRole('plan') || firstRole('letter') || firstRole('record') || firstRole('worksheet');
   const worksheet = firstRole('worksheet');
   const extraDoc = worksheet && worksheet !== mainDoc ? worksheet : undefined;
@@ -285,6 +286,12 @@ export function designComposedFrame(frameId: string, variant: LayoutVariant = 'd
   //   [아이디어 sub-frame] [계획안 (full doc)] [컨셉 이미지] [활동지 · 웹 자료]
   const rowY = y + (ideas.length ? SUB_TAB_CLEAR : 0);
   let colX = ox;
+
+  // Column 0 — 아이디어 리스트(선택형 doc, 놀이 패키지). 맨 왼쪽에 두고 나머지는 오른쪽으로.
+  if (idealist) {
+    b.updateNodeRaw(idealist.id, { x: colX, y: rowY });
+    colX += idealist.w + D_COLGAP;
+  }
 
   // (variant: hero-doc) the main document LEADS — placed first/left so it reads as
   // the hero; ideas, images and materials follow to its right.

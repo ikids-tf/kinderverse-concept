@@ -14,7 +14,7 @@ import { saveGameCard } from '@/features/interactive-viewer/store/gameCards';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
-import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior, generateIdeaList } from './composer';
+import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior, generateIdeaList, buildPlayPackage } from './composer';
 import { useFormatChoiceStore, type FormatMode, type FormatChoice } from '@/store/formatChoiceStore';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import { useUIStore } from '@/store/uiStore';
@@ -111,7 +111,7 @@ export function runFormatChoice(choice: FormatChoice, topic: string): void {
       void composeFromPrompt(`${t} 놀이계획`, 'plan');
       break;
     case 'package':
-      showToast('놀이 패키지(세트)는 곧 추가됩니다 — 우선 리스트·마인드맵·계획 문서를 써 보세요', 'success', 4500);
+      void buildPlayPackage(t);
       break;
   }
 }
