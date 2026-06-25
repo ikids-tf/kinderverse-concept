@@ -1,6 +1,8 @@
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { useBoardsStore } from '@/store/boardsStore';
-import { recordSpawnedNodes, captureNodes, pushRedesign } from './commands';
+import { recordSpawnedNodes, captureNodes, pushRedesign, addPresetNodeCmd } from './commands';
+import { useInteractiveStore } from '@/features/interactive-viewer/store/interactiveStore';
+import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
 import {
   spawnTextCard,
   spawnDocCard,
@@ -46,7 +48,6 @@ import { streamChat } from '@/ai/chat';
 import { buildAgentContext } from '@/ai/context';
 import { PAGE_ACTIONS } from '@/ai/actions';
 import { showToast } from '@/lib/toast';
-import { queueGameCreate } from './gameHandoff';
 import { SUGGESTION_HIDE_BELOW, type RouterOutput, type RecordMode, type RouteTarget } from '@/ai/contract';
 import type { RegistryPayload } from '@/ui-registry/contracts';
 
@@ -1053,24 +1054,43 @@ export async function buildPlayPackage(topic: string): Promise<void> {
       fillRegion(frameId, 'source.web', t, ctx, undefined, 'story').catch(() => ({ ids: [] as string[] })),
     ]);
     results.forEach((r) => created.push(...r.ids));
-    // 3) 자료 카드 정렬 → 그 아래 한 줄에 동영상·게임 임베드 카드를 둔다.
+    // 3) 자료 카드 정렬 → 그 아래 한 줄에 동영상·게임을 둔다(실제 렌더 높이 기준이라 겹치지 않게).
     say('🪄 패키지를 정리하고 있어요…');
     designComposedFrame(frameId, asLayoutVariant(undefined));
-    await new Promise((r) => setTimeout(r, 240)); // 카드 실제 높이 측정 대기
+    await new Promise((r) => setTimeout(r, 340)); // 카드 실제 높이(renderH) 반영 대기
     const st = useBoardStore.getState();
     const kids = Object.values(st.nodes).filter((n) => n.data?.frameId === frameId);
     const fr = st.nodes[frameId];
-    const rowY = kids.length ? Math.max(...kids.map((n) => n.y + (n.h || 120))) + 40 : (fr?.y ?? 0) + 60;
+    const rh = (n: BoardNode) => Math.max(typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : 0, n.h || 0);
+    const bottomY = kids.length ? Math.max(...kids.map((n) => n.y + rh(n))) : (fr?.y ?? 0) + 60;
     const leftX = kids.length ? Math.min(...kids.map((n) => n.x)) : (fr?.x ?? 0) + 24;
+    const COL_GAP = 40, VID_W = 480, VID_H = 300, GAME_W = 720, GAME_H = 450;
+    const rowY = bottomY + 48;
+    // 동영상 — video-player 카드(프레임 자식)
     const vidId = newId('sticky');
-    b.addNodeRaw({ id: vidId, type: 'sticky', x: leftX, y: rowY, w: 480, h: 300, autoH: false, text: '동영상', data: { embed: '/video-player.html', title: `${t} 동영상`, frameId } });
-    const gameId = newId('sticky');
-    b.addNodeRaw({ id: gameId, type: 'sticky', x: leftX + 520, y: rowY, w: 560, h: 420, autoH: false, text: '놀이 만들기', data: { embed: '/game-viewer.html', title: `${t} 게임`, frameId } });
-    queueGameCreate(gameId, { prompt: t }); // 뷰어 준비되면 이 주제로 게임 생성
-    created.push(vidId, gameId);
+    b.addNodeRaw({ id: vidId, type: 'sticky', x: leftX, y: rowY, w: VID_W, h: VID_H, autoH: false, text: '동영상', data: { embed: '/video-player.html', title: `${t} 동영상`, frameId } });
+    created.push(vidId);
+    // 게임 — 인터랙티브 노드(게임뷰어 iframe 아님). 주제 게임은 패키지 완성 뒤 비동기로 채운다.
+    const gameDocId = newId('inode');
+    const gameNodeId = addPresetNodeCmd(
+      'interactive',
+      leftX + VID_W + COL_GAP + GAME_W / 2,
+      rowY + GAME_H / 2,
+      { w: GAME_W, h: GAME_H, autoH: false, data: { docId: gameDocId, frameId } },
+      '인터랙티브 게임',
+    );
+    created.push(gameNodeId);
     fitFrameToChildren(frameId); // 동영상·게임까지 감싸도록 프레임 확장
+    b.setSelection([frameId]); // addPresetNodeCmd가 게임 노드를 선택 → 프레임 선택으로 되돌림
     slideFrameToEmpty(frameId);
     recordSpawnedNodes(created.filter((id) => useBoardStore.getState().nodes[id]), '놀이 패키지');
+    // 게임 생성(인터랙티브 노드) — 비동기. 자체 gen 카운터로 진행 표시를 유지한다.
+    useInteractiveStore.getState().ensure(gameDocId);
+    const gb = useBoardStore.getState();
+    gb.beginGen();
+    gb.setGenerating(`🎮 「${t}」 게임을 만들고 있어요…`);
+    // 프롬프트에 생성 동사를 포함해야 applyInteractivePrompt가 '전체 구성(디렉터)'으로 분기한다(없으면 편집→빈 노드).
+  void applyInteractivePrompt(gameDocId, `${t} 게임 만들어줘`, [], (m) => gb.setGenerating(m ?? `🎮 「${t}」 게임을 만들고 있어요…`)).finally(() => gb.endGen());
   } finally {
     const cur = useBoardStore.getState().nodes[frameId];
     if (cur) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(cur.data ?? {}), loading: false, working: false } });

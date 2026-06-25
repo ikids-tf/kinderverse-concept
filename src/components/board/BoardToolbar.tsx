@@ -83,17 +83,6 @@ const SLIDES_VIEWER_PATCH: Partial<BoardNode> = {
   data: { embed: '/slides-viewer.html', title: '슬라이드' },
 };
 
-/** 게임 뷰어 — 교사가 템플릿/프롬프트로 만들고 아이가 즐기는 인터랙티브 놀이(파스텔).
-    화면 안쪽은 Milray 미적용(아이 대면) — src/game-viewer/theme.ts 토큰. 셸은 Milray 유지.
-    상세 아키텍처: game-viewer-handoff/CLAUDE.md(템플릿+GameSpec 단일 계약). */
-const GAME_VIEWER_PATCH: Partial<BoardNode> = {
-  w: 760,
-  h: 560,
-  autoH: false,
-  text: '놀이 만들기',
-  data: { embed: '/game-viewer.html', title: '놀이 만들기' },
-};
-
 /** 인터렉티브 노드 — 네이티브 보드 노드(iframe 아님). 교사가 자료를 배치하고 탭하면
     움직임/교체가 일어나게 저작, 풀스크린 단독 재생. 카드 안쪽은 파스텔(아이 대면,
     .kv-inode) — Milray 미적용. 저작 단위 InteractiveNode는 data.docId로 참조(스키마:
@@ -411,19 +400,6 @@ const PRESET_PANELS: Record<ToolId, { title: string; caption?: string; sections:
               <svg viewBox="0 0 24 24" width={19} height={19} className="text-accent" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <rect x="3" y="4.5" width="18" height="15" rx="2.4" />
                 <path d="M6.5 9h7M6.5 12.5h11M6.5 16h8" />
-              </svg>
-            ),
-          },
-          {
-            id: 'game', label: '놀이 만들기', desc: '숫자 세기·그림자 맞추기 등 아이용 인터랙티브 놀이 (음성·보상)',
-            nodeType: 'sticky',
-            patch: GAME_VIEWER_PATCH,
-            swatch: (
-              <svg viewBox="0 0 24 24" width={19} height={19} className="text-accent" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <rect x="2.5" y="7" width="19" height="10" rx="5" />
-                <path d="M7 12h2.4M8.2 10.8v2.4" />
-                <circle cx="15.4" cy="11.3" r="0.5" fill="currentColor" />
-                <circle cx="17.2" cy="13" r="0.5" fill="currentColor" />
               </svg>
             ),
           },
