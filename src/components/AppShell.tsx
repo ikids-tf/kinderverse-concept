@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { LNB, BottomTabs } from './LNB';
 import { PromptBar } from './PromptBar';
 import { KvToast } from './KvToast';
+import { FormatChoiceOverlay } from './FormatChoiceOverlay';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { actionsForPath } from '@/ai/actions';
 import { AI_CHAT_PATH } from '@/lib/nav';
@@ -73,6 +74,9 @@ export function AppShell() {
 
       {/* 전역 토스트 — showToast()가 어느 페이지에서든 하단 중앙에 띄운다 */}
       <KvToast />
+
+      {/* 포맷 선택 오버레이 — "○○ 아이디어/놀이계획 만들어줘" 시 형식(리스트·마인드맵·계획·패키지) 선택 */}
+      <FormatChoiceOverlay />
     </div>
   );
 }

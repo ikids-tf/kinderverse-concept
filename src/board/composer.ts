@@ -36,7 +36,7 @@ import { ruleBasedVariant, asLayoutVariant, ruleBasedSpec } from './design-spec'
 import { runDesignDirector } from '@/ai/agents/design';
 import { pickTemplate, type FrameTemplate, type FrameRegion, type FillAgent } from './templates';
 import { runRouter } from '@/ai/agents/router';
-import { runPlanIdeas, runPlan, runMindMapActivities, type MindActivity } from '@/ai/agents/plan';
+import { runPlanIdeas, runPlan, runMindMapActivities, type MindActivity, type IdeaItem } from '@/ai/agents/plan';
 import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImage, KV_ART_STYLE, KV_CUTOUT_STYLE } from '@/ai/agents/studio';
 import { findAsset, saveAsset } from './assets';
 import { runRecord } from '@/ai/agents/record';
@@ -920,6 +920,40 @@ export async function worksheetFromNode(nodeId: string): Promise<void> {
     fitFrameToChildren(frameId);
   }
   recordSpawnedNodes([id], '활동지 만들기');
+}
+
+/** 아이디어 리스트 — 주제로 놀이 아이디어 ~20가지를 간단한 목록 문서(doc 카드)로 만든다.
+    포맷 선택 오버레이의 '아이디어 리스트' 선택 시 호출(board/prompt.runFormatChoice). 기존 ideas 에이전트 재사용. */
+export async function generateIdeaList(topic: string): Promise<void> {
+  const b = useBoardStore.getState();
+  b.beginGen();
+  const t = (topic || '놀이').trim();
+  const vc = viewportCenterBoardPoint();
+  const frameId = newId('frame');
+  b.addNodeRaw({
+    id: frameId,
+    type: 'frame',
+    x: Math.round(vc.x - 300),
+    y: Math.round(vc.y - 230),
+    w: 600,
+    h: 460,
+    data: { title: `${t} 아이디어`, composer: true, loading: true, working: true, loadingLabel: '💡 놀이 아이디어를 모으고 있어요…', sourcePrompt: topic },
+  });
+  b.focusNode(frameId);
+  try {
+    const ideas = await runPlanIdeas(t, buildAgentContext('plan'), 20).catch(() => [] as IdeaItem[]);
+    const lines = ideas.map((it, i) => `${i + 1}. **${it.label}**${it.desc ? ` — ${it.desc}` : ''}`);
+    const md = lines.length
+      ? `# 💡 ${t} 놀이 아이디어 ${lines.length}가지\n\n${lines.join('\n')}`
+      : `# 💡 ${t} 놀이 아이디어\n\n아이디어 생성에 실패했어요. 다시 시도해 주세요.`;
+    spawnDocCard(frameId, md, 'idea', 560);
+    slideFrameToEmpty(frameId);
+    recordSpawnedNodes([frameId], '아이디어 리스트');
+  } finally {
+    const cur = useBoardStore.getState().nodes[frameId];
+    if (cur) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(cur.data ?? {}), loading: false, working: false } });
+    useBoardStore.getState().endGen();
+  }
 }
 
 /** Make a full A4 주간 놀이계획안 from a selected idea/branch and connect it — the

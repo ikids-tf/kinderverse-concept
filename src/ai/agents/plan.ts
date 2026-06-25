@@ -101,7 +101,8 @@ export async function runPlanIdeas(request: string, ctx?: string, count = 4): Pr
       },
     ],
     meta: { kind: 'idea', title: request, selected: [] },
-    maxTokens: 1400,
+    // count 에 비례해 토큰 확보 — 아이디어 20개(아이디어 리스트)는 1400으론 JSON이 잘려 파싱 실패한다.
+    maxTokens: Math.min(4000, Math.max(1400, 240 + count * 130)),
   });
   if (!res.ok || !res.text) return [];
   try {

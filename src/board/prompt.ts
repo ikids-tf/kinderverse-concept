@@ -14,7 +14,8 @@ import { saveGameCard } from '@/features/interactive-viewer/store/gameCards';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage, spawnGameFromImages } from './workflow';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
-import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior } from './composer';
+import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior, generateIdeaList } from './composer';
+import { useFormatChoiceStore, type FormatMode, type FormatChoice } from '@/store/formatChoiceStore';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import { useUIStore } from '@/store/uiStore';
 import {
@@ -69,6 +70,50 @@ function cleanGameTopic(text: string): string {
     .trim();
   const topic = t || (text || '').trim() || '인터랙티브';
   return topic.length > 20 ? topic.slice(0, 20) + '…' : topic;
+}
+
+/* ─── 포맷 선택(아이디어 / 놀이계획) ─── "○○ 아이디어/놀이계획 만들어줘"는 바로 생성하지 않고
+   리스트·마인드맵·계획문서·패키지 중 무엇으로 만들지 화면 중앙 오버레이로 고르게 한다(1단계). */
+const FMT_GEN_RE = /만들|만드|생성|짜\s*줘|구성|기획|추천|뽑아|줘|해\s*줘/;
+const FMT_PLAN_RE = /놀이\s*계획|계획안|주간\s*계획|수업\s*계획|일일\s*계획|연간\s*계획|주안|월안|교육\s*계획/;
+const FMT_IDEA_RE = /아이디어|생각\s*그물|브레인\s*스토밍|놀이\s*거리/;
+function fmtTopic(text: string): string {
+  // coreTopic 은 끝 '이/가'를 조사로 깎아 '물놀이'→'물놀' 식으로 명사를 훼손한다 →
+  // 여기선 포맷/주제어/생성동사만 직접 제거해 주제 명사를 보존한다.
+  const t = text
+    .replace(FMT_PLAN_RE, ' ')
+    .replace(FMT_IDEA_RE, ' ')
+    .replace(/[을를이가은는]?\s*주제로(\s*한)?|에\s*(대한|관한|대해|관해)|관련(된)?|관한|위한/g, ' ')
+    .replace(/활동\s*할\s*수\s*있는|할\s*수\s*있는|해\s*볼\s*만한|할\s*만한/g, ' ')
+    .replace(/만들어\s*줘|만들어|만들|만드(라|는)?|생성(해\s*줘|해|하라)?|짜\s*줘|구성(해\s*줘|해)?|기획(해\s*줘|해)?|추천(해\s*줘|해)?|뽑아\s*줘|뽑아|해\s*줘|해\s*주세요|주세요|줘|줄래/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return t || text.trim();
+}
+/** 아이디어/놀이계획 요청이면 모드를 돌려준다(포맷 선택 오버레이 트리거). 아니면 null. */
+function detectFormatChoice(text: string): { mode: FormatMode; topic: string } | null {
+  if (!FMT_GEN_RE.test(text)) return null;
+  if (FMT_PLAN_RE.test(text)) return { mode: 'plan', topic: fmtTopic(text) };
+  if (FMT_IDEA_RE.test(text)) return { mode: 'idea', topic: fmtTopic(text) };
+  return null;
+}
+/** 포맷 선택 오버레이에서 고른 형식으로 생성한다(FormatChoiceOverlay → 여기). */
+export function runFormatChoice(choice: FormatChoice, topic: string): void {
+  const t = (topic || '놀이').trim();
+  switch (choice) {
+    case 'idea-list':
+      void generateIdeaList(t);
+      break;
+    case 'mindmap':
+      void composeFromPrompt(`${t} 마인드맵`, 'mindmap');
+      break;
+    case 'plan-doc':
+      void composeFromPrompt(`${t} 놀이계획`, 'plan');
+      break;
+    case 'package':
+      showToast('놀이 패키지(세트)는 곧 추가됩니다 — 우선 리스트·마인드맵·계획 문서를 써 보세요', 'success', 4500);
+      break;
+  }
 }
 
 /** 보드에 인터랙티브 노드를 만들고 프롬프트로 게임 전체를 구성한다(디렉터).
@@ -395,6 +440,13 @@ export function handleBoardPrompt(text: string): boolean {
     }
     // 인터랙티브 게임 — "○○ 게임/퀴즈 만들어줘" → 보드에 인터랙티브 노드를 만들고 구성(디렉터).
     // 활동지/계획/도안 컴포저(아래 composeFromPrompt)로 새지 않도록 그 앞에서 가로챈다.
+    // 아이디어/놀이계획 요청 → 바로 생성하지 않고 포맷 선택 오버레이(리스트·마인드맵·계획·패키지)를 띄운다.
+    // (게임 분기보다 먼저 — "물놀이 놀이 계획"의 둘째 '놀이'가 게임 키워드로 오인돼 게임이 만들어지지 않게.)
+    const fmt = detectFormatChoice(text);
+    if (fmt) {
+      useFormatChoiceStore.getState().open(fmt.mode, fmt.topic, text);
+      return true;
+    }
     if (isNewInteractiveGame(text)) {
       void createInteractiveGame(text);
       return true;
