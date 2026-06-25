@@ -1,6 +1,6 @@
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { worldBox } from './geometry';
-import { frameSubtree } from './frames';
+import { frameSubtree, fitFrameToChildren } from './frames';
 import { captureNodes, pushRedesign } from './commands';
 import { relayoutVideoFrame } from './workflow';
 
@@ -274,6 +274,52 @@ export function alignFrameDeep(frameId: string, seen = new Set<string>()): void 
 /** 정렬 버튼 진입점 — 프레임 하위 전체(+페이지 안 떠돌이)를 스냅샷 뜨고 정렬한
     뒤 한 번의 undo로 되돌릴 수 있게 기록(⌘Z, '프레임 정렬'). 소속 입양(태그
     교정)도 같은 스냅샷에 담겨 함께 되돌아간다. */
+const GRID = 8; // 좌표 스냅(들쭉날쭉 완화) — 행 재패킹이 아닌 가벼운 정돈.
+/** 부드러운 정렬 — 현재 위치를 최대한 보존하며 '겹친 것만' 최소로(바로 아래로) 떨어뜨리고,
+    좌표를 가벼운 그리드로 스냅한 뒤 프레임을 내용에 핏한다. 급격한 행 재패킹(alignFrameDeep)
+    대신 "제자리 겹침 해소" — 교사가 둔 배치를 거의 그대로 두고 겹침만 푼다. */
+export function gridDeOverlap(frameId: string, seen = new Set<string>()): void {
+  if (seen.has(frameId)) return;
+  seen.add(frameId);
+  const b0 = useBoardStore.getState();
+  const frame = b0.nodes[frameId];
+  if (!frame || frame.type !== 'frame' || frame.locked || frame.data?.mindmap) return;
+  const snap = (v: number) => Math.round(v / GRID) * GRID;
+  const kids = Object.values(b0.nodes).filter(
+    (n) => n.data?.frameId === frameId && n.id !== frameId && n.type !== 'motion' && n.type !== 'runner' && !n.locked,
+  );
+  if (kids.length === 0) return;
+  for (const n of kids) if (n.type === 'frame') gridDeOverlap(n.id, seen); // 서브 프레임 먼저 제 안을 정돈
+  const rh = (n: BoardNode) => Math.max(typeof n.data?.renderH === 'number' ? (n.data.renderH as number) : 0, n.h);
+  // 읽기 순서(현재 위치 기준) — 헤더(제목)는 먼저 두어 위쪽 고정.
+  const order = [...kids].sort((a, z) => {
+    const ah = a.data?.role === 'header' ? 0 : 1;
+    const zh = z.data?.role === 'header' ? 0 : 1;
+    return ah - zh || a.y - z.y || a.x - z.x;
+  });
+  const placed: Box[] = [];
+  for (const n of order) {
+    const w = n.w;
+    const h = rh(n);
+    let x = snap(n.x);
+    let y = snap(n.y);
+    let guard = 0;
+    for (;;) {
+      const hit = placed.find((p) => boxOverlaps({ x, y, w, h }, p));
+      if (!hit || guard++ > kids.length + 4) break;
+      y = snap(hit.y + hit.h + GUT); // 겹친 것 바로 아래로 — 최소 수직 이동
+    }
+    const dx = x - n.x;
+    const dy = y - n.y;
+    if (dx || dy) {
+      const ids = n.type === 'frame' ? [n.id, ...frameSubtree(n.id)] : [n.id];
+      useBoardStore.getState().moveNodesRaw(ids, dx, dy);
+    }
+    placed.push({ x, y, w, h });
+  }
+  fitFrameToChildren(frameId);
+}
+
 export function alignFrameCmd(frameId: string): boolean {
   const b = useBoardStore.getState();
   const frame = b.nodes[frameId];
@@ -289,7 +335,8 @@ export function alignFrameCmd(frameId: string): boolean {
     pushRedesign(ids, before, '동영상 프레임 정렬');
     return true;
   }
-  alignFrameDeep(frameId);
+  // 부드러운 정렬 — 현재 위치 보존 + 겹침만 해소 + 프레임 핏(급격한 행 재패킹 대신).
+  gridDeOverlap(frameId);
   pushRedesign(ids, before, '프레임 정렬');
   return true;
 }

@@ -3,6 +3,7 @@ import { useBoardsStore } from '@/store/boardsStore';
 import { recordSpawnedNodes, captureNodes, pushRedesign, addPresetNodeCmd } from './commands';
 import { useInteractiveStore } from '@/features/interactive-viewer/store/interactiveStore';
 import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
+import { gridDeOverlap } from './align';
 import {
   spawnTextCard,
   spawnDocCard,
@@ -1080,7 +1081,9 @@ export async function buildPlayPackage(topic: string): Promise<void> {
       '인터랙티브 게임',
     );
     created.push(gameNodeId);
-    fitFrameToChildren(frameId); // 동영상·게임까지 감싸도록 프레임 확장
+    // 겹침 보장 해소 — 자료 카드(designComposedFrame)와 하단 동영상·게임이 어떤 경우에도
+    // 겹치지 않게 제자리 정돈 + 프레임을 내용에 맞춰 확장(병렬 채움 레이스 안전망).
+    gridDeOverlap(frameId);
     b.setSelection([frameId]); // addPresetNodeCmd가 게임 노드를 선택 → 프레임 선택으로 되돌림
     slideFrameToEmpty(frameId);
     recordSpawnedNodes(created.filter((id) => useBoardStore.getState().nodes[id]), '놀이 패키지');
