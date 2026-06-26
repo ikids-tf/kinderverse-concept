@@ -1,9 +1,11 @@
 # KinderVerse Interactive Viewer — 레인 인프라 스펙
 
-> **버전** v1.0 · **상태** 구현 준비됨 · **대상 레포** `D:\claud project\kinderverse concept`
-> **타깃 런타임** Interactive Viewer(B) 단일. Game Viewer v2(A)는 폐기.
-> **선행 조사** 본 스펙의 모든 파일:라인은 B 전수 조사 문서 기준.
+> **버전** v1.0 · **상태** **구현 완료**(2026-06-26 확인) · **대상 레포** `kinderverse-concept`
+> **타깃 런타임** Interactive Viewer(B) 단일. *(본 스펙의 "Game Viewer v2(A)는 폐기"는 이 B 라인 설계 결정 — 별개 모듈 `src/game-viewer/v2/` 게임뷰어는 현재도 활성, CLAUDE.md §8 참조.)*
+> **선행 조사** 본 스펙의 모든 파일:라인은 B 전수 조사 문서 기준(라인 번호는 이후 드리프트 가능 — 심볼명 기준 참조 권장).
 > **범위** 노드 내부 다중 레인 + 확장 내부화 인프라. **게임 생성 엔진(레시피·테마·Resolver)은 후속 스펙 v0.2.**
+>
+> **🔄 최신화 메모(2026-06-26, 코드 기준)** — **구현 완료**. 핵심 파일: 노드 내부 레인 + 카메라 패닝 `src/features/interactive-viewer/runtime/InteractiveStage.tsx`(`LANE_W`·`panToLane`·`laneFromSceneId`·`goToScene`), 확장 내부화 `src/features/interactive-viewer/authoring/extendLane.ts`(`extendActivityInNode`·`offsetLane`), 확장 레시피 `resolver/extend.ts`. (보드 워크플로 레인 `src/board/lanes.ts`는 별개 시스템 — 혼동 주의.) §9 구현 계획 항목은 모두 반영됨.
 
 ---
 

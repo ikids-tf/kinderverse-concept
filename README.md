@@ -3,6 +3,19 @@
 공간 단위 교사 워크스페이스. 자세한 제품 정의는 [`CLAUDE.md`](CLAUDE.md), 기획은 [`docs/PRD.md`](docs/PRD.md),
 도메인/에이전트 지식은 [`.claude/skills/kinderverse/SKILL.md`](.claude/skills/kinderverse/SKILL.md).
 
+## 📚 문서
+
+| 목적 | 문서 |
+|---|---|
+| **처음 시작** — 실행·환경·디렉터리·멘탈 모델 | [`docs/ONBOARDING.md`](docs/ONBOARDING.md) |
+| **시스템 구조** — 계층·데이터 흐름·다이어그램(Mermaid) | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| **모듈 레퍼런스** — 스토어/AI/보드/게임뷰어 export + 확장 레시피 | [`docs/MODULE_REFERENCE.md`](docs/MODULE_REFERENCE.md) |
+| **API·백엔드** — 엔드포인트·AUI(JSON) 계약·env·Supabase | [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) |
+| 제품 헌장·하드 룰 | [`CLAUDE.md`](CLAUDE.md) |
+| 상세 기획 | [`docs/PRD.md`](docs/PRD.md) |
+
+> 아래는 마일스톤별 구현 이력(M1~M9). 빠른 개발 시작은 위 온보딩 문서를 권장한다.
+
 ## 스택
 
 - React 18 + Vite + TypeScript
@@ -187,9 +200,20 @@ npm run preview  # 빌드 결과 미리보기
 ---
 
 ## 전체 로드맵 완료 — M1~M9 ✅
-4대 태스크 에이전트(기록·계획·스튜디오·문장) + 라우터·게이트웨이 + AUI 레지스트리(10종) + 통합 보드·워크플로 레인·러너 + 우리반·캘린더·컨텍스트 + 이미지 플러그인·폴더 번들 + 고위험 적합성검증·자율성 게이트 + 자가고도화 폐루프 + 평가 하네스·거버넌스. 동작하는 수직 슬라이스.
+4대 태스크 에이전트(기록·계획·스튜디오·문장) + 디자인 디렉터 + 라우터·게이트웨이 + AUI 레지스트리(8종) + 통합 보드·워크플로 레인·러너 + 우리반·캘린더·컨텍스트 + 이미지 플러그인·폴더 번들 + 고위험 적합성검증·자율성 게이트 + 자가고도화 폐루프 + 평가 하네스·거버넌스. 동작하는 수직 슬라이스.
 
-남은 외부 작업(코드 외): Supabase/실DB 연동, distill 야간 배치(GitHub Actions), 사진 분류 API 실연동, 법무 검토.
+남은 외부 작업(코드 외): 멀티테넌트 인증·실DB 격리(현재 `supabase/schema.sql` = `kv_store`·`kv-assets` 데모 anon 모델), distill 야간 배치(GitHub Actions), 사진 분류 API 실연동, 법무 검토.
+
+## M10+ 추가 모듈 — 게임뷰어 v2 · 인터랙티브 노드 · 슬라이드 · 영상
+
+| 영역 | 위치 | 비고 |
+|---|---|---|
+| **게임뷰어 v2**(놀이 만들기, iframe) | `src/game-viewer/v2/`, 엔트리 `game-viewer.html`→`viewer/main.tsx` | 단일 계약 `InteractiveDoc`(Zod), **인터랙션 11종**·이펙트 3종·확장활동 6종. 결정적 리졸버(`resolver/`) + 프로바이더(나노바나나 이미지·RMBG 누끼·SlimSAM 분할·CLOVA TTS). 보드 임베드 postMessage 계약. 플레이 화면 Milray 면제(파스텔 `theme.ts`). 옛 v1 `GameSpec`은 제거. |
+| **인터랙티브 노드**(보드 네이티브) | `src/features/interactive-viewer/` | 계약 `InteractiveNode`. 동작엔진(액션·트리거·조건/체인)·노드 내부 다중 레인·확장 내부화·리졸버(레시피·테마팩·메커니즘). 게임뷰어 v2와 별개 시스템(`type:'interactive'` 카드). |
+| **슬라이드 엔진** | `src/features/slides/`, 엔트리 `slides-viewer.html` | DeckSpec·다중 레이아웃·테마(`--s-*`, Milray 면제)·Recharts·PDF/PPTX 내보내기. |
+| **영상 생성**(Veo) | `server/gateway/video.ts`, `/api/ai/video/{start,poll}` | Gemini Veo 비동기 2단계(과금 게이트·중복 가드, 서버가 mp4 변환·키 비노출). |
+
+> 두 인터랙티브 시스템 구분: **게임뷰어 v2(A)** = 독립 iframe(`InteractiveDoc`), **인터랙티브 노드(B)** = 보드 카드(`InteractiveNode`). 스펙 문서 `docs/kinderverse-game-engine-spec-v0.2.md`·`docs/kinderverse-lane-infrastructure-spec-v1.0.md`는 **B 라인**을 다룬다.
 
 ### 후속 개선 (UX)
 - **프롬프트바 중앙 정렬**: 메인 콘텐츠 영역 기준 가로 중앙(LNB·채팅 사이드패널 비킴). `AppShell` 메인 컬럼 내부 `absolute` + `promptBarLeftInset`.

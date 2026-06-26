@@ -7,7 +7,7 @@
 | 문서 | KinderVerse PRD (최종) |
 | 대상 | KinderBoard / i-screamkids 제품·개발팀 |
 | 문서 위치(권장) | 프로젝트 루트 `/docs/PRD.md` (CLAUDE.md / SKILL.md / PROMPTS.md 동거) |
-| 상태 | **v2** — M0 초안 + **프로토타입 구현 반영**(추가 기능·정책 명세는 §16, 2026-06-12 빌드 기준) |
+| 상태 | **v2** — M0 초안 + **프로토타입 구현 반영**(추가 기능·정책 명세는 §16, 2026-06-26 빌드 기준 · 게임뷰어 v2 `InteractiveDoc` 반영) |
 
 ---
 
@@ -232,7 +232,8 @@ MeetFlow 패턴 대비: 승계=라우터·2단계. 신규=분류·기억 엔진,
 
 ### 6.3 AUI = 레지스트리 선택 + 파라미터 (임의 생성 금지)
 `에이전트 JSON → 스키마 검증 → UI Registry 매칭 → 정적 컴포넌트 렌더`
-**Registry 카탈로그(초기)**: `RecordDraftCard`(관찰기록)·`PlayStoryCard`(놀이기록=놀이이야기, 사진슬롯+활동서술+학부모발송)·`WeeklyPlanGrid`·`LetterPreview`·`StudioGallery`(이미지/영상/도안)·`WorksheetCard`(활동지/워크시트, A4·인쇄·다운로드·계획연결)·`AssessmentReport`(발달평가서 — 적합성 검증 결과 표시, 구현 추가)·`PhotoClusterBoard`·`StickyNote`·`TextBlock`·`ImageCard`·`WorkCanvasFrame`(구 My Verse)·`ClarifyPrompt`·`FavoriteCardRail`·`SelectionToolbar`. (확장 상세 §16.15)
+**AUI Registry 카탈로그(구현 = 8종, `src/ui-registry/registry.tsx`)**: `RecordDraftCard`(관찰기록)·`PlayStoryCard`(놀이기록=놀이이야기, 사진슬롯+활동서술+학부모발송)·`ClarifyPrompt`·`WeeklyPlanGrid`·`WorksheetCard`(활동지/워크시트, A4·인쇄·다운로드·계획연결)·`StudioGallery`(이미지/영상/도안)·`LetterPreview`·`AssessmentReport`(발달평가서 — 적합성 검증 결과 표시). 에이전트 JSON `{type, props}`만 이 8종으로 렌더된다.
+> 참고: `StickyNote`·`TextBlock`·`ImageCard`·프레임 등은 **보드 네이티브 프리미티브**(`boardStore`/`NodeView`)이고, `FavoriteCardRail`·`SelectionToolbar`는 **셸 컴포넌트**다 — AUI 레지스트리(에이전트 출력 렌더)와는 별개 계층. (확장 상세 §16.15)
 
 ### 6.4 반응형 (모든 뷰포트 + 모바일 폴백)
 셸=container query(LNB 레일↔하단탭) · 결과=fluid grid · **My Board=무한 캔버스+줌/팬, 작은 화면은 태스크 우선 리스트로 폴백(R5)** · BP: sm480/md768/lg1024/xl1440/2xl1920+.
@@ -458,8 +459,8 @@ calendar_events(tenant_id, date, type, linked_artifact)
 | §16.3 프레임 | **프레임 정렬 버튼**(페이지형 행·열 정돈, 헤더 인식) 추가 + 동반 이동에서 **모션 라인 제외** + 복사 깊은 수집(§16.3) |
 | §16.10/§16.18 영상 | **전용 영상 생성 구현**(Gemini Veo) — 텍스트/이미지/계획→비디오를 동영상 뷰어에서 재생(§16.19). '프로바이더 미연동' 갭 해소. 비동기 start/poll 2단계(서버가 mp4 다운로드, 키 비노출), 과금 확인 게이트·중복 가드 |
 | §4.6 미디어 → 슬라이드 | **자체 슬라이드 엔진 추가(§16.20)** — §16.8 보드 카드 슬라이드쇼와 별개의 덱 빌더. DeckSpec(JSON)·11레이아웃·7테마·Recharts 차트·PDF/PPTX 내보내기·전문 편집기. 슬라이드 콘텐츠는 Milray 토큰 면제(`--s-*` 테마, CLAUDE.md 2026-06-14 예외) |
-| §4.6 미디어 → 게임 | **게임뷰어 + 공용 배경제거 엔진 + 웹뷰어 추가(§16.21)** — "나만의 게임 만들기"(템플릿+GameSpec 단일 계약, counting/silhouette/emotion/matching) + 보드·게임뷰어 공유 배경제거(BiRefNet MIT, 온디바이스) + 임베드 링크 웹뷰어. 게임 플레이 화면은 Milray 면제(파스텔 `theme.ts`, CLAUDE.md §8) |
-| §4.2 보드 → 인터랙티브 | **인터렉티브 노드 추가(§16.22)** — 보드 네이티브 인터랙티브 카드(`type:'interactive'`). 단일 스키마·동작엔진(액션11·트리거6·조건/체인)·연결(포트)·이야기·수업모드 자동넘김·묶어서 복제·도움말. 게임뷰어(§16.21 iframe/GameSpec)와 별개로 **카드 자체가 파스텔 캔버스** |
+| §4.6 미디어 → 게임 | **게임뷰어 v2 + 공용 배경제거 엔진 + 웹뷰어 추가(§16.21)** — "놀이 만들기"(단일 계약 `InteractiveDoc`, 인터랙션 11종) + 보드·게임뷰어 공유 배경제거(BiRefNet/RMBG MIT, 온디바이스) + 임베드 링크 웹뷰어. 게임 플레이 화면은 Milray 면제(파스텔 `theme.ts`, CLAUDE.md §8) |
+| §4.2 보드 → 인터랙티브 | **인터렉티브 노드 추가(§16.22)** — 보드 네이티브 인터랙티브 카드(`type:'interactive'`). 단일 스키마·동작엔진(액션11·트리거6·조건/체인)·연결(포트)·이야기·수업모드 자동넘김·묶어서 복제·도움말. 게임뷰어(§16.21 iframe/`InteractiveDoc`)와 별개로 **카드 자체가 파스텔 캔버스** |
 | §16.9 모션 | 출발/도착뿐 아니라 **중간 웨이포인트(⅓·⅔)도 카드 연결(양방향)** + `follow` 유휴 거동(지연 추적) 추가 |
 | §16.1/§16.10 뷰어 | **뷰어(슬라이드·영상·3D·유튜브) 더블클릭 = 화면 중앙 포커스**(이전 '조작 모드 진입'에서 변경), iframe 임베드는 `kv-embed-dblclick` postMessage로 부모에 전달 |
 | §16.12/§16.17 갤러리 | 풀해상도 base64 일괄 렌더 대신 **썸네일 캐시(`gallery-thumbs:v1`) + IntersectionObserver 지연마운트**로 마이보드→갤러리 전환 가속 |
@@ -615,7 +616,7 @@ calendar_events(tenant_id, date, type, linked_artifact)
 ### 16.18 미구현·이관 대기 (정식 서비스 갭)
 - Supabase 연동(현재 로컬 저장소·파일DB — 데이터 계약은 §11 유지) · **사진 분류 실시간 API 연동**(§5.1 Tier2 분류·기억 엔진) · 실제 아동 사진 파이프라인(현재 AI 개념 이미지만) · 멀티 테넌트 인증 · 갤러리 실데이터 · 화이트 모드(헌장대로 미착수 유지).
 - **영상 생성 프로바이더 다양화**: 현재 Gemini **Veo 단일**(§16.19 구현 완료). Runway·Pika 등 대체 프로바이더, 활동별 다중 생성(현재 비용 통제로 연결당 1개), 더 긴 클립은 추후. · **인터랙티브 콘텐츠**(매직 뷰어 모드 추가 예정).
-- **게임뷰어(§16.21) 갭**: 교사 이미지 파이프라인 M3(인라인 슬롯 교체·업로드 안전 분류기·기관 보관함)는 일부 진행 — 안전 분류기·기관 격리 저장은 이관 대기. 스타터 라이브러리 ~50개 사전 생성, OpenMoji 미보유 소재의 생성 폴백, 다국어 TTS(`ttsLocale` ko/ja/en)는 추후. emotion 템플릿의 Rive 자산·CLOVA TTS는 M2 범위.
+- **게임뷰어 v2(§16.21) 갭**: 교사 이미지 파이프라인(인라인 슬롯 교체·업로드 안전 분류기·기관 보관함)은 일부 진행 — 안전 분류기·기관 격리 저장은 이관 대기. 다국어 TTS(`ttsLocale` ko/ja/en)·반응형 캐릭터(Rive responsive-state) 자산 확충은 추후. 리졸버 자유 프롬프트(`llmIntent`) 커버리지 확대 진행 중.
 - **공용 배경제거 서버 티어 미배포**: 현재 `SERVER_ENABLED=false` → 모든 소재가 온디바이스(BiRefNet MIT) 처리. 비민감 소재(generated/object)용 서버 미세경계 티어(BiRefNet-HR/BEN2 등)는 모델·가중치·호스팅 라이선스 재점검 후 추가 예정(§16.21).
 - **인터렉티브 노드(§16.22) 갭**: **암묵 노드화**(빈 보드 드롭 → 자동 인터랙티브 래핑) 미구현(현행: 명시 툴바 생성 — 보드 코어 드롭 동작 변경 리스크로 보류) · 이야기 **분기(branches)·장면 전환**은 런타임만(전용 저작 UI 후속) · `groups`는 ‘묶어서 복제’ 실용 수준(명명 프리팹 라이브러리는 후속) · `assetKind` 기본 `teacher-upload`(child-photo 수동 태깅 후속) · 영속화 localStorage(Supabase 이관 시 데이터 계약 §11 정합 필요).
 
@@ -647,17 +648,19 @@ calendar_events(tenant_id, date, type, linked_artifact)
 ### 16.21 ★ 게임뷰어 · 공용 배경제거 엔진 · 웹뷰어 (2026-06 신규)
 보드 툴바에서 부르는 신규 산출물 3종. **상세 명세는 별도 핸드오프 문서 `game-viewer-handoff/PRD.md`(+`CLAUDE.md`/`KICKOFF_M1.md`/`FORM_DESIGN.md`)에 있으며, 본 절은 메인 PRD 차원의 요약**이다.
 - **게임뷰어 — "나만의 게임 만들기"**(`src/game-viewer/**`, 진입 `game-viewer.html` = Vite 멀티페이지 엔트리, 보드 임베드는 툴바 뷰어 패널 **'놀이 만들기'** 프리셋 iframe): 교사가 프롬프트 또는 폼으로 아이용 인터랙티브 게임을 즉시 만들어 보드에서 플레이/수업 모드 투사.
-  - **핵심 결정 — 런타임 코드 생성 금지**: 모든 입구가 **템플릿 + `GameSpec`(JSON) 단일 계약**(`schema/gameSpec.ts`, 판별 유니온 `templateId`)으로 수렴. 엔진은 입구를 모른다.
-  - **3 입구**: ① 템플릿 갤러리 + **간단 폼**(`buildSpecFromForm` — LLM 없이 결정적 조립, `contentSets.ts` 큐레이션 셋) ② 프롬프트(Router → 생성 에이전트, `llmRouter.ts`) ③ 예시에서 변형(M3).
-  - **템플릿**: counting(숫자 세기)·silhouette(실루엣)= M1(OpenMoji-only, 이미지 생성 0) / emotion(Rive 감정 공감)·matching(Konva 선잇기)= M2. 에셋 추상화 `GameAsset.source = openmoji | teacher | generated`(템플릿은 출처 모름). 음성=Web Speech 스텁(CLOVA는 M2+).
-  - **속도**: 흔한 케이스에 코드·이미지를 만들지 않음 — 에셋 로컬(OpenMoji)·TTS/게임 캐시·프로그레시브 렌더(목표 라이브러리 경로 <1초).
+  - **핵심 결정 — 런타임 코드 생성 금지**: 모든 입구가 **단일 계약 `InteractiveDoc`(JSON)** (`src/game-viewer/v2/schema/interactiveDoc.ts`, Zod 검증 `parseInteractiveDoc`)으로 수렴. 생성·편집·런타임 모두 이 문서만 의존. 엔진은 입구를 모른다. *(옛 v1 `GameSpec`/`templateId`는 제거됨 — git 이력 보존.)*
+  - **입구**: ① 프롬프트 → **리졸버**(`resolver/resolver.ts` `recommend`/`parseIntent` — LLM 없이 결정적 조립, `resolver/contentSets.ts` 큐레이션 셋; 자유 프롬프트는 `llmIntent`로 보강) → 추천 카드 ② 오케스트레이터(`generate/orchestrator.ts` `generateGame`) ③ 보드 임베드 메시지(`kv-game-create`).
+  - **인터랙션 11종**(문서당 1종): tap-the-right-one · match-pair · binary-choice · connect · flip-memory · combine · categorize · order-sequence · find-it · sequence-tap · pattern-next. **이펙트 3종**(reveal · responsive-state · goal-state), **확장 활동 6종**(discuss · story · name-create · connect-apply · move-express · watch-video).
+  - **프로바이더(교체 가능)**: 이미지=나노바나나(`providers/nanoBanana.ts` → `@/ai/client` `task:'image'`) → 누끼=`@/shared/background-removal`(BiRefNet/RMBG, 온디바이스 WASM) → 객체분할=`@/shared/segment`(SlimSAM). 음성=CLOVA Voice(`task:'tts'`, 키 없으면 브라우저 TTS). 영상=Gemini Veo. **child-photo/video는 외부 API 미전송**(`assertNotChildMedia`).
+  - **런타임/편집**: `runtime/useGame.ts`(Zustand + zundo undo) · 인터랙션별 컴포넌트(`runtime/interactions/*`) · 직접 레이아웃 편집 `editor/EditLayer.tsx`. 보드 임베드 = iframe `/game-viewer.html`(엔트리 `viewer/main.tsx`), postMessage 계약(`kv-game-create`/`progress`/`mode`, `kvSetChrome`). 플레이 화면은 파스텔 `v2/theme.ts`(Milray 면제).
+  - **속도**: 흔한 케이스는 결정적 리졸버로 코드·LLM 없이 조립. 에셋은 지연 생성·캐시(`runtime/assetStore.ts`), 프로그레시브 렌더.
   - **디자인 예외(CLAUDE.md §8)**: **게임 플레이 화면(아이 대면)은 Milray 미적용** — 파스텔/큐트 토큰(`src/game-viewer/theme.ts`). 단 게임을 감싸는 **보드 카드 프레임·툴바·교사용 프롬프트바는 Milray 유지**. 슬라이드 콘텐츠와 동일한 면제 범주.
   - **안전·적합성**: 큐레이션 에셋으로 부적절 이미지 구조적 차단 · 음성+시각 완결(읽기 0) · 큰 터치 타깃 · 긍정 피드백만 · 연령 보정. 교사 업로드 이미지는 안전 분류기 통과 필수(M3), 아이 사진은 **온디바이스 처리 우선**(§12 정합).
 - **공용 배경제거 엔진**(`src/shared/background-removal/**`): **보드(프롬프트바·인라인 버튼)와 게임뷰어(교사 에셋)가 단일 진입점(`removeBackground`)을 공유** — "두 진입점, 한 엔진". 온디바이스 **BiRefNet(onnx-community, MIT)** Web Worker(transformers.js), 입력 일반화(File/Blob/Img/URL)·≤1024px 다운스케일·워밍업. **안전 티어 엔진 내부 강제**(`pickTier`): `child-photo`·`unknown` → 무조건 온디바이스(외부 전송 절대 금지), `generated`·`object` → `allowServerTier` + 서버 가동 시에만 서버(현재 `SERVER_ENABLED=false`라 사실상 항상 온디바이스). **라이선스**: @imgly(AGPL)·RMBG-1.4(BRIA 비상업)는 채택 금지, MIT BiRefNet로 일원화(`src/lib/removeBg.ts`는 기존 시그니처 호환 셸). §12 아동데이터 온디바이스·외부전송 최소화 원칙과 정합.
 - **웹뷰어**(`public/web-viewer.html`): 임베드 가능한 링크만 보드 안에서 뷰어로, 막힌 링크는 새 탭으로. 독립 HTML이라 Milray 토큰 값을 CSS 변수로 **복제**(임의 색 추가 없음 — 헌장 준수).
 
 ### 16.22 ★ 인터렉티브 노드 — 보드 네이티브 인터랙티브 카드 (2026-06-21 신규)
-보드 툴바에서 만드는 **네이티브 보드 노드 타입(`type:'interactive'`)** — 게임뷰어(§16.21, iframe·GameSpec)와는 별개로, **보드 카드 자체가 파스텔 인터랙티브 캔버스**다. 교사가 사진·글자·도형을 올리고 "탭하면 일어나는 일"을 붙여 아이용 놀이 카드를 만든다. 코드: `src/features/interactive-viewer/**`. 영속화 localStorage `kv:inodes:v1`, 보드 노드는 `data.docId`만 참조(슬라이드 `?id=` 선례). 풀스크린 저작/재생은 `ZoomOverlay` 재사용.
+보드 툴바에서 만드는 **네이티브 보드 노드 타입(`type:'interactive'`)** — 게임뷰어(§16.21, iframe·`InteractiveDoc`)와는 별개로, **보드 카드 자체가 파스텔 인터랙티브 캔버스**다. 교사가 사진·글자·도형을 올리고 "탭하면 일어나는 일"을 붙여 아이용 놀이 카드를 만든다. 코드: `src/features/interactive-viewer/**`. 영속화 localStorage `kv:inodes:v1`, 보드 노드는 `data.docId`만 참조(슬라이드 `?id=` 선례). 풀스크린 저작/재생은 `ZoomOverlay` 재사용.
 
 - **단일 계약 스키마**(`schema/interactiveNode.ts`, zod, **재정의 금지** — 사전검증 산출물): elements(image/video/text/shape/sprite)·connections(path/link/order)·behaviors(트리거→액션)·conditions(when)·counters/flags·story(graph)·groups. 참조 무결성 superRefine. 생성·저작·런타임·수업모드가 모두 이 문서만 의존.
 - **동작 엔진**(`runtime/InteractiveStage.tsx` `fireBehavior`): 액션 **11종** 실행 — 반응(WAAPI 9프리셋)·교체·보이기/숨기기·강조·세기·스위치(플래그)·말하기(말풍선+브라우저 TTS ko-KR)·영상재생·연결 따라 이동(+장면전환은 no-op). 제어: **조건(when, 카운터/플래그/상태)·지연(delay)·잇기(then 체이닝)**. 카운터 배지·말풍선·숨김/강조 상태를 렌더, 리셋 토큰으로 지연/체인 취소. 🐛 영상 자동재생 금지(playVideo/컨트롤로만).

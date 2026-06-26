@@ -1,9 +1,14 @@
 # KinderVerse 게임 생성 엔진(Resolver) 스펙
 
-> **버전** v0.2 · **상태** 설계 확정 / 구현 전 조사 1건 필요 · **대상 레포** `D:\claud project\kinderverse concept`
+> **버전** v0.2 · **상태** **구현됨**(2026-06-26 확인) · **대상 레포** `kinderverse-concept`
 > **타깃 런타임** Interactive Viewer(B) 단일. **v0.1 폐기 supersede** (v0.1은 폐기된 System A에 매핑돼 무효).
 > **선행** 레인 인프라 스펙 v1.0(인프라), B 전수 조사(프리미티브 인벤토리).
 > **범위** 레인을 *무엇으로* 채우는가 — 메커니즘 레시피 + 동사 매핑 + 테마팩 + Resolver. (레인을 *어떻게* 추가/패닝하는가는 인프라 v1.0.)
+>
+> **🔄 최신화 메모(2026-06-26, 코드 기준)**
+> - **구현 완료**: Resolver는 `src/features/interactive-viewer/resolver/`(`resolveIntent`·`selectRecipe`·`assemble`·`fillSlots`·`themePacks`·`extend`·`place` 등)에 존재. 메커니즘 프리미티브 계약은 `src/features/interactive-viewer/schema/interactiveNode.ts`(`InteractiveNode`).
+> - **메커니즘 명칭은 코드와 일치**: `sequence-order`·`path-trace`·`pair-match`·`tap-select`·`branch-choose`·`combine`·`memory-flip`·`free-create`·`sort-to-bin`·`slot-fill` 모두 B에 구현됨(§4 표 유효). §4-1 드래그 모델 조사는 해소됨(`sort-to-bin`·`slot-fill` 구현 확인).
+> - **⚠ 용어 주의 — 'System A(폐기)'는 본 스펙(B 중심) 설계 시점 관점**이다. 별개 모듈 **`src/game-viewer/v2/`(계약 `InteractiveDoc`, 인터랙션 11종) 게임뷰어는 현재도 활성**(CLAUDE.md §8, 보드 '놀이 만들기' iframe `/game-viewer.html`). 즉 "A 폐기"는 *이 B 라인 설계 결정*이지 게임뷰어 v2 모듈 제거를 뜻하지 않는다. 본 문서의 'B' = `src/features/interactive-viewer/`(보드 네이티브 인터랙티브 노드).
 
 ---
 
