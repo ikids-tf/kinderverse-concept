@@ -1,5 +1,7 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
+import { useTrayStore } from '@/store/trayStore';
 import { PageHero } from '@/components/PageHero';
 import {
   NotebookPen, Palette, Shapes, BookOpen, Image as ImageIcon, Tag, Sparkles,
@@ -281,7 +283,7 @@ function useInView<T extends HTMLElement>(rootMargin = '500px'): { ref: React.Re
 /* 마조너리(높이 가변)지만 '행 우선' 정렬 — 항목을 열에 라운드로빈으로 분배해
    맨 윗줄이 왼→오로 최신순이 되게 한다. CSS columns는 세로 우선이라 왼쪽 열부터
    채워져(최신이 왼쪽 열에 쌓임) 이 동작을 못 한다. */
-function MasonryGrid({ items, onOpen, onDelete }: { items: GalleryItem[]; onOpen: (it: GalleryItem) => void; onDelete: (it: GalleryItem) => void }) {
+function MasonryGrid({ items, onOpen, onDelete, picked, onTogglePick, onSendToBoard }: { items: GalleryItem[]; onOpen: (it: GalleryItem) => void; onDelete: (it: GalleryItem) => void; picked: Set<string>; onTogglePick: (id: string) => void; onSendToBoard: (it: GalleryItem) => void }) {
   const COL = 228;
   const GAP = 16;
   const ref = useRef<HTMLDivElement>(null);
@@ -305,14 +307,14 @@ function MasonryGrid({ items, onOpen, onDelete }: { items: GalleryItem[]; onOpen
     <div ref={ref} style={{ display: 'flex', gap: GAP, alignItems: 'flex-start' }}>
       {buckets.map((bucket, ci) => (
         <div key={ci} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: GAP }}>
-          {bucket.map((it) => <GalleryCard key={it.id} it={it} onOpen={() => onOpen(it)} onDelete={it.del ? () => onDelete(it) : undefined} />)}
+          {bucket.map((it) => <GalleryCard key={it.id} it={it} onOpen={() => onOpen(it)} onDelete={it.del ? () => onDelete(it) : undefined} picked={picked.has(it.id)} selecting={picked.size > 0} onTogglePick={() => onTogglePick(it.id)} onSendToBoard={() => onSendToBoard(it)} />)}
         </div>
       ))}
     </div>
   );
 }
 
-function GalleryCard({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => void; onDelete?: () => void }) {
+function GalleryCard({ it, onOpen, onDelete, picked, selecting, onTogglePick, onSendToBoard }: { it: GalleryItem; onOpen: () => void; onDelete?: () => void; picked: boolean; selecting: boolean; onTogglePick: () => void; onSendToBoard: () => void }) {
   const a = C.coral;
   const Icon = it.icon;
   const isVideo = it.assetKind === 'video';
@@ -322,6 +324,8 @@ function GalleryCard({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => 
   const vidRef = useRef<HTMLVideoElement>(null);
   const [vidSrc, setVidSrc] = useState<string | undefined>();
   const [playing, setPlaying] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [natRatio, setNatRatio] = useState<number | undefined>(); // 로드된 이미지의 실제 비율 — 잘림 없이 원본 비율로 표시
   // 그리드용 작은 썸네일(긴 변 384px ≈ 30KB) — 풀해상도(it.thumb)는 뷰어/다운로드에서만.
   const [thumbSrc, setThumbSrc] = useState<string | undefined>();
   useEffect(() => {
@@ -360,11 +364,13 @@ function GalleryCard({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => 
 
   // 호버 → 실제 영상을 카드 안에서 재생(음소거·반복). 떠나면 멈추고 포스터로.
   const onEnter = () => {
+    setHovered(true);
     if (!isVideo) return;
     if (vidSrc) { setPlaying(true); return; }
     void loadVideoSrc(it.videoAssetId).then((src) => { if (src) { setVidSrc(src); setPlaying(true); } });
   };
   const onLeave = () => {
+    setHovered(false);
     if (!isVideo) return;
     setPlaying(false);
     const v = vidRef.current;
@@ -385,6 +391,7 @@ function GalleryCard({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => 
     setLiked((v) => { const n = !v; setLike(it.id, n); return n; });
   };
   const onDownload = (e: React.MouseEvent) => { e.stopPropagation(); void downloadItem(it); };
+  const showActions = hovered || picked || selecting;
 
   return (
     <button
@@ -393,11 +400,11 @@ function GalleryCard({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => 
       onClick={onOpen}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      style={{ width: '100%', display: 'block', textAlign: 'left', padding: 0, border: `1px solid ${C.line}`, borderRadius: 16, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', overflow: 'hidden', boxShadow: C.shadow1, transition: 'transform .15s, border-color .15s, box-shadow .15s' }}
+      style={{ width: '100%', display: 'block', textAlign: 'left', padding: 0, border: picked ? `2px solid ${a}` : `1px solid ${C.line}`, borderRadius: 16, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', overflow: 'hidden', boxShadow: picked ? `0 0 0 3px ${a}33, ${C.shadow1}` : C.shadow1, transition: 'transform .15s, border-color .15s, box-shadow .15s' }}
     >
-      <div style={{ position: 'relative', aspectRatio: it.ratio, background: C.thumb, display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+      <div style={{ position: 'relative', aspectRatio: natRatio ?? it.ratio, background: C.thumb, display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
         {(isVideo ? poster : isImage ? thumbSrc : undefined) ? (
-          <img src={isVideo ? poster : thumbSrc} alt={it.t} draggable={false} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: 'auto' }} />
+          <img src={isVideo ? poster : thumbSrc} alt={it.t} draggable={false} loading="lazy" decoding="async" onLoad={(e) => { const im = e.currentTarget; if (im.naturalWidth && im.naturalHeight) setNatRatio(im.naturalWidth / im.naturalHeight); }} style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: 'auto' }} />
         ) : it.assetKind === 'web' && faviconOf(it.href) ? (
           <img src={faviconOf(it.href)} alt="" width={44} height={44} style={{ borderRadius: 10 }} />
         ) : isVideo || (isImage && it.thumb) ? (
@@ -425,7 +432,26 @@ function GalleryCard({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => 
             </span>
           </span>
         )}
-        <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: a, background: '#fff', borderRadius: 999, padding: '3px 9px', boxShadow: C.shadow1 }}>{it.cat}</span>
+        <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: a, background: '#fff', borderRadius: 999, padding: '3px 9px', boxShadow: C.shadow1, opacity: showActions ? 0 : 1, transition: 'opacity .15s' }}>{it.cat}</span>
+        {/* 선택 체크박스 — 호버/선택 시 좌상단(배지 자리) */}
+        <span
+          role="button"
+          title={picked ? '선택 해제' : '선택'}
+          onClick={(e) => { e.stopPropagation(); onTogglePick(); }}
+          style={{ position: 'absolute', top: 10, left: 10, width: 26, height: 26, borderRadius: 999, display: 'grid', placeItems: 'center', cursor: 'pointer', background: picked ? a : 'rgba(255,255,255,.92)', border: picked ? `2px solid ${a}` : `1.5px solid ${C.line}`, boxShadow: C.shadow1, opacity: showActions ? 1 : 0, transition: 'opacity .15s', zIndex: 3 }}
+        >
+          {picked && <Check size={15} color="#fff" strokeWidth={3} />}
+        </span>
+        {/* 마이보드로 보내기 — 호버 시 우상단(코랄, 선택 자료가 있으면 선택분 전체) */}
+        <span
+          className="kv-galmax"
+          role="button"
+          title={selecting ? '선택한 자료를 마이보드로 보내기' : '이 자료를 마이보드로 보내기'}
+          onClick={(e) => { e.stopPropagation(); onSendToBoard(); }}
+          style={{ position: 'absolute', top: 10, right: 10, width: 28, height: 28, borderRadius: 8, background: a, display: 'grid', placeItems: 'center', color: '#fff', boxShadow: C.shadow1, zIndex: 3 }}
+        >
+          <LayoutGrid size={15} />
+        </span>
         {/* 호버 시 — 삭제(삭제 가능 자료만) + 다운로드 + 확대 */}
         {onDelete && (
           <span
@@ -447,7 +473,7 @@ function GalleryCard({ it, onOpen, onDelete }: { it: GalleryItem; onOpen: () => 
         >
           <Download size={14} />
         </span>
-        <span className="kv-galmax" style={{ position: 'absolute', top: 10, right: 10, width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,.92)', display: 'grid', placeItems: 'center', color: C.ink }}><Maximize2 size={14} /></span>
+        <span className="kv-galmax" style={{ position: 'absolute', top: 10, right: 112, width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,.92)', display: 'grid', placeItems: 'center', color: C.ink }}><Maximize2 size={14} /></span>
       </div>
       <div style={{ padding: '11px 14px 12px' }}>
         <div style={{ fontWeight: 700, fontSize: 14.5, lineHeight: 1.35 }}>{it.t}</div>
@@ -620,6 +646,8 @@ export function GalleryPage() {
   const [gameItems, setGameItems] = useState<GalleryItem[]>([]);
   const [playDocId, setPlayDocId] = useState<string | null>(null);
   const [iHomeOpen, setIHomeOpen] = useState(false); // 게임 '홈' → 인터랙티브 홈(저장 게임 목록·추천)
+  const [picked, setPicked] = useState<Set<string>>(() => new Set()); // 다중 선택(자료 id) — 마이보드로 보내기
+  const navigate = useNavigate();
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2200); return () => clearTimeout(t); }, [toast]);
 
@@ -685,6 +713,21 @@ export function GalleryPage() {
     })();
   };
 
+  const togglePick = (id: string) => setPicked((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const clearPick = () => setPicked(new Set());
+  // 선택(또는 단일) 자료를 보드 '임시 트레이'에 담고 보드로 이동 — 사용자가 원하는 위치에 직접 배치.
+  const sendToBoard = (ids: string[]) => {
+    const trayItems = allItems
+      .filter((it) => ids.includes(it.id) && it.thumb)
+      .map((it) => ({ id: it.id, src: it.thumb!, title: it.t, ratio: it.ratio }));
+    if (!trayItems.length) { setToast('보드로 보낼 이미지가 없어요'); return; }
+    useTrayStore.getState().add(trayItems);
+    clearPick();
+    setToast(`${trayItems.length}개를 보드 임시 자료함에 담았어요`);
+    navigate('/board');
+  };
+  const sendToBoardSmart = (it: GalleryItem) => sendToBoard(picked.size > 0 ? [...picked] : [it.id]);
+
   const exitAi = () => setAi(null);
   const items = ai
     ? allItems.filter((i) => ai.ids.includes(i.id))
@@ -739,7 +782,7 @@ export function GalleryPage() {
         {items.length === 0 ? (
           <div style={{ textAlign: 'center', color: C.muted, marginTop: 80, fontSize: 14 }}>{ai ? `‘${ai.label}’에 어울리는 자료를 찾지 못했어요.` : `‘${q || cat}’에 해당하는 자료가 없어요.`}</div>
         ) : view === 'grid' ? (
-          <MasonryGrid items={items} onOpen={openItem} onDelete={deleteItem} />
+          <MasonryGrid items={items} onOpen={openItem} onDelete={deleteItem} picked={picked} onTogglePick={togglePick} onSendToBoard={sendToBoardSmart} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 880, margin: '0 auto' }}>
             {items.map((it) => <GalleryRow key={it.id} it={it} onOpen={() => openItem(it)} onDelete={it.del ? () => deleteItem(it) : undefined} />)}
@@ -747,6 +790,17 @@ export function GalleryPage() {
         )}
       </div>
 
+      {/* 선택 자료 일괄 작업 바 — 마이보드로 보내기 / 선택 해제 */}
+      {picked.size > 0 && (
+        <div style={{ position: 'fixed', bottom: 96, left: '50%', transform: 'translateX(-50%)', zIndex: 40, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px 10px 18px', borderRadius: 999, background: a, color: '#fff', boxShadow: '0 12px 32px rgba(20,19,17,.28)' }}>
+          <Check size={16} />
+          <span style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap' }}>{picked.size}개 선택됨</span>
+          <button onClick={() => sendToBoard([...picked])} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', color: a, border: 'none', borderRadius: 999, padding: '8px 15px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, whiteSpace: 'nowrap' }}>
+            <LayoutGrid size={15} /> 마이보드로 보내기
+          </button>
+          <button onClick={clearPick} title="선택 해제" style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, background: 'rgba(255,255,255,.18)', color: '#fff', border: 'none', borderRadius: 999, cursor: 'pointer' }}><X size={16} /></button>
+        </div>
+      )}
       {sel && <GalleryViewer item={sel} onClose={() => setSel(null)} onAction={(m) => setToast(m)} />}
       {/* 게임 카드 클릭 → 플레이 오버레이(인터랙티브 홈과 동일 경로). */}
       {playDocId && (

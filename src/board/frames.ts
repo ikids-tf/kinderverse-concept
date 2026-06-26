@@ -443,9 +443,18 @@ export function frameBoardSnap(frameId: string): BoardSnap | null {
       } else if (n.type === 'image' && n.src) {
         nodes.push({ ...base, kind: 'image', src: n.src, text: n.text ?? '' });
       } else if (n.data?.doc) {
-        nodes.push({ ...base, kind: 'doc', text: n.text ?? '', cover: n.data?.coverImage as string | undefined });
+        // 활동지(WorksheetCard)는 본문이 A4 그림 — 보드처럼 '이미지'로 담아 텍스트로 새지 않게.
+        const wsImg = (n.data?.payload as { type?: string; props?: { image_url?: string } } | undefined)?.type === 'WorksheetCard'
+          ? (n.data.payload as { props?: { image_url?: string } }).props?.image_url
+          : undefined;
+        if (wsImg) {
+          nodes.push({ ...base, kind: 'image', src: wsImg, text: n.text ?? '' });
+        } else {
+          nodes.push({ ...base, kind: 'doc', text: n.text ?? '', cover: n.data?.coverImage as string | undefined });
+        }
       } else if (typeof n.data?.embed === 'string' || n.type === 'interactive') {
-        // 동영상·슬라이드·게임 등 뷰어 — 보드 모습 그대로 보이게 'embed'로 담는다(메모 텍스트로 새지 않게).
+        // 동영상·슬라이드·게임 등 뷰어 — 'embed'로 담는다(메모 텍스트로 새지 않게).
+        // 유튜브 viewerSrc(watch URL)는 BoardPreview에서 썸네일 포스터로 변환해 보이게 한다.
         const embed = typeof n.data?.embed === 'string' ? (n.data.embed as string) : 'interactive';
         nodes.push({ ...base, kind: 'embed', embed, src: n.data?.viewerSrc as string | undefined, text: (n.data?.title as string) || n.text || '뷰어' });
       } else if (n.type === 'sticky' || n.type === 'text') {

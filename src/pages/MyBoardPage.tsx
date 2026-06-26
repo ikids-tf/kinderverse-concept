@@ -4,6 +4,7 @@ import { useBoardStore } from '@/store/boardStore';
 import { useBoardsStore } from '@/store/boardsStore';
 import { kindFromFavorite } from '@/board/seed';
 import { BoardCanvas } from '@/components/board/BoardCanvas';
+import { BoardTray } from '@/components/board/BoardTray';
 import { BoardToolbar } from '@/components/board/BoardToolbar';
 import { BoardControls } from '@/components/board/BoardControls';
 import { BoardSwitcher } from '@/components/board/BoardSwitcher';
@@ -52,6 +53,7 @@ export function MyBoardPage() {
         <BoardToolbar />
         <BoardControls />
         <PromptChoiceDialog />
+        <BoardTray />
         {empty && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
             <p className="font-display text-h2 text-fg-2">빈 보드</p>

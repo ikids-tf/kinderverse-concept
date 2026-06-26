@@ -255,6 +255,16 @@ function DocSheet({ md, cover, width }: { md: string; cover?: string; width: num
   );
 }
 
+/** embed 뷰어의 포스터 이미지 — 유튜브 watch/embed URL은 썸네일로, 이미지 URL은 그대로.
+    그 외(덱 id·iframe 경로 등)는 포스터 없음 → 아이콘 플레이스홀더로 표시(깨진 <img> 방지). */
+function embedPoster(src?: string): string | undefined {
+  if (!src) return undefined;
+  const yt = src.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([\w-]{11})/);
+  if (yt) return `https://i.ytimg.com/vi/${yt[1]}/hqdefault.jpg`;
+  if (src.startsWith('data:image') || src.includes('i.ytimg.com') || /\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i.test(src)) return src;
+  return undefined;
+}
+
 /** 저장 당시 보드 모습 — 실측 px 레이아웃을 CSS scale로 통째로 축소(썸네일/뷰어 공용). */
 function BoardPreview({ content, maxW, maxH, radius = 12 }: { content: string; maxW: number; maxH: number; radius?: number }) {
   let snap: BoardSnap | null = null;
@@ -284,18 +294,26 @@ function BoardPreview({ content, maxW, maxH, radius = 12 }: { content: string; m
                 {n.cover && (
                   <img src={n.cover} alt="" style={{ display: 'block', width: '100%', maxHeight: 110, objectFit: 'cover', borderRadius: 8, border: `1px solid ${C.line}`, marginBottom: 10 }} />
                 )}
-                <div className="kv-snapdoc" dangerouslySetInnerHTML={{ __html: mdToHtml((n.text ?? '').slice(0, 4000)) }} />
+                <div className="kv-snapdoc" dangerouslySetInnerHTML={{ __html: mdToHtml((n.text ?? '').slice(0, 12000)) }} />
               </div>
             );
           }
           if (n.kind === 'embed') {
             const video = isVideoEmbed(n.embed ?? '');
+            const poster = embedPoster(n.src);
             return (
               <div key={i} style={{ ...box, background: 'var(--accent-soft, #FBE8DB)', border: `1px solid ${C.line}`, borderRadius: 10, overflow: 'hidden', display: 'grid', placeItems: 'center', position: 'relative' }}>
-                {n.src && <img src={n.src} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
-                <span style={{ position: 'relative', display: 'grid', placeItems: 'center', gap: 6, textAlign: 'center', padding: 8 }}>
-                  {video ? <Film size={26} color={C.coral} /> : <Frame size={26} color={C.coral} />}
-                  <span style={{ fontSize: 12, fontWeight: 700, color: C.ink, maxWidth: '94%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.text || (video ? '동영상' : '뷰어')}</span>
+                {poster && (
+                  <img
+                    src={poster}
+                    alt=""
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                )}
+                <span style={{ position: 'relative', display: 'grid', placeItems: 'center', gap: 6, textAlign: 'center', padding: poster ? '8px 12px' : 8, background: poster ? 'rgba(20,19,17,.5)' : 'transparent', borderRadius: 12 }}>
+                  {video ? <Film size={26} color={poster ? '#fff' : C.coral} /> : <Frame size={26} color={poster ? '#fff' : C.coral} />}
+                  <span style={{ fontSize: 12, fontWeight: 700, color: poster ? '#fff' : C.ink, maxWidth: '94%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.text || (video ? '동영상' : '뷰어')}</span>
                 </span>
                 {video && (
                   <span style={{ position: 'absolute', right: 8, bottom: 8, width: 34, height: 34, borderRadius: 999, background: 'rgba(20,19,17,.5)', display: 'grid', placeItems: 'center' }}>

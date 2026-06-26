@@ -5,6 +5,7 @@ import { useUIStore } from '@/store/uiStore';
 import { linkedComponent } from '@/board/links';
 import { recordCurrentLesson, saveCurrentLesson } from '@/board/lessons';
 import { LessonHistoryPanel } from './LessonHistoryPanel';
+import { BoardMinimap } from './BoardMinimap';
 
 /** 호버 상태 — 커서가 떠나도 delay(기본 3초) 동안 유지된 뒤 풀린다.
     수업 모드 알약(이전 수업)·✕/수업 종료 클러스터가 바로 닫히지 않게. */
@@ -65,6 +66,7 @@ export function BoardControls() {
     return !!vis && [...vis].some((id) => s.nodes[id]?.type === 'motion');
   });
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   const lessonHover = useDelayedHover(); // 수업 모드 알약 → 이전 수업 확장 유지
   const clusterHover = useDelayedHover(); // ✕ 클러스터 → 수업 종료 확장 유지
   // 수업 저장 버튼 — 누르면 잠깐 '저장됨 ✓'로 바뀌었다가 돌아온다.
@@ -101,33 +103,47 @@ export function BoardControls() {
 
   return (
     <>
-      {/* top-left: zoom/Fit — 슬라이드 쇼 중에는 숨겨 화면을 깨끗하게 */}
+      {/* top-left: MAP(미니맵) + zoom/Fit — 슬라이드 쇼 중에는 숨겨 화면을 깨끗하게 */}
       {!show && (
-        <div className="pointer-events-auto absolute left-t4 top-t3 z-20 flex items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-sm backdrop-blur">
-          <button
-            title="축소 (⌘/Ctrl+-)"
-            onClick={() => zoomBy(1 / 1.1, cx, cy)}
-            className="flex h-8 w-8 items-center justify-center rounded-pill text-fg-2 hover:bg-surface-2"
-          >
-            <Icon name="minus" size={16} />
-          </button>
-          <span className="w-12 text-center text-overline text-fg-2">
-            {Math.round(viewport.zoom * 100)}%
-          </span>
-          <button
-            title="확대 (⌘/Ctrl+=)"
-            onClick={() => zoomBy(1.1, cx, cy)}
-            className="flex h-8 w-8 items-center justify-center rounded-pill text-fg-2 hover:bg-surface-2"
-          >
-            <Icon name="plus" size={16} />
-          </button>
-          <button
-            title="전체 맞춤 (Shift+1)"
-            onClick={fit}
-            className="flex h-8 items-center justify-center rounded-pill px-t2 text-overline text-fg-2 hover:bg-surface-2"
-          >
-            FIT
-          </button>
+        <div className="pointer-events-auto absolute left-t4 top-t3 z-20 flex items-start gap-t2">
+          {/* MAP — 미니맵 네비게이터(버튼 바로 아래로 펼쳐짐) */}
+          <div className="relative">
+            <button
+              title="미니맵 — 보드 전체에서 현재 위치 보기·이동"
+              onClick={() => setMapOpen((v) => !v)}
+              className={`flex h-9 items-center rounded-pill border border-border bg-surface/95 px-t3 text-overline shadow-sm backdrop-blur hover:bg-surface-2 ${mapOpen ? 'text-accent' : 'text-fg-2'}`}
+            >
+              MAP
+            </button>
+            {mapOpen && <BoardMinimap />}
+          </div>
+          {/* zoom / Fit */}
+          <div className="flex items-center gap-t1 rounded-pill border border-border bg-surface/95 p-t1 shadow-sm backdrop-blur">
+            <button
+              title="축소 (⌘/Ctrl+-)"
+              onClick={() => zoomBy(1 / 1.1, cx, cy)}
+              className="flex h-8 w-8 items-center justify-center rounded-pill text-fg-2 hover:bg-surface-2"
+            >
+              <Icon name="minus" size={16} />
+            </button>
+            <span className="w-12 text-center text-overline text-fg-2">
+              {Math.round(viewport.zoom * 100)}%
+            </span>
+            <button
+              title="확대 (⌘/Ctrl+=)"
+              onClick={() => zoomBy(1.1, cx, cy)}
+              className="flex h-8 w-8 items-center justify-center rounded-pill text-fg-2 hover:bg-surface-2"
+            >
+              <Icon name="plus" size={16} />
+            </button>
+            <button
+              title="전체 맞춤 (Shift+1)"
+              onClick={fit}
+              className="flex h-8 items-center justify-center rounded-pill px-t2 text-overline text-fg-2 hover:bg-surface-2"
+            >
+              FIT
+            </button>
+          </div>
         </div>
       )}
 

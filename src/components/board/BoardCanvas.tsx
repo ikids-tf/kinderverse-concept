@@ -2,6 +2,8 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } fro
 import { createPortal } from 'react-dom';
 import { useBoardStore, presentationVisibleSet, type BoardNode, type BoardLink } from '@/store/boardStore';
 import { addImageFileAtWorld } from '@/board/upload';
+import { useTrayStore } from '@/store/trayStore';
+import { placeTrayItem } from '@/board/tray';
 import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, attachMotionSlotCmd, type NodeSnap } from '@/board/commands';
 import { linkSequence } from '@/board/links';
 import { nearestMotionSlot } from '@/board/motionGeometry';
@@ -947,13 +949,22 @@ export function BoardCanvas() {
   /* 외부(데스크톱/다른 창)에서 이미지 파일을 보드로 드래그&드롭 → 드롭한 위치에 업로드.
      실제 업로드 로직은 공용 모듈(@/board/upload)에 있어 상단 업로드 버튼과 공유한다. */
   function onCanvasDragOver(e: React.DragEvent) {
-    // 파일 드래그일 때만 드롭을 허용(브라우저 기본 '파일 열기' 방지).
-    if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) {
+    // 파일 드래그 또는 갤러리 임시 자료(tray) 드래그일 때 드롭 허용(브라우저 기본 '파일 열기' 방지).
+    const types = Array.from(e.dataTransfer?.types ?? []);
+    if (types.includes('Files') || types.includes('text/kv-tray')) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
     }
   }
   function onCanvasDrop(e: React.DragEvent) {
+    // 갤러리 임시 자료함에서 끌어다 놓기 — 드롭 지점(월드)에 이미지 노드로 배치 후 트레이에서 제거.
+    const trayId = e.dataTransfer?.getData('text/kv-tray');
+    if (trayId) {
+      e.preventDefault();
+      const item = useTrayStore.getState().items.find((t) => t.id === trayId);
+      if (item) { const w = toWorld(e.clientX, e.clientY); placeTrayItem(item, w.x, w.y); }
+      return;
+    }
     const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
     if (!files.length) return;
     e.preventDefault();
