@@ -98,9 +98,46 @@ const CATEGORY_GUIDE: Record<Category, string> = {
 - 군더더기 없이 핵심만, 불릿은 명사형 짧게.`,
 };
 
+export interface Research {
+  text: string;
+  sources: { title?: string; url: string }[];
+}
+
+/** 웹 리서치(Gemini Google Search 그라운딩) — 슬라이드 생성 '전에' 주제를 현장 수준으로 조사한다.
+    카테고리에 맞춘 질의로 누리과정 연계·구체 활동/발문·발달 근거·가정 연계·수치/사례를 모아 와
+    buildDeck 프롬프트에 '근거 자료'로 주입한다(일반론·기초적 결과 방지). Gemini 키가 없으면(mocked)
+    null 을 돌려주고 비그라운딩 생성으로 진행(기능 저하 없이). */
+async function researchTopic(request: string, r: RouterOut): Promise<Research | null> {
+  const focus: Record<Category, string> = {
+    lesson: `유아(${r.ageBand}) 대상 "${request}" 수업·놀이 활동을 설계하는 데 필요한 현장 핵심 정보를 찾아라: 2019 개정 누리과정 연계 영역·경험, 도입–전개–마무리 구체적 활동 전개와 교사 발문 예시, 준비물, 안전·유의점, 발달적 의의. 구체적 활동명·발문까지.`,
+    parent: `유치원 학부모 설명회/부모참여수업 "${request}" 자료에 필요한 현장 핵심을 찾아라: 교육적 의의와 발달 근거, 학부모에게 전할 핵심 메시지, 가정에서 이어 할 수 있는 연계 활동, 학부모가 자주 묻는 점, 최신 권장 사항·동향. 가능하면 수치·사례.`,
+    admin: `유치원 "${request}" 운영·보고 문서에 필요한 핵심을 찾아라: 주요 항목·절차, 점검 지표, 일정, 행정·안전 유의사항, 모범 사례. 가능하면 수치·기준.`,
+  };
+  const system =
+    '너는 유아교육 현장 전문가다. 요청 주제로 유치원에서 바로 쓸 자료를 만들기 위해 웹에서 최신·정확·실무적 정보를 찾아 한국어 불릿으로 핵심만 정리한다. 추측 금지, 근거 있는 내용 중심. 수치·구체 사례·활동명이 있으면 포함한다.';
+  try {
+    const res = await callGateway({
+      task: 'search',
+      tier: 'low',
+      provider: 'gemini',
+      system,
+      messages: [{ role: 'user', content: focus[r.category] }],
+      meta: { kind: 'slides_research', title: request },
+      maxTokens: 900,
+    });
+    if (!res.ok || !res.text || res.mocked) return null; // 키 없음/실패 → 비그라운딩 생성
+    const text = res.text.trim();
+    if (text.length < 40) return null; // 너무 빈약하면 무시
+    return { text, sources: res.sources ?? [] };
+  } catch {
+    return null;
+  }
+}
+
 /** 장표 에이전트 — DeckSpec JSON 생성 + 스키마 검증(실패 시 1회 강화 재요청). */
-async function buildDeck(request: string, r: RouterOut): Promise<DeckSpec | null> {
-  const tier = r.category === 'admin' ? 'low' : 'mid'; // admin=Haiku, lesson/parent=Sonnet
+async function buildDeck(request: string, r: RouterOut, research?: Research | null, source?: string | null): Promise<DeckSpec | null> {
+  // 수업·학부모 덱은 '전문가 수준' 지시 준수·콘텐츠 깊이가 중요 → 최상위 모델(Opus). admin(보고)은 mid로 충분.
+  const tier = r.category === 'admin' ? 'mid' : 'high';
   const fallbackTheme = DEFAULT_THEME[r.category];
   const system = `너는 킨더버스의 "장표" 에이전트다. 유치원 교사를 위한 '전문가 수준' 슬라이드 덱을 설계한다.
 출력은 DeckSpec JSON 하나뿐 — JSON 외 텍스트·마크다운 펜스 금지.
@@ -111,6 +148,18 @@ async function buildDeck(request: string, r: RouterOut): Promise<DeckSpec | null
 - 단조로움 금지: 같은 레이아웃을 연달아 쓰지 마라. 밀도를 의도적으로 바꿔라(여유로운 표지/섹션 ↔ 촘촘한 내용).
 - 내러티브 아크로 엮어라(도입 훅 → 전개 → 마무리). 막과 막 사이엔 section-divider 한 장.
 - 수치(퍼센트·개수·금액)는 문장에 묻지 말고 big-stat 또는 chart로 '크게' 보여라.
+
+[내용 깊이 — 현장에서 바로 쓰는 수준(절대 기초·뻔하게 쓰지 마라)]
+- 일반론·교과서적 상투어 금지. 구체적 활동명·교사 발문·단계·준비물·수치·사례로 채운다.
+- 학부모 설명회/부모참여수업·보고용은 발달 근거·데이터(참여율·발달 영역 추이 등)를 곁들여 신뢰감 있게.
+- 아래 사용자 메시지에 '웹 리서치' 자료가 주어지면 반드시 그것을 근거로 구체적으로 작성한다(추측·일반론으로 메우지 마라).
+
+[활동 슬라이드 — 필수 규칙(아래는 '레이아웃 다양화'보다 우선한다). 글로만 때우지 마라]
+- 탐색·관찰·오감 활동: 반드시 layout="photo-grid" + image 블록 정확히 4개(2×2) + caption 1줄. hero-image나 image-feature(이미지 1장)로 만들지 마라. 각 image.prompt = 서로 다른 구체적 대상(예: 호박 / 박쥐 / 거미 / 사탕).
+- 신체·표현·동작 활동: 반드시 layout="photo-grid" + image 블록 4개. 각 prompt = "○○ 동작을 하는 유아 한 명의 전신 모습, 따라 하기 쉬운 또렷한 포즈"(예: 박쥐처럼 두 팔 펼친 유아 / 유령처럼 사뿐 걷는 유아 …). 한 장에 여러 포즈를 몰아넣지 말고 '포즈마다 1장'.
+- 만들기·미술 활동: 만드는 활동마다 '별도의 image-feature 슬라이드'로 나눠라(2가지면 슬라이드 2장). 각 슬라이드 = 제목 + 만드는 순서(body 또는 bullets) + image 1개(그 작품을 만들고 있는 유아의 모습). 글만 있는 two-column 만들기 슬라이드 금지.
+- 마무리 / 오늘의 배움: layout="bullets". 추상적 질문·한 줄 금지. 오늘 한 '구체적 활동'마다 그 활동으로 아이가 무엇을 경험·배웠는지 누리과정 영역과 묶어 3~5개 불릿으로(예: "호박 가면 만들기 — 가위질로 소근육을, 표정을 고르며 감정 표현을 경험했어요(예술경험·신체운동)").
+- 모든 image.prompt는 자기완결적(그 자체로 무엇을 그릴지 명확)·글자 금지.
 
 [레이아웃 카탈로그 — 콘텐츠 목적에 맞게]
 - title: 표지(덱 시작 1장).  · section-divider: 파트/단계 전환(eyebrow + 짧은 섹션 제목).
@@ -136,9 +185,21 @@ warm(따뜻한 크림·코랄) · ivory(깨끗한 화이트·테라코타) · mi
 [카테고리: ${r.category}]
 ${CATEGORY_GUIDE[r.category].replace('{{age}}', r.ageBand)}`;
 
+  const sourceBlock = source && source.trim()
+    ? `
+[원본 자료 — 교사가 이 문서/자료를 슬라이드 뷰어에 연결해 "이걸로 만들어 달라"고 했다. 아래 내용을 '슬라이드로 기획·재구성'하라: 핵심 흐름·요점을 슬라이드 순서로 옮기되, 한 슬라이드 한 메시지로 다듬고 전문적으로 시각화하라(표/문단을 그대로 베끼지 말 것). 이 자료가 슬라이드 내용의 1차 출처다]
+${source.trim().slice(0, 3000)}
+`
+    : '';
+  const researchBlock = research
+    ? `
+[웹 리서치 — 이 주제로 실제 검색한 현장 자료다. 위 원본 자료를 보강하는 '근거'로 써라(수치·사례·최신 동향). 그대로 베끼지 말고 핵심을 슬라이드 구조로 재구성]
+${research.text}
+`
+    : '';
   const base = `카테고리: ${r.category} / 연령: ${r.ageBand} / 목표 슬라이드 수: 약 ${r.lengthHint}장
 주제/요청: "${request}"
-
+${sourceBlock}${researchBlock}
 DeckSpec 형태:
 { "category":"${r.category}", "theme":"<warm|ivory|midnight|slate|sage|bloom|mono 중 1개>", "ratio":"16:9", "ageBand":"${r.ageBand}", "title":"<덱 제목>",
   "slides":[
@@ -176,7 +237,7 @@ big-stat의 blocks는 caption(라벨)+title(수치)+subtitle(맥락) 순서.
       tier,
       provider: 'auto',
       responseFormat: 'json',
-      fallback: tier === 'low' ? ['mid'] : ['high'],
+      fallback: tier === 'high' ? ['mid'] : ['high'],
       system,
       messages: [{ role: 'user', content }],
       meta: { kind: 'slides_deck', title: request },
@@ -233,19 +294,27 @@ export async function fillDeckImages(
   const worker = async () => {
     while (idx < targets.length) {
       const t = targets[idx++];
-      try {
-        const res = await callGateway({
-          task: 'image',
-          provider: 'auto',
-          messages: [],
-          meta: { prompt: `${t.prompt} — ${KV_ART_STYLE}`, caption: t.prompt.slice(0, 40) },
-        });
-        if (res.image) {
+      // 실패(예외·빈 응답·폴백 SVG)면 한 번 더 시도 — '생성 안 된 페이지'(AI 생성 자리표시)로 남지 않게.
+      // 진짜 이미지(mocked 아님)만 채택하고, 폴백(mocked)이면 다시 시도한다. 2회째도 폴백이면 그거라도 채운다.
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        let res;
+        try {
+          res = await callGateway({
+            task: 'image',
+            provider: 'auto',
+            messages: [],
+            meta: { prompt: `${t.prompt} — ${KV_ART_STYLE}`, caption: t.prompt.slice(0, 40) },
+          });
+        } catch {
+          continue; // 예외 → 다음 시도
+        }
+        if (!res.image) continue;
+        const real = !res.mocked;
+        if (real || attempt === 2) {
           const id = await storeSlideImage(res.image);
           if (id) t.set(id);
         }
-      } catch {
-        /* 한 장 실패해도 나머지는 계속 — 자리표시로 남는다 */
+        if (real) break; // 진짜 이미지면 완료(폴백이면 한 번 더 시도)
       }
       done += 1;
       onProgress?.(done, targets.length);
@@ -254,11 +323,79 @@ export async function fillDeckImages(
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
 }
 
+/** 활동 슬라이드 이미지 보강(결정론) — LLM(Opus여도)이 활동 슬라이드를 글 위주/이미지 1장으로
+    만들어 버리는 걸 강제로 바로잡는다: 탐색·관찰 → photo-grid 이미지 4장 / 신체 → photo-grid 포즈
+    4장 / 만들기 → image-feature(이미지 1장). eyebrow(활동 라벨)로만 게이트 → 표지·섹션·도입·마무리는
+    건드리지 않는다(오변환 방지). 생성한 image 블록은 fillDeckImages가 실제 그림으로 채운다. */
+function enforceActivitySlides(deck: DeckSpec, request: string): void {
+  type S = DeckSpec['slides'][number];
+  const topic = ((deck.title || request).replace(/슬라이드|만들어\s*줘?|수업\s*자료|자료|수업|활동/g, '').trim()) || deck.title;
+  const stripEmoji = (x: string) => x.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '').replace(/^[\s\-—•·]+/, '').trim();
+  const textOf = (s: S, t: string) => {
+    const b = s.blocks.find((x) => x.type === t) as { text?: string } | undefined;
+    return b?.text ?? '';
+  };
+  const itemsOf = (s: S): string[] => {
+    const bl = s.blocks.find((b) => b.type === 'bullets') as { items?: string[] } | undefined;
+    if (bl?.items?.length) return bl.items.map(stripEmoji).filter(Boolean);
+    const body = textOf(s, 'body');
+    return body ? body.split(/[\n·/,]/).map(stripEmoji).filter((x) => x.length >= 2) : [];
+  };
+  const imgCount = (s: S) => s.blocks.filter((b) => b.type === 'image').length;
+
+  for (const s of deck.slides) {
+    const eb = (s.eyebrow ?? '').trim();
+    if (!eb) continue; // 표지/섹션/도입엔 eyebrow 없음 → 건드리지 않음
+    const explore = /탐색|관찰|오감|감각|살펴|느껴/.test(eb);
+    const physical = !explore && /신체|몸|동작|포즈|움직/.test(eb);
+    const make = /만들|꾸미|미술|작품/.test(eb);
+
+    if ((explore || physical) && imgCount(s) < 4) {
+      const its = itemsOf(s);
+      const base = its.length >= 2 ? its : [topic];
+      const four = [0, 1, 2, 3].map((i) => base[i] || base[i % base.length] || topic);
+      const cap = textOf(s, 'title') || (physical ? '몸으로 표현해요' : `${topic} 살펴보기`);
+      s.layout = 'photo-grid';
+      s.blocks = [
+        ...four.map((it) => ({
+          type: 'image' as const,
+          role: 'inline' as const,
+          assetId: null,
+          prompt: physical
+            ? `${it}처럼 움직이는 유아 한 명의 전신 모습 — 따라 하기 쉬운 또렷한 포즈, 밝은 동화풍 삽화, 단일 인물`
+            : `${it} — ${topic} 주제의 밝은 동화풍 삽화, 단일 사물`,
+        })),
+        { type: 'caption' as const, text: cap },
+      ] as S['blocks'];
+    } else if (make && s.layout !== 'image-feature' && s.layout !== 'hero-image' && s.layout !== 'photo-grid') {
+      const title = textOf(s, 'title') || `${topic} 만들기`;
+      const body = itemsOf(s).slice(0, 5);
+      s.layout = 'image-feature';
+      s.blocks = [
+        { type: 'title' as const, text: title },
+        body.length ? { type: 'bullets' as const, items: body } : { type: 'body' as const, text: textOf(s, 'body') || '만드는 순서를 따라가요.' },
+        { type: 'image' as const, role: 'inline' as const, assetId: null, prompt: `${title}을(를) 만들고 있는 유아의 모습 — 밝은 동화풍 삽화` },
+      ] as S['blocks'];
+    }
+  }
+}
+
 /** 한 줄 요청 → DeckSpec(테마는 에이전트가 주제에 맞게 선택). 실패 시 '제목만 채운' 최소 덱. */
-export async function generateDeck(request: string, chip?: SlideChips): Promise<DeckSpec> {
+export async function generateDeck(
+  request: string,
+  chip?: SlideChips,
+  onStage?: (s: 'research' | 'build') => void,
+  source?: string | null, // 연결한 문서/자료 원문 — 있으면 이 내용을 1차 출처로 슬라이드를 기획한다
+): Promise<DeckSpec> {
   const r = await classify(request, chip);
-  const deck = await buildDeck(request, r);
-  if (deck) return deck;
+  onStage?.('research');
+  const research = await researchTopic(request, r); // 웹 리서치(Gemini 키 없으면 null → 비그라운딩 생성)
+  onStage?.('build');
+  const deck = await buildDeck(request, r, research, source);
+  if (deck) {
+    enforceActivitySlides(deck, request); // 활동 슬라이드 이미지 구조 강제(탐색/신체 4그리드·만들기 이미지)
+    return deck;
+  }
   const title = request.trim().slice(0, 40) || '새 슬라이드';
   return {
     category: r.category,

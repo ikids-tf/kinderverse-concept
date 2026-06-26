@@ -369,6 +369,8 @@ export function BoardCanvas() {
   const [proposal, setProposal] = useState<{ id: string; topic: string; kind: 'memo' | 'image' } | null>(null);
   // 유튜브 뷰어에 자료를 연결했을 때 뜨는 선택 팝오버: 영상 추천 vs 웹 검색.
   const [viewerLink, setViewerLink] = useState<{ viewerId: string; content: string; topic: string; sourceId?: string } | null>(null);
+  // 슬라이드 뷰어에 자료(문서 등)를 연결 → "이 자료로 슬라이드를 만들까요 / 연결만 할까요?" 팝오버.
+  const [slideLink, setSlideLink] = useState<{ viewerId: string; content: string; topic: string; sourceId?: string } | null>(null);
   // 동영상 생성 확인 팝오버(과금·시간 게이트) — 선 연결(이미지/계획 카드↔동영상 뷰어),
   // 뷰어 선택+프롬프트(텍스트→비디오), 카드 선택+프롬프트(스폰 후 생성)가 모두 이 한
   // 곳으로 모인다. viewerId 없으면 confirm 때 spawnNear 옆에 뷰어를 깔고 생성한다.
@@ -551,6 +553,7 @@ export function BoardCanvas() {
               n ? ((n.text ?? '') || String(n.data?.title ?? '')).split('\n')[0].trim() : '';
             const viewer = pair.find((n) => String(n.data?.embed ?? '').includes('youtube-viewer'));
             const videoPlayerViewer = pair.find((n) => String(n.data?.embed ?? '').includes('video-player'));
+            const slidesViewer = pair.find((n) => String(n.data?.embed ?? '').includes('slides-viewer'));
             if (viewer) {
               // 유튜브 뷰어에 자료를 연결 → 즉시 추천(뷰어 아래 가로 중앙 썸네일,
               // 클릭 = 재생). 놀이계획안이면 요일별 활동마다 영상 1개씩, 그 외엔
@@ -591,6 +594,17 @@ export function BoardCanvas() {
                     sourceId: other.id,
                   });
                 }
+              }
+            } else if (slidesViewer) {
+              // 슬라이드 뷰어에 자료(문서 등)를 연결 → "이 자료로 슬라이드 생성 / 연결만" 팝오버.
+              //  · 생성: 그 자료 내용을 1차 출처로 슬라이드를 기획·생성한다.
+              //  · 연결만: 선만 남기고 아무것도 안 한다.
+              const other = pair.find((n) => n !== slidesViewer);
+              const content = other
+                ? [String(other.data?.title ?? ''), other.text ?? ''].filter(Boolean).join('\n').trim()
+                : '';
+              if (content) {
+                setSlideLink({ viewerId: slidesViewer.id, content, topic: topicOf(other), sourceId: other?.id });
               }
             } else {
               // 빈 카드만 제안 — 채워진 이미지끼리 잇는 슬라이드 체인을 방해하지 않게.
@@ -1339,6 +1353,58 @@ export function BoardCanvas() {
                     style={{ fontSize: 12 / z, padding: `${5 / z}px ${12 / z}px` }}
                   >
                     취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 슬라이드 뷰어 연결 팝오버 — 연결한 자료로 슬라이드를 '생성'할지 '연결만' 할지 묻는다.
+            생성: 그 자료 내용을 1차 출처로 슬라이드를 기획·생성(연결선 유지=출처 표시). */}
+        {slideLink && nodes[slideLink.viewerId] && (() => {
+          const vn = nodes[slideLink.viewerId];
+          const vb = worldBox(vn);
+          const z = viewport.zoom;
+          const gen = () => {
+            const { viewerId, content, topic, sourceId } = slideLink;
+            setSlideLink(null);
+            // '생성'은 일회성 트리거 — 자료↔뷰어 연결선을 지운다('연결만'은 선을 유지).
+            if (sourceId) {
+              const trig = useBoardStore
+                .getState()
+                .links.find((l) => (l.from === sourceId && l.to === viewerId) || (l.from === viewerId && l.to === sourceId));
+              if (trig) removeLinkCmd(trig.id);
+            }
+            void import('@/board/slides').then((m) => m.generateSlidesForViewer(viewerId, topic || '연결한 자료', content));
+          };
+          return (
+            <div
+              className="absolute z-40"
+              style={{ left: vb.x + vb.w / 2, top: vb.y + vb.h + 10 / z, transform: 'translateX(-50%)' }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div
+                className="rounded-lg border border-border bg-surface text-center shadow-lg"
+                style={{ padding: `${10 / z}px ${14 / z}px`, width: 'max-content', maxWidth: 380 / z }}
+              >
+                <p className="text-fg" style={{ fontSize: 13 / z, margin: 0, marginBottom: 9 / z, lineHeight: 1.45 }}>
+                  연결한 자료 <b className="font-semibold text-accent">'{slideLink.topic || '자료'}'</b>로 슬라이드를 만들까요?
+                </p>
+                <div className="flex items-center justify-center" style={{ gap: 6 / z }}>
+                  <button
+                    onClick={gen}
+                    className="rounded-pill bg-accent font-semibold text-on-accent hover:bg-accent-hover"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${14 / z}px` }}
+                  >
+                    이 자료로 슬라이드 생성
+                  </button>
+                  <button
+                    onClick={() => setSlideLink(null)}
+                    className="rounded-pill border border-accent bg-surface font-semibold text-accent hover:bg-accent-soft"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${14 / z}px` }}
+                  >
+                    연결만
                   </button>
                 </div>
               </div>

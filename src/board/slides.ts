@@ -10,7 +10,7 @@ import { showToast } from '@/lib/toast';
 /** 같은 뷰어에 대한 동시 생성 방지(중복 클릭·이벤트 중복). */
 const inFlight = new Set<string>();
 
-export async function generateSlidesForViewer(viewerId: string, request: string): Promise<void> {
+export async function generateSlidesForViewer(viewerId: string, request: string, source?: string): Promise<void> {
   const b = useBoardStore.getState();
   if (!b.nodes[viewerId]) return;
   if (inFlight.has(viewerId)) {
@@ -19,9 +19,12 @@ export async function generateSlidesForViewer(viewerId: string, request: string)
   }
   inFlight.add(viewerId);
   b.beginGen();
-  b.setGenerating('🖼️ 슬라이드를 구성하고 있어요…');
+  b.setGenerating(source ? '📑 연결한 자료를 분석하고 있어요…' : '🖼️ 슬라이드를 구성하고 있어요…');
   try {
-    const deck = await generateDeck(request);
+    const deck = await generateDeck(request, undefined, (s) =>
+      b.setGenerating(s === 'research'
+        ? (source ? '📚 자료를 보강할 웹 자료를 찾는 중…' : '📚 웹에서 관련 자료를 조사하는 중…')
+        : (source ? '🖼️ 연결한 자료로 슬라이드를 기획·구성하는 중…' : '🖼️ 조사 내용으로 슬라이드를 구성하는 중…')), source);
     const load = () => window.dispatchEvent(new CustomEvent('kv:slides-load', { detail: { viewerId, deck } }));
     // 1차 — 글(레이아웃)부터 바로 보여 준다(이미지는 자리표시). 체감 속도 ↑.
     load();

@@ -49,11 +49,30 @@ export const SlideImage: FC<{
       />
     );
   }
+  // 자리표시는 비-button 요소(div)로 렌더한다 — 상위 래퍼(레일 썸네일 등)가 <button>이라
+  // 네이티브 <button>을 쓰면 button 중첩(React validateDOMNesting 경고)이 된다.
+  // 편집 모드에서만 상호작용: role="button" + 키보드(Enter/Space)로 onPick(접근성 유지).
   return (
-    <button type="button" className="sl-ph sl-ph--add" data-bi={dataBi} onClick={editable ? onPick : undefined} disabled={!editable}>
+    <div
+      className={`sl-ph${editable ? ' sl-ph--add' : ''}`}
+      data-bi={dataBi}
+      role={editable ? 'button' : undefined}
+      tabIndex={editable ? 0 : undefined}
+      onClick={editable ? onPick : undefined}
+      onKeyDown={
+        editable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onPick?.();
+              }
+            }
+          : undefined
+      }
+    >
       <span className="ph-ic" aria-hidden>🖼️</span>
       <span className="ph-label">{editable ? '이미지 추가' : '이미지'}</span>
-    </button>
+    </div>
   );
 };
 

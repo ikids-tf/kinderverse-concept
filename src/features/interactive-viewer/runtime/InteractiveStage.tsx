@@ -446,9 +446,15 @@ export function InteractiveStage({
   const collectInfo = useMemo(() => {
     const moveTargets = new Set(doc.behaviors.filter((b) => b.action === 'moveAlongPath').map((b) => b.target));
     const actorId = [...moveTargets][0] ?? null;
+    // 탭하면 '통통 튀기(animate)만' 하는 장식(예: 꿀단지·둥지)은 줍기 대상이 아니다 — 액터가 복귀로
+    // 그 위에 도착해도 수거되지 않게 제외한다(복귀처가 사라지던 버그 방지). 줍는 아이템은 count/hide 등 동작을 가진다.
+    const isDecorationTap = (id: string) => {
+      const bs = doc.behaviors.filter((b) => (b.trigger === 'tap' || b.trigger === 'sequenceTap') && b.target === id);
+      return bs.length > 0 && bs.every((b) => b.action === 'animate');
+    };
     const playIds = new Set(
       doc.behaviors
-        .filter((b) => (b.trigger === 'tap' || b.trigger === 'sequenceTap') && !moveTargets.has(b.target))
+        .filter((b) => (b.trigger === 'tap' || b.trigger === 'sequenceTap') && !moveTargets.has(b.target) && !isDecorationTap(b.target))
         .map((b) => b.target),
     );
     const isCollect =
@@ -634,7 +640,10 @@ export function InteractiveStage({
         const inner = innerRefs.current[beh.target];
         const me = doc.elements.find((e) => e.id === beh.target);
         if (conn && inner && me) {
-          const otherId = conn.from === beh.target ? conn.to : conn.from;
+          // 이동 목적지 = 연결에서 '대상(움직이는 요소)이 아닌 쪽'. 대상이 from이면 to로, to면 from으로.
+          // 대상이 양 끝 어느 쪽도 아니면(예: 복귀 연결 flower→honeypot 인데 움직이는 건 bee) 방향성을 따라
+          // 도착점(to)으로 간다 — 안 그러면 출발점(flower)으로 가 '제자리 복귀'가 돼 움직이지 않던 버그.
+          const otherId = beh.target === conn.from ? conn.to : beh.target === conn.to ? conn.from : conn.to;
           const other = doc.elements.find((e) => e.id === otherId);
           if (other) {
             // 대상(연잎 등) 중심으로 이동 — 좌표는 요소 레이아웃 원점 기준 누적 translate.
@@ -1282,9 +1291,11 @@ export function InteractiveStage({
     // 대기 애니메이션(살짝 숨쉬듯) — '살아있는' 캐릭터(수집형 주인공·숨바꼭질 대상)가 정지 상태일 때만.
     // 분류 게임의 아이템(인형·블록·쓰레기 등 무생물)은 collectInfo.actorId로 잡혀도 대기 모션 금지 —
     // isCollect(진짜 수집형: 움직이는 주인공이 있는 게임)일 때만 적용. 주인공은 이동 중엔 끈다.
+    // '살아있는' 캐릭터(곤충·동물 — 수집형 주인공·숨바꼭질 대상)는 정지 시 항상 살짝 숨쉬듯 대기한다.
+    // preview(보드 카드 썸네일)에서도 켠다 — 카드에서 벌·동물이 죽은 듯 멈춰 있지 않게(교사 요청).
+    // 편집(mode!=='play')에선 정밀 배치를 위해 끈다.
     const idle =
       mode === 'play' &&
-      !preview &&
       ((collectInfo.isCollect && el.id === collectInfo.actorId && !actorMoving) ||
         (peekMode && peekIds.has(el.id)));
     // 전체 화면 크기 이미지(배경 — dress-up 실외 등)는 cover 로 꽉 채운다(토큰은 기본 contain 유지).

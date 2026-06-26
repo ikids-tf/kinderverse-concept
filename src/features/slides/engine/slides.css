@@ -398,7 +398,9 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 
 .sl--grid { padding: 72px 104px; gap: 22px; }
 .sl--grid .sl-eyebrow { margin-bottom: 2px; }
-.sl-grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 20px; }
+/* minmax(0,1fr) — 행/열 최소를 0으로(기본 1fr=minmax(auto,1fr)는 이미지 '자연 높이'를 최소로 잡아
+   2행이 슬라이드를 넘쳐 아래 2장이 잘리던 문제). 그리드 높이에 맞춰 4칸이 정확히 나뉘고, 이미지는 contain. */
+.sl-grid { flex: 1 1 auto; min-height: 0; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
 .sl-grid .sl-ph .ph-ic { font-size: 38px; }
 
 .sl--chart { padding: 72px 104px; gap: 18px; }
@@ -411,10 +413,9 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 .sl-chart .recharts-legend-item-text { color: var(--s-fg-2) !important; }
 .sl--chart .sl-caption { color: var(--s-fg-muted); }
 
-/* ── 이미지 — 블록 이미지(<img>)와 '이미지 추가' 자리표시(button) ── */
+/* ── 이미지 — 블록 이미지(<img>)와 '이미지 추가' 자리표시(편집 시 role=button div) ── */
 .sl-img { display: block; width: 100%; height: 100%; border-radius: var(--r-md); }
 .sl-ph--add { font-family: var(--s-body); cursor: pointer; }
-.sl-ph--add:disabled { cursor: default; }
 body.chrome:not(.present):not(.fs) .sl-img { cursor: pointer; }
 /* 레이아웃별 이미지 채움 */
 .sl--hero .sl-img, .sl--hero .sl-ph { flex: 1 1 auto; min-height: 0; width: 100%; }

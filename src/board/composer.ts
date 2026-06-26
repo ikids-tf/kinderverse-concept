@@ -1056,11 +1056,16 @@ function spawnImageLinksCard(frameId: string, topic: string, activities: string[
   const q = (a: string) => encodeURIComponent(`${topic} ${a.slice(0, 28)}`);
   const links = acts.map((a) => ({ title: `🖼 ${shortAct(a)}`, url: `https://www.google.com/search?tbm=isch&q=${q(a)}`, domain: 'google.com' }));
   const id = newId('sticky');
+  // ★ 프레임 '안'에서 시작 — (0,0) 원점에 두면 fitFrameToChildren이 프레임을 원점으로 끌어당겨
+  //   패키지 전체가 보드 좌상단(다른 패키지들 위)으로 점프해 겹친다. 최종 위치는 designComposedFrame가 잡는다.
+  const fr = b.nodes[frameId];
+  const sx = fr ? Math.round(fr.x + 28) : 0;
+  const sy = fr ? Math.round(fr.y + 28) : 0;
   b.addNodeRaw({
     id,
     type: 'sticky',
-    x: 0,
-    y: 0,
+    x: sx,
+    y: sy,
     w: 360,
     h: 200,
     autoH: true,
@@ -1101,14 +1106,26 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
   const ctx = buildAgentContext('plan');
   const vc = viewportCenterBoardPoint();
   const W0 = 2100, H0 = 1700;
-  // ★ 확실히 '오른쪽 빈 곳'에 생성 — 기존 모든 노드의 '가장 오른쪽 끝' 너머에 둔다. x가 모든 자료보다
-  //   오른쪽이라 어떤 y에서도 절대 겹치지 않는다(빽빽한 보드에서 slideFrameToEmpty가 빈 띠를 못 찾아
-  //   기존 자료 위에 겹쳐 생성되던 문제 해결). 빈 보드면 현재 화면 중앙. 생성 직후 카메라를 그리로 옮긴다.
-  const existing = Object.values(b.nodes).filter((n) => n.type !== 'motion');
-  const fX = existing.length
-    ? Math.round(Math.max(...existing.map((n) => { const w = worldBox(n); return w.x + w.w; })) + 240)
-    : Math.round(vc.x - W0 / 2);
   const fY = Math.round(vc.y - H0 / 2);
+  // ★ '보고 있는 자료 바로 오른쪽'에 생성 — 교사가 바로 찾게. 화면(뷰포트) 오른쪽 끝보다 훨씬 멀리
+  //   (화면 밖 오른쪽) 떨어진 옛 자료(아웃라이어 — 예: 멀리 둔 테스트 자료)는 기준에서 빼고, '현재
+  //   화면 또는 그 왼쪽' 자료 중 가장 오른쪽 끝 옆(+240)에 둔다. 그 자리가 어떤 자료와 겹치면(가까이
+  //   자료가 있으면) 전체의 오른쪽 끝으로 물러나 절대 겹치지 않게 한다. 빈 보드면 현재 화면 중앙.
+  const existing = Object.values(b.nodes).filter((n) => n.type !== 'motion' && n.type !== 'runner');
+  const rightEnd = (pool: typeof existing) => Math.max(...pool.map((n) => { const w = worldBox(n); return w.x + w.w; }));
+  let fX: number;
+  if (!existing.length) {
+    fX = Math.round(vc.x - W0 / 2);
+  } else {
+    const railW = 64;
+    const cw = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) - railW);
+    const viewRight = (cw - b.viewport.panX) / b.viewport.zoom; // 화면 오른쪽 끝의 보드 x
+    const nearby = existing.filter((n) => n.x <= viewRight + 200); // 화면 밖 오른쪽으로 멀리 떨어진 건 제외
+    fX = Math.round(rightEnd(nearby.length ? nearby : existing) + 240);
+    // 그 자리가 어떤 자료와도 안 겹치는지 확인 — 겹치면(그 y대에 가까운 자료가 있으면) 전체 오른쪽 끝으로.
+    const hit = existing.some((n) => { const w = worldBox(n); return fX < w.x + w.w && fX + W0 > w.x && fY < w.y + w.h && fY + H0 > w.y; });
+    if (hit) fX = Math.round(rightEnd(existing) + 240);
+  }
   const frameId = newId('frame');
   b.addNodeRaw({
     id: frameId,
@@ -1136,14 +1153,17 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
       useBoardStore.getState().updateNodeRaw(ideaCardId, { data: { ...(c?.data ?? {}), loadingDoc: true, ideaTitle: `${t} ${kindLabel} 아이디어` } });
     }
     created.push(ideaCardId);
-    // 동영상(유튜브 뷰어) — role 'video'라 designComposedFrame의 '동영상 띠'가 전담 배치한다
-    //   (뷰어 아래에 활동별 영상 썸네일 행 → 클릭하면 이 뷰어에서 바로 재생).
+    // 동영상 — 패키지 프레임 '안의 서브 프레임'에 유튜브 뷰어 + 활동별 썸네일을 묶어 정리해 넣는다
+    //   (프레임 안에 프레임). 썸네일 클릭 → 이 뷰어에서 바로 재생. designComposedFrame은 videoBand
+    //   서브프레임을 건드리지 않고(아이디어 프레임으로 오인 X), 최종 위치는 gridDeOverlap가 한 단위로 정돈.
+    const vFrameId = newId('frame');
+    b.addNodeRaw({ id: vFrameId, type: 'frame', x: fX + 24, y: fY + 560, w: VID_W + 56, h: VID_H + 260, data: { title: '동영상', composer: true, sub: true, videoBand: true, frameId } });
     const ytId = newId('sticky');
-    b.addNodeRaw({ id: ytId, type: 'sticky', x: fX + 24, y: fY + 560, w: VID_W, h: VID_H, autoH: false, text: '유튜브', data: { embed: '/youtube-viewer.html', title: `${t} 동영상`, role: 'video', frameId } });
+    b.addNodeRaw({ id: ytId, type: 'sticky', x: fX + 24 + 28, y: fY + 560 + 46, w: VID_W, h: VID_H, autoH: false, text: '유튜브', data: { embed: '/youtube-viewer.html', title: `${t} 동영상`, role: 'video', frameId: vFrameId } });
     // 게임 — 인터랙티브 노드 placeholder(빈 노드, 생성 후 채워짐).
     const gameDocId = newId('inode');
-    const gameNodeId = addPresetNodeCmd('interactive', fX + 24 + VID_W + 40 + GAME_W / 2, fY + 560 + GAME_H / 2, { w: GAME_W, h: GAME_H, autoH: false, data: { docId: gameDocId, frameId } }, '인터랙티브 게임');
-    created.push(ytId, gameNodeId);
+    const gameNodeId = addPresetNodeCmd('interactive', fX + 24 + (VID_W + 56) + 40 + GAME_W / 2, fY + 560 + GAME_H / 2, { w: GAME_W, h: GAME_H, autoH: false, data: { docId: gameDocId, frameId } }, '인터랙티브 게임');
+    created.push(vFrameId, ytId, gameNodeId);
     b.setSelection([frameId]); // addPresetNodeCmd가 게임 노드를 선택 → 프레임 선택으로 되돌림
     gridDeOverlap(frameId); // 스켈레톤 1차 정돈(자리 안정)
 
@@ -1203,9 +1223,11 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
           }
         }
       })(),
-      // 동영상 — 활동별 영상 썸네일(클릭 → 위 유튜브 뷰어에서 재생). 프레임 멤버로 직접 추가(별도 프레임 X).
-      fillActivityVideos(ytId, frameId, t, activities).then((vids) => created.push(...vids)).catch(() => {}),
+      // 동영상 — 활동별 영상 썸네일(클릭 → 위 유튜브 뷰어에서 재생). 동영상 서브프레임 멤버로 추가(뷰어 아래 행).
+      fillActivityVideos(ytId, vFrameId, t, activities).then((vids) => created.push(...vids)).catch(() => {}),
     ]);
+    // 동영상 서브프레임을 내용(뷰어 + 썸네일)에 맞춰 감싼다(프레임 안에 프레임이 깔끔히 닫히게).
+    fitFrameToChildren(vFrameId);
 
     // 이미지 링크 — 프레임 '안' 우측에 활동수만큼. 클릭하면 해당 사이트로 이동해 자료를 확인한다.
     //   (designComposedFrame 전에 멤버로 만들어야 우측 자료 스택에 배치된다.)

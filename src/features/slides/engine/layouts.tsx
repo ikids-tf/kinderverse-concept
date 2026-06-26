@@ -344,7 +344,8 @@ const ImageFeatureLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) =
         {(() => {
           const img = findImages(slide)[0];
           return img ? (
-            <FreeImage info={img} editable={editable} onPick={() => h.pickImage(img.index)} />
+            // 활동·핵심 삽화는 contain 기본 — 주제(활동 모습)가 잘리지 않게.
+            <FreeImage info={{ ...img, fit: img.fit ?? 'contain' }} editable={editable} onPick={() => h.pickImage(img.index)} />
           ) : (
             <Placeholder icon="🖼️" label="삽화" />
           );
@@ -446,7 +447,8 @@ const PhotoGridLayout: FC<LayoutProps> = ({ slide, editable, h, selected }) => {
       <div className="sl-grid">
         {imgs.length > 0
           ? imgs.map((im) => (
-              <FreeImage key={im.index} info={im} editable={editable} onPick={() => h.pickImage(im.index)} />
+              // 콘텐츠 삽화는 contain 기본 — 그리드 칸에 맞춰 '잘리지 않고' 전체가 보이게(교사 요청).
+              <FreeImage key={im.index} info={{ ...im, fit: im.fit ?? 'contain' }} editable={editable} onPick={() => h.pickImage(im.index)} />
             ))
           : [0, 1, 2, 3].map((i) => <Placeholder key={i} icon="🖼️" />)}
       </div>

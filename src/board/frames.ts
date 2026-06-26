@@ -241,7 +241,9 @@ export function designComposedFrame(frameId: string, variant: LayoutVariant = 'd
   // members — so gather ideas from BOTH sources, else a re-run sees "no ideas" and
   // would wrongly delete the sub-frame. Track the sub-frame by ID only (never
   // re-read b.nodes[id] after addNodeRaw — the captured `b` snapshot is stale).
-  let ideaFrameId = members.find((n) => n.type === 'frame' && n.data?.sub)?.id;
+  // 동영상 서브프레임(data.videoBand)은 '아이디어 서브프레임'이 아니다 — 빈 아이디어 프레임으로
+  // 오인해 지우지 않도록 제외한다(놀이 패키지: 아이디어는 idealist 문서, 동영상은 별도 서브프레임).
+  let ideaFrameId = members.find((n) => n.type === 'frame' && n.data?.sub && !n.data?.videoBand)?.id;
   const nestedIdeas = ideaFrameId
     ? Object.values(b.nodes).filter((n) => n.data?.frameId === ideaFrameId && n.data?.role === 'idea')
     : [];
@@ -362,30 +364,40 @@ export function designComposedFrame(frameId: string, variant: LayoutVariant = 'd
     }
   }
 
-  // Bottom band — 놀이 패키지의 동영상(유튜브 뷰어 + 활동별 썸네일 행)과 게임 뷰어.
-  // 컬럼 행 '아래'에 가로 띠로 둔다(뷰어 왼쪽 + 썸네일은 뷰어 바로 아래 한 줄, 게임은 오른쪽).
-  // 뷰어는 role 'video', 썸네일은 'yt-result', 게임은 interactive — 위 컬럼 규칙에서 모두 제외되므로
-  // 여기서만 배치한다(컬럼과 안 섞이게). 동영상/게임이 없으면(일반 컴포저) 건너뛴다.
+  // Bottom band — 놀이 패키지의 동영상 서브프레임(유튜브 뷰어 + 활동별 썸네일을 한 프레임에 묶음)과
+  // 게임 뷰어. 컬럼 행 '아래'에 가로 띠로 둔다(동영상 서브프레임 왼쪽 + 게임 오른쪽). 동영상 서브
+  // 프레임은 위 컬럼 규칙(역할 기반)에 안 잡히므로 여기서 '한 단위'(프레임 + 모든 자식)로 옮겨 둔다 —
+  // 안 그러면 본체(아이디어·계획·이미지)만 정렬되고 동영상 서브프레임이 생성 자리에 홀로 뒤처진다.
+  // (뷰어가 서브프레임이 아니라 직속 멤버인 옛 경로도 위해 viewer 분기는 폴백으로 남겨 둔다.)
+  const videoSub = members.find((n) => n.type === 'frame' && n.data?.videoBand);
   const viewer = members.find(
     (n) => n.data?.role === 'video' || String(n.data?.embed ?? '').includes('youtube-viewer'),
   );
   const ytThumbs = byRole('yt-result');
   const game = members.find((n) => n.type === 'interactive');
-  if (viewer || game) {
+  if (videoSub || viewer || game) {
     // 컬럼 행의 실제 바닥 — 방금 배치한 노드들의 최신 위치를 스토어에서 다시 읽어 계산
     // (캡처한 members 스냅샷의 y는 updateNodeRaw 후 낡았다). 동영상/게임/썸네일 자신은 제외.
     const live = useBoardStore.getState().nodes;
     const colBottom = Math.max(
       oy,
       ...members
-        .filter((n) => n !== viewer && n !== game && n.data?.role !== 'yt-result')
+        .filter((n) => n !== viewer && n !== game && n !== videoSub && n.data?.role !== 'yt-result')
         .map((n) => live[n.id])
         .filter((n): n is BoardNode => !!n)
         .map((n) => n.y + layoutH(n)),
     );
     const bandY = colBottom + D_VGAP + 12;
     let bandX = ox;
-    if (viewer) {
+    if (videoSub) {
+      // 동영상 서브프레임을 한 단위(프레임 + 모든 자식)로 띠 왼쪽에 평행이동 — 본체와 함께 가게.
+      const lv = live[videoSub.id];
+      if (lv) {
+        const ids = [videoSub.id, ...frameSubtree(videoSub.id)];
+        useBoardStore.getState().moveNodesRaw(ids, Math.round(bandX - lv.x), Math.round(bandY - lv.y));
+        bandX += lv.w + D_COLGAP;
+      }
+    } else if (viewer) {
       b.updateNodeRaw(viewer.id, { x: bandX, y: bandY });
       let bandW = viewer.w;
       if (ytThumbs.length) {
