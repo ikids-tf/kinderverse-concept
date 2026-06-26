@@ -1,7 +1,7 @@
 /* Vercel 서버리스 — POST /api/ai/video/start (Veo 영상 생성 시작, 비동기). */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { startVideo } from '../../../server/gateway/video';
-import { gatewayConfigFromEnv } from '../../../server/gateway/env';
+import { startVideo } from '../../../server/gateway/video.js';
+import { gatewayConfigFromEnv } from '../../../server/gateway/env.js';
 
 export const maxDuration = 60;
 

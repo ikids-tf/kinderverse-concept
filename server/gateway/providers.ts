@@ -2,7 +2,7 @@
    (CLAUDE.md §1, PRD §7.4). Runs only in Node (Vite dev middleware / serverless);
    API keys never reach the browser. */
 
-import type { GatewayMessage, Tier } from '../../src/ai/gateway/types';
+import type { GatewayMessage, Tier } from '../../src/ai/gateway/types.js';
 
 export interface ProviderCallOpts {
   apiKey: string;

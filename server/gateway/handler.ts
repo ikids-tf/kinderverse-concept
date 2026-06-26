@@ -7,9 +7,9 @@ import type {
   GatewayResponse,
   Provider,
   Tier,
-} from '../../src/ai/gateway/types';
-import type { RouterInput } from '../../src/ai/contract';
-import type { RecordInput } from '../../src/ai/prompt-record';
+} from '../../src/ai/gateway/types.js';
+import type { RouterInput } from '../../src/ai/contract.js';
+import type { RecordInput } from '../../src/ai/prompt-record.js';
 import {
   anthropicComplete,
   geminiComplete,
@@ -17,16 +17,16 @@ import {
   DEFAULT_ANTHROPIC_MODELS,
   DEFAULT_GEMINI_MODELS,
   type ProviderCallResult,
-} from './providers';
+} from './providers.js';
 import {
   mockRouterOutput,
   mockRecordOutput,
   mockLaneStep,
   mockAgentStep,
   type LaneStepMeta,
-} from './mock';
-import { generateImage, editImage, detectImageElements, askImage } from './image';
-import { synthSpeech } from './tts';
+} from './mock.js';
+import { generateImage, editImage, detectImageElements, askImage } from './image.js';
+import { synthSpeech } from './tts.js';
 
 export interface GatewayConfig {
   anthropicKey?: string;

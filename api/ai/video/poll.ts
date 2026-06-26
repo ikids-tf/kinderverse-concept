@@ -1,7 +1,7 @@
 /* Vercel 서버리스 — GET /api/ai/video/poll?op=... (영상 생성 폴링). */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { pollVideo } from '../../../server/gateway/video';
-import { gatewayConfigFromEnv } from '../../../server/gateway/env';
+import { pollVideo } from '../../../server/gateway/video.js';
+import { gatewayConfigFromEnv } from '../../../server/gateway/env.js';
 
 export const maxDuration = 60;
 

@@ -1,6 +1,6 @@
 /* Vercel 서버리스 — GET /api/youtube/search?q=...&n=3 (무키 결과 파싱). */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { searchYoutube } from '../../server/gateway/youtube';
+import { searchYoutube } from '../../server/gateway/youtube.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const q = (typeof req.query.q === 'string' ? req.query.q : '').trim();

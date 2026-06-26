@@ -3,7 +3,7 @@
    KV_GEMINI_IMAGE_MODEL are configured; otherwise a labeled SVG placeholder so
    the lane stays runnable. Server-side only; keys never reach the browser. */
 
-import type { DetectedRegion } from '../../src/ai/gateway/types';
+import type { DetectedRegion } from '../../src/ai/gateway/types.js';
 
 const WARM = ['#F4EDE3', '#EAE0D2', '#FBE6D9', '#F1EEE6'];
 

@@ -8,11 +8,11 @@ import type {
   RouterOutput,
   RouteTarget,
   SuggestedNext,
-} from '../../src/ai/contract';
-import type { RecordInput } from '../../src/ai/prompt-record';
-import type { RegistryPayload } from '../../src/ui-registry/contracts';
+} from '../../src/ai/contract.js';
+import type { RecordInput } from '../../src/ai/prompt-record.js';
+import type { RegistryPayload } from '../../src/ui-registry/contracts.js';
 // 의도 어휘는 단일 출처(intent-lexicon)를 공유 — 실라우터/보드 정규식과 동일 사전(P0-3).
-import { contentIntentFast, boardOp, INTENT_TO_ROUTE, requestedCount, imageSubject } from '../../src/ai/intent-lexicon';
+import { contentIntentFast, boardOp, INTENT_TO_ROUTE, requestedCount, imageSubject } from '../../src/ai/intent-lexicon.js';
 
 function suggestionsFor(route: RouteTarget): SuggestedNext[] {
   switch (route) {

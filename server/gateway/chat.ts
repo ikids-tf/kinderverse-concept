@@ -11,8 +11,8 @@
    - no key        → a canned markdown demo answer, streamed the same way.        */
 
 import type { ServerResponse } from 'node:http';
-import type { GatewayConfig } from './handler';
-import { geminiComplete, DEFAULT_ANTHROPIC_MODELS, DEFAULT_GEMINI_MODELS } from './providers';
+import type { GatewayConfig } from './handler.js';
+import { geminiComplete, DEFAULT_ANTHROPIC_MODELS, DEFAULT_GEMINI_MODELS } from './providers.js';
 
 export interface ChatStreamBody {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;

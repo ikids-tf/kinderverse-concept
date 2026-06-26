@@ -1,6 +1,6 @@
 /* Vercel 서버리스 — GET /api/unfurl?url=... (링크 og:image·제목 파싱, CORS 우회). */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { unfurlLink } from '../server/gateway/unfurl';
+import { unfurlLink } from '../server/gateway/unfurl.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const target = (typeof req.query.url === 'string' ? req.query.url : '').trim();

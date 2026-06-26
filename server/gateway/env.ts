@@ -1,6 +1,6 @@
 /* 프로덕션(서버리스) 게이트웨이용 설정 — process.env에서 키/모델을 읽는다.
    dev는 vite-plugins/devGateway가 loadEnv로 같은 모양의 config를 만든다(동일 계약). */
-import type { GatewayConfig } from './handler';
+import type { GatewayConfig } from './handler.js';
 
 export function gatewayConfigFromEnv(): GatewayConfig {
   const e = process.env;
