@@ -1,11 +1,11 @@
 # KinderVerse Interactive Viewer — 레인 인프라 스펙
 
-> **버전** v1.0 · **상태** **구현 완료**(2026-06-26 확인) · **대상 레포** `kinderverse-concept`
+> **버전** v1.0 · **상태** **부분 구현**(2026-06-26 확인 — §9 step1·step2만, step3은 미배선 데드코드) · **대상 레포** `kinderverse-concept`
 > **타깃 런타임** Interactive Viewer(B) 단일. *(본 스펙의 "Game Viewer v2(A)는 폐기"는 이 B 라인 설계 결정 — 별개 모듈 `src/game-viewer/v2/` 게임뷰어는 현재도 활성, CLAUDE.md §8 참조.)*
 > **선행 조사** 본 스펙의 모든 파일:라인은 B 전수 조사 문서 기준(라인 번호는 이후 드리프트 가능 — 심볼명 기준 참조 권장).
 > **범위** 노드 내부 다중 레인 + 확장 내부화 인프라. **게임 생성 엔진(레시피·테마·Resolver)은 후속 스펙 v0.2.**
 >
-> **🔄 최신화 메모(2026-06-26, 코드 기준)** — **구현 완료**. 핵심 파일: 노드 내부 레인 + 카메라 패닝 `src/features/interactive-viewer/runtime/InteractiveStage.tsx`(`LANE_W`·`panToLane`·`laneFromSceneId`·`goToScene`), 확장 내부화 `src/features/interactive-viewer/authoring/extendLane.ts`(`extendActivityInNode`·`offsetLane`), 확장 레시피 `resolver/extend.ts`. (보드 워크플로 레인 `src/board/lanes.ts`는 별개 시스템 — 혼동 주의.) §9 구현 계획 항목은 모두 반영됨.
+> **🔄 최신화 메모(2026-06-26, 코드 기준)** — **부분 구현: §9 step1(카메라 오프셋 인프라)·step2(`goToScene` 런타임)만 구현(`InteractiveStage.tsx`).** step3(확장 내부화)는 **미배선 데드코드** — `extendActivityInNode`(`authoring/extendLane.ts`)·`resolverExtend`(`resolver/extend.ts`)·`extendInteractiveActivity`(`composer.ts`) 호출부 0건, `onExtend` 심볼 부재, `kv:inode-goto-lane` 디스패처 없음(리스너만 `InteractiveStage.tsx:280`에 존재), 확장 버튼은 `InteractiveOverlay.tsx:871`에서 제거됨. 핵심 파일: 노드 내부 레인 + 카메라 패닝 `src/features/interactive-viewer/runtime/InteractiveStage.tsx`(`LANE_W`·`panToLane`·`laneFromSceneId`·`goToScene`), 확장 내부화(정의만·미배선) `src/features/interactive-viewer/authoring/extendLane.ts`(`extendActivityInNode`·`offsetLane`), 확장 레시피 `resolver/extend.ts`. (보드 워크플로 레인 `src/board/lanes.ts`는 별개 시스템 — 혼동 주의.) ⚠ §9 step3는 아직 미반영.
 
 ---
 
@@ -38,11 +38,11 @@
 
 ---
 
-## 3. 핵심 통찰: `goToScene`는 이미 비워둔 자리
+## 3. 핵심 통찰: `goToScene`는 이미 비워둔 자리(현재 구현됨)
 
-조사의 결정적 발견 — `goToScene` 액션이 **스키마에 이미 존재**(`interactiveNode.ts:171`)하나 런타임이 **no-op**(`InteractiveStage.tsx:615~617`, 주석: *"장면 개념 미도입(P2). 무시"*).
+조사의 결정적 발견이었던 자리 — `goToScene` 액션이 **스키마에 이미 존재**(`interactiveNode.ts:171`)하고 런타임은 당시 **no-op**였다. **현재는 구현됨** — `InteractiveStage.tsx`의 case `'goToScene'`(line 705~709)이 `panToLane(laneFromSceneId(...))`를 호출한다. 옛 no-op 주석(*"장면 개념 미도입(P2). 무시"*)은 제거됨. (단 이 패닝 흐름은 어떤 UI에도 미배선된 휴면 코드 — 디스패처/트리거 발화부가 없다.)
 
-→ 레인 전환을 위해 **새 트리거·새 액션·새 params 스키마를 0개** 만든다. 기존 `goToScene`의 빈 본문을 "레인으로 패닝"으로 채우면, 기존 트리거(`afterComplete`, `tap` 등)와 조합해 *"게임 끝 → 옆 레인 패닝"* 이 그대로 표현된다.
+→ 레인 전환을 위해 **새 트리거·새 액션·새 params 스키마를 0개** 만들었다. 기존 `goToScene`의 빈 본문을 "레인으로 패닝"으로 채웠으므로, 기존 트리거(`afterComplete`, `tap` 등)와 조합하면 *"게임 끝 → 옆 레인 패닝"* 이 그대로 표현된다.
 
 이것이 "가산 변경"의 이상적 형태다.
 
@@ -56,32 +56,33 @@
 - 레인 `i`의 요소는 `x ∈ [i·1280, (i+1)·1280)`. 요소는 지금처럼 `elements[]` 평면 절대좌표(`schema:227`, `transform` `schema:31~38`) — **요소 모델 손대지 않음**.
 - 레인 식별은 좌표 밴드로 충분. 옵셔널 `lanes?` 메타는 **필수 아님**(필요해지면 `Counter.display`처럼 옵셔널 메타로 후가산).
 
-### 4-2. 한 레인 fit + 가로 카메라 오프셋 (런타임만)
+### 4-2. 한 레인 fit + 가로 카메라 오프셋 (런타임만) — ✅ 구현됨(step1)
 
-현재: `useStageFit`이 전체 캔버스 기준 단일 scale, `tx`는 중앙 레터박스 정렬 전용(`InteractiveStage.tsx:201~202`), 적용 `:1312`. 가로 패닝 없음.
-
-변경:
+당초 상태: `useStageFit`이 전체 캔버스 기준 단일 scale, `tx`는 중앙 레터박스 정렬 전용, 가로 패닝 없음. **현재는 아래대로 구현됨**(`InteractiveStage.tsx`의 `LANE_W`·`panToLane`):
 - **fit 기준을 전체 → 한 레인(1280)** 으로 (`InteractiveStage.tsx:199` fit 폭).
 - **`tx`에 카메라 오프셋 가산** — `tx + (-cameraLane * 1280 * scale)` (`InteractiveStage.tsx:201`).
 - **`cameraLane` state + rAF 이징** — `slideFrameToEmpty`(`workflow.ts:523~`)의 rAF+cubic-out 패턴을 **로컬 복제**(원본 무수정).
 - **기본값 `cameraLane = 0`** → 단일 레인(N=1) 노드는 동작·렌더 완전 불변(하위호환).
 
-### 4-3. `goToScene` 런타임 구현 (no-op 교체)
+### 4-3. `goToScene` 런타임 구현 (no-op 교체) — ✅ 구현됨(step2)
 
-- `InteractiveStage.tsx:615~617`의 no-op을 교체.
-- `params.sceneId`(`schema:171`)를 **레인 인덱스/대상**으로 해석 → §4-2의 `cameraLane`을 그 값으로 rAF 이징 애니메이트.
+- ✅ 옛 no-op을 교체 — `InteractiveStage.tsx`의 case `'goToScene'`(line 705~709)이 `panToLane(laneFromSceneId(...))` 호출.
+- `params.sceneId`(`schema:171`)를 `laneFromSceneId`로 **레인 인덱스/대상**으로 해석 → §4-2의 카메라(`panToLane`)를 그 값으로 rAF 이징 애니메이트.
 - 트리거·액션·params 스키마 신설 0.
+- ⚠ 단 이 액션 경로는 어떤 UI에도 미배선된 휴면 코드(발화부 부재).
 
-### 4-4. 확장을 노드 내부로 (MyBoard externalize 차단)
+### 4-4. 확장을 노드 내부로 (MyBoard externalize 차단) — ⚠ 미배선(데드코드, step3)
 
-현재 확장 경로: `InteractiveOverlay.tsx:822`(✨ 버튼) → 부모 `onExtend` → `InteractiveNodeCard.tsx:159` → `extendInteractiveActivity(title, anchorNodeId?)`(`composer.ts:1864~1911`).
+> **현재 상태(2026-06-26):** 이 분기는 **미구현 데드코드**다. `extendInteractiveActivity`(`composer.ts:2209~`)는 보드-누수 경로(`sticky` 생성·`focusNode` 전역 카메라·`task:'plan'` 마크다운)를 **그대로 보유**하나 호출부 0건의 **휴면/데드코드 상태(미삭제)**다. 노드 내부화 함수(`extendActivityInNode` in `authoring/extendLane.ts`, `resolverExtend` in `resolver/extend.ts`)는 **정의만 있고 미배선**이며, `onExtend` 심볼·`kv:inode-goto-lane` 디스패처는 부재(리스너만 `InteractiveStage.tsx:280`), 확장 버튼은 `InteractiveOverlay.tsx:871`에서 제거됨. 아래는 **목표 설계(미달성)**.
 
-문제 라인 — **MyBoard로 새는 지점**: `composer.ts:1877~1886` (`b.addNodeRaw({type:'sticky', ...})` + `setSelection`+`focusNode`).
+설계상 확장 경로: ✨ 버튼 → 부모 `onExtend` → `InteractiveNodeCard` → `extendInteractiveActivity(title, anchorNodeId?)`(`composer.ts:2209~`).
 
-변경:
-- **끊을 곳:** `composer.ts:1877~1886` (보드 sticky 생성 + 전역 카메라 패닝) 제거.
-- **붙일 곳:** 같은 `docId`에 `useInteractiveStore.getState().mutate(docId, ...)`로 **새 레인 밴드(`canvas.w += 1280`)에 콘텐츠 append**. `docId`는 `InteractiveNodeCard.tsx:156`에 이미 있음 → `onExtend` 클로저로 전달.
-- **콘텐츠 생성:** 확장 레인은 플레이 가능 활동이므로 `composeInteractiveNode`(`composeNode.ts:258`) 재사용. **현재 `task:'plan'` 마크다운 경로(`composer.ts:1889~1908`)는 버림.**
+문제 라인 — **MyBoard로 새는 지점**: `extendInteractiveActivity` 내부의 `b.addNodeRaw({type:'sticky', ...})` + `setSelection`+`focusNode` (현재 잔존, 휴면).
+
+목표 변경(미달성):
+- **끊을 곳:** 보드 sticky 생성 + 전역 카메라 패닝 경로. *(현재 미제거 — 휴면 데드코드로 잔존.)*
+- **붙일 곳:** 같은 `docId`에 `useInteractiveStore.getState().mutate(docId, ...)`로 **새 레인 밴드(`canvas.w += 1280`)에 콘텐츠 append**. `docId`는 `InteractiveNodeCard`에 이미 있음 → `onExtend` 클로저로 전달. *(현재 `onExtend` 심볼 부재.)*
+- **콘텐츠 생성:** 확장 레인은 플레이 가능 활동이므로 `composeInteractiveNode`(`composeNode.ts`) 재사용. **목표상 `task:'plan'` 마크다운 경로는 버리되, 현재는 잔존.**
   - ⚠ v0.2 의존: "어떤 확장 게임을 생성할지"의 교육적 선택은 Resolver(v0.2) 몫. **이 스펙에서는 배관만** — 즉 `composeInteractiveNode`를 호출해 새 밴드에 노드를 채우고 `goToScene`로 그 레인으로 패닝하는 흐름까지. 프롬프트 결정 로직은 v0.2에서 주입.
 - **패닝:** append 후 `goToScene`(§4-3)로 새 레인으로 카메라 이동.
 
@@ -95,7 +96,7 @@
 - **MyBoard 전역** viewport·`slideFrameToEmpty` 원본.
 - **단일 레인 노드 렌더** (`cameraLane=0` 기본).
 
-**가산 변경 선 점검:** 신규 = `cameraLane` state + `goToScene` 본문 + 확장 mutate 분기 **3곳뿐**. 기존 스키마/엔진/생성/저장/보드 무변경. ✅
+**가산 변경 선 점검:** 신규 = 카메라 오프셋(`panToLane`) + `goToScene` 본문 + 확장 mutate 분기 **3곳뿐**. 현재 앞 2곳은 구현 완료, 확장 mutate 분기는 정의만·미배선(데드코드). 기존 스키마/엔진/생성/저장/보드 무변경. ✅(범위 측면)
 
 ---
 
@@ -124,7 +125,7 @@
 - [ ] **레인 fit:** N>1 노드에서 한 번에 정확히 한 레인(1280)만 화면을 채운다(레터박스 정렬 유지).
 - [ ] **패닝:** `goToScene` 발화 시 카메라가 대상 레인으로 부드럽게(cubic-out 이징) 이동하고, 종료 시 정확히 밴드 경계에 정렬된다.
 - [ ] **양방향:** 큰 sceneId(우향)·작은 sceneId(좌향) 모두 동작.
-- [ ] **확장 내부화:** "확장" 클릭이 MyBoard에 sticky 노드를 **생성하지 않는다**(`composer.ts:1877~1886` 경로 미발화). 콘텐츠가 같은 노드 새 레인에 나타난다.
+- [ ] **확장 내부화:** *(⚠ 현재 충족 불가 — step3 미배선 데드코드. 확장 버튼·`onExtend`·`kv:inode-goto-lane` 디스패처가 부재해 클릭 경로 자체가 없고, 보드-누수 경로(`composer.ts:2209~`)는 휴면으로 잔존.)* 목표: "확장" 클릭이 MyBoard에 sticky 노드를 **생성하지 않는다**(보드-누수 경로 미발화). 콘텐츠가 같은 노드 새 레인에 나타난다.
 - [ ] **영속·undo:** 레인 추가가 `store.mutate`로 저장되고 undo 1회로 직전 레인 상태로 복귀한다.
 - [ ] **전역 미오염:** 노드 내부 패닝이 MyBoard 전역 `viewport.panX`를 건드리지 않는다.
 
@@ -141,20 +142,23 @@
 
 ---
 
-## 9. Claude Code 핸드오프 (구현 순서)
+## 9. Claude Code 핸드오프 (구현 순서 / 현재 상태)
 
 표준 3-파일 패턴.
+
+> **상태(2026-06-26):** step1·step2는 **구현 완료**(`InteractiveStage.tsx`), step3(확장 내부화)는 함수만 정의되고 호출부 0건의 **미배선 데드코드**. 아래 step 라인 번호는 드리프트됨 — 심볼 기준으로 읽을 것.
 
 - **CLAUDE.md** — 타깃 B 단일·A 폐기, 모델 2 무한 성장, 레인=x-밴드 규약, "가산 변경 3곳" 원칙, §5 불가침 목록.
 - **SKILL.md** — 카메라 오프셋 추가하는 법, `goToScene` 해석 규칙, 확장 mutate 분기 패턴.
 - **PROMPTS.md** — 구현 순서(각 단계 독립 검증):
-  1. **카메라 오프셋 인프라** — `cameraLane` state + fit 폭 1280 변경(`InteractiveStage.tsx:199`) + tx 오프셋 가산(`:201`) + rAF 이징(`slideFrameToEmpty` 패턴 로컬 복제). 수용: §7 하위호환·fit·패닝.
-  2. **`goToScene` 본문** — no-op(`:615~617`) 교체, `sceneId`→`cameraLane` 애니. 수용: §7 양방향.
-  3. **확장 내부화** — `composer.ts:1877~1886` 끊기, `mutate(docId)` 새 밴드 append, `docId` 클로저 전달(`InteractiveNodeCard.tsx:156/159`), `composeInteractiveNode` 재사용, append 후 `goToScene`. 수용: §7 확장 내부화·영속·전역 미오염.
+  1. **카메라 오프셋 인프라** ✅ **구현됨** — `panToLane` 카메라 + fit 폭 1280(`LANE_W`) + tx 오프셋 가산 + rAF 이징(`slideFrameToEmpty` 패턴 로컬 복제). 수용: §7 하위호환·fit·패닝.
+  2. **`goToScene` 본문** ✅ **구현됨** — 옛 no-op 교체, case `'goToScene'`(`InteractiveStage.tsx:705~709`)이 `panToLane(laneFromSceneId(...))` 호출. 수용: §7 양방향. (단 어떤 UI에도 미배선된 휴면 코드.)
+  3. **확장 내부화** ⚠ **미배선(데드코드)** — `extendActivityInNode`(`authoring/extendLane.ts`)·`resolverExtend`(`resolver/extend.ts`)·`extendInteractiveActivity`(`composer.ts:2209~`) 정의는 있으나 호출부 0건, `onExtend` 심볼 부재, `kv:inode-goto-lane` 디스패처 없음(리스너만 `InteractiveStage.tsx:280`), 확장 버튼 `InteractiveOverlay.tsx:871`에서 제거됨. 남은 작업: 보드-누수 경로 끊기, `mutate(docId)` 새 밴드 append, `docId` 클로저 전달, `composeInteractiveNode` 재사용, append 후 `goToScene` 발화 배선. 수용: §7 확장 내부화·영속·전역 미오염 — **현재 충족 불가.**
 
-각 단계는 앞 단계 위에서만 동작. 1 없이 2·3 불가.
+각 단계는 앞 단계 위에서만 동작. 1 없이 2·3 불가. (현재 1·2 완료, 3 미배선.)
 
 ---
 
 ### 변경 이력
 - v1.0 — 레인 인프라 초안. 모델 2 확정, goToScene 재사용 전략, 신규 3곳, 가산 변경 선, 수용 기준, 핸드오프.
+- v1.0 상태 정정(2026-06-26, 코드 기준) — "구현 완료"를 "부분 구현"으로 정정. step1(카메라 오프셋)·step2(`goToScene` 런타임)는 구현됨(`InteractiveStage.tsx`), step3(확장 내부화)는 호출부 0건의 미배선 데드코드로 표기. §3는 `goToScene` 구현 반영, §4-4/§7은 보드-누수 경로가 제거가 아닌 휴면 잔존임을 정정.

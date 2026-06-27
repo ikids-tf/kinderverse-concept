@@ -112,7 +112,8 @@ graph LR
 | 계층 | 책임 | 모델 티어 | 위치 |
 |---|---|---|---|
 | **Tier 0 라우터** | 의도분류·슬롯추출·라우팅·확신도. 콘텐츠 생성 안 함 | low (`claude-haiku-4-5`) | `src/ai/agents/router.ts` |
-| **Tier 1 에이전트** | 기록·계획·스튜디오·문장. Pedagogy Foundation 상속 | mid→high fallback | `src/ai/agents/{record,plan,studio,writing,design}.ts` |
+| **Tier 1 에이전트** | 기록·계획·스튜디오·문장. Pedagogy Foundation 상속 | mid→high fallback | `src/ai/agents/{record,plan,studio,writing}.ts` |
+| **Tier 1 디자인 디렉터(하이브리드)** | 보드 프레임 배치·꾸미기(DesignSpec) 결정. 콘텐츠/HTML 미생성, Pedagogy Foundation 미상속 | low→mid fallback | `src/ai/agents/design.ts` |
 | **Tier 2 도구** | 이미지/비디오 생성, 비전, TTS, 검색 | 프로바이더별 | `server/gateway/*` |
 | **공유 레이어** | 유아교육 적합성·테넌트·학습 선호 주입 | — | `src/ai/pedagogy.ts`, `src/ai/context.ts` |
 
@@ -340,6 +341,33 @@ graph LR
 - 영속: `learningStore`=localStorage, `folderStore`=IndexedDB(+클라우드 미러), 나머지=세션/로컬.
 
 스토어별 상태·액션 전체는 [`MODULE_REFERENCE.md` §스토어](./MODULE_REFERENCE.md#1-스토어-srcstore) 참조.
+
+---
+
+## 클라우드 동기화/영속
+
+로컬(localStorage/IndexedDB)을 1차 저장소로 두고, 자격증명이 있으면 Supabase `kv_store`로 **last-write-wins** 미러한다. 키 없으면 모든 동기화가 no-op이라 앱은 기존 '로컬 전용'과 동일하게 동작한다.
+
+```mermaid
+graph LR
+    LS["localStorage / IndexedDB<br/>(board/idb.ts)"]
+    Mirror["cloudMirror.ts<br/>installLocalStorageMirror<br/>setItem 가로채기 · isMirroredKey"]
+    Push["cloud.ts<br/>cloudPush / cloudPushNow / cloudList"]
+    Assets["cloudAssets.ts<br/>externalizeAssets<br/>(base64 → kv-assets, 콘텐츠 해시 dedup)"]
+    KV["Supabase kv_store"]
+    Bucket["Supabase kv-assets 버킷"]
+
+    LS -->|"쓰기 가로채기 ls:&lt;key&gt; / idb:&lt;key&gt;"| Mirror
+    Mirror --> Push
+    Push --> Assets
+    Assets --> Bucket
+    Push --> KV
+```
+
+- **부팅 순서**(`src/main.tsx`): `installLocalStorageMirror()` → `await initCloudSync()`. 미러를 먼저 설치해 앱 로드 중의 모든 localStorage 쓰기를 빠짐없이 클라우드로 흘린 뒤, 동기화가 클라우드→로컬을 **last-write-wins**로 맞춘다.
+- **키 스킴**: localStorage 키는 `ls:<key>`, IndexedDB 키는 `idb:<key>`로 클라우드에 저장(`cloudSync.ts`의 `initCloudSync`). `isMirroredKey()`가 미러 대상 키를 판별한다.
+- **에셋 외부화**: `externalizeAssets()`가 보드 스냅샷·문서에 박힌 `data:image|video|audio;base64,...`를 `kv-assets` 버킷 파일로 올리고 공개 URL로 치환한다. 업로드 경로는 **콘텐츠 해시**라 같은 소재는 자동 dedup된다.
+- 세부 export는 [`MODULE_REFERENCE.md`](./MODULE_REFERENCE.md)의 `src/lib` 절 참조.
 
 ---
 

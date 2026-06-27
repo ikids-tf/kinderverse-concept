@@ -14,8 +14,10 @@ user-invocable: true
 | Tier1 | `agent.plan` | 놀이계획·주안·월안 (활동 맥락을 스튜디오에 공급) | 중급 |
 | Tier1 | `agent.studio` | 이미지·영상·도안 + **활동지/워크시트**(프롬프트 설계 + 도구 오케스트레이션) | 이미지/영상 전용 |
 | Tier1 | `agent.writing` | 문장생성·가정통신문·공지·평가서 | 중급 |
+| Tier1 | `agent.design` | **디자인 디렉터(하이브리드, 보조)**: 레이아웃 변형·스티커·표지 결정 → `DesignSpec`. **콘텐츠/HTML 미생성**, Pedagogy 미상속. `src/ai/agents/design.ts` `runDesignDirector` | 저가(fallback 중급) |
 | Tier2 | `engine.curator` | 사진 실시간 분류(기개발 API) + 임베딩·RAG·기억 | (엔진) |
 
+콘텐츠 생성 Tier1은 `record`·`plan`·`studio`·`writing` 4종(Pedagogy 상속). `design`은 디렉팅만 하는 보조 Tier1(콘텐츠 비생성).
 즐겨찾기 카드 → 에이전트: 놀이계획=plan · 놀이기록/관찰기록=record · 문장생성=writing · 스튜디오=studio.
 
 ## 2. Pedagogy Foundation (공유 토대 레이어 — 모든 Tier1 상속)
@@ -34,7 +36,7 @@ user-invocable: true
   "available_actions": ["generate","merge","relayout","restyle","add_media"],
   "intent": "merge",
   "scope": "selection",                            // selection | page | new
-  "route_to": "record",                            // router|record|plan|studio|writing
+  "route_to": "record",                            // router|record|plan|studio|writing|mindmap (6종; contract.ts RouteTarget/ROUTE_TARGETS, actions.ts pathForRoute('mindmap')·ROUTE_LABEL '생각그물')
   "mode": "story",                                 // record: observation|story / 그 외 생략
   "link": { "plan_id": null, "child_ids": [] },    // 활동지↔놀이계획, 산출물↔아동 연결(선택)
   "lane": { "id":"lane_22", "template":"play_plan", "step":"plan", "node_id":"node_3" }, // 워크플로 레인 컨텍스트(§9)
@@ -57,8 +59,9 @@ user-invocable: true
 
 ## 4. UI Registry (AUI는 레지스트리 선택+파라미터만)
 `에이전트 JSON → 스키마 검증 → Registry 매칭 → 정적 컴포넌트 렌더`
-초기 카탈로그: `RecordDraftCard`(관찰기록), `PlayStoryCard`(놀이기록=놀이이야기—사진 슬롯 그리드 + 활동 서술 + 학부모 발송 미리보기), `WeeklyPlanGrid`, `LetterPreview`, `StudioGallery`(이미지/영상/도안), `WorksheetCard`(활동지/워크시트—A4·인쇄 규격·다운로드, 연결된 놀이계획 표시), `PhotoClusterBoard`, `StickyNote`, `TextBlock`, `ImageCard`, `WorkCanvasFrame`(보드에 얹는 작업 캔버스), `ClarifyPrompt`, `FavoriteCardRail`, `SelectionToolbar`.
+레지스트리 카탈로그 (에이전트 출력과 1:1, `src/ui-registry/registry.tsx` = **정확히 8종**): `RecordDraftCard`(관찰기록), `PlayStoryCard`(놀이기록=놀이이야기—사진 슬롯 그리드 + 활동 서술 + 학부모 발송 미리보기), `ClarifyPrompt`(명확화 질문), `WeeklyPlanGrid`(주안/월안), `WorksheetCard`(활동지/워크시트—A4·인쇄 규격·다운로드, 연결된 놀이계획 표시), `StudioGallery`(이미지/영상/도안), `LetterPreview`(가정통신문/공지), `AssessmentReport`(발달평가서—고위험·자동 적합성 검증 패스 대상).
 각 컴포넌트의 props 스키마 = 에이전트 출력 계약과 1:1.
+> **레지스트리가 아닌 것**(위 "에이전트 출력 1:1 레지스트리"와 섞지 말 것): 보드 프리미티브 `StickyNote`·`TextBlock`·`ImageCard`·`WorkCanvasFrame`(보드에 얹는 작업 캔버스)·`PhotoClusterBoard`, 앱 셸 `FavoriteCardRail`·`SelectionToolbar`. 이들은 보드/셸 UI일 뿐 AUI 레지스트리 8종에 포함되지 않는다.
 
 ### 4.1 에이전트 협업 경로 (단일 책임 + 컨텍스트 공급)
 - **놀이기록(`record.story`)**: `engine.curator`가 그날 활동 사진을 골라줌 → `record.story`가 사진에 맞춰 활동 서술 생성 → `PlayStoryCard` 렌더. 부모 발송 톤은 `agent.writing`의 톤 능력을 선택적으로 빌림.

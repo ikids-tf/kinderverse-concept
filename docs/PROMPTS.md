@@ -20,9 +20,9 @@
 출력: SKILL.md §3 JSON 계약을 정확히 따른다. 다른 텍스트 출력 금지.
 규칙:
 - selection이 있으면 scope="selection", 그 대상에만 한정.
-- available_actions 밖의 intent로 라우팅하지 마라.
+- available_actions는 페이지가 허용하는 동작 '힌트'일 뿐. 보드(/board)에서는 모든 전문 에이전트 생성 가능 — 목록에 에이전트명이 없어도 적절한 route_to로 라우팅(콘텐츠 생성 요청 거절 금지).
 - 확신도<0.7이면 route_to를 비우고 needs_confirmation=true로 명확화 질문 슬롯을 채워라(추측 금지).
-- 관찰/평가 의도인데 grounding(사진/메모)이 없으면 보강 요청 의도로 처리.
+- 근거(사진/메모) 유무는 라우팅 단계에서 따지지 않는다 — grounding 확인·보강 요청(ClarifyPrompt)은 전문 에이전트(기록 등)의 책임. 교사가 활동·관찰 내용을 입력에 담았으면 record로 라우팅.
 ```
 
 ## 2. 기록 (agent.record) — 스켈레톤 (2모드)
@@ -39,7 +39,7 @@
 ## 3. 계획 (agent.plan) — 스켈레톤
 ```
 역할: 주안·월안 놀이계획. 요일×영역, 준비물, 발달목표. age_band별 적합성.
-출력: WeeklyPlanGrid props 스키마(JSON). 계획에 id를 스탬프 → 활동지가 link.plan_id로 역참조. 캘린더 이벤트와 연계 가능.
+출력: WeeklyPlanGrid props 스키마(JSON). 계획에 id를 스탬프 → 활동지가 link_plan_id(평탄한 string)로 역참조. 캘린더 이벤트와 연계 가능.
 
 진입 함수(코드: src/ai/agents/plan.ts):
 - runMindMapActivities(topic, ctx?, count=7, grounding?) — 마인드맵용 활동 후보 N개(label·method·materials·area). 교사가 바로 실행 가능한 구체 수준.
@@ -51,7 +51,7 @@
 ## 4. 스튜디오 (agent.studio) — 스켈레톤
 ```
 역할: 이미지·영상·도안 + 활동지/워크시트 생성을 위한 프롬프트 설계 + 도구 호출 오케스트레이션.
-활동지 두 경로: (A) 놀이계획 연결 — agent.plan이 활동 맥락(연령·영역·목표)을 공급, 결과를 link.plan_id로 연결. (B) 독립 — 연령·영역 슬롯만 받아 Pedagogy Foundation에 맞게 생성.
+활동지 두 경로: (A) 놀이계획 연결 — agent.plan이 활동 맥락(연령·영역·목표)을 공급, 결과를 link_plan_id로 연결. (B) 독립 — 연령·영역 슬롯만 받아 Pedagogy Foundation에 맞게 생성.
 출력: 시각물→StudioGallery, 활동지→WorksheetCard props 스키마(JSON). 활동지는 A4/인쇄 규격·다운로드 + 연결 계획 표시.
 비용: 영상은 게이팅(명시적 의도 + 프리뷰 후). 이미지/도안은 작은 모델 우선, 필요 시 승급.
 
@@ -109,7 +109,7 @@
   · difficulty: "basic" | "standard" | "extended"
   · image_prompt(조립 완료 텍스트)
   · cut_layout?: { pieces[], shared_edges[], cut_line_style }
-  · A4 세로/인쇄 규격·다운로드, 연결 계획(link.plan_id) 표시
+  · A4 세로/인쇄 규격·다운로드, 연결 계획(link_plan_id, 평탄한 string) 표시
   · visual_status: pending | filled  (studio 렌더 추적)
 
 발송/자율성: 생성=초안(L1). 인쇄·배포는 studio 렌더 완료 후 확정.
@@ -140,7 +140,7 @@ selected_by(user|recommended)로 출처 표기
   "needs_cut_layout": false,
   "image_prompt": "A4 세로형 한국 유아용 분류하기 활동지. 가을 낙엽 테마 적용, 캐릭터 스타일. ... rounded cute character illustration style, soft crayon and colored-pencil texture ...",
   "cut_layout": null,
-  "link": { "plan_id": null },
+  "link_plan_id": null,
   "visual_status": "pending"
 }
 ```
@@ -148,10 +148,8 @@ selected_by(user|recommended)로 출처 표기
 ## 부록 C. 결정 기록 — 활동지 에이전트 분리는 채택되지 않음
 > 과거 초안은 활동지 설계를 별도 `agent.worksheet`로 분리하려 했으나, **현재 코드는 분리하지 않는다.**
 - 활동지 **설계 + 시각 렌더 모두 스튜디오(`studio.ts` `runStudioWorksheet`)** 가 담당. 별도 worksheet 에이전트 없음.
-- §4의 "활동지 두 경로(A 계획 연결 / B 독립)"는 **유효** — 계획 연결 시 `link.plan_id`로 연결, 독립 시 연령·영역 슬롯만으로 생성.
+- §4의 "활동지 두 경로(A 계획 연결 / B 독립)"는 **유효** — 계획 연결 시 평탄한 `link_plan_id`(string)로 연결, 독립 시 연령·영역 슬롯만으로 생성. (중첩 `link.plan_id`는 RouterOutput 전용 — WorksheetCard 아님.)
 - `visual_spec`(image_prompt + cut_layout)은 스튜디오 내부에서 조립되어 게이트웨이 `task:'image'`로 렌더된다(외부 도구·별도 에이전트 아님).
-
-```
 
 ## 5. 문장 (agent.writing) — 스켈레톤
 ```
@@ -176,6 +174,6 @@ selected_by(user|recommended)로 출처 표기
 ```
 
 ## 8. 공통 가드(모든 에이전트)
-- JSON 스키마 외 출력 금지(채팅 제외 — 마크다운 프로즈). 검증 실패 시 자기수선 1회 후 ClarifyPrompt.
+- JSON 스키마 외 출력 금지(채팅 제외 — 마크다운 프로즈). 자기수선 1회 후 ClarifyPrompt 폴백은 라우터·기록에만. 계획·스튜디오·문장은 검증 1회 후 자기수선 없이 즉시 ClarifyPrompt 폴백.
 - 아동 식별정보 외부 노출/마스킹 규칙 준수. 테넌트 경계 침범 금지. child-photo/video는 외부 API 미전송.
 - 자율성: 생성=초안(L1)/통신문(L2)/발송·삭제(L3).

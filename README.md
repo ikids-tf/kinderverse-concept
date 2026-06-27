@@ -148,7 +148,7 @@ npm run preview  # 빌드 결과 미리보기
 | 폴더 번들 저장/렌더 | `src/store/folderStore.ts`, `src/pages/FolderPage.tsx` |
 
 ### 핵심
-- **레인 단계 = 전용 에이전트**: 아이디어→계획(WeeklyPlanGrid)→활동지(WorksheetCard, `link_plan_id`로 계획 연결)→개념이미지(StudioGallery). 모두 Pedagogy Foundation + 우리반 컨텍스트 상속. **진행은 클릭으로만, 선택이 다음 단계 입력**.
+- **레인 단계 = 전용 에이전트**: 아이디어→개념이미지(StudioGallery)→계획(WeeklyPlanGrid)→활동지(WorksheetCard, `link_plan_id`로 계획 연결). 모두 Pedagogy Foundation + 우리반 컨텍스트 상속. **진행은 클릭으로만, 선택이 다음 단계 입력**.
 - **이미지 플러그인**(§9.5): `GEMINI_API_KEY`+`KV_GEMINI_IMAGE_MODEL` 구성 시 실제 생성, 미구성 시 **"AI 생성" 라벨 플레이스홀더**. 실제 아동 사진과 분리.
 - **폴더 번들**: 레인 저장 → 매니페스트(계획안+활동지+이미지+연결) 1건으로 폴더에 저장, 제목 하나로 재오픈. 활동지↔계획 연결 표시.
 - **비용 캐스케이드**: 게이트웨이 티어 fallback(mid→high). 라우터 route_to plan/studio는 채팅에서 인라인 실행.
@@ -219,7 +219,7 @@ npm run preview  # 빌드 결과 미리보기
 - **프롬프트바 중앙 정렬**: 메인 콘텐츠 영역 기준 가로 중앙(LNB·채팅 사이드패널 비킴). `AppShell` 메인 컬럼 내부 `absolute` + `promptBarLeftInset`.
 - **멀티 보드**(`boardsStore` + `board/seed.ts` + `BoardSwitcher`): 즐겨찾기 카드 클릭 → 해당 콘텐츠에 **최적화 시드된 새 보드**(놀이계획=워크플로 레인, 그 외=맞춤 시작 카드)로 이동. 상단 탭으로 보드 전환(상태 보존), **보드 추가** 메뉴(빈 보드 + 5종). 세션 스코프.
 - **보드 하이브리드**(참조 KinderVerse 모델): 프레임(뒤쪽 컨테이너) + 보드 네이티브 카드(이미지/메모/텍스트). 놀이계획 보드 = "새 놀이계획" 프레임 + 러너; 각 단계가 프레임 안에 카드를 생성(아이디어/계획안/활동지=메모, 이미지=실제 Gemini 이미지 카드). 모든 카드 선택·드래그·인라인 편집(스크롤 없이 내용에 맞춰 크기). `board/workflow.ts`, `frame`/`runner` 노드 타입.
-- **보드에서 바로 생성**(`board/prompt.ts` `runBoardPrompt`): 대상을 선택하고 프롬프트바에 입력하면 **AI 채팅으로 이동하지 않고** 그 대상에 바로 생성 — 이미지 카드→`regenImageCard`(제자리 재생성), 메모/텍스트→`genTextCard`(제자리 재작성), 프레임→`generateIntoFrame`(이미지 키워드면 이미지 카드, 아니면 메모). AI 채팅은 프롬프트바 왼쪽 메시지 아이콘으로만.
+- **보드에서 바로 생성**(`board/prompt.ts` `handleBoardPrompt`): 대상을 선택하고 프롬프트바에 입력하면 **AI 채팅으로 이동하지 않고** 그 대상에 바로 생성 — 이미지 카드→`regenImageCard`(제자리 재생성), 메모/텍스트→`genTextCard`(제자리 재작성), 프레임→`generateIntoFrame`(이미지 키워드면 이미지 카드, 아니면 메모). AI 채팅은 프롬프트바 왼쪽 메시지 아이콘으로만.
 - **프레임 그룹 이동 + 자동 확장**: 프레임을 드래그하면 그 위에 겹친 모든 카드가 함께 이동(`BoardCanvas.containedNodeIds`, 되돌리기 1단위). 프레임/워크플로로 생성 시 공간이 부족하면 프레임이 자동 확장(`workflow.ts` `placeInFrame`→`expandFrame`).
 - **홈 = 추천 자료 갤러리 홈**(참조 KinderVerse 패리티): 중앙 정렬 인사("선생님, 오늘은 / 무엇을 만들어 볼까요?") + **가로 스크롤 추천 자료 갤러리**(10종 카드, 코랄 아이콘 타일, 드래그/휠→가로 스크롤 + 관성, 가장자리 페이드 마스크, 페이지 점=활성 코랄 알약) + **퀵 액션 알약 5개**(자료 갤러리·우리반·캘린더·자료 보관함·내 캔버스). 카드 클릭 → 프롬프트바에 해당 프롬프트 채움(바로 시작), 퀵 액션 → 라우트 이동. `src/pages/HomePage.tsx`, 전부 시맨틱 토큰(세리프 인사/그로테스크 본문, 색 하드코딩 0), 진입 페이드 애니메이션(`kv-home-in`/`kv-quick-in`, reduced-motion 안전).
 - **AI 채팅 = 스트리밍 마크다운 채팅**(참조 KinderVerse 답변 스타일·UI/UX 패리티): 일반 질문은 **편집 디자인된 마크다운**(도입 → `##` 소제목 → **굵게** → 목록/표 → 마무리)으로 **토큰 단위 스트리밍** 응답. 사용자 말풍선(우측) + 코랄 스파클 아바타(좌측) + 작성 중 점 애니메이션 + **복사** 버튼 + 자동 스크롤. 서버 SSE는 `/api/ai/chat`(`server/gateway/chat.ts`, 키는 서버 전용: Anthropic=실시간 패스스루 / Gemini=완성 후 타자기 / 키 없음=데모). 클라이언트 파서·시스템프롬프트는 `src/ai/chat.ts`, 마크다운 렌더는 `src/components/ai/MarkdownMessage.tsx`(전부 시맨틱 토큰 — 세리프 제목/그로테스크 본문, 색 하드코딩 0). **라우터는 유지** — 프로즈 답변 아래 *맥락 액션*으로 표시(명확한 작업≥0.7 → "○○ 생성" 카드 → AUI / 모호하면 옵션 칩). `routerStore.send`가 스트림과 라우터를 병렬 실행.

@@ -14,7 +14,7 @@
 |---|---|---|---|
 | `boardStore.ts` | `useBoardStore`, `BoardNode`, `Lane`, `LaneStep`, `BoardSnapshot`, `newId` | `nodes`, `order`, `lanes`, `selection`, `viewport`, `links`, `classroomMode`, `show`, `generating` | 보드 캔버스 raw ops (노드/레인/뷰포트) |
 | `historyStore.ts` | `useHistoryStore`, `Command` | `past[]`, `future[]`, `limit`(100) | 되돌리기 Command 패턴 (`execute/push/undo/redo`) |
-| `boardsStore.ts` | `useBoardsStore`, `BoardMeta`, `BoardKind` | `boards[]`, `snapshots`, `activeId` | 멀티보드 (create/switch/save/remove) |
+| `boardsStore.ts` | `useBoardsStore`, `BoardMeta` | `boards[]`, `snapshots`, `activeId` | 멀티보드 (create/switch/save/remove). `BoardKind`는 `@/board/seed`에서 정의·export, 여기선 import만 |
 | `routerStore.ts` | `useRouterStore`, `RouterTurn`, `INLINE_ROUTES`, `isImageRequest` | `turns[]` | AI 채팅 턴 + 병렬 라우터 + 인라인 Tier1 |
 | `classStore.ts` | `useClassStore`, `Child`, `ClassRoom`, `maskName`, `buildTenantContext` | `classes`, `children`, `selectedClassId` | 우리반 (테넌트 컨텍스트·동의 게이팅) |
 | `calendarStore.ts` | `useCalendarStore`, `CalEvent`, `EVENT_COLOR` | `events[]` | 일정 → 생성 트리거 |
@@ -70,6 +70,9 @@
 | `commands.ts` | `addNodeCmd`, `addFrameCmd`, `addPresetNodeCmd`, `addPrimitivesRowCmd`, `wrapSelectionInFrameCmd`, `moveNodesCmd`, `deleteNodesCmd` 외 다수 | 되돌리기 가능한 L1 명령 팩토리 (`{id,label,do,undo}` + `history().execute()`) |
 | `lanes.ts` | `createLane(template, request, x, y)`, `runLaneStep(laneId, stepId)`, `LANE_TEMPLATES` | Workflow Lane/Runner — 템플릿 순서대로 전용 Tier1 에이전트 호출 |
 | `workflow.ts` | `seedWorkflowFrame`, `placeInFrame`, `spawnTextCard`, `spawnHeaderCard`, `spawnImageCard`, `generateIntoFrame`, `regenImageCard`, `genTextCard`, `RunnerStep` | 프레임+러너 모델 — 보드 네이티브 카드 생성·자동 확장 |
+| `composer.ts` | `composeFromPrompt`, `composeCutoutFromPrompt`, `mindMapSubtree`, `expandMindMapBranch`, `worksheetFromNode`, `planFromNode`, `generateIdeaList`, `buildPlayPackage`, `searchWebForLink`, `placeWebLinksOnBoard`, `runComposerChip`, `redesignFrame`, `consultBehavior` 외 (함수 17 + 인터페이스 `ComposerChip`) | 프레임 작곡기 — 프롬프트→보드 카드 생성(이미지·마인드맵·활동지·계획·웹자료·놀이패키지) |
+| `frames.ts` | `childrenOf`, `frameSubtree`, `frameMoveSet`, `rebindFrameMembership`, `fitFrameToChildren`, `designComposedFrame`, `folderFromFrame`, `saveFrameToFolder`, `saveDocToFolder` 외 (12함수) | 프레임 트리·멤버십·동반이동·프레임→폴더 저장 |
+| `templates.ts` | `ComposerIntent`(6종 play_plan/mindmap/observation/studio/writing/general)·`FRAME_TEMPLATES`·`pickTemplate`·`FrameTemplate{regions,nextSteps}` | 프레임 작곡 템플릿(region 레이아웃 + nextSteps 칩). ※ `LANE_TEMPLATES`(워크플로 레인)와 별개 시스템 |
 | `prompt.ts` | `handleBoardPrompt(text)`, `runFormatChoice`, `startInteractiveGame`, `spawnSavedGameOnBoard` | PromptBar 진입점 — 의도 감지 후 생성/오버레이/다이얼로그 라우팅 |
 | `seed.ts` | `seedSnapshot(kind)`, `KIND_LABEL`, `kindFromFavorite` | 보드 종류별 초기 시드(play_plan/observation/studio/writing/general) |
 
@@ -101,7 +104,7 @@ iframe(`/game-viewer.html`)으로 임베드되는 자기완결 React 런타임. 
 |---|---|---|
 | `interactiveDoc.ts` | `InteractiveDoc`, `SceneNode`, `Interaction`, `Effect`, `ExtendActivity`, `ContentBinding`, `AssetRef`, `SCHEMA_VERSION` | 단일 계약 (Zod + superRefine 시맨틱 검증) |
 | `parse.ts` | `parseInteractiveDoc`, `safeParseInteractiveDoc`, `assertDocIntegrity`, `collectWarnings` | 검증·경고 수집 |
-| `examples.ts` | FIXTURES | 테스트/참조 |
+| `examples.ts` | `*Example` 상수 10종(`tapTheRightOneExample`, `matchPairExample`, `revealAndCollectExample`, `responsiveStateExample`, `categorizeExample`, `orderSequenceExample`, `findItExample`, `sequenceTapExample`, `patternNextExample`, `videoCueExample`) | 테스트/참조 |
 
 **InteractiveDoc 구조**: `{ schemaVersion, meta, settings, stage{nodes[]}, interaction(1종), effects[], extend[], rewards }`.
 - **인터랙션 11종**: `tap-the-right-one`, `match-pair`, `binary-choice`, `connect`, `flip-memory`, `combine`, `categorize`, `order-sequence`, `find-it`, `sequence-tap`, `pattern-next`.
@@ -117,6 +120,7 @@ iframe(`/game-viewer.html`)으로 임베드되는 자기완결 React 런타임. 
 | `interactions/*.tsx` | `TapTheRightOne`, `MatchPair`, `BinaryChoice`, `FlipMemory`, `OrderSequence`, `Categorize`, `PatternNext`, `FindIt`, `SequenceTap`, `CombineGame` | 인터랙션별 컴포넌트 |
 | `editor/EditLayer.tsx` | — | 직접 레이아웃 편집(드래그/리사이즈/크롭/인라인 텍스트, 릴리즈 시 1 undo) |
 | `tts.ts` | `say`, `stopSay` | TtsProvider 싱글톤 |
+| `fixtures.ts` | `FIXTURES`, `FIXTURE_KEYS`, `ExampleKey` | 기본 게임 픽스처(GamePicker/GameStage/useGame/savedGames에서 사용) |
 
 ### 생성·리졸버·프로바이더
 | 파일 | export | 책임 |
@@ -156,6 +160,22 @@ iframe(`/game-viewer.html`)으로 임베드되는 자기완결 React 런타임. 
 
 ---
 
+## src/lib — 클라우드 동기화/영속
+
+로컬 우선(localStorage/IndexedDB) + 공유 클라우드 미러. 모든 영속 쓰기를 가로채 클라우드로 비추고, 부팅 시 클라우드를 로컬로 당긴다.
+
+| 파일 | export | 책임 |
+|---|---|---|
+| `cloudSync.ts` | `initCloudSync` | 부팅 동기화 — 클라우드 → 로컬(last-write-wins) |
+| `cloudMirror.ts` | `installLocalStorageMirror`, `isMirroredKey`, `rawLocalSet` | localStorage 쓰기 가로채 클라우드 미러(`ls:`/`idb:` 키 스킴) |
+| `cloudAssets.ts` | `externalizeAssets` | base64 → `kv-assets` 외부화(콘텐츠 해시 dedup) |
+| `cloud.ts` | `cloudList`, `cloudPush`, `cloudPushNow` | KV 클라우드 목록/푸시(디바운스·즉시) |
+| `@/board/idb.ts` (src/board, src/lib 아님) | `idbGet`, `idbSet`, `idbSetRaw`, `idbKeys` | IndexedDB 영속(보드/번들 대용량) |
+
+**부팅 순서**(`main.tsx`): `installLocalStorageMirror()`(앱 로드 전 미러 설치) → `await initCloudSync()`(클라우드 → 로컬 last-write-wins).
+
+---
+
 ## 7. 피처 (`src/features/`)
 
 ### `slides/`
@@ -164,10 +184,10 @@ iframe(`/game-viewer.html`)으로 임베드되는 자기완결 React 런타임. 
 ### `interactive-viewer/`
 보드 네이티브 인터랙티브/게임 노드 저작.
 - `store/` → `useInteractiveStore` (`ensure`, `peek`, `mutate`, `undo`, `redo`, `loadInteractiveNode`, `saveInteractiveNode`, `newDocId`, `listInteractiveNodes`). docId별 캐시 + 문서별 undo + localStorage/클라우드 미러.
-- `resolver/` → 리졸버 파이프라인(`resolveIntent` → `selectRecipe` → `designGame` → `ensurePrompts` → `assembleAndPlace`).
+- `resolver/` → 리졸버 **3단 폴백**(호출부 `createInteractiveGame`): ① `designGame`(AI 1차) → `assembleAndPlace` ② 규칙기반 `resolveIntent`(내부 `selectRecipe` → `fillSlots`) → `assembleAndPlace` ③ 롱테일 `composeInteractiveNode`. `assembleAndPlace`는 내부에서 `buildRecipe`(`resolver/index.ts`)로 결정론 조립 + 레인 배치. 성공 후 교사 카드 발문은 `ensurePrompts`(`resolver/teacherCard.ts`)로 마무리. `designGame`·`resolveIntent`는 상호배타 대안이고, `selectRecipe`는 `resolveIntent`의 하위 단계.
 - `runtime/`·`authoring/`·`inspector/`·`node/` → 렌더·편집·속성·보드 통합.
 
-흐름: 프롬프트 "○○ 게임" → `createInteractiveGame()` → `addPresetNodeCmd('interactive', { data.docId })` → `useInteractiveStore.ensure(docId)` → `runDesignGame()` → 보드 카드 인라인 렌더. 풀스크린 편집은 `uiStore.inodeFsDocId`로 프롬프트 입력을 해당 문서로 라우팅.
+흐름: 프롬프트 "○○ 게임" → `createInteractiveGame()`(`src/board/prompt.ts`) → `addPresetNodeCmd('interactive', { data.docId })` → `useInteractiveStore.ensure(docId)` → `designGame(text, onBusy)`(`resolver/designAgent.ts`, AI 1차) → `assembleAndPlace`(`resolver/place.ts`); 실패 시 `resolveIntent`(`resolver/resolveIntent.ts`) → `assembleAndPlace`, 그래도 실패 시 `composeInteractiveNode`(`authoring/composeNode.ts`) → 보드 카드 인라인 렌더. 풀스크린 편집은 `uiStore.inodeFsDocId`로 프롬프트 입력을 해당 문서로 라우팅.
 
 ---
 

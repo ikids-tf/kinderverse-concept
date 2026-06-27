@@ -36,12 +36,12 @@ npm run preview  # 빌드 결과 미리보기
 |---|---|
 | 프론트엔드 | React 18 + Vite + TypeScript |
 | 스타일 | Tailwind CSS (Milray Park **시맨틱 토큰만**) |
-| 상태 | Zustand (전역/보드/히스토리 분리, zundo undo) |
+| 상태 | Zustand (전역/보드/히스토리 분리). 보드 undo/redo는 손수작성 Command 스토어(`src/store/historyStore.ts`, past/future/limit=100). zundo(temporal)는 게임 에디터(`src/game-viewer/v2/runtime`의 `useGame`·`useMaterials`) 전용 |
 | 라우팅 | React Router |
 | 백엔드 | Vercel 서버리스 함수 + 개발용 Vite 미들웨어(`devGateway`) |
 | DB(선택) | Supabase (Postgres + Storage) |
 | AI | **얇은 프로바이더 게이트웨이** — Anthropic + Gemini 직접 fetch. **LangChain/CrewAI 등 프레임워크 금지.** |
-| 온디바이스 | RMBG(배경제거)·SlimSAM(분할) WASM — 아동 미디어 전용 |
+| 온디바이스 | RMBG(배경제거)·SlimSAM(분할) WASM — 일반 자산(생성·객체·업로드)에 두루 사용. 아동 미디어는 외부 전송 불가라 반드시 온디바이스(현재 `SERVER_ENABLED=false`라 모든 소재 온디바이스) |
 
 ---
 

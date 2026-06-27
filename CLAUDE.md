@@ -14,7 +14,7 @@
 - 배치: GitHub Actions (distill/인덱싱 등 비실시간만)
 
 ## 2. 하드 룰 (위반 금지)
-1. **디자인 토큰은 Milray Park 시스템만 사용** — `.claude/skills/milray-park-design/colors_and_type.css`의 CSS 변수를 그대로 쓴다. 색·폰트·라운드·그림자·간격을 하드코딩하지 말고 `var(--coral)`, `var(--surface)`, `var(--r-pill)` 등 시맨틱 변수로.
+1. **디자인 토큰은 Milray Park 시스템만 사용** — `.claude/skills/milray park design/colors_and_type.css`(디렉터리명에 공백 포함)의 CSS 변수를 그대로 쓴다. 앱 토큰 구현체는 `src/styles/tokens.css`. 색·폰트·라운드·그림자·간격을 하드코딩하지 말고 `var(--coral)`, `var(--surface)`, `var(--r-pill)` 등 시맨틱 변수로.
    - 악센트는 **코랄 `#F2733E`** 단일 + 골드(등급 전용). **퍼플(#723CEB) 등 임의 색 추가 금지.**
    - 폰트: 표현=Playfair Display/Noto Serif KR(세리프), 기능=Hanken Grotesk/Pretendard(그로테스크).
    - 모드: **웜(크림) 단일 테마 기본.** 화이트 모드는 토큰 오버라이드 한 겹으로 추후 추가(지금은 만들지 말 것).
@@ -61,6 +61,6 @@
 게임 뷰어 작업 시 `m0-handoff/CLAUDE.md` · `PRD_TWO_LAYER_DESIGN.md` · `KICKOFF_M0.md`를 함께 읽을 것.
 - 코드: **`src/game-viewer/v2/`(자기완결 모듈)** + 공용 엔트리 `viewer/main.tsx`. 진입 페이지 `game-viewer.html`(Vite 멀티페이지 엔트리). 보드 임베드는 툴바 뷰어 패널의 **놀이 만들기** 프리셋(iframe `/game-viewer.html`). 엔트리·보드 임베드 계약 **불변(7곳)**.
 - **게임 플레이 화면 안쪽은 Milray Park 미적용**(아이 대면 파스텔) — `src/game-viewer/v2/theme.ts` 토큰 사용. 슬라이드 콘텐츠와 동일한 면제 대상. 단, 게임을 감싸는 **보드 카드 프레임·툴바·프롬프트바(교사용)는 Milray 유지**.
-- 핵심 결정: 런타임 코드 생성 ❌ → **단일 계약 `src/game-viewer/v2/schema/interactiveDoc.ts`**(InteractiveDoc). 생성·편집·런타임 모두 이 문서만 의존(`parseInteractiveDoc` 검증). 인터랙션 6종(tap·match·connect·reveal·binary·flip·order) + 고급 편집(EditLayer) + 리졸버(프롬프트→추천카드) 구현됨.
-- Provider(교체 가능): 이미지=나노바나나(`@/ai/client` `task:'image'`) → 누끼=`@/shared/background-removal`(BiRefNet/RMBG, MIT) → 객체분할=`@/shared/segment`(SAM). 음성=CLOVA Voice(`task:'tts'`, 키 없으면 브라우저 TTS 폴백). **`@imgly`(AGPL) 금지.** child-photo/video는 외부 API 미전송(`assertNotChildMedia`).
+- 핵심 결정: 런타임 코드 생성 ❌ → **단일 계약 `src/game-viewer/v2/schema/interactiveDoc.ts`**(InteractiveDoc). 생성·편집·런타임 모두 이 문서만 의존(`parseInteractiveDoc` 검증). 인터랙션 11종(tap-the-right-one·match-pair·binary-choice·connect·flip-memory·combine·categorize·order-sequence·find-it·sequence-tap·pattern-next) + 효과 3종(reveal·responsive-state·goal-state) + 고급 편집(EditLayer) + 리졸버(프롬프트→추천카드) 구현됨. (reveal은 인터랙션이 아니라 효과)
+- Provider(교체 가능): 이미지=나노바나나(`@/ai/client` `task:'image'`) → 누끼=`@/shared/background-removal`(현행 모델 briaai/RMBG-1.4, BRIA 비상업 라이선스 / BiRefNet(MIT)은 상업화 전 교체 대상·현재 미사용) → 객체분할=`@/shared/segment`(SAM). 음성=CLOVA Voice(`task:'tts'`, 키 없으면 브라우저 TTS 폴백). **`@imgly`(AGPL) 금지.** child-photo/video는 외부 API 미전송(`assertNotChildMedia`).
 - 옛 v1 GameSpec 게임뷰어(`src/game-viewer/{schema,engine,entry,templates,assets,generate}` + `theme.ts`)는 **제거됨**(v2가 대체, git 이력 보존).

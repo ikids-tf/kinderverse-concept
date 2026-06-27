@@ -15,9 +15,9 @@
 
 ```ts
 {
-  task: 'router' | 'record' | 'plan' | 'studio' | 'writing'
-      | 'image' | 'detect' | 'vision' | 'tts' | 'search'
-      | 'lane_step' | 'suitability';
+  task: string;  // 논리적 태스크명(기본 tier/provider 결정). 알려진 14종 아래.
+                 // router·record·plan·studio·writing·design·suitability
+                 // ·lane_step·slides·image·detect·vision·tts·search
   messages: { role: string; content: string }[];
   provider?: 'anthropic' | 'gemini' | 'auto';   // 기본 auto (Anthropic 우선)
   tier?: 'low' | 'mid' | 'high' | 'auto';        // 라우터 기본 low, 그 외 mid
@@ -63,7 +63,7 @@
 ### `POST /api/ai/video/start` · `GET /api/ai/video/poll` — Veo 비디오 (비동기)
 - **함수**: `api/ai/video/{start,poll}.ts` → `server/gateway/video.ts` `startVideo()` / `pollVideo()`
 - `start` 본문: `{ prompt?, imageDataUri?, aspectRatio?='16:9', durationSeconds?=4, negativePrompt? }` → `{ ok, op?, real }`
-- `poll` 쿼리: `?op=<operation>` → `{ ok, done?, result?: { outputUri? } }` (서버가 Gemini URI를 data URI로 변환)
+- `poll` 쿼리: `?op=<operation>` → `{ ok, done, video?, mocked?, error?, filtered? }` (서버가 Gemini URI를 base64 data URI로 변환해 최상위 `video`에 담음; `result`/`outputUri` 필드 없음). 클라이언트는 `pr.video`를 읽음(`src/board/video.ts`).
 - 프로바이더: Google Gemini **Veo** 전용. 기본 모델 `veo-3.0-fast-generate-001`.
 
 ### `GET /api/youtube/search` — 키리스 유튜브 검색
