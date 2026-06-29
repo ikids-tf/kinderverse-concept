@@ -927,14 +927,9 @@ export async function worksheetFromNode(nodeId: string): Promise<void> {
 
   try {
     const res = await runStudioWorksheet(activity, buildAgentContext('studio'));
-    const cur = useBoardStore.getState().nodes[id];
-    b.updateNodeRaw(id, {
-      text: worksheetText(res.payload),
-      data: { ...(cur?.data ?? {}), doc: true, role: 'worksheet', payload: res.payload, loadingDoc: false },
-    });
+    fillPlaceholderDoc(id, worksheetText(res.payload), res.payload);
   } catch {
-    const cur = useBoardStore.getState().nodes[id];
-    b.updateNodeRaw(id, { text: `‘${activity}’ 활동지 생성에 실패했어요.`, data: { ...(cur?.data ?? {}), loadingDoc: false } });
+    failPlaceholderDoc(id, `‘${activity}’ 활동지 생성에 실패했어요.`);
   } finally {
     useBoardStore.getState().setGenerating(null);
   }
@@ -1218,8 +1213,7 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
             const res = await runStudioWorksheet(act, buildAgentContext('studio'), planId);
             fillPlaceholderDoc(cid, payloadText(res.payload), res.payload);
           } catch {
-            const cur = useBoardStore.getState().nodes[cid];
-            if (cur) useBoardStore.getState().updateNodeRaw(cid, { text: `‘${act}’ 활동지 생성에 실패했어요.`, data: { ...(cur.data ?? {}), loadingDoc: false } });
+            failPlaceholderDoc(cid, `‘${act}’ 활동지 생성에 실패했어요.`);
           }
         }
       })(),
@@ -1283,14 +1277,9 @@ export async function planFromNode(nodeId: string): Promise<void> {
 
   try {
     const res = await runPlan(activity, seed, buildAgentContext('plan'));
-    const cur = useBoardStore.getState().nodes[id];
-    b.updateNodeRaw(id, {
-      text: planDocMarkdown(res.payload),
-      data: { ...(cur?.data ?? {}), doc: true, role: 'plan', payload: res.payload, loadingDoc: false },
-    });
+    fillPlaceholderDoc(id, planDocMarkdown(res.payload), res.payload);
   } catch {
-    const cur = useBoardStore.getState().nodes[id];
-    b.updateNodeRaw(id, { text: `‘${activity}’ 계획안 생성에 실패했어요.`, data: { ...(cur?.data ?? {}), loadingDoc: false } });
+    failPlaceholderDoc(id, `‘${activity}’ 계획안 생성에 실패했어요.`);
   } finally {
     useBoardStore.getState().setGenerating(null);
   }
@@ -1419,6 +1408,16 @@ function fillPlaceholderDoc(cid: string, text: string, payload: RegistryPayload)
   const data = { ...(n.data ?? {}) };
   delete data.loadingDoc;
   b.updateNodeRaw(cid, { text, data: { ...data, payload } });
+}
+
+/** fillPlaceholderDoc의 에러 짝 — 위치·data 유지, loadingDoc만 해제하고 실패 메시지로 채운다. */
+function failPlaceholderDoc(cid: string, text: string): void {
+  const b = useBoardStore.getState();
+  const n = b.nodes[cid];
+  if (!n) return;
+  const data = { ...(n.data ?? {}) };
+  delete data.loadingDoc;
+  b.updateNodeRaw(cid, { text, data });
 }
 
 async function fillRegion(
@@ -2187,8 +2186,7 @@ export async function consultBehavior(text: string): Promise<void> {
   }
   if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined; }
   if (!started || !draft.trim()) {
-    const cur = useBoardStore.getState().nodes[id];
-    if (cur) b.updateNodeRaw(id, { text: '상담 자료 생성에 실패했어요. 다시 시도해 주세요.', data: { ...(cur.data ?? {}), loadingDoc: false } });
+    failPlaceholderDoc(id, '상담 자료 생성에 실패했어요. 다시 시도해 주세요.');
   } else {
     flush();
   }
