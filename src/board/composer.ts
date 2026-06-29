@@ -2199,6 +2199,9 @@ export async function consultBehavior(text: string): Promise<void> {
   recordSpawnedNodes([id], '아동 행동 상담');
 }
 
+// ⏸️ [보류/구버전] 확장 활동의 옛 '보드-누수' 방식 — 결과를 MyBoard sticky로 빼고 전역 카메라 이동(stretch-canvas 이슈로 제거됨).
+//    노드 내부 레인 방식(authoring/extendLane.ts extendActivityInNode + resolver/extend.ts resolverExtend)으로 대체됨.
+//    현재 호출부 0(의도적 보류). 참조용 보존 — 부활 시 내부 레인 방식 권장, 이 보드-누수 방식은 쓰지 말 것. 삭제 금지(2026-06-29).
 const EXTEND_SYSTEM =
   '너는 유아 교사를 돕는 계획 에이전트다. 방금 아이들이 한 인터랙티브 놀이의 주제를 이어받아, 교실에서 바로 이어 할 수 있는 "확장 활동" 한 장을 만든다. ' +
   '마크다운으로 작성: "## ✨ 확장 활동" 제목 + 한 줄 소개 + "### 이야기 나누기"(발문 3~4개 글머리표) + "### 함께 해보기"(몸·미술·자연 등 2~3가지, 각 한 줄) + "### 가정 연계"(1~2줄, "> " 콜아웃). ' +

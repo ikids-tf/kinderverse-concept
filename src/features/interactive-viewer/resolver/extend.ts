@@ -1,3 +1,5 @@
+// ⏸️ 보류된 확장성 인프라(파킹) — "놀이 확장 사슬"의 두뇌. 의도적 미배선(부활 대기) — 데드코드로 오인·삭제 금지(2026-06-29 보존 결정).
+//    부활 경로·상세: docs/kinderverse-lane-infrastructure-spec-v1.0.md §9 step3. (gameSuggest.ts의 detectMechanism은 별개 사본 — 여기와 무관.)
 /**
  * Resolver — 레인 확장 훅(§9 + PROMPT 6). "확장 활동" 클릭 시 현재 레인의 메커니즘을 감지하고
  * 레시피별 기본 body(교육적 후속)를 골라 다음 레인을 Resolver로 채운다(결정론 + 의미 narrow LLM).

@@ -1,3 +1,7 @@
+// ⏸️ 보류된 확장성 인프라(파킹) — "놀이 확장 사슬" 기능. 의도적 미배선(부활 대기) — 데드코드로 오인·삭제 금지(2026-06-29 보존 결정).
+//    부활: InteractiveOverlay에 ✨확장 버튼 + runExtend(~25줄) → resolverExtend(docId) →(폴백) extendActivityInNode → 'kv:inode-goto-lane' 디스패치.
+//    단, offsetLane은 보류 아님 — resolver/place.ts(정상 게임 생성)가 쓰는 라이브 유틸이다.
+//    상세·부활 절차: docs/kinderverse-lane-infrastructure-spec-v1.0.md §9 step3.
 /**
  * 확장 레인 — "확장" 클릭 시 같은 인터랙티브 노드에 새 레인(1280px 밴드)을 추가하고
  * 플레이 가능한 활동으로 채운다(모델 2 무한 성장). 더 이상 MyBoard로 새지 않는다.

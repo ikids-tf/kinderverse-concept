@@ -268,6 +268,8 @@ export function InteractiveStage({
     setCameraAnim(0);
   }, [resetNonce, mode]);
 
+  // ⏸️ 보류된 '놀이 확장 사슬' 기능의 패닝 수신부 — 부활 시 확장 핸들러가 'kv:inode-goto-lane'을 디스패치한다.
+  //    현재 디스패처 없음(의도적 보류). 데드코드 아님 — 삭제 금지(2026-06-29). 상세: lane-infrastructure-spec §9.
   // 외부(확장 등)에서 특정 레인으로 패닝 요청 — 노드 로컬 카메라만 움직인다(전역 viewport 미사용).
   // 미리보기 썸네일은 무시(보드 카드).
   useEffect(() => {
