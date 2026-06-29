@@ -1,5 +1,9 @@
 # CLAUDE.md — 킨더버스 게임 뷰어
 
+> ⚠️ **HISTORICAL — 특정 시점 인계 스냅샷. 현행 아님.** 이 문서는 옛 v1 `GameSpec` 아키텍처(templates·OpenMoji·Konva·`@imgly`)를 기술하며 **v2가 전면 대체**함. 코드 탐색 가이드로 쓰지 말 것.
+> 진실원: 루트 `CLAUDE.md` + `docs/{ONBOARDING,ARCHITECTURE,MODULE_REFERENCE,API_REFERENCE}.md` + 코드.
+> 옛 상태 주의: v1 `GameSpec` **제거됨**(현행 `src/game-viewer/v2/` `InteractiveDoc`) · 게임뷰어 A·인터랙티브노드 B **둘 다 활성**(폐기 아님) · 환경 **macOS/zsh**(Windows·`D:\` 아님) · 배경제거 **briaai/RMBG-1.4(비상업)** · `@imgly`(AGPL) **금지**.
+
 > Claude Code는 매 세션 이 파일을 먼저 읽는다. 여기 적힌 결정과 규칙을 어기지 말 것.
 
 ---

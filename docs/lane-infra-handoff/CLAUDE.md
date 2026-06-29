@@ -1,5 +1,9 @@
 # CLAUDE.md — 레인 인프라
 
+> ⚠️ **HISTORICAL — 작업 계획(plan) 스냅샷. 현행 아님.** 여기 적힌 3단계는 **모두 구현됨**(레인 인프라 v1.0), step3(확장 내부화)는 이후 **의도적 보류**로 전환(데드코드 아님·삭제 금지). "no-op 교체하라"는 지시 따르면 회귀 유발.
+> 진실원: 루트 `CLAUDE.md` + `docs/{ONBOARDING,ARCHITECTURE,MODULE_REFERENCE,API_REFERENCE}.md` + `docs/kinderverse-lane-infrastructure-spec-v1.0.md` §9 + 코드.
+> 옛 상태 주의: "Game Viewer v2(A) 폐기"는 **B 라인 설계 관점**일 뿐 — A(`src/game-viewer/v2/`)·B(`src/features/interactive-viewer/`) **둘 다 활성** · `goToScene`/카메라 런타임은 이미 구현됨 · 파일:라인 번호는 드리프트(심볼명 기준).
+
 > Interactive Viewer(B) 노드 내부 다중 레인 작업의 항구적 컨텍스트. 모든 세션에서 먼저 읽을 것.
 > 전체 스펙: `docs/kinderverse-lane-infrastructure-spec-v1.0.md`
 

@@ -1,5 +1,9 @@
 # CLAUDE.md — 게임 생성 엔진(Resolver) v0.2
 
+> ⚠️ **HISTORICAL — '구현 착수 전' 청사진. 현행 아님.** Resolver는 **구현 완료**(`src/features/interactive-viewer/resolver/`, 레시피 11종 incl. `dress-up`, board/prompt.ts 배선됨). "착수하라"는 지시 따르면 완성된 작업을 재구현하게 됨.
+> 진실원: 루트 `CLAUDE.md` + `docs/{ONBOARDING,ARCHITECTURE,MODULE_REFERENCE,API_REFERENCE}.md` + 코드.
+> 옛 상태 주의: "Game Viewer v2(A) 폐기"는 **B 라인 설계 관점**일 뿐 — A(`src/game-viewer/v2/`)·B(`src/features/interactive-viewer/`) **둘 다 활성** · 파일:라인 번호는 드리프트(심볼명 기준 참조).
+
 > Interactive Viewer(B) 메커니즘 레시피 작업의 항구적 컨텍스트. 모든 세션에서 먼저 읽을 것.
 > 전체 설계: `docs/kinderverse-game-engine-spec-v0.2.md` · 근거 조사: B 생성 내부 조사(드래그 모델·결정론 꼬리·워크드 예시).
 

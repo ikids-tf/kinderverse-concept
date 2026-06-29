@@ -1,5 +1,9 @@
 # CLAUDE.md — 게임 뷰어 (재구축, v2)
 
+> ⚠️ **HISTORICAL — M0 재구축 시점 스냅샷. 현행 아님.** 이후 v2 구현 완료(resolver·11종 인터랙션·EditLayer). v1 롤백 경로 없음(이미 제거).
+> 진실원: 루트 `CLAUDE.md` + `docs/{ONBOARDING,ARCHITECTURE,MODULE_REFERENCE,API_REFERENCE}.md` + 코드.
+> 옛 상태 주의: v1 `GameSpec` **제거됨**(현행 `src/game-viewer/v2/` `InteractiveDoc`) · 게임뷰어 A·인터랙티브노드 B **둘 다 활성**(폐기 아님) · 환경 **macOS/zsh**(Windows·`D:\` 아님) · 배경제거 **briaai/RMBG-1.4(비상업)**(MIT 아님) · `@imgly`(AGPL) **금지**.
+
 ## 이 프로젝트가 뭔가
 교사가 **프롬프트·드롭·간단한 노브**로 유아용 인터랙티브 게임을 만드는 뷰어. 옛 GameSpec(템플릿 4종) 모델을 InteractiveDoc(단일 문서) 모델로 재구축한다. **읽기 전용 충돌 점검 완료 — 통합 방향 확정.**
 

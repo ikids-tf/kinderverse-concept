@@ -68,13 +68,13 @@
 - 변경 요약 + 스크린샷(있으면) 첨부.
 
 ## 7. 작업 순서
-현재 마일스톤: **M1**(디자인 토큰 · 셸 · LNB · 프롬프트바). 단계별 지시는 `docs/KICKOFF_M1.md`를 순서대로 실행.
+진행 현황: **M1~M9 완료** + 게임뷰어 v2·슬라이드·인터랙티브 노드·`/eval`·영상(Veo)까지 구현. 범위·현황의 단일 진실원은 `README.md`/`docs/ONBOARDING.md`. 초기 셋업 순서는 `docs/KICKOFF_M1.md`.
 
 ## 8. 게임 뷰어 (보드 툴바)
-게임 뷰어 작업 시 `m0-handoff/CLAUDE.md` · `PRD_TWO_LAYER_DESIGN.md` · `KICKOFF_M0.md`를 함께 읽을 것.
+게임 뷰어 참고(⚠️ 역사적 인계 — 일부 superseded, v1 GameSpec은 이미 제거): `m0-handoff/CLAUDE.md` · `m0-handoff/PRD_TWO_LAYER_DESIGN.md` · `m0-handoff/KICKOFF_M0.md`. **현행 진실원은 본 §8 + 코드 `src/game-viewer/v2/`.**
 - 코드: **`src/game-viewer/v2/`(자기완결 모듈)** + 공용 엔트리 `viewer/main.tsx`. 진입 페이지 `game-viewer.html`(Vite 멀티페이지 엔트리). 보드 임베드는 툴바 뷰어 패널의 **놀이 만들기** 프리셋(iframe `/game-viewer.html`). 엔트리·보드 임베드 계약 **불변(7곳)**.
 - **게임 플레이 화면 안쪽은 Milray Park 미적용**(아이 대면 파스텔) — `src/game-viewer/v2/theme.ts` 토큰 사용. 슬라이드 콘텐츠와 동일한 면제 대상. 단, 게임을 감싸는 **보드 카드 프레임·툴바·프롬프트바(교사용)는 Milray 유지**.
 - 핵심 결정: 런타임 코드 생성 ❌ → **단일 계약 `src/game-viewer/v2/schema/interactiveDoc.ts`**(InteractiveDoc). 생성·편집·런타임 모두 이 문서만 의존(`parseInteractiveDoc` 검증). 인터랙션 11종(tap-the-right-one·match-pair·binary-choice·connect·flip-memory·combine·categorize·order-sequence·find-it·sequence-tap·pattern-next) + 효과 3종(reveal·responsive-state·goal-state) + 고급 편집(EditLayer) + 리졸버(프롬프트→추천카드) 구현됨. (reveal은 인터랙션이 아니라 효과)
-- Provider(교체 가능): 이미지=나노바나나(`@/ai/client` `task:'image'`) → 누끼=`@/shared/background-removal`(현행 모델 briaai/RMBG-1.4, BRIA 비상업 라이선스 / BiRefNet(MIT)은 상업화 전 교체 대상·현재 미사용) → 객체분할=`@/shared/segment`(SAM). 음성=CLOVA Voice(`task:'tts'`, 키 없으면 브라우저 TTS 폴백). **`@imgly`(AGPL) 금지.** child-photo/video는 외부 API 미전송(`assertNotChildMedia`).
+- Provider(교체 가능): 이미지=나노바나나(`@/ai/client` `task:'image'`) → 누끼=`@/shared/background-removal`(현행 모델 briaai/RMBG-1.4, BRIA 비상업 라이선스 / BiRefNet(MIT)은 상업화 전 교체 대상·현재 미사용) → 객체분할=`@/shared/segment`(SlimSAM). 음성=CLOVA Voice(`task:'tts'`, 키 없으면 브라우저 TTS 폴백). **`@imgly`(AGPL) 금지.** child-photo/video는 외부 API 미전송(`assertNotChildMedia`).
 - 옛 v1 GameSpec 게임뷰어(`src/game-viewer/{schema,engine,entry,templates,assets,generate}` + `theme.ts`)는 **제거됨**(v2가 대체, git 이력 보존).
 - **★ 두 인터랙티브 시스템 구분(혼동 주의 — 여러 파일을 봐야 보이는 함정):** 이 §8의 게임뷰어(**A** = `src/game-viewer/v2/`, 계약 `InteractiveDoc`, 독립 iframe `/game-viewer.html`)와 **보드 네이티브 인터랙티브 노드**(**B** = `src/features/interactive-viewer/`, 계약 `InteractiveNode`, 보드 카드 `type:'interactive'`)는 **이름이 비슷하지만 별개 시스템**이다(메커니즘 명칭·계약·런타임 전부 다름). `docs/kinderverse-game-engine-spec-v0.2.md`·`docs/kinderverse-lane-infrastructure-spec-v1.0.md`는 **B**를 다룬다(두 문서의 "Game Viewer v2(A) 폐기"는 B 라인 설계 관점일 뿐, A 모듈은 현재도 활성). B의 '확장 내부화'(놀이 확장 사슬, `extendLane.ts`·`resolver/extend.ts`)는 **의도적 보류 인프라(데드코드 아님 — 삭제 금지)**, 부활=UI 글루 ~25줄(레인 스펙 §9).

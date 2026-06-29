@@ -1,5 +1,9 @@
 # CLAUDE.md — KinderVerse 슬라이드 기능 프로젝트 규칙
 
+> ⚠️ **HISTORICAL — 슬라이드 기능 인계 스냅샷. 현행 아님.** 실코드는 `src/features/slides/{agent,engine,viewer,schema}`. export는 **html-to-image + jsPDF + pptxgenjs**(클라이언트) — React Flow·TipTap·Puppeteer 미사용.
+> 진실원: 루트 `CLAUDE.md` + `docs/{ONBOARDING,ARCHITECTURE,MODULE_REFERENCE,API_REFERENCE}.md` + 코드.
+> 옛 상태 주의: 환경 **macOS/zsh**(Windows·`D:\` 아님) · 런타임 계약은 `src/features/slides/schema/deckspec.ts`(Zod).
+
 > 이 파일은 Claude Code가 자동으로 읽는 프로젝트 헌법이다. 여기 적힌 불변식은 협상 대상이 아니다.
 
 ## 1. 작업 환경 / 경로 규칙 (필수)
