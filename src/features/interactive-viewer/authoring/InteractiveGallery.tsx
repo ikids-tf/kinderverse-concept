@@ -11,7 +11,7 @@ import { ZoomOverlay } from '@/components/board/ZoomOverlay';
 import { newDocId, useInteractiveStore } from '../store/interactiveStore';
 import { listLibrary, removeFromLibrary } from '../store/library';
 import { composeInteractiveNode } from './composeNode';
-import { InteractiveStage } from '../runtime/InteractiveStage';
+import { renderGameFirstFrame } from '../runtime/firstFrame';
 import { InteractiveOverlay } from './InteractiveOverlay';
 
 const chromeBtn =
@@ -26,16 +26,34 @@ const REC_PROMPTS: Array<{ emoji: string; label: string; prompt: string }> = [
   { emoji: '🔊', label: '탐험·소리', prompt: '동물을 누르면 이름과 소리를 들려주는 게임 만들어줘' },
 ];
 
-/** 게임 한 칸의 살아있는 미리보기 — 스토어에서 문서를 보장하고 preview로 렌더. */
+/** 게임 한 칸의 미리보기 — 라이브 스테이지 대신 '첫 화면'을 한 장(정적 이미지)으로 구워 보여준다.
+    N개 게임을 동시에 살아있는 스테이지로 렌더하던 부담(요소·애니메이션 상시 구동)을 없앤다.
+    합성은 docId+내용 기준 캐시(firstFrame.ts) → 재열람은 즉시. 합성 실패(CORS 등) 시 배경 폴백. */
 function GalleryThumb({ id }: { id: string }) {
   const ensure = useInteractiveStore((s) => s.ensure);
   const doc = useInteractiveStore((s) => s.docs[id]);
+  const [frame, setFrame] = useState<string | undefined>();
   useEffect(() => { ensure(id); }, [id, ensure]);
-  return doc ? (
-    <InteractiveStage doc={doc} mode="play" preview />
-  ) : (
-    <div className="grid h-full w-full place-items-center text-fg-muted">불러오는 중…</div>
-  );
+  useEffect(() => {
+    if (!doc) return;
+    let alive = true;
+    setFrame(undefined);
+    void renderGameFirstFrame(doc)
+      .then((f) => { if (alive && f) setFrame(f); })
+      .catch(() => { /* 합성 실패(CORS 등) — 배경 폴백 유지 */ });
+    return () => { alive = false; };
+  }, [doc]);
+
+  // 합성 완료 전엔 배경만 즉시 보여주고(빠른 첫 페인트), 완료되면 '배경+요소' 합성 한 장으로
+  // 교체한다. 어느 경우든 라이브 스테이지는 마운트하지 않는다(가벼움).
+  const bg = doc?.canvas.background as { src?: string } | string | undefined;
+  const bgSrc =
+    bg && typeof bg === 'object' && typeof bg.src === 'string' && /^(data:|https?:|blob:)/.test(bg.src) ? bg.src : null;
+  const src = frame ?? bgSrc;
+  if (src) {
+    return <img src={src} alt="" draggable={false} loading="lazy" decoding="async" className="h-full w-full object-cover" />;
+  }
+  return <div className="grid h-full w-full place-items-center bg-surface-2 text-[11px] text-fg-muted">불러오는 중…</div>;
 }
 
 export function InteractiveGallery({ onClose }: { onClose: () => void }) {
@@ -87,9 +105,9 @@ export function InteractiveGallery({ onClose }: { onClose: () => void }) {
                 onClick={() => makeFromPrompt(p.prompt)}
                 disabled={!!busy}
                 title={p.prompt}
-                className="inline-flex items-center gap-2 rounded-pill border border-accent-soft bg-accent-soft/30 px-4 py-2 text-sm font-bold text-fg transition-colors hover:border-accent hover:bg-accent-soft/60 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-pill border border-border bg-surface px-[15px] py-2 text-[13px] font-semibold text-fg shadow-sm transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <span aria-hidden className="text-base leading-none">{p.emoji}</span> {p.label}
+                <span aria-hidden className="text-[15px] leading-none">{p.emoji}</span> {p.label}
               </button>
             ))}
           </div>
@@ -103,31 +121,38 @@ export function InteractiveGallery({ onClose }: { onClose: () => void }) {
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               {games.map((g) => (
-                <div
+                // 갤러리(자료 갤러리) 카드와 동일한 형태 — 흰 카드 + 상단 썸네일(배지·호버 액션) + 하단 제목/부제.
+                <button
                   key={g.docId}
-                  className="group relative aspect-[16/10] overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md"
+                  onClick={() => setPlayId(g.docId)}
+                  title={`${g.title || '인터랙티브'} — 재생`}
+                  className="kv-galcard group block w-full overflow-hidden rounded-2xl border border-border bg-surface text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-accent hover:shadow-md"
                 >
-                  <button onClick={() => setPlayId(g.docId)} className="absolute inset-0" title={`${g.title || '인터랙티브'} — 재생`}>
-                    <div className="pointer-events-none absolute inset-0">
-                      <GalleryThumb id={g.docId} />
-                    </div>
-                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/55 to-transparent px-3 py-2 text-left">
-                      <span className="truncate text-sm font-bold text-white">{g.title || '인터랙티브'}</span>
-                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow">
-                        <Icon name="play" size={16} fill="currentColor" stroke={0} />
-                      </span>
-                    </div>
-                  </button>
-                  {/* 삭제 — 호버 시 우상단. 목록에서만 제거(게임 문서는 보드에 남음). */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeGame(g.docId, g.title); }}
-                    className="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-full bg-black/45 text-white opacity-0 shadow transition-opacity hover:bg-accent group-hover:opacity-100"
-                    title="이 게임을 목록에서 삭제"
-                    aria-label="삭제"
-                  >
-                    <Icon name="trash" size={15} />
-                  </button>
-                </div>
+                  <div className="relative aspect-[16/10] overflow-hidden bg-surface-2">
+                    <GalleryThumb id={g.docId} />
+                    {/* 카테고리 배지(좌상단) — 갤러리 it.cat 배지와 동일 */}
+                    <span className="absolute left-2.5 top-2.5 rounded-pill bg-surface px-2.5 py-[3px] text-[10.5px] font-bold text-accent shadow-sm">게임</span>
+                    {/* 재생 배지(우하단) */}
+                    <span className="grid h-9 w-9 place-items-center rounded-full bg-accent text-on-accent shadow-md ring-2 ring-surface/70 transition-transform group-hover:scale-105 absolute bottom-2.5 right-2.5">
+                      <Icon name="play" size={15} fill="currentColor" stroke={0} />
+                    </span>
+                    {/* 삭제(우상단, 호버) — 갤러리 kv-galmax 호버 액션과 동일 */}
+                    <span
+                      className="kv-galmax absolute right-2.5 top-2.5 grid h-7 w-7 place-items-center rounded-lg bg-surface/90 shadow-sm"
+                      role="button"
+                      onClick={(e) => { e.stopPropagation(); removeGame(g.docId, g.title); }}
+                      title="이 게임을 목록에서 삭제"
+                      aria-label="삭제"
+                      style={{ color: '#D8442F' }}
+                    >
+                      <Icon name="trash" size={13} />
+                    </span>
+                  </div>
+                  <div className="px-3.5 pb-3 pt-2.5">
+                    <div className="truncate text-[14.5px] font-bold leading-tight text-fg">{g.title || '인터랙티브'}</div>
+                    <div className="mt-1 text-xs text-fg-muted">인터랙티브 게임</div>
+                  </div>
+                </button>
               ))}
             </div>
           )}
