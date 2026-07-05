@@ -393,6 +393,11 @@ function GalleryCard({ it, onOpen, onDelete, picked, selecting, onTogglePick, on
   const onDownload = (e: React.MouseEvent) => { e.stopPropagation(); void downloadItem(it); };
   const showActions = hovered || picked || selecting;
 
+  // 카드 대표 이미지 — 영상=포스터, 이미지=구운 썸네일, 웹=대표 이미지(og:image).
+  // 웹 링크는 thumb가 있으면 풀스크린과 같은 이미지를 카드에 꽉 채우고, 없을 때만 파비콘.
+  const webThumb = it.assetKind === 'web' ? it.thumb : undefined;
+  const mainImg = isVideo ? poster : isImage ? thumbSrc : webThumb;
+
   return (
     <button
       ref={ref}
@@ -403,8 +408,8 @@ function GalleryCard({ it, onOpen, onDelete, picked, selecting, onTogglePick, on
       style={{ width: '100%', display: 'block', textAlign: 'left', padding: 0, border: picked ? `2px solid ${a}` : `1px solid ${C.line}`, borderRadius: 16, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', overflow: 'hidden', boxShadow: picked ? `0 0 0 3px ${a}33, ${C.shadow1}` : C.shadow1, transition: 'transform .15s, border-color .15s, box-shadow .15s' }}
     >
       <div style={{ position: 'relative', aspectRatio: natRatio ?? it.ratio, background: C.thumb, display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
-        {(isVideo ? poster : isImage ? thumbSrc : undefined) ? (
-          <img src={isVideo ? poster : thumbSrc} alt={it.t} draggable={false} loading="lazy" decoding="async" onLoad={(e) => { const im = e.currentTarget; if (im.naturalWidth && im.naturalHeight) setNatRatio(im.naturalWidth / im.naturalHeight); }} style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: 'auto' }} />
+        {mainImg ? (
+          <img src={mainImg} alt={it.t} draggable={false} loading="lazy" decoding="async" onLoad={(e) => { const im = e.currentTarget; if (im.naturalWidth && im.naturalHeight) setNatRatio(im.naturalWidth / im.naturalHeight); }} style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: 'auto' }} />
         ) : it.assetKind === 'web' && faviconOf(it.href) ? (
           <img src={faviconOf(it.href)} alt="" width={44} height={44} style={{ borderRadius: 10 }} />
         ) : isVideo || (isImage && it.thumb) ? (
