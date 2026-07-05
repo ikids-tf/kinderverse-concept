@@ -143,10 +143,13 @@ export function rebindFrameMembership(movedIds: string[]): void {
   for (const id of movedIds) {
     const n = b.nodes[id];
     if (!n) continue;
+    const cur = n.data?.frameId as string | undefined;
+    // 마인드맵 멤버는 위치가 아니라 계층(링크)으로 소속이 정해진다 — 프레임 밖으로 끌어내도
+    // data.frameId를 유지해야 부모→자식 동반 이동이 계속 동작한다(자식 단독 이동엔 무영향).
+    if (cur && b.nodes[cur]?.data?.mindmap) continue;
     // 프레임은 '완전히 감싸는' 부모 프레임에 소속(중첩) — 자기 후손은 부모가 될 수 없다.
     // 일반 카드는 종전대로 중심점이 들어간 최상위 프레임에 소속.
     const target = n.type === 'frame' ? enclosingFrame(id) : frameOfPoint(n.x + n.w / 2, n.y + n.h / 2);
-    const cur = n.data?.frameId as string | undefined;
     if (target === cur) continue;
     const data = { ...(n.data ?? {}) };
     if (target) data.frameId = target;

@@ -7,7 +7,7 @@ import { placeTrayItem } from '@/board/tray';
 import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, attachMotionSlotCmd, type NodeSnap } from '@/board/commands';
 import { linkSequence } from '@/board/links';
 import { nearestMotionSlot } from '@/board/motionGeometry';
-import { mindMapSubtree } from '@/board/composer';
+import { linkDescendants, migrateMindMapEdges } from '@/board/composer';
 import { regenImageCard, genTextCard, spawnVideoPlayer, activityTextForVideo } from '@/board/workflow';
 import { generateVideoForViewer } from '@/board/video';
 import { getVideoAsset } from '@/board/videoAssets';
@@ -134,7 +134,11 @@ export function BoardCanvas() {
     const b = worldBox(n);
     const list = sideMap.get(nodeId)?.[side] ?? [];
     const total = list.length + 1;
-    const gap = 22 / viewport.zoom;
+    // 포트 간격 = 화면상 22px(줌 보정). 단, 연결이 많으면 부채꼴이 카드 높이를 넘어
+    // 저줌에서 선이 카드에서 떨어져 보인다 → 슬롯 전체를 카드 세로 범위(여백 12) 안으로
+    // 클램프해 선이 항상 카드 측변에 붙게 한다.
+    const desired = 22 / viewport.zoom;
+    const gap = total > 1 ? Math.min(desired, Math.max(0, b.h - 12) / (total - 1)) : desired;
     const x = side === 'l' ? b.x : b.x + b.w;
     const cy = b.y + b.h / 2;
     return Array.from({ length: total }, (_, i) => ({
@@ -151,17 +155,9 @@ export function BoardCanvas() {
     return { x: slot.x + off.dx, y: slot.y + off.dy };
   }
 
-  // Mind-map connection edges (frame.data.edges). Recompute only when nodes/order
-  // change — NOT on every drag frame (drag is local state, doesn't touch the store).
-  const edgeList = useMemo(() => {
-    const out: Array<{ from: string; to: string }> = [];
-    for (const id of order) {
-      const n = nodes[id];
-      const edges = n?.type === 'frame' ? (n.data?.edges as Array<{ from: string; to: string }> | undefined) : undefined;
-      if (Array.isArray(edges)) out.push(...edges);
-    }
-    return out;
-  }, [order, nodes]);
+  // 마인드맵 연결도 요소 링크(store.links)로 통일 — 별도 edge 선을 그리지 않는다.
+  // 옛 보드의 frame.data.edges는 로드 시 링크로 1회 이관(신규 맵은 처음부터 링크).
+  useEffect(() => { migrateMindMapEdges(); }, [order]);
 
   const [spaceDown, setSpaceDown] = useState(false);
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
@@ -197,17 +193,13 @@ export function BoardCanvas() {
   }, [size, viewport]);
 
   // Always render these regardless of the viewport: the current selection (covers
-  // the card being edited — editing starts from a click that selects it), nodes
-  // being dragged, and mind-map edge endpoints (so connection lines never dangle).
+  // the card being edited — editing starts from a click that selects it) and nodes
+  // being dragged.
   const keepIds = useMemo(() => {
     const s = new Set<string>(selection);
     for (const id of dragIds) s.add(id);
-    for (const e of edgeList) {
-      s.add(e.from);
-      s.add(e.to);
-    }
     return s;
-  }, [selection, dragIds, edgeList]);
+  }, [selection, dragIds]);
 
   const inView = (n: BoardNode | undefined): boolean => {
     if (!n) return false;
@@ -901,13 +893,13 @@ export function BoardCanvas() {
     // Mind-map hierarchy: clicking a parent card selects + moves its whole subtree
     // (center → branches → sub-branches + their images/docs), like a frame's children.
     const clicked = b.nodes[id];
-    const mmFrame =
-      clicked?.data?.role === 'mm-branch' || clicked?.data?.role === 'mm-center'
-        ? (clicked.data?.frameId as string | undefined)
-        : undefined;
+    // 마인드맵 부모(중심·가지)를 끌면 링크 그래프의 후손 전체가 따라온다 — 프레임 소속과
+    // 무관(카드가 프레임 밖에 있어도 동작). 자식(잎)을 끌면 부모는 따라오지 않는다(방향 역행 없음).
+    const isMmParent =
+      (clicked?.data?.role === 'mm-branch' || clicked?.data?.role === 'mm-center') && !e.shiftKey;
     let moveIds = ids;
-    if (mmFrame && !e.shiftKey) {
-      const subtree = [id, ...mindMapSubtree(mmFrame, id)];
+    if (isMmParent) {
+      const subtree = [id, ...linkDescendants(id)];
       ids = subtree;
       b.setSelection(subtree);
       moveIds = subtree;
@@ -1086,34 +1078,6 @@ export function BoardCanvas() {
               />
             );
           })}
-
-        {/* mind-map connection lines — above the frame bg, below the cards. Edges
-            live on the mind-map frame as data.edges = [{from,to}] node-id pairs. */}
-        <svg className="pointer-events-none absolute left-0 top-0" width="1" height="1" style={{ overflow: 'visible' }}>
-          {edgeList.map((e) => {
-            const a = nodes[e.from];
-            const z = nodes[e.to];
-            if (!a || !z) return null;
-            if (classSet && (!classSet.has(e.from) || !classSet.has(e.to))) return null;
-            const oa = drag && dragIds.includes(a.id) ? drag : { dx: 0, dy: 0 };
-            const oz = drag && dragIds.includes(z.id) ? drag : { dx: 0, dy: 0 };
-            const ah = typeof a.data?.renderH === 'number' ? a.data.renderH : a.h;
-            const zh = typeof z.data?.renderH === 'number' ? z.data.renderH : z.h;
-            return (
-              <line
-                key={`${e.from}-${e.to}`}
-                x1={a.x + oa.dx + a.w / 2}
-                y1={a.y + oa.dy + ah / 2}
-                x2={z.x + oz.dx + z.w / 2}
-                y2={z.y + oz.dy + zh / 2}
-                stroke="var(--accent)"
-                strokeWidth={2}
-                strokeLinecap="round"
-                opacity={0.45}
-              />
-            );
-          })}
-        </svg>
 
         {order
           .filter((id) => nodes[id] && nodes[id].type !== 'frame')

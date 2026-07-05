@@ -579,12 +579,6 @@ async function seedMindMap(
   });
   created.push(centerId);
 
-  const edges: Array<{ from: string; to: string }> = [];
-  const persistEdges = () => {
-    const fr = useBoardStore.getState().nodes[frameId];
-    if (fr) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(fr.data ?? {}), edges: [...edges] } });
-  };
-
   // Activity branches — rich, field-usable cards (positioned by layoutMindMap).
   const BW = 220;
   const branchIds: string[] = [];
@@ -595,7 +589,7 @@ async function seedMindMap(
       text: branchText(a), color: 'accent-soft', data: { role: 'mm-branch', frameId, activity: a },
     });
     branchIds.push(id);
-    edges.push({ from: centerId, to: id });
+    linkMindMap(centerId, id);
     created.push(id);
   });
 
@@ -607,10 +601,9 @@ async function seedMindMap(
     const id = newId('image');
     b.addNodeRaw({ id, type: 'image', x: Math.round(c.x), y: Math.round(c.y), w: 160, h: 140, loading: true, data: { role: 'mm-leaf', frameId } });
     leafIds.push(id);
-    edges.push({ from: branchIds[i], to: id });
+    linkMindMap(branchIds[i], id);
     created.push(id);
   }
-  persistEdges();
   layoutMindMap(frameId); // clean radial-tree placement, lines appear immediately
 
   // Concept images + a web 자료 node, fetched in parallel; fill the placeholders.
@@ -632,10 +625,9 @@ async function seedMindMap(
       id: wid, type: 'sticky', x: Math.round(c.x), y: Math.round(c.y), w: 340, h: 200, autoH: true, color: 'surface-2',
       data: { role: 'source', frameId, links: web.links, thumbs: web.thumbs, summary: web.summary },
     });
-    edges.push({ from: centerId, to: wid });
+    linkMindMap(centerId, wid);
     created.push(wid);
   }
-  persistEdges();
 
   useBoardStore.getState().setSelection([frameId]);
   await new Promise((r) => setTimeout(r, 260));
@@ -645,34 +637,69 @@ async function seedMindMap(
 
 /* ---------------- mind-map tree + radial layout ---------------- */
 
-type MindEdge = { from: string; to: string };
+/** 마인드맵 연결 = 보드 요소 링크(store.links)와 통일 — 별도 선(frame.data.edges)을 그리지
+    않고, 호버 시 뜨는 원형 포트로 잇고 떼며 liveLinks 곡선으로 렌더된다. 중복·자기연결은 무시. */
+function linkMindMap(from: string, to: string): void {
+  if (from === to) return;
+  const b = useBoardStore.getState();
+  if (b.links.some((l) => (l.from === from && l.to === to) || (l.from === to && l.to === from))) return;
+  b.addLinkRaw({ id: newId('link'), from, to });
+}
 
-/** parent → [child ids] map from a frame's stored edges. */
+/** parent → [child ids] map — 같은 프레임 멤버(data.frameId)끼리 이어진 요소 링크에서.
+    방향(from→to)은 생성 시 부모→자식으로 넣으므로 계층이 보존된다. */
 function childrenMap(frameId: string): Map<string, string[]> {
-  const edges = (useBoardStore.getState().nodes[frameId]?.data?.edges as MindEdge[]) ?? [];
+  const b = useBoardStore.getState();
   const m = new Map<string, string[]>();
-  for (const e of edges) {
-    if (!m.has(e.from)) m.set(e.from, []);
-    m.get(e.from)!.push(e.to);
+  for (const l of b.links) {
+    if (b.nodes[l.from]?.data?.frameId === frameId && b.nodes[l.to]?.data?.frameId === frameId) {
+      if (!m.has(l.from)) m.set(l.from, []);
+      m.get(l.from)!.push(l.to);
+    }
   }
   return m;
 }
 
-/** All descendant node ids of `id` in the mind-map tree (excludes `id` itself).
-    Used for hierarchy select/move — a parent carries its whole subtree. */
-export function mindMapSubtree(frameId: string, id: string): string[] {
-  const cm = childrenMap(frameId);
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const stack = [...(cm.get(id) ?? [])];
+/** Legacy 이관 — 옛 마인드맵 선(frame.data.edges)을 요소 링크(store.links)로 1회 변환하고
+    edges를 제거한다. 신규 맵은 처음부터 링크라 무영향. 변환이 있었으면 true. */
+export function migrateMindMapEdges(): boolean {
+  const b = useBoardStore.getState();
+  let changed = false;
+  for (const id of Object.keys(b.nodes)) {
+    const n = b.nodes[id];
+    if (n?.type !== 'frame') continue;
+    const edges = n.data?.edges as Array<{ from: string; to: string }> | undefined;
+    if (!Array.isArray(edges) || edges.length === 0) continue;
+    for (const e of edges) if (b.nodes[e.from] && b.nodes[e.to]) linkMindMap(e.from, e.to);
+    const nd = { ...(n.data ?? {}) };
+    delete nd.edges;
+    b.updateNodeRaw(id, { data: nd });
+    changed = true;
+  }
+  return changed;
+}
+
+/** id의 후손(자식·손주…) — 요소 링크 그래프의 from→to 방향만 따라 내려간다.
+    프레임 소속(data.frameId)과 무관 → 카드가 프레임 밖으로 나가도 부모→자식 동반 이동이
+    유지된다(자식을 끌면 부모는 절대 포함 안 됨: 방향 역행 안 함). 사이클 안전. */
+export function linkDescendants(id: string): string[] {
+  const b = useBoardStore.getState();
+  const out = new Map<string, string[]>(); // from → [to]
+  for (const l of b.links) {
+    if (!out.has(l.from)) out.set(l.from, []);
+    out.get(l.from)!.push(l.to);
+  }
+  const res: string[] = [];
+  const seen = new Set<string>([id]);
+  const stack = [...(out.get(id) ?? [])];
   while (stack.length) {
     const x = stack.pop()!;
     if (seen.has(x)) continue;
     seen.add(x);
-    out.push(x);
-    for (const c of cm.get(x) ?? []) stack.push(c);
+    res.push(x);
+    for (const c of out.get(x) ?? []) stack.push(c);
   }
-  return out;
+  return res;
 }
 
 /** Lay the mind map out as a clean radial tree: the center stays fixed; top-level
@@ -801,14 +828,6 @@ export async function openDocOnBoard(doc: { title: string; markdown: string }): 
   }
 }
 
-/** Append edges to a mind-map frame's edge list (re-reads fresh state). */
-function addMindMapEdges(frameId: string, more: Array<{ from: string; to: string }>): void {
-  const fr = useBoardStore.getState().nodes[frameId];
-  if (!fr) return;
-  const edges = [...((fr.data?.edges as Array<{ from: string; to: string }>) ?? []), ...more];
-  useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(fr.data ?? {}), edges } });
-}
-
 /** Effective height of a card for collision: prefer the measured renderH; for an
     unmeasured auto-height card assume a generous minimum so freshly-added siblings
     (still at their seed height) are treated as tall as they will render. */
@@ -880,18 +899,16 @@ export async function expandMindMapBranch(branchId: string): Promise<void> {
     if (subs.length === 0) return;
 
     const created: string[] = [];
-    const edges: Array<{ from: string; to: string }> = [];
     subs.forEach((a) => {
       const id = newId('sticky');
       b.addNodeRaw({
         id, type: 'sticky', x: branch.x, y: branch.y, w: 190, h: 84, autoH: true,
         text: branchText(a), color: 'surface-2', data: { role: 'mm-branch', frameId, activity: a },
       });
-      edges.push({ from: branchId, to: id });
+      linkMindMap(branchId, id);
       created.push(id);
     });
 
-    addMindMapEdges(frameId, edges);
     decorateMindMapStickers(frameId, label); // sticker the new sub-branches
     await new Promise((r) => setTimeout(r, 240)); // let cards render so heights are measured
     layoutMindMap(frameId); // re-arrange the WHOLE map cleanly — no crossing lines / overlaps
@@ -919,8 +936,8 @@ export async function worksheetFromNode(nodeId: string): Promise<void> {
     text: '✏️ 활동지를 만들고 있어요…', color: 'paper',
     data: { doc: true, role: 'worksheet', loadingDoc: true, ...(frameId ? { frameId } : {}) },
   });
-  if (frameId && Array.isArray(useBoardStore.getState().nodes[frameId]?.data?.edges)) {
-    addMindMapEdges(frameId, [{ from: nodeId, to: id }]);
+  if (frameId && useBoardStore.getState().nodes[frameId]?.data?.mindmap) {
+    linkMindMap(nodeId, id);
   }
   useBoardStore.getState().setSelection([id]);
   useBoardStore.getState().setGenerating('✏️ 활동지를 만들고 있어요…');
@@ -1269,8 +1286,8 @@ export async function planFromNode(nodeId: string): Promise<void> {
     text: '📋 계획안을 만들고 있어요…', color: 'paper',
     data: { doc: true, role: 'plan', loadingDoc: true, ...(frameId ? { frameId } : {}) },
   });
-  if (frameId && Array.isArray(useBoardStore.getState().nodes[frameId]?.data?.edges)) {
-    addMindMapEdges(frameId, [{ from: nodeId, to: id }]);
+  if (frameId && useBoardStore.getState().nodes[frameId]?.data?.mindmap) {
+    linkMindMap(nodeId, id);
   }
   useBoardStore.getState().setSelection([id]);
   useBoardStore.getState().setGenerating('📋 계획안을 만들고 있어요…');
