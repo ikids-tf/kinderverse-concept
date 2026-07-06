@@ -58,6 +58,7 @@ function buildShadowQuiz(input: RecipeInput): InteractiveNode {
   const R = rounds.length;
 
   const qId = (r: number) => `q_${r}`; // 그림자(질문)
+  const realId = (r: number) => `real_${r}`; // 정답의 실제 색깔 그림(그림자 자리, 맞히면 공개)
   const optId = (r: number, k: number) => `opt_${r}_${k}`; // 선택지
 
   // 질문(그림자) = 가운데 위 크게. 선택지 = 아래 가로줄(라운드마다 같은 자리, 하나만 보임).
@@ -66,26 +67,30 @@ function buildShadowQuiz(input: RecipeInput): InteractiveNode {
   const OPT_SIZE = 200;
 
   // 라운드별 선택지 순서를 미리 정한다(요소·행동 두 루프가 동일 배열을 쓰게 — 발산 방지).
+  // qc = 라운드 시작 시 보이는 것(그림자+선택지), real = 정답 시 그림자 자리에 나타나는 색깔 그림.
   const plan = rounds.map((rd, i) => {
     const opts: RecipeItem[] = [{ label: rd.answer, correct: true, speak: rd.speak }, ...rd.distractors.map((l) => ({ label: l }))];
     const n = opts.length;
     const rot = i % n; // 라운드마다 정답 위치를 회전(정답이 늘 첫 칸이 아니게)
     const ordered = Array.from({ length: n }, (_, k) => opts[(k + rot) % n]);
     const tfs = rowTransforms(n, { y: OPT_Y, size: OPT_SIZE, z: 8 });
-    const ids = [qId(i + 1), ...ordered.map((_, k) => optId(i + 1, k + 1))];
-    return { ordered, tfs, ids };
+    const qc = [qId(i + 1), ...ordered.map((_, k) => optId(i + 1, k + 1))];
+    return { ordered, tfs, qc, real: realId(i + 1), all: [...qc, realId(i + 1)] };
   });
 
   const elements: ElementNode[] = [textEl(TITLE, input.title, { x: 280, y: 26, w: 720, h: 64, z: 20 })];
   plan.forEach((p, i) => {
     const r = i + 1;
     elements.push(shadowImageEl(qId(r), rounds[i].answer, QBOX)); // 그림자 = 정답의 실루엣
+    // 정답 색깔 그림 — 그림자와 '같은 라벨(gen:)'이라 fillShadowImages 가 같은 원본을 공유(형태 일치).
+    //  그림자 위(z↑)에 겹쳐 두고 시작 시 숨김 → 맞히면 공개되어 '그림자가 색으로 채워지는' 연출.
+    elements.push(imageEl(realId(r), rounds[i].answer, { ...QBOX, z: 13 }));
     p.ordered.forEach((op, k) => elements.push(imageEl(optId(r, k + 1), op.label, p.tfs[k])));
   });
   elements.push(textEl(WIN, '잘했어요! 🎉', { x: 390, y: 250, w: 500, h: 110, z: 50 }));
 
-  // 시작 — 첫 문제만 보이게(2번 이후 문제 + 승리 숨김) + 도입 안내.
-  const hideStart = [WIN, ...plan.slice(1).flatMap((p) => p.ids)];
+  // 시작 — 첫 문제의 그림자+선택지만 보이게. 모든 정답 색깔 그림 + 2번 이후 문제 + 승리는 숨김.
+  const hideStart = [WIN, ...plan.map((p) => p.real), ...plan.slice(1).flatMap((p) => p.qc)];
   const behaviors: Behavior[] = [
     onHide('hidestart', TITLE, 'sceneEnter', hideStart),
     onSpeak('intro', TITLE, 'sceneEnter', input.introText ?? DEFAULT_INTRO['shadow-quiz'], { delay: 600 }),
@@ -97,17 +102,23 @@ function buildShadowQuiz(input: RecipeInput): InteractiveNode {
       const id = optId(r, k + 1);
       const kk = k + 1;
       if (op.correct) {
-        // 정답 — 세기 → 키우기 → 칭찬 → (이 문제 숨기고 다음 공개 / 마지막이면 완료).
+        // 정답 — 세기 → 선택지 키우기 → ★그림자 자리에 실제 색깔 그림 공개(그림자→컬러) + 팝 액션
+        //   → 칭찬 → (이 문제 숨기고 다음 공개 / 마지막이면 완료).
         behaviors.push(onCount(`pick_${r}_${kk}`, id, 'tap', CNT, 1, { then: [`grow_${r}`] }));
-        behaviors.push(onAnimate(`grow_${r}`, id, 'afterComplete', 'grow', { then: [`say_${r}`] }));
-        behaviors.push(onSpeak(`say_${r}`, id, 'afterComplete', op.speak ?? '딩동댕! 바로 이 친구예요!', { then: [`adv_${r}`] }));
+        behaviors.push(onAnimate(`grow_${r}`, id, 'afterComplete', 'grow', { then: [`fill_${r}`] }));
+        // 그림자가 실제 객체로 채워짐 — 색깔 그림을 공개하고(fadeIn) 그림자는 숨긴 뒤 통통 튀는 성공 액션.
+        behaviors.push(onReveal(`fill_${r}`, realId(r), 'afterComplete', [realId(r)], { then: [`fadein_${r}`] }));
+        behaviors.push(onAnimate(`fadein_${r}`, realId(r), 'afterComplete', 'fadeIn', { then: [`hidesh_${r}`] }));
+        behaviors.push(onHide(`hidesh_${r}`, qId(r), 'afterComplete', [qId(r)], { then: [`pop_${r}`] }));
+        behaviors.push(onAnimate(`pop_${r}`, realId(r), 'afterComplete', 'bounce', { then: [`say_${r}`] }));
+        behaviors.push(onSpeak(`say_${r}`, realId(r), 'afterComplete', op.speak ?? '딩동댕! 바로 이 친구였어요!', { then: [`adv_${r}`] }));
         if (r < R) {
-          // 자동 진행 — 잠깐(0.8s) 칭찬을 보고 이 문제 숨김 → 다음 문제 공개.
-          behaviors.push(onHide(`adv_${r}`, id, 'afterComplete', p.ids, { delay: 800, then: [`next_${r}`] }));
-          behaviors.push(onReveal(`next_${r}`, qId(r + 1), 'afterComplete', plan[i + 1].ids));
+          // 자동 진행 — 잠깐(1.3s) 색깔 그림·칭찬을 충분히 보고 이 문제(그림자·선택지·색깔그림) 숨김 → 다음 문제 공개.
+          behaviors.push(onHide(`adv_${r}`, realId(r), 'afterComplete', p.all, { delay: 1300, then: [`next_${r}`] }));
+          behaviors.push(onReveal(`next_${r}`, qId(r + 1), 'afterComplete', plan[i + 1].qc));
         } else {
-          // 마지막 문제 — 문제 숨김 → 완료 축하.
-          behaviors.push(onHide(`adv_${r}`, id, 'afterComplete', p.ids, { delay: 800, then: ['showwin'] }));
+          // 마지막 문제 — 색깔 그림을 잠깐 보여 준 뒤 문제 숨김 → 완료 축하.
+          behaviors.push(onHide(`adv_${r}`, realId(r), 'afterComplete', p.all, { delay: 1300, then: ['showwin'] }));
         }
       } else {
         // 오답 — 흔들고 교정 한마디(그림자를 다시 잘 보게).
