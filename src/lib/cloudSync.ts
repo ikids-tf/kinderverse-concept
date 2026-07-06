@@ -8,12 +8,15 @@
  *
  * 시작 시(이 함수, main.tsx에서 렌더 전 await):
  *   1) 클라우드의 모든 행을 받아 로컬에 적용(raw 세터 — 미러 루프 안 탐). cloud=공유 진실.
+ *      단, 신선도 가드: 로컬 마지막 쓰기(cloud.ts의 기기-로컬 맵)가 클라우드 updated_at보다
+ *      최신이면 그 키는 덮지 않고 로컬 값을 역푸시한다 — 디바운스 창 리로드로 push가 유실됐을 때
+ *      옛 스냅샷이 라이브러리를 롤백하던 문제의 2차 방어(1차는 cloud.ts의 flushPendingPushes).
  *   2) 구버전 키(prefix 없는 boards:* 등)는 알맞은 로컬 위치로 1회 이관(하위호환).
  *   3) 클라우드에 아직 없는 로컬 항목은 올린다(기존 로컬 자료 최초 이관).
  * 자격증명 없으면 즉시 반환(no-op).
  */
 import { isCloudEnabled } from './supabase';
-import { cloudList, cloudPushNow } from './cloud';
+import { cloudList, cloudPushNow, isLocalNewerThan } from './cloud';
 import { rawLocalSet, isMirroredKey } from './cloudMirror';
 import { idbSetRaw, idbGet, idbKeys } from '@/board/idb';
 
@@ -43,14 +46,45 @@ function nonEmpty(v: unknown): boolean {
 export async function initCloudSync(timeoutMs = 9000): Promise<void> {
   if (!isCloudEnabled()) return;
   const work = (async () => {
-    // 1) 클라우드 전체 → 로컬 적용
+    // 1) 클라우드 전체 → 로컬 적용(신선도 가드: 로컬이 더 최신인 키는 덮지 않고 역푸시)
     const rows = await cloudList();
     const cloudHas = new Set(rows.map((r) => r.k));
-    for (const { k, v } of rows) {
+    for (const { k, v, updated_at } of rows) {
       try {
-        if (k.startsWith('ls:')) rawLocalSet(k.slice(3), toStr(v));
-        else if (k.startsWith('idb:')) await idbSetRaw(k.slice(4), v);
-        else if (LEGACY_LS[k]) rawLocalSet(LEGACY_LS[k], toStr(v));
+        if (k.startsWith('ls:')) {
+          const lsKey = k.slice(3);
+          if (isLocalNewerThan(k, updated_at)) {
+            const raw = localStorage.getItem(lsKey);
+            if (raw != null && raw.length > 0) {
+              let parsed: unknown = raw;
+              try {
+                parsed = JSON.parse(raw);
+              } catch {
+                /* 비-JSON 값은 문자열 그대로 */
+              }
+              if (nonEmpty(parsed)) {
+                // eslint-disable-next-line no-console
+                console.warn('[cloudSync] 로컬이 더 최신 — pull 생략·역푸시:', k);
+                void cloudPushNow(k, parsed); // 렌더를 막지 않게 fire-and-forget
+                continue;
+              }
+            }
+            /* 로컬 실물이 비어 있으면(쓰기 기록만 남은 경우) 가드 해제 → 아래로 진행해 클라우드 값 적용 */
+          }
+          rawLocalSet(lsKey, toStr(v));
+        } else if (k.startsWith('idb:')) {
+          const idbKey = k.slice(4);
+          if (isLocalNewerThan(k, updated_at)) {
+            const local = await idbGet<unknown>(idbKey);
+            if (nonEmpty(local)) {
+              // eslint-disable-next-line no-console
+              console.warn('[cloudSync] 로컬이 더 최신 — pull 생략·역푸시:', k);
+              void cloudPushNow(k, local);
+              continue;
+            }
+          }
+          await idbSetRaw(idbKey, v);
+        } else if (LEGACY_LS[k]) rawLocalSet(LEGACY_LS[k], toStr(v));
         else if (LEGACY_IDB[k]) await idbSetRaw(LEGACY_IDB[k], v);
       } catch {
         /* 한 항목 실패는 건너뛴다 */

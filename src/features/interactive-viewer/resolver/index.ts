@@ -13,6 +13,7 @@ import { branchChoose, combine, tapSelect } from './recipes/combos';
 import { slotFill, sortToBin } from './recipes/dragSort';
 import { freeCreate, memoryFlip } from './recipes/freeCreate';
 import { dressUp } from './recipes/dressUp';
+import { shadowQuiz } from './recipes/quiz';
 
 export type { MechanismId, Recipe, RecipeInput, RecipeItem, RecipeBin, RecipePair, BuildResult } from './recipeTypes';
 
@@ -29,6 +30,7 @@ export const RECIPES: Partial<Record<MechanismId, Recipe>> = {
   'free-create': freeCreate,
   'memory-flip': memoryFlip,
   'dress-up': dressUp,
+  'shadow-quiz': shadowQuiz,
 };
 
 export function getRecipe(id: MechanismId): Recipe | undefined {

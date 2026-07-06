@@ -22,8 +22,9 @@ function writeAll(all: Record<string, TeacherCard>): void {
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(KEY, JSON.stringify(all)); // localStorage 미러가 클라우드로 동기화
-  } catch {
-    /* quota — 무시 */
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[game-cards] 저장 실패(quota) — 교사 카드가 저장되지 않았다:', e);
   }
 }
 

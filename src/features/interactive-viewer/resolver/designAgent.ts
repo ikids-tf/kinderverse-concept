@@ -45,24 +45,39 @@ export interface TeacherCard {
 
 export interface DesignedGame {
   mechanism: MechanismId;
-  /** 레시피 입력 '내용'(docId 제외) — assembleAndPlace 로 결정론 조립. */
-  input: Content;
+  /** 레시피 입력 '내용'(docId 제외) — assembleAndPlace 로 결정론 조립.
+      null = '부분 설계'(내용 정규화만 실패) — 호출부(runFullCreation)가 내용은 fillSlots/resolveIntent 로
+      충전하되 card 는 에이전트 것을 살린다(P0-2 — 카드까지 통째로 버리던 손실 방지). */
+  input: Content | null;
   card: TeacherCard;
 }
 
 /* ──────────────── 캐시(프롬프트 단위 — 한도·비용 절약) ──────────────── */
-const CACHE_KEY = 'kv:resolver:design:v1';
+// v2: 항목을 {v, t}로 래핑해 24h TTL — 옛 v1(영구 캐시)은 버린다(프롬프트를 고쳐도 옛 설계가 영영 나오던 문제).
+const CACHE_KEY = 'kv:resolver:design:v2';
+/** 시스템 프롬프트·출력 계약이 바뀔 때 올린다 — 캐시 키 프리픽스로 박혀 옛 설계를 자동 무효화. */
+const DESIGN_PROMPT_VER = 'v2';
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** 같은 세션에서 같은 프롬프트 재요청 = "다시 만들어줘" 신호 — 2회째부터는 캐시를 건너뛰고 새로 설계한다. */
+const sessionSeen = new Set<string>();
+
+interface CacheEntry {
+  v: DesignedGame;
+  t: number;
+}
 function cacheGet(k: string): DesignedGame | null {
   try {
-    return (JSON.parse(localStorage.getItem(CACHE_KEY) ?? '{}') as Record<string, DesignedGame>)[k] ?? null;
+    const e = (JSON.parse(localStorage.getItem(CACHE_KEY) ?? '{}') as Record<string, CacheEntry>)[k];
+    if (!e || typeof e.t !== 'number' || Date.now() - e.t > CACHE_TTL_MS) return null;
+    return e.v ?? null;
   } catch {
     return null;
   }
 }
 function cacheSet(k: string, v: DesignedGame): void {
   try {
-    const all = JSON.parse(localStorage.getItem(CACHE_KEY) ?? '{}') as Record<string, DesignedGame>;
-    all[k] = v;
+    const all = JSON.parse(localStorage.getItem(CACHE_KEY) ?? '{}') as Record<string, CacheEntry>;
+    all[k] = { v, t: Date.now() };
     localStorage.setItem(CACHE_KEY, JSON.stringify(all));
   } catch {
     /* quota — 캐시 생략 */
@@ -74,13 +89,14 @@ const MECH_SPEC = `[고를 수 있는 놀이 방식 — 정확히 하나만 mech
 - sequence-order : 정해진 순서대로 탭하며 세기(1,2,3…). content.items=순서대로 셀 대상들, content.actorLabel=세어 주는 캐릭터.
 - path-trace     : 캐릭터를 길 따라 목표까지 데려가기. content.actorLabel=움직일 캐릭터, content.goalLabel=목표 지점, content.items=길 위 디딤돌(선택).
 - pair-match     : 어울리는 둘을 연결. content.pairs=[{left,right}] (예: 동물-새끼, 사물-그림자).
-- tap-select     : 여럿 중 정답만 골라 탭(찾기·고르기). content.items=[{label,correct}] — 정답은 correct:true, 헷갈리는 오답은 correct 생략.
+- tap-select     : 여럿 중 정답만 골라 탭(찾기·고르기). content.items=[{label,correct}] — 정답은 correct:true, 헷갈리는 오답(전체의 1/3 이상 반드시 섞기)은 correct 생략.
 - branch-choose  : 상황에서 옳은 선택 고르기(안전·생활습관). content.items=[{label,correct,speak}](정답 1개만 correct:true, 오답은 speak로 반응), content.goalLabel=정답일 때 보여줄 결과.
 - combine        : A+B를 합쳐 C 만들기(색 섞기·자연 변화·요리). content.items=[{label:A},{label:B}], content.goalLabel=결과 C.
 - sort-to-bin    : 끌어서 정답 통에 분류. content.bins=[{key,label}](2~3통), content.items=[{label,binKey}](각 통에 고르게).
 - slot-fill      : 끌어서 빈칸 채우기(분류와 같은 형식). content.bins, content.items[binKey].
 - free-create    : 캐릭터 꾸미기(승패 없는 열린 놀이). content.actorLabel=꾸밀 주인공(예: 토끼), content.bins=[{key,label}] 꾸밀 부위 카테고리(머리 위→아래 순, 예: 모자·목도리·신발, 2~3개), content.items=[{label,binKey}] 각 부위의 선택지(예: 빨간 모자·파란 모자, binKey=부위). 아이가 팔레트에서 골라 캐릭터에 입힌다.
-- memory-flip    : 카드를 뒤집어 그림 공개·세기. content.items=[{label}] — 카드에 그릴 그림들.`;
+- memory-flip    : 카드를 뒤집어 그림 공개·세기. content.items=[{label}] — 카드에 그릴 그림들.
+(전 방식 공통) content.introText(놀이를 여는 안내)·winText(완료 축하)·wrongText(오답 교정)를 유아어 존댓말 해요체로 채운다. items[].speak 는 오답엔 교정 대사, 정답엔 칭찬 대사를 넣기를 권장.`;
 
 function system(): string {
   const role = `너는 킨더버스 Tier1 '게임 디자인' 에이전트다. 교사의 한국어 요청을 받아 유아 인터랙티브 놀이를 '설계'한다.
@@ -110,7 +126,8 @@ ${MECH_SPEC}
     "items": [{ "label": "사과", "correct": true, "binKey": "b1", "speak": "" }],
     "bins": [{ "key": "b1", "label": "과일" }],
     "pairs": [{ "left": "엄마 곰", "right": "아기 곰" }],
-    "actorLabel": "", "goalLabel": "", "sceneDesc": ""
+    "actorLabel": "", "goalLabel": "", "sceneDesc": "",
+    "introText": "<놀이를 여는 안내 한 문장>", "winText": "<모두 해냈을 때 축하 한 문장>", "wrongText": "<오답을 다독이는 한 문장>"
   },
   "teacherCard": {
     "intro": "<도입 발문>",
@@ -135,6 +152,8 @@ const strList = (v: unknown, cap: number): string[] =>
 function items(v: unknown): { label: string; correct?: boolean; binKey?: string; speak?: string }[] {
   return arr(v)
     .map((it) => {
+      // P0-2: LLM이 ["사과","배"] 처럼 문자열 배열로 줘도 수용(전량 드롭 → 폴백 강등 방지).
+      if (typeof it === 'string') return it.trim() ? { label: it.trim() } : null;
       const o = it as Record<string, unknown>;
       const label = str(o.label);
       if (!label) return null;
@@ -151,6 +170,11 @@ function items(v: unknown): { label: string; correct?: boolean; binKey?: string;
 function pairs(v: unknown): { left: string; right: string }[] {
   return arr(v)
     .map((p) => {
+      // P0-2: "엄마 곰-아기 곰" / "A→B" 문자열 형태도 수용.
+      if (typeof p === 'string') {
+        const parts = p.split(/\s*(?:→|->|-)\s*/).filter(Boolean);
+        return parts.length >= 2 ? { left: parts[0].trim(), right: parts[1].trim() } : null;
+      }
       const o = p as Record<string, unknown>;
       const l = str(o.left);
       const r = str(o.right);
@@ -161,29 +185,48 @@ function pairs(v: unknown): { left: string; right: string }[] {
 
 /**
  * 메커니즘별로 필요한 content 만 추려 안전한 Content 를 만든다. 최소 불변 미달이면 null
- * (→ 호출부가 결정론 폴백). 레시피의 최종 buildRecipe+safeParse 가 한 번 더 막는다(이중 바닥).
+ * (→ 호출부가 결정론 폴백. 단 card 는 designGame 의 부분 반환으로 살아남는다).
+ * 레시피의 최종 buildRecipe+safeParse 가 한 번 더 막는다(이중 바닥).
  */
-function toContent(mech: MechanismId, title: string, sceneDesc: string | null, c: Record<string, unknown>): Content | null {
+function toContent(mech: MechanismId, title: string, sceneDesc: string | null, c: Record<string, unknown>, age: 3 | 4 | 5): Content | null {
   const its = items(c.items);
   const prs = pairs(c.pairs);
   const scene = sceneDesc ?? undefined;
-  const base = { title, sceneDesc: scene };
+  const base = {
+    title,
+    sceneDesc: scene,
+    // P1-1 대사 계약 — 레시피가 onSpeak 로 배선한다(비면 레시피의 메커니즘별 기본 문구가 바닥).
+    introText: str(c.introText) ?? undefined,
+    winText: str(c.winText) ?? undefined,
+    wrongText: str(c.wrongText) ?? undefined,
+  };
+  // P1-4: 연령-깊이 정합 — 만5인데 항목이 5개 미만이면 null(폴백 difficulty()가 8~12로 채움).
+  // 항목 수가 곧 난이도인 메커니즘에만 적용(combine=항상 2개, path-trace=디딤돌 장식 등은 제외).
+  const tooFewFor5 = (n: number) => age === 5 && n < 5;
 
   switch (mech) {
     case 'sequence-order': {
       const list = its.slice(0, 12);
-      if (list.length < 2) return null;
+      if (list.length < 2 || tooFewFor5(list.length)) return null;
       return { ...base, actorLabel: str(c.actorLabel) ?? '다람쥐', items: list };
     }
     case 'tap-select': {
       const list = its.slice(0, 12);
-      if (list.length < 2) return null;
-      if (!list.some((i) => i.correct)) list.forEach((i) => (i.correct = true)); // 정답 표시 없으면 '모두 찾기'
+      if (list.length < 2 || tooFewFor5(list.length)) return null;
+      if (!list.some((i) => i.correct)) {
+        // P1-2: 정답 미표시 → '모두 찾기'로 두되, 4개 이상이면 마지막 1~2개를 오답으로 남겨
+        // '다 누르면 이기는' 퇴화를 막는다(LLM이 correct 를 명시했으면 그대로 존중).
+        list.forEach((i) => (i.correct = true));
+        if (list.length >= 4) {
+          const off = list.length >= 8 ? 2 : 1;
+          for (let k = list.length - off; k < list.length; k++) delete list[k].correct;
+        }
+      }
       return { ...base, items: list };
     }
     case 'memory-flip': {
       const list = its.slice(0, 10);
-      return list.length >= 2 ? { ...base, items: list } : null;
+      return list.length >= 2 && !tooFewFor5(list.length) ? { ...base, items: list } : null;
     }
     case 'path-trace':
       return {
@@ -193,7 +236,7 @@ function toContent(mech: MechanismId, title: string, sceneDesc: string | null, c
         items: its.length ? its.slice(0, 5) : Array.from({ length: 3 }, () => ({ label: '징검돌' })),
       };
     case 'pair-match': {
-      const list = prs.slice(0, 5);
+      const list = prs.slice(0, 8); // P1-4: 5→8 — 만5 심화 허용(연령 지시 7~10과의 모순 해소)
       return list.length >= 1 ? { ...base, pairs: list } : null;
     }
     case 'free-create': {
@@ -218,9 +261,11 @@ function toContent(mech: MechanismId, title: string, sceneDesc: string | null, c
       return prs2.length >= 1 ? { ...base, pairs: prs2 } : null;
     }
     case 'branch-choose': {
-      const list = its.slice(0, 4);
+      const list = its.slice(0, 5); // P1-4: 4→5(180px 선택지 5개 = 900px — rowTransforms 캔버스 안)
       if (list.length < 2) return null;
-      if (!list.some((i) => i.correct)) list[0].correct = true;
+      // P1-2: 정답 미표시면 첫 항목을 임의 지정하지 않고 폴백(fillSemantic 이 correct 지시를 명시해
+      // 재획득) — 안전·생활습관 게임의 '틀린 정답' 차단.
+      if (!list.some((i) => i.correct)) return null;
       return { ...base, items: list, goalLabel: str(c.goalLabel) ?? undefined };
     }
     case 'combine': {
@@ -244,7 +289,7 @@ function toContent(mech: MechanismId, title: string, sceneDesc: string | null, c
         label: it.label,
         binKey: it.binKey && keys.has(it.binKey) ? it.binKey : bins[i % bins.length].key, // 미지정/오류 → 순환
       }));
-      if (list.length < 2) return null;
+      if (list.length < 2 || tooFewFor5(list.length)) return null;
       return { ...base, bins, items: list };
     }
     default:
@@ -262,9 +307,15 @@ function clampAge(v: unknown): 3 | 4 | 5 {
  * onBusy 로 진행 메시지(프롬프트바 스트리밍)를 흘린다.
  */
 export async function designGame(prompt: string, onBusy?: (m: string | null) => void): Promise<DesignedGame | null> {
-  const key = prompt.trim();
-  const cached = cacheGet(key);
-  if (cached) return cached;
+  // 키에 프롬프트 버전을 박아 계약이 바뀌면 옛 캐시가 자동 무효화된다.
+  const key = `${DESIGN_PROMPT_VER}|${prompt.trim()}`;
+  // 같은 세션 두 번째 동일 프롬프트 = "다시 해도 똑같다" 방지 — 캐시를 건너뛰고 새로 설계.
+  const rerun = sessionSeen.has(key);
+  sessionSeen.add(key);
+  if (!rerun) {
+    const cached = cacheGet(key);
+    if (cached && cached.input) return cached; // 부분 설계(input null)는 캐시하지 않지만 방어적으로 확인
+  }
 
   onBusy?.('🧠 놀이를 교육적으로 설계하는 중…');
   const ask = (provider: 'auto' | 'gemini') =>
@@ -277,28 +328,37 @@ export async function designGame(prompt: string, onBusy?: (m: string | null) => 
       system: system(),
       messages: [{ role: 'user', content: `교사 요청: "${prompt}". 위 형식의 설계 JSON 하나만 출력.` }],
       meta: { kind: 'game_design' },
-      maxTokens: 1600,
+      // P0-2: 1600이면 만5 심화(항목 10+ · 카드 전 필드 · 대사 계약)에서 JSON이 중간에 잘려
+      // 파싱 실패 → 폴백 강등이 잦았다. 설계 JSON 최대치를 여유 있게 덮는 값.
+      maxTokens: 4000,
     });
   // 한 프로바이더가 막혀도(예: Anthropic 한도) 다른 쪽으로.
   let res = await ask('auto');
   if (!res.ok || res.mocked || !res.text) res = await ask('gemini');
-  if (!res.ok || res.mocked || !res.text) return null;
+  if (!res.ok || res.mocked || !res.text) {
+    // eslint-disable-next-line no-console -- 무언 폴백 방지: 강등 원인을 콘솔에 남긴다(P0-2)
+    console.warn('[designGame] fail: provider', { ok: res.ok, mocked: res.mocked });
+    return null;
+  }
 
   let raw: Record<string, unknown>;
   try {
     raw = (extractJson(res.text) ?? {}) as Record<string, unknown>;
   } catch {
+    // eslint-disable-next-line no-console -- 무언 폴백 방지(P0-2)
+    console.warn('[designGame] fail: parse', res.text.slice(0, 160));
     return null;
   }
 
   const mech = str(raw.mechanism) as MechanismId | null;
-  if (!mech || !implementedMechanisms().includes(mech)) return null;
+  if (!mech || !implementedMechanisms().includes(mech)) {
+    // eslint-disable-next-line no-console -- 무언 폴백 방지(P0-2)
+    console.warn('[designGame] fail: mech', raw.mechanism);
+    return null;
+  }
 
   const title = (str(raw.title) ?? prompt.trim().slice(0, 30)) || '인터랙티브';
   const sceneDesc = str((raw.content as Record<string, unknown>)?.sceneDesc) ?? str(raw.theme);
-  const content = toContent(mech, title, sceneDesc, (raw.content as Record<string, unknown>) ?? {});
-  if (!content) return null;
-
   const age = clampAge(raw.age);
   const tc = (raw.teacherCard ?? {}) as Record<string, unknown>;
   const domains = strList(raw.domains, 3).filter((d) => NURI.includes(d));
@@ -314,6 +374,15 @@ export async function designGame(prompt: string, onBusy?: (m: string | null) => 
     extensions: strList(tc.extensions, 4),
     assessment: str(tc.assessment) ?? '놀이에 관심을 보이며 끝까지 참여하는지 관찰한다.',
   };
+
+  const content = toContent(mech, title, sceneDesc, (raw.content as Record<string, unknown>) ?? {}, age);
+  if (!content) {
+    // P0-2: 내용 정규화만 실패 — 메커니즘·교사 카드는 살려 '부분 설계'로 반환(호출부가 내용을
+    // fillSlots/resolveIntent 로 충전). 부분 설계는 캐시하지 않는다(다음 요청엔 온전한 설계 기회).
+    // eslint-disable-next-line no-console -- 무언 폴백 방지(P0-2)
+    console.warn('[designGame] fail: content', mech);
+    return { mechanism: mech, input: null, card };
+  }
 
   const designed: DesignedGame = { mechanism: mech, input: content, card };
   cacheSet(key, designed);

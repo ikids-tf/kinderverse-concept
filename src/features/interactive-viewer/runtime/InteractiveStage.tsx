@@ -407,6 +407,10 @@ export function InteractiveStage({
     countersRef.current = c;
     flagsRef.current = f;
     seqIndexRef.current = 0;
+    lastTapRef.current = {};
+    chainBusyRef.current.clear();
+    wrongSpeakAtRef.current = 0;
+    wrongDropRef.current = 0;
     moveOffset.current = {};
     flipRef.current = {};
     // moveAlongPath 의 fill:forwards/커밋된 transform 잔상까지 비워 액터를 '시작 위치'로 확실히 원복
@@ -442,6 +446,13 @@ export function InteractiveStage({
     [doc.behaviors, linkLabels],
   );
   const seqIndexRef = useRef(0);
+  // 입력 안정 가드 — 일반 tap 요소별 400ms 쿨다운(연타 이중발화 방지) + moveAlongPath 체인 실행 중
+  // 잠금 Set(이동 중 새 탭이 겹쳐 애니메이션·카운터가 레이스하지 않게). 오답 교정 speak는 1.5s
+  // 스로틀 1개로 남발을 막고, 오답 드롭 누적 3회면 올바른 통을 bounce로 넌지시 알려준다.
+  const lastTapRef = useRef<Record<string, number>>({});
+  const chainBusyRef = useRef<Set<string>>(new Set());
+  const wrongSpeakAtRef = useRef(0);
+  const wrongDropRef = useRef(0);
 
   // 수집형(줍기/찾기) 게임 감지 — 액터(moveAlongPath 대상)가 아이템들(tap/sequenceTap)로 이동해 줍는 구조.
   // (분류 게임은 아이템 자신이 이동하므로 playIds 가 비어 제외된다.)
@@ -566,8 +577,10 @@ export function InteractiveStage({
           beh.params.targets.forEach((t) => (n[t] = false));
           return n;
         });
-        // 조건부로 '시작 시 숨겨둔' 요소(=승리 오버레이)를 보이면 = 게임 완료(비순서 게임의 완료 신호).
-        if (beh.when && beh.params.targets.some((t) => hiddenAtStartIds.has(t))) {
+        // '시작 시 숨겨둔' 요소(=승리 오버레이)를 보이면 = 게임 완료(비순서 게임의 완료 신호).
+        // when 조건이 이 behavior가 아니라 then 체인 '상류'에 있는 생성 경로(compose 등)도 있어
+        // beh.when 유무는 따지지 않는다 — hiddenAtStartIds 포함 여부만으로 판정(완료 침묵 해소).
+        if (beh.params.targets.some((t) => hiddenAtStartIds.has(t))) {
           const token = runToken.current;
           window.setTimeout(() => { if (token === runToken.current) fireComplete(); }, 700);
         }
@@ -613,13 +626,18 @@ export function InteractiveStage({
         setBubbles((b) => ({ ...b, [beh.target]: text }));
         speakText(text);
         const token = runToken.current;
-        await sleep(Math.min(5000, Math.max(1600, text.length * 130)));
-        if (token === runToken.current)
+        // 말풍선 제거는 타이머로만(fire-and-forget) — 여기서 기다리면 then 체인·완료 판정이 최대
+        // 5초 멈춘다. 표시 시간은 기존과 동일(연출 유지, '대기'만 제거). 같은 대상에 새 말풍선이
+        // 겹쳐 발화되면(체인 끝 speak 등) 뒤에 온 말풍선은 지우지 않는다(조기 삭제 방지).
+        window.setTimeout(() => {
+          if (token !== runToken.current) return;
           setBubbles((b) => {
+            if (b[beh.target] !== text) return b;
             const n = { ...b };
             delete n[beh.target];
             return n;
           });
+        }, Math.min(5000, Math.max(1600, text.length * 130)));
         return;
       }
       case 'playVideo': {
@@ -725,23 +743,33 @@ export function InteractiveStage({
         await sleep(beh.delay);
         if (token !== runToken.current) return;
       }
-      await applyAction(beh);
-      if (token !== runToken.current) return;
-      for (const t of beh.then ?? []) {
+      // moveAlongPath 체인 잠금 — 시각 이동이 실행 중인 대상을 Set에 기록해, onElClick(일반 tap)이
+      // 이동이 끝날 때까지 새 탭을 받지 않게 한다(이중발화로 애니메이션이 겹쳐 위치가 튀는 레이스 차단).
+      // drag-sort 아이템의 moveAlongPath는 시각 이동이 없어(applyAction에서 생략) 잠그지 않는다.
+      // 발화 자체는 막지 않는다 — 순서(sequenceTap) 수집 게임의 연속 진행을 깨지 않기 위해.
+      const lockId = beh.action === 'moveAlongPath' && !dragSortBeh[beh.target] ? beh.target : null;
+      if (lockId) chainBusyRef.current.add(lockId);
+      try {
+        await applyAction(beh);
         if (token !== runToken.current) return;
-        await fireBehavior(t, depth + 1);
-      }
-      // afterComplete 트리거 — 이 동작 완료를 기다리던 동작들 발화.
-      for (const ac of doc.behaviors) {
-        if (ac.trigger === 'afterComplete' && ac.after === beh.id) {
+        for (const t of beh.then ?? []) {
           if (token !== runToken.current) return;
-          await fireBehavior(ac.id, depth + 1);
+          await fireBehavior(t, depth + 1);
         }
+        // afterComplete 트리거 — 이 동작 완료를 기다리던 동작들 발화.
+        for (const ac of doc.behaviors) {
+          if (ac.trigger === 'afterComplete' && ac.after === beh.id) {
+            if (token !== runToken.current) return;
+            await fireBehavior(ac.id, depth + 1);
+          }
+        }
+      } finally {
+        if (lockId) chainBusyRef.current.delete(lockId);
       }
     },
     // applyAction/evalCond는 최신 doc/state 클로저 — doc.behaviors 바뀔 때만 갱신.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc.behaviors, doc.connections, doc.elements, swapped],
+    [doc.behaviors, doc.connections, doc.elements, swapped, dragSortBeh],
   );
 
   // sceneEnter 트리거 — 재생 시작 시 자동 실행(인트로 애니메이션·나레이션). 리셋 토큰으로 취소.
@@ -990,11 +1018,30 @@ export function InteractiveStage({
           [{ transform: 'scale(1)' }, { transform: 'scale(1.14)', offset: 0.4 }, { transform: 'scale(1)' }],
           { duration: 420, easing: 'cubic-bezier(.3,1.5,.5,1)' },
         );
-      setHidden((h) => ({ ...h, [p.id]: true }));
+      // '드롭 자리에서 숨김'은 drag-sort(통에 넣기)에서만 — path-trace 액터·pair-match 카드·dress-up
+      // 옷까지 무조건 숨기면 성공 드롭이 '증발'로 보인다. 이들은 체인의 moveAlongPath/hide가 시각을 담당.
+      if (dragSortBeh[p.id]) setHidden((h) => ({ ...h, [p.id]: true }));
+      wrongDropRef.current = 0; // 성공 — 오답 누적 힌트 리셋
       setDrag(null);
       void fireBehavior(p.behId); // count/hide/win 체인(drag-sort moveAlongPath는 무시각)
     } else {
-      // ❌ 틀린 통/빈 곳 → 드롭한 자리에서 '같은 outer 좌표계(drag 상태)'로 부드럽게 제자리 복귀.
+      // ❌ 틀린 통/빈 곳 → 오답 피드백(흔들 + 교정 한마디, 1.5s 스로틀) 후 제자리 복귀.
+      const wrongInner = innerRefs.current[p.id];
+      if (wrongInner) runAnimate(wrongInner, 'shake');
+      const nowMs = Date.now();
+      if (nowMs - wrongSpeakAtRef.current >= 1500) {
+        wrongSpeakAtRef.current = nowMs;
+        speakText('다시 한번 해 볼까요?');
+      }
+      // 오답 3회 누적 — 올바른 통(연결된 상대)을 통통 튀겨 넌지시 알려준다(교정 힌트).
+      wrongDropRef.current += 1;
+      if (wrongDropRef.current >= 3) {
+        wrongDropRef.current = 0;
+        const hintConn = connsRef.current.find((cc) => cc.from === p.id || cc.to === p.id);
+        const hintBin = hintConn ? innerRefs.current[hintConn.from === p.id ? hintConn.to : hintConn.from] : null;
+        if (hintBin) runAnimate(hintBin, 'bounce');
+      }
+      // 드롭한 자리에서 '같은 outer 좌표계(drag 상태)'로 부드럽게 제자리 복귀.
       // 드래그와 동일한 setDrag/clampXY 경로라 좌표계 핸드오프가 없어 위치가 튀지 않는다(rAF 보간).
       const fromDx = Math.round((e.clientX - p.sx) / sc);
       const fromDy = Math.round((e.clientY - p.sy) / sc);
@@ -1012,7 +1059,7 @@ export function InteractiveStage({
       };
       requestAnimationFrame(step);
     }
-  }, [onPathMove, hitConnectedAt, fireBehavior]);
+  }, [onPathMove, hitConnectedAt, fireBehavior, dragSortBeh]);
 
   // cleanup은 언마운트에서만(deps []). 핸들러가 영구 고정이라 리렌더 중 리스너가
   // 떨어지지 않는다 — 위 ref 주석 참조.
@@ -1161,7 +1208,11 @@ export function InteractiveStage({
   const onElClick = (e: React.MouseEvent, el: ElementNode) => {
     if (preview || mode !== 'play') return;
     if (dragSortBeh[el.id]) return; // 드래그-분류 아이템 = 드래그로만(탭 자동 이동 비활성 — 통에 끌어다 놓아야 들어감)
-    const beh = tapLike(el.id);
+    // 같은 요소에 tap 행동이 여럿이면 when 조건을 통과하는 첫 행동을 발화 — '첫 행동 고정(find)'이면
+    // 조건부 두 번째 행동(예: dress-up '먼저 옷을 골라 입어요' 안내)이 영원히 죽는 배선이 된다.
+    // 단일 tap 문서는 첫 행동이 곧 유일 행동이라 기존 동작 그대로.
+    const cands = doc.behaviors.filter((b) => b.target === el.id && (b.trigger === 'tap' || b.trigger === 'sequenceTap'));
+    const beh = cands.find((b) => evalCond(b.when)) ?? cands[0];
     if (!beh) return;
     e.stopPropagation();
     if (beh.trigger === 'sequenceTap') {
@@ -1176,10 +1227,29 @@ export function InteractiveStage({
         if (!collectInfo.isCollect && seqIndexRef.current >= seqOrder.length && seqOrder.length > 0) fireComplete();
       } else {
         const inner = innerRefs.current[el.id];
+        // 이미 맞힌 항목·완주 후 재탭은 오답이 아니다 — 흔들기(오답) 대신 중립 bounce로만 화답.
+        if (seqOrder.slice(0, seqIndexRef.current).includes(el.id) || seqIndexRef.current >= seqOrder.length) {
+          if (inner) runAnimate(inner, 'bounce');
+          return;
+        }
         if (inner) runAnimate(inner, 'shake');
+        // 오답 교정 한마디(1.5s 스로틀) — 문서가 'wrongsay' 행동을 준비했으면 그 연출을, 없으면 기본 안내.
+        const nowMs = Date.now();
+        if (nowMs - wrongSpeakAtRef.current >= 1500) {
+          wrongSpeakAtRef.current = nowMs;
+          const ws = doc.behaviors.find((b) => b.id === 'wrongsay');
+          if (ws) void fireBehavior(ws.id);
+          else speakText('순서를 잘 보고 다시 눌러 볼까요?');
+        }
       }
       return;
     }
+    // 일반 tap — 이동(moveAlongPath) 체인 실행 중엔 새 탭을 받지 않고(레이스 차단, 끝나면 다시 받음),
+    // 같은 요소 연타는 400ms 쿨다운으로 이중발화를 막는다(연타 조기승리·카운터 중복 방지).
+    if (chainBusyRef.current.size > 0) return;
+    const nowTap = performance.now();
+    if (nowTap - (lastTapRef.current[el.id] ?? 0) < 400) return;
+    lastTapRef.current[el.id] = nowTap;
     void fireBehavior(beh.id);
     if (peekMode && peekIds.has(el.id)) setRevealed((r) => ({ ...r, [el.id]: true })); // 탭 → 전신 공개
     if (!(beh.action === 'animate' && beh.params.preset === 'shake')) {
@@ -1514,7 +1584,8 @@ export function InteractiveStage({
             // 숨김(hide/reveal)은 재생에서만 반영 — 편집에선 항상 보여 교사가 다룰 수 있게.
             // 수집형에서 '획득'한 아이템도 제자리에서 사라진다(중앙 트레이로 모인다).
             const collectedAway = collectInfo.isCollect && mode === 'play' && !preview && collected.includes(el.id);
-            const isHidden = (mode === 'play' && !preview && !!hidden[el.id]) || collectedAway;
+            // preview(보드 카드·슬라이드 썸네일)에선 '시작 시 숨김' 요소(승리 오버레이 등)를 숨긴다 — 스포일러 차단.
+            const isHidden = (mode === 'play' && !preview && !!hidden[el.id]) || collectedAway || (preview && hiddenAtStartIds.has(el.id));
             const hl = highlighted[el.id];
             // 숨바꼭질 — 재생 중 아직 안 누른 peek 대상은 아랫부분을 그라데이션으로 가린다(풀 속에 숨은 듯).
             const peekMaskCss =

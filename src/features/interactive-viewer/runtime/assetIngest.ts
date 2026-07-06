@@ -8,7 +8,7 @@
 import { newId } from '@/store/boardStore';
 import { removeBackground } from '@/shared/background-removal';
 import { toRemoveBgAssetKind, type AssetKind } from '@/shared/assetKind';
-import type { AssetRef, ElementNode, ElementOrigin, InteractiveNode } from '../schema/interactiveNode';
+import type { AssetRef, Behavior, ElementNode, ElementOrigin, InteractiveNode } from '../schema/interactiveNode';
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -144,12 +144,40 @@ export function withElementReplaced(doc: InteractiveNode, elId: string, patch: P
   };
 }
 
-/** 요소 삭제 + 그 요소를 target/대상으로 쓰는 behavior도 함께 제거(참조 무결성). */
+/**
+ * 삭제 계열 편집 뒤 참조 무결성 청소 — (a) 존재하지 않는 behavior id를 then/after에서 제거,
+ * (b) 삭제된 연결을 참조하는 moveAlongPath behavior를 통째로 제거.
+ * 잔여 참조를 남기면 저장분이 리로드 때 스키마 검증(superRefine)에서 통째로 무효가 되어
+ * 게임이 빈 카드로 증발한다. 정상 문서엔 no-op(같은 참조 반환) — 순수 함수.
+ */
+export function sanitizeDoc(doc: InteractiveNode): InteractiveNode {
+  const connIds = new Set(doc.connections.map((c) => c.id));
+  // (b) 경로가 사라진 moveAlongPath 는 실행 불가 — 먼저 걸러내고, 그 id들도 아래 (a)에서 정리된다.
+  const alive = doc.behaviors.filter((b) => b.action !== 'moveAlongPath' || connIds.has(b.params.connectionId));
+  const behIds = new Set(alive.map((b) => b.id));
+  let changed = alive.length !== doc.behaviors.length;
+  const behaviors = alive.map((b) => {
+    const afterOk = b.after === undefined || behIds.has(b.after);
+    const keptThen = b.then?.filter((t) => behIds.has(t));
+    const thenOk = !b.then || !keptThen || keptThen.length === b.then.length;
+    if (afterOk && thenOk) return b;
+    changed = true;
+    return {
+      ...b,
+      after: afterOk ? b.after : undefined,
+      then: thenOk ? b.then : keptThen && keptThen.length ? keptThen : undefined,
+    } as Behavior;
+  });
+  return changed ? { ...doc, behaviors } : doc;
+}
+
+/** 요소 삭제 + 그 요소를 target/대상으로 쓰는 behavior도 함께 제거(참조 무결성).
+ *  잔여 then/after·경로 참조는 sanitizeDoc이 마저 청소한다. */
 export function withElementRemoved(doc: InteractiveNode, elId: string): InteractiveNode {
-  return {
+  return sanitizeDoc({
     ...doc,
     elements: doc.elements.filter((e) => e.id !== elId),
     behaviors: doc.behaviors.filter((b) => b.target !== elId),
     connections: doc.connections.filter((c) => c.from !== elId && c.to !== elId),
-  };
+  });
 }

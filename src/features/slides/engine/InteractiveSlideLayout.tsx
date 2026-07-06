@@ -6,7 +6,7 @@
  *    SlidesViewerApp이 현재 슬라이드의 nodeId로 반영).
  * 슬라이드 진행(다음 장)은 기존 교사 수동 컨트롤 그대로 — 노드 안 동작과 분리.
  */
-import { useMemo, type FC } from 'react';
+import { useMemo, useState, type FC } from 'react';
 import type { LayoutProps } from './layouts';
 import { InteractiveStage } from '../../interactive-viewer/runtime/InteractiveStage';
 import { loadInteractiveNode, listInteractiveNodes } from '../../interactive-viewer/store/interactiveStore';
@@ -32,6 +32,9 @@ const chipBtn: React.CSSProperties = {
 export const InteractiveSlideLayout: FC<LayoutProps> = ({ slide, editable, thumbnail }) => {
   const nodeId = slide.nodeId;
   const node = useMemo(() => (nodeId ? loadInteractiveNode(nodeId) : null), [nodeId]);
+  // 다시하기 — InteractiveOverlay의 resetNonce 패턴. 수업 중 게임을 시작 상태로 되돌린다
+  // (슬라이드를 벗어나지 않고 반복 활동 가능 — 교실 회전 수업용).
+  const [resetNonce, setResetNonce] = useState(0);
   const autoAdvance = slide.advance === 'onComplete';
 
   // 노드가 정해졌고 로드되면 — 전체 재생(썸네일은 정적 미리보기).
@@ -42,22 +45,30 @@ export const InteractiveSlideLayout: FC<LayoutProps> = ({ slide, editable, thumb
           doc={node}
           mode="play"
           preview={thumbnail}
+          resetNonce={resetNonce}
           // 자동 넘김 정책일 때만 완료 콜백 전달 → 이야기 마지막에 '완료 ▶'가 뜨고 다음 장으로.
           onComplete={autoAdvance && !thumbnail ? () => window.dispatchEvent(new CustomEvent('kv:inode-slide-complete')) : undefined}
         />
-        {editable && (
+        {!thumbnail && (
           <div style={{ position: 'absolute', right: 12, top: 12, zIndex: 5, display: 'flex', gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => setAdvance(autoAdvance ? 'teacher' : 'onComplete')}
-              title="활동을 끝내면(이야기 끝·순서 완료) 자동으로 다음 장으로 넘어가요"
-              style={{ ...chipBtn, ...(autoAdvance ? { background: 'var(--accent)', color: 'var(--on-accent)', borderColor: 'var(--accent)' } : {}) }}
-            >
-              {autoAdvance ? '✅ 완료 시 자동 넘김' : '⬜ 완료 시 자동 넘김'}
+            <button type="button" onClick={() => setResetNonce((n) => n + 1)} title="게임을 시작 상태로 되돌려요" style={chipBtn}>
+              ↺ 다시하기
             </button>
-            <button type="button" onClick={() => pick('')} title="다른 인터렉티브로 바꾸기" style={chipBtn}>
-              🔁 노드 바꾸기
-            </button>
+            {editable && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setAdvance(autoAdvance ? 'teacher' : 'onComplete')}
+                  title="활동을 끝내면(이야기 끝·순서 완료) 자동으로 다음 장으로 넘어가요"
+                  style={{ ...chipBtn, ...(autoAdvance ? { background: 'var(--accent)', color: 'var(--on-accent)', borderColor: 'var(--accent)' } : {}) }}
+                >
+                  {autoAdvance ? '✅ 완료 시 자동 넘김' : '⬜ 완료 시 자동 넘김'}
+                </button>
+                <button type="button" onClick={() => pick('')} title="다른 인터렉티브로 바꾸기" style={chipBtn}>
+                  🔁 노드 바꾸기
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

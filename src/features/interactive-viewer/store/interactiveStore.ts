@@ -7,11 +7,14 @@
  */
 import { create } from 'zustand';
 import { newId } from '@/store/boardStore';
+import { showToast } from '@/lib/toast';
 import { parseInteractiveNode, safeParseInteractiveNode } from '../schema/parse';
 import { normalizeNode } from '../runtime/geometry';
 import type { InteractiveNode } from '../schema/interactiveNode';
 
 const LS_KEY = 'kv:inodes:v1';
+// 파싱 실패한 저장분의 대피소 — 깨진 문서를 빈 기본 문서로 '영구 덮어쓰기' 전에 원본을 보존한다(복구 여지).
+const QUARANTINE_KEY = 'kv:inodes:quarantine:v1';
 
 type Persisted = Record<string, InteractiveNode>;
 
@@ -24,12 +27,29 @@ function readAll(): Persisted {
   }
 }
 
-function writeAll(all: Persisted): void {
-  if (typeof localStorage === 'undefined') return;
+/** 전체 맵 저장 — 성공 여부를 반환해 호출부가 실패(quota/직렬화)를 표면화할 수 있게 한다. */
+function writeAll(all: Persisted): boolean {
+  if (typeof localStorage === 'undefined') return false;
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(all)); // localStorage 미러가 클라우드로 동기화
+    return true;
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[inodes] 저장 실패(quota/직렬화) — 세션 캐시만 유지된다:', e);
+    return false;
+  }
+}
+
+/** 파싱 실패한 raw 원본을 격리 보관 — 같은 id는 재격리 스킵(리로드마다 재검사돼도 최초 원본만 보존). */
+function quarantineRaw(docId: string, raw: unknown): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const q = JSON.parse(localStorage.getItem(QUARANTINE_KEY) ?? '{}') as Record<string, unknown>;
+    if (docId in q) return;
+    q[docId] = raw;
+    localStorage.setItem(QUARANTINE_KEY, JSON.stringify(q));
   } catch {
-    /* quota/직렬화 실패 — 무시(세션 캐시는 유지된다) */
+    /* 격리 실패해도 흐름 유지 — 핵심은 원본을 기본 문서로 덮어쓰지 않는 것 */
   }
 }
 
@@ -47,11 +67,17 @@ export function listInteractiveNodes(): Array<{ id: string; title: string; count
   return Object.values(all).map((d) => ({ id: d.id, title: d.title || '인터랙티브', count: (d.elements ?? []).length }));
 }
 
-/** 문서를 localStorage에 저장(저장 직전 엄격 파싱으로 무결성 보장). */
+// 저장 실패 토스트는 세션당 1회만 — mutate 마다 실패가 반복돼도 도배하지 않는다.
+let quotaToastShown = false;
+
+/** 문서를 localStorage에 저장 — 실패(quota)를 무음으로 삼키지 않고 경고·토스트로 표면화. */
 export function saveInteractiveNode(doc: InteractiveNode): void {
   const all = readAll();
   all[doc.id] = doc;
-  writeAll(all);
+  if (!writeAll(all) && typeof window !== 'undefined' && !quotaToastShown) {
+    quotaToastShown = true;
+    showToast('저장 공간이 부족해요 — 게임이 저장되지 않았어요', 'error');
+  }
 }
 
 /** 빈 인터렉티브 노드 — 파스텔 배경 + 빈 캔버스. parse로 기본값 채워 항상 유효. */
@@ -76,7 +102,7 @@ interface InteractiveState {
   /** per-doc undo/redo 스택(편집 히스토리). */
   past: Record<string, InteractiveNode[]>;
   future: Record<string, InteractiveNode[]>;
-  /** docId 보장 — 캐시→localStorage→기본 생성(생성 시 즉시 영속화). 히스토리에 안 남음. */
+  /** docId 보장 — 캐시→localStorage→기본 생성(신규만 즉시 영속화 · 파싱 실패분은 격리 후 메모리에만). 히스토리에 안 남음. */
   ensure: (docId: string) => InteractiveNode;
   /** 현재 캐시 값(없으면 undefined). */
   peek: (docId: string) => InteractiveNode | undefined;
@@ -98,6 +124,17 @@ export const useInteractiveStore = create<InteractiveState>((set, get) => ({
     const cached = get().docs[docId];
     if (cached) return cached;
     const stored = loadInteractiveNode(docId);
+    const raw = stored ? undefined : (readAll()[docId] as unknown);
+    if (!stored && raw !== undefined) {
+      // 저장분이 '있는데' 파싱에 실패한 경우 — 예전엔 기본 문서를 즉시 저장해 원본이 영구 소실됐다.
+      // 원본은 격리 보관하고 기본 문서는 메모리 캐시에만 둔다(다음 정상 mutate 때 저장).
+      // eslint-disable-next-line no-console
+      console.warn('[inodes] 저장 문서 파싱 실패 — 원본을 격리 보관:', docId);
+      quarantineRaw(docId, raw);
+      const fallback = normalizeNode(createDefaultNode(docId));
+      set((s) => ({ docs: { ...s.docs, [docId]: fallback } }));
+      return fallback;
+    }
     // 화면 밖으로 튕겨나간 요소 회수 + 신규 문서는 즉시 영속화.
     const loaded = normalizeNode(stored ?? createDefaultNode(docId));
     if (!stored || loaded !== stored) saveInteractiveNode(loaded);

@@ -7,7 +7,7 @@
  */
 import { callGateway } from '@/ai/client';
 import { extractJson } from '@/ai/json';
-import { pickVocab, resolveTheme, type ThemePack } from './themePacks';
+import { pickVocab, resolveTheme, THEME_PACKS, type ThemePack } from './themePacks';
 import type { IntentParse } from './selectRecipe';
 import type { MechanismId, RecipeInput } from './recipeTypes';
 import type { TeacherCard } from './designAgent';
@@ -134,10 +134,42 @@ export async function fillSlots(
     // ── 결정론(vocab/명사 — LLM 콜 없음) ──
     case 'sequence-order':
       return withScene({ title, actorLabel: '다람쥐', items: pool(count).map((l, i) => ({ label: `${i + 1} 적힌 ${l}` })) });
-    case 'tap-select':
-      return withScene({ title, items: pool(count).map((l) => ({ label: l, correct: true })) });
+    case 'tap-select': {
+      // P1-2: 전원-정답 퇴화 방지 — 정답 ~60% + 오답('다음' 테마팩 vocab — 주제와 확실히 구분)을
+      // 섞어 진짜 '고르기'를 만든다(다 누르면 이기는 게임 근절).
+      const correctN = Math.max(1, Math.ceil(count * 0.6));
+      const wrongN = Math.max(0, count - correctN);
+      const packIdx = pack ? THEME_PACKS.findIndex((p) => p.id === pack.id) : -1;
+      const wrongPack = THEME_PACKS[(packIdx + 1) % THEME_PACKS.length];
+      const all: Array<{ label: string; correct?: boolean }> = [
+        ...pool(correctN).map((l) => ({ label: l, correct: true })),
+        ...pickVocab(wrongPack, wrongN).map((l) => ({ label: l })),
+      ];
+      // 결정론 인덱스 셔플 — 정답이 앞줄에 몰리지 않게. step 은 n 과 서로소인 소수를 골라 순열을 보장.
+      const n = all.length;
+      const step = [7, 5, 3, 2].find((s) => n % s !== 0) ?? 1;
+      const mixed = Array.from({ length: n }, (_, i) => all[(i * step) % n]);
+      return withScene({ title, items: mixed });
+    }
     case 'memory-flip':
       return withScene({ title, items: pool(count).map((l) => ({ label: l })) });
+    case 'shadow-quiz': {
+      // 그림자 퀴즈 — 실루엣이 뚜렷한 동물 풀에서 문제를 만든다(테마팩이 있으면 그 vocab, 없으면 기본 동물).
+      // 각 문제: 정답 1 + 오답 2(풀의 다른 항목). 그림자(질문)는 정답 그림의 실루엣(place.fillShadowImages).
+      const ANIMALS = ['코끼리', '기린', '사자', '토끼', '오리', '곰', '펭귄', '거북이', '고양이', '강아지'];
+      const uniq = [...new Set(pack ? pickDistinct(pack, Math.max(6, count + 2)) : ANIMALS)];
+      const R = Math.min(Math.max(3, count || 5), uniq.length);
+      const rounds = Array.from({ length: R }, (_, i) => {
+        const answer = uniq[i];
+        const others = uniq.filter((l) => l !== answer);
+        return { answer, distractors: [others[i % others.length], others[(i + 1) % others.length]] };
+      });
+      // 제목 — 그림자 게임은 에이전트를 건너뛰어 제목이 곧 프롬프트다. 생성 동사를 걷어내 깔끔하게.
+      const base = title.replace(/게임|놀이|퀴즈|만들어\s*줘?|만들기|만들|구성|생성|맞히기|맞추기|찾기|해\s*줘?|주세요|줘/g, '').replace(/\s+/g, ' ').trim();
+      const quizTitle = !base || base === '그림자' ? '누구의 그림자일까?' : base.includes('그림자') ? base : `${base} 그림자 찾기`;
+      // 그림자는 어두운 실루엣 → 밝고 단순한 배경이라야 형태가 또렷하다(테마팩 장면 또는 파스텔 초원).
+      return { title: quizTitle, rounds, sceneDesc: pack?.scene ?? '밝고 부드러운 파스텔 초원과 맑은 하늘, 가운데가 비어 단순한 배경' };
+    }
     case 'path-trace':
       return withScene({ title, actorLabel: noun !== '사물' ? noun : '토끼', goalLabel: '집', items: Array.from({ length: 3 }, () => ({ label: '징검돌' })) });
     case 'free-create': {

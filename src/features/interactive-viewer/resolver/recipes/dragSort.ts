@@ -16,7 +16,7 @@
  */
 import type { Behavior, Connection, ElementNode, InteractiveNode } from '../../schema/interactiveNode';
 import type { Recipe, RecipeInput } from '../recipeTypes';
-import { CANVAS, assembleNode, conn, counter, imageEl, onCount, onHide, onMove, onReveal, shapeEl, textEl, whenCounter } from '../assemble';
+import { CANVAS, DEFAULT_INTRO, assembleNode, conn, counter, imageEl, onCount, onHide, onMove, onReveal, onSpeak, shapeEl, textEl, whenCounter } from '../assemble';
 
 const CNT = 'cnt';
 const WIN = 'win';
@@ -65,14 +65,19 @@ function buildDragSort(input: RecipeInput, mode: 'bin' | 'slot'): InteractiveNod
   const connections: Connection[] = items.map((it, k) => conn(`c_${k + 1}`, 'path', itemId(k), binId(binIndexOf(it.binKey))));
 
   // 아이템: tap → moveAlongPath(자기 정답 통) → 세기 → 완료. (move 타깃이 N종 ≥2 → 드래그-분류 활성.)
-  const behaviors: Behavior[] = [onHide('hidewin', WIN, 'sceneEnter', [WIN])];
+  const behaviors: Behavior[] = [
+    onHide('hidewin', WIN, 'sceneEnter', [WIN]),
+    // 도입 안내 — 끌어서 담는 놀이의 규칙으로 시작(introText 계약, 없으면 결정론 기본).
+    onSpeak('intro', TITLE, 'sceneEnter', input.introText ?? DEFAULT_INTRO[what], { delay: 600 }),
+  ];
   items.forEach((_, k) => {
     behaviors.push(onMove(`move_${k + 1}`, itemId(k), 'tap', `c_${k + 1}`, 1, { then: [`count_${k + 1}`] }));
     behaviors.push(onCount(`count_${k + 1}`, itemId(k), 'afterComplete', CNT, 1, { then: ['showwin'] }));
   });
-  behaviors.push(onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, N) }));
+  behaviors.push(onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, N), then: ['winsay'] }));
+  behaviors.push(onSpeak('winsay', WIN, 'afterComplete', input.winText ?? `${N}개를 모두 알맞은 곳에 담았어요! 참 잘했어요!`));
 
-  return assembleNode(input, { elements, connections, behaviors, counters: [counter(CNT, '담았어요', { x: 600, y: 36 })] });
+  return assembleNode(input, { elements, connections, behaviors, counters: [counter(CNT, `담았어요 · 모두 ${N}개`, { x: 600, y: 36 })] });
 }
 
 export const sortToBin: Recipe = { id: 'sort-to-bin', build: (i) => buildDragSort(i, 'bin'), manualLayout: true };

@@ -18,6 +18,7 @@ import type { Behavior, ElementNode, InteractiveNode } from '../../schema/intera
 import type { Recipe, RecipeInput } from '../recipeTypes';
 import {
   CARD_BACK_URI,
+  DEFAULT_INTRO,
   assembleNode,
   counter,
   fixedImageEl,
@@ -27,6 +28,7 @@ import {
   onHide,
   onReveal,
   onSetFlag,
+  onSpeak,
   onSwap,
   rowTransforms,
   textEl,
@@ -90,8 +92,11 @@ function buildLayered(input: RecipeInput): InteractiveNode {
     });
   });
 
-  // 시작 — 모든 오버레이 숨김(맨몸에서 시작해 골라 입힌다).
-  behaviors.unshift(onHide('hide_all', 'base', 'sceneEnter', allOverlayIds));
+  // 시작 — 모든 오버레이 숨김(맨몸에서 시작해 골라 입힌다) + 도입 안내(열린 놀이 초대).
+  behaviors.unshift(
+    onHide('hide_all', 'base', 'sceneEnter', allOverlayIds),
+    onSpeak('intro', TITLE, 'sceneEnter', input.introText ?? DEFAULT_INTRO['free-create'], { delay: 600 }),
+  );
 
   return assembleNode(input, { elements, behaviors }); // 승리조건 없음(열린결말)
 }
@@ -109,9 +114,13 @@ function buildToggle(input: RecipeInput): InteractiveNode {
     textEl('howto', '탭하면 모습이 바뀌어요 ✨ 마음대로 꾸며 보세요!', { x: 220, y: 130, w: 840, h: 46, z: 19 }),
     ...pairs.map((p, i) => imageEl(slotId(i + 1), p.left, tfs[i])),
   ];
-  const behaviors: Behavior[] = pairs.map((p, i) =>
-    onSwap(`toggle_${i + 1}`, slotId(i + 1), 'tap', { id: `opt_${i + 1}`, src: `gen:${p.right}`, assetKind: 'generated' }),
-  );
+  const behaviors: Behavior[] = [
+    // 도입 안내 — 탭하면 바뀌는 열린 놀이임을 알려 준다.
+    onSpeak('intro', TITLE, 'sceneEnter', input.introText ?? DEFAULT_INTRO['free-create'], { delay: 600 }),
+    ...pairs.map((p, i) =>
+      onSwap(`toggle_${i + 1}`, slotId(i + 1), 'tap', { id: `opt_${i + 1}`, src: `gen:${p.right}`, assetKind: 'generated' }),
+    ),
+  ];
   return assembleNode(input, { elements, behaviors });
 }
 
@@ -136,7 +145,11 @@ function buildMemoryFlip(input: RecipeInput): InteractiveNode {
     textEl(WIN, '다 뒤집었어요! 🎉', { x: 390, y: 250, w: 500, h: 110, z: 50 }),
   ];
 
-  const behaviors: Behavior[] = [onHide('hidewin', WIN, 'sceneEnter', [WIN])];
+  const behaviors: Behavior[] = [
+    onHide('hidewin', WIN, 'sceneEnter', [WIN]),
+    // 도입 안내 — 뒤집기 놀이의 규칙으로 시작.
+    onSpeak('intro', TITLE, 'sceneEnter', input.introText ?? DEFAULT_INTRO['memory-flip'], { delay: 600 }),
+  ];
   items.forEach((it, i) => {
     const k = i + 1;
     // 아직 안 뒤집은 카드만(when flag false) tap → 앞면 공개 → 가드 set → 세기.
@@ -149,12 +162,13 @@ function buildMemoryFlip(input: RecipeInput): InteractiveNode {
     behaviors.push(onSetFlag(`mark_${k}`, cardId(k), 'afterComplete', flagId(k), true, { then: [`count_${k}`] }));
     behaviors.push(onCount(`count_${k}`, cardId(k), 'afterComplete', CNT, 1, { then: ['showwin'] }));
   });
-  behaviors.push(onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, n) }));
+  behaviors.push(onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, n), then: ['winsay'] }));
+  behaviors.push(onSpeak('winsay', WIN, 'afterComplete', input.winText ?? `카드 ${n}장을 모두 뒤집었어요! 참 잘했어요!`));
 
   return assembleNode(input, {
     elements,
     behaviors,
-    counters: [counter(CNT, '뒤집었어요', { x: 600, y: 36 })],
+    counters: [counter(CNT, `뒤집었어요 · 모두 ${n}장`, { x: 600, y: 36 })],
     flags: items.map((_, i) => flag(flagId(i + 1))),
   });
 }

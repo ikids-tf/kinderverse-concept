@@ -12,6 +12,7 @@
 import type { Behavior, Connection, ElementNode, InteractiveNode } from '../../schema/interactiveNode';
 import type { Recipe, RecipeInput } from '../recipeTypes';
 import {
+  DEFAULT_INTRO,
   assembleNode,
   conn,
   counter,
@@ -20,6 +21,7 @@ import {
   onHide,
   onMove,
   onReveal,
+  onSpeak,
   rowTransforms,
   shapeEl,
   textEl,
@@ -51,32 +53,30 @@ function buildSequenceOrder(input: RecipeInput): InteractiveNode {
 
   const connections: Connection[] = items.map((_, i) => conn(`c_${i + 1}`, 'order', ACTOR, itemId(i + 1)));
 
-  const behaviors: Behavior[] = [onHide('hidewin', WIN, 'sceneEnter', [WIN])];
+  const behaviors: Behavior[] = [
+    onHide('hidewin', WIN, 'sceneEnter', [WIN]),
+    // 도입 안내 — 순서 놀이의 규칙으로 시작(introText 계약, 없으면 결정론 기본).
+    onSpeak('intro', TITLE, 'sceneEnter', input.introText ?? DEFAULT_INTRO['sequence-order'], { delay: 600 }),
+  ];
   items.forEach((it, i) => {
     const k = i + 1;
-    // 순서대로 탭 → 세기 → 그 항목으로 액터 이동.
+    // 순서대로 탭 → 세기 → 그 항목으로 액터 이동 → 구호.
     behaviors.push(onCount(`tap_${k}`, itemId(k), 'sequenceTap', CNT, 1, { then: [`move_${k}`] }));
-    const moveThen = it.speak ? [`speak_${k}`] : ['showwin'];
-    behaviors.push(onMove(`move_${k}`, ACTOR, 'afterComplete', `c_${k}`, 1, { then: moveThen }));
-    if (it.speak) {
-      behaviors.push({
-        id: `speak_${k}`,
-        target: itemId(k),
-        trigger: 'afterComplete',
-        action: 'speak',
-        params: { text: it.speak, mode: 'bubble' },
-        then: ['showwin'],
-      });
-    }
+    behaviors.push(onMove(`move_${k}`, ACTOR, 'afterComplete', `c_${k}`, 1, { then: [`speak_${k}`] }));
+    // 숫자 구호 — 항목 speak 이 없으면 'k!'를 외쳐 순서 세기의 리듬을 만든다(수 세기 경험).
+    behaviors.push(onSpeak(`speak_${k}`, itemId(k), 'afterComplete', it.speak ?? `${k}!`, { then: ['showwin'] }));
   });
   // 완료 — 모든 이동이 showwin 으로 수렴, when counter>=N 일 때만 승리 노출.
-  behaviors.push(onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, n) }));
+  behaviors.push(onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, n), then: ['winsay'] }));
+  behaviors.push(onSpeak('winsay', WIN, 'afterComplete', input.winText ?? `와, ${n}개를 순서대로 다 해냈어요! 참 잘했어요!`));
+  // 오답 훅 — 엔진(sequenceTap 오답)이 id 'wrongsay' 행동을 찾으면 그 연출을 쓴다(없으면 엔진 기본 안내).
+  if (input.wrongText) behaviors.push(onSpeak('wrongsay', TITLE, 'afterComplete', input.wrongText));
 
   return assembleNode(input, {
     elements,
     connections,
     behaviors,
-    counters: [counter(CNT, '세었어요', { x: 600, y: 36 })],
+    counters: [counter(CNT, `세었어요 · 모두 ${n}개`, { x: 600, y: 36 })],
   });
 }
 
@@ -109,10 +109,14 @@ function buildPathTrace(input: RecipeInput): InteractiveNode {
 
   const behaviors: Behavior[] = [
     onHide('hidewin', WIN, 'sceneEnter', [WIN]),
+    // 도입 안내 — 끌어서 데려다 주는 놀이임을 알려 준다.
+    onSpeak('intro', TITLE, 'sceneEnter', input.introText ?? DEFAULT_INTRO['path-trace'], { delay: 600 }),
     // 액터를 끌어(pathTraverse) 목표 위에 놓으면 → 경로 따라 이동 → 세기 → 완료.
     onMove('trace', ACTOR, 'pathTraverse', 'c_path', 1, { then: ['arrive'] }),
     onCount('arrive', ACTOR, 'afterComplete', CNT, 1, { then: ['showwin'] }),
-    onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, 1) }),
+    onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, 1), then: ['winsay'] }),
+    // 완료 축하 — 도착의 기쁨을 함께.
+    onSpeak('winsay', WIN, 'afterComplete', input.winText ?? '와, 끝까지 잘 데려다 주었어요! 참 잘했어요!'),
   ];
 
   return assembleNode(input, {
@@ -145,19 +149,24 @@ function buildPairMatch(input: RecipeInput): InteractiveNode {
 
   const connections: Connection[] = pairs.map((_, i) => conn(`c_${i + 1}`, 'link', leftId(i + 1), rightId(i + 1)));
 
-  const behaviors: Behavior[] = [onHide('hidewin', WIN, 'sceneEnter', [WIN])];
+  const behaviors: Behavior[] = [
+    onHide('hidewin', WIN, 'sceneEnter', [WIN]),
+    // 도입 안내 — 짝을 찾아 끌어다 잇는 놀이임을 알려 준다.
+    onSpeak('intro', TITLE, 'sceneEnter', input.introText ?? DEFAULT_INTRO['pair-match'], { delay: 600 }),
+  ];
   pairs.forEach((_, i) => {
     const k = i + 1;
     behaviors.push(onMove(`match_${k}`, leftId(k), 'pathTraverse', `c_${k}`, 1, { then: [`count_${k}`] }));
     behaviors.push(onCount(`count_${k}`, leftId(k), 'afterComplete', CNT, 1, { then: ['showwin'] }));
   });
-  behaviors.push(onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, n) }));
+  behaviors.push(onReveal('showwin', WIN, 'afterComplete', [WIN], { when: whenCounter(CNT, n), then: ['winsay'] }));
+  behaviors.push(onSpeak('winsay', WIN, 'afterComplete', input.winText ?? `${n}쌍 짝을 모두 찾았어요! 참 잘했어요!`));
 
   return assembleNode(input, {
     elements,
     connections,
     behaviors,
-    counters: [counter(CNT, '짝', { x: 600, y: 36 })],
+    counters: [counter(CNT, `짝 · 모두 ${n}쌍`, { x: 600, y: 36 })],
   });
 }
 

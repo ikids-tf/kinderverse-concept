@@ -309,23 +309,39 @@ export async function composeInteractiveNode(
       return node;
     };
 
+    // 최소 내용 게이트 — 요소 3개·행동 1개 미만이면 '게임'이라 부를 수 없는 빈 껍데기다.
+    // 스키마는 통과해도 놀 거리가 없는 산출물이 "만들었어요"로 위장하던 거짓 성공을 막는다.
+    const tooThin = (n: InteractiveNode) => n.elements.length < 3 || n.behaviors.length < 1;
+
     let node = await buildNode(text);
-    if (!node) {
-      // self-repair: 스키마 오류를 되먹여 1회 재시도
-      const raw0 = (() => { try { return extractJson(text!) as RawNode; } catch { return null; } })();
-      let errs = '구문/스키마 오류';
-      if (raw0) {
-        forceShape(raw0, docId, prompt);
-        const p = safeParseInteractiveNode(raw0);
-        if (!p.success) errs = p.error.issues.slice(0, 6).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+    if (!node || tooThin(node)) {
+      // self-repair: 스키마 오류(또는 내용 부족)를 되먹여 1회 재시도
+      let errs: string;
+      if (node) {
+        errs = `내용 부족: 요소 ${node.elements.length}개·행동 ${node.behaviors.length}개 — 요소 3개 이상과 행동 1개 이상을 갖춘 완성된 놀이로 다시 만들어라`;
+      } else {
+        const raw0 = (() => { try { return extractJson(text!) as RawNode; } catch { return null; } })();
+        errs = '구문/스키마 오류';
+        if (raw0) {
+          forceShape(raw0, docId, prompt);
+          const p = safeParseInteractiveNode(raw0);
+          if (!p.success) errs = p.error.issues.slice(0, 6).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+        }
       }
       onBusy?.('AI가 게임을 다듬는 중…');
       text = await callCompose(prompt, { prevText: text, errors: errs });
-      if (text) node = await buildNode(text);
+      if (text) {
+        const retry = await buildNode(text);
+        if (retry) node = retry; // 재시도가 파싱 실패면 1차 결과(있다면)로 아래 게이트 판정
+      }
     }
 
     if (!node) {
       return { ok: false, message: '게임을 만들지 못했어요 — 조금 더 구체적으로 말씀해 주세요' };
+    }
+    if (tooThin(node)) {
+      // 재시도까지 부족 — 빈 껍데기를 노드에 커밋하지 않는다(기존 문서 무변경).
+      return { ok: false, message: '게임 내용이 부족해요 — 다시 시도해 주세요' };
     }
 
     // 3) 좌표 클램프 + 배경 정규화 후 교체(undo 가능)
@@ -435,6 +451,30 @@ async function callEdit(
   return res.text;
 }
 
+/** no-op 편집 감지용 다이제스트 — 아무것도 안 바뀐 결과에 '수정했어요'를 돌려주던 거짓 성공을 막는다.
+    보수적으로 '내용 신호'만 본다(요소 수·종류·라벨·그림 머리, 행동 수·트리거→액션·params·when·delay,
+    연결/카운터/플래그/스토리 수, 제목·배경) — id 재발급이나 transform 소수점 드리프트 같은 무의미한
+    차이로 '수정됨'으로 오판하지 않게 좌표·id 는 제외한다(단순 stringify 동등 비교는 거의 발화하지 않음). */
+function editDigest(n: InteractiveNode): string {
+  const els = n.elements
+    .map((e) => `${e.kind}:${(e.text ?? '').trim()}:${e.src ? e.src.src.slice(0, 32) : ''}`)
+    .sort();
+  const behs = n.behaviors
+    .map((b) => `${b.trigger}>${b.action}:${JSON.stringify(b.params).slice(0, 200)}:${JSON.stringify(b.when ?? null)}:${(b.then ?? []).length}:${b.delay ?? 0}`)
+    .sort();
+  const bg = typeof n.canvas.background === 'string' ? n.canvas.background : n.canvas.background.src.slice(0, 32);
+  return [
+    n.title,
+    bg,
+    n.elements.length, els.join('|'),
+    n.behaviors.length, behs.join('|'),
+    n.connections.length,
+    n.counters?.length ?? 0,
+    n.flags?.length ?? 0,
+    n.story?.steps.length ?? 0,
+  ].join('§');
+}
+
 export async function editInteractiveNode(
   docId: string,
   prompt: string,
@@ -504,8 +544,9 @@ export async function editInteractiveNode(
 
     // 레이아웃 보존 — 위치/크기 지시가 아니면 기존 요소의 transform 을 원래대로 유지(무관한 이동·리사이즈 드리프트 방지).
     const LAYOUT_RE = /크게|작게|크기|사이즈|옮겨|옮길|위치|정렬|배치|줄여|키워|넓게|좁게|move|resize|size|bigger|smaller|position/i;
+    const layoutEdit = LAYOUT_RE.test(prompt);
     let result = node;
-    if (!LAYOUT_RE.test(prompt)) {
+    if (!layoutEdit) {
       const origById = new Map(doc.elements.map((e) => [e.id, e] as const));
       result = {
         ...node,
@@ -517,6 +558,11 @@ export async function editInteractiveNode(
     }
 
     const finalNode = clampNode(normalizeBackground(result));
+    // no-op 게이트 — 비-레이아웃 편집인데 내용 다이제스트가 그대로면 실제로 바뀐 게 없다.
+    // (레이아웃 지시는 transform 변화가 곧 수정이라 게이트를 건너뛴다 — 좌표는 다이제스트 제외 필드.)
+    if (!layoutEdit && editDigest(finalNode) === editDigest(doc)) {
+      return { ok: false, message: '바꿀 내용을 찾지 못했어요 — 다르게 말씀해 주세요' };
+    }
     onBusy?.('적용하는 중…');
     store.mutate(docId, () => finalNode);
     return { ok: true, message: '수정했어요' };

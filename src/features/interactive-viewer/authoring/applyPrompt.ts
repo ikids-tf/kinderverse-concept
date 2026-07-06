@@ -1,8 +1,10 @@
 /**
  * 프롬프트 → 인터랙티브 노드 편집(AI). 풀스크린 프롬프트바 입력을 받아 노드를 고친다.
  *
- * - 빈 노드 + 게임 생성 의도 → 전체 구성(composeInteractiveNode: 새 컨셉 확립).
- * - 그 외(내용이 있거나 단순 수정) → 맥락 인지 편집(editInteractiveNode): 현재 노드 '전체'를
+ * - 빈 노드 → 전체 구성(runFullCreation: 디자인 에이전트 → 결정론 조립 → 폴백 사슬).
+ *   빈 노드에 온 프롬프트는 생성 동사 유무와 무관하게 무조건 전체 구성이다 — 생성어
+ *   미매칭 시 빈 문서를 '최소 수정'하던 거짓 경로를 없앴다(교사 카드·라이브러리 저장 포함).
+ * - 그 외(내용이 있음) → 맥락 인지 편집(editInteractiveNode): 현재 노드 '전체'를
  *   모델에 보여주고 지시대로 '최소' 수정한다. 기존 요소·동작·연결을 보존해 통째 교체/파괴를 막는다.
  *
  * 어떤 인터랙티브 노드 안에 있으면(풀스크린) 입력은 그 노드(docId)에만 적용된다 —
@@ -10,9 +12,8 @@
  * 선택 요소가 있으면 그 요소를 우선 대상으로 한다(컨셉 안에서만 수정).
  */
 import { useInteractiveStore } from '../store/interactiveStore';
-import { composeInteractiveNode, editInteractiveNode } from './composeNode';
-import { resolveIntent } from '../resolver/resolveIntent';
-import { assembleAndPlace } from '../resolver/place';
+import { editInteractiveNode } from './composeNode';
+import { runFullCreation } from './createChain';
 import { saveToLibrary } from '../store/library';
 
 export interface ApplyResult {
@@ -31,31 +32,18 @@ export async function applyInteractivePrompt(
   const store = useInteractiveStore.getState();
   const doc = store.peek(docId) ?? store.ensure(docId);
 
-  // 전체 구성(디렉터)은 '빈 노드 + 게임 생성 의도'일 때만 — 새 컨셉을 처음 세울 때.
-  // 그 외엔 맥락 인지 편집으로 '그 자리에서' 최소 수정(컨셉·기존 동작 보존, 통째 교체 금지).
-  const empty = doc.elements.length === 0;
-  const createIntent =
-    /(게임|놀이|액티비티|활동|퀴즈|미션)/.test(prompt) && /(만들|구성|생성|새로|처음|짜)/.test(prompt);
-
-  // 새 컨셉 생성 — 먼저 Resolver(결정론 레시피)로 즉시·안정 합성을 시도하고,
-  // 레시피 없는 의도(롱테일)거나 조립 실패면 기존 composeInteractiveNode(전체 LLM)로 폴백.
-  // 생성 성공 → 갤러리/인터랙티브 홈에 자동 리스트(라이브러리 등록).
-  const autosave = () => {
-    const d = store.peek(docId);
-    if (d && d.elements.length > 0) saveToLibrary(d);
-  };
-  if (empty && createIntent) {
-    const intent = await resolveIntent(prompt, onBusy);
-    if (intent) {
-      const placed = await assembleAndPlace(docId, intent.mechanism, intent.input, onBusy);
-      if (placed.ok) { autosave(); return { ok: true, addedIds: [], message: placed.message }; }
-      // 레시피 조립 실패 → 폴백.
-    }
-    const c = await composeInteractiveNode(docId, prompt, onBusy);
-    if (c.ok) autosave();
-    return { ok: c.ok, addedIds: [], message: c.message };
+  // 빈 노드 → 전체 구성(디렉터 사슬 공용 함수). 교사 카드·라이브러리 저장까지 안에서 끝난다.
+  if (doc.elements.length === 0) {
+    const r = await runFullCreation(docId, prompt, onBusy);
+    return { ok: r.ok, addedIds: [], message: r.message };
   }
 
+  // 내용이 있는 노드 → 맥락 인지 편집. 성공하면 라이브러리도 최신 상태로 갱신
+  // (편집 후 갤러리/홈 썸네일·제목이 옛 스냅샷으로 남지 않게).
   const r = await editInteractiveNode(docId, prompt, selectedElIds, onBusy);
+  if (r.ok) {
+    const d = store.peek(docId);
+    if (d && d.elements.length > 0) saveToLibrary(d);
+  }
   return { ok: r.ok, addedIds: [], message: r.message };
 }

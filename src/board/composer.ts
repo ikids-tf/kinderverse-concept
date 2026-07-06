@@ -1088,7 +1088,8 @@ function spawnImageLinksCard(frameId: string, topic: string, activities: string[
 }
 
 /** 패키지 게임 생성(인터랙티브 노드) — 견고하게. 리졸버/이미지 실패로 빈 노드가 남던 문제를 막기
-    위해, 생성 후 비어 있으면 한 번 더 시도한다. 자체 gen 카운터로 진행 표시를 유지한다. */
+    위해, 생성 후 비어 있으면 한 번 더 시도한다. 그래도 비면 실패를 알리고 노드에 표식을 남긴다
+    (무음 실패 → 빈 카드 잔류 방지). 자체 gen 카운터로 진행 표시를 유지한다. */
 async function runPackageGame(docId: string, topic: string): Promise<void> {
   useInteractiveStore.getState().ensure(docId);
   const gb = useBoardStore.getState();
@@ -1097,9 +1098,17 @@ async function runPackageGame(docId: string, topic: string): Promise<void> {
   const onBusy = (m: string | null) => gb.setGenerating(m ?? `🎮 「${topic}」 게임을 만들고 있어요…`);
   const isEmpty = () => (useInteractiveStore.getState().peek(docId)?.elements.length ?? 0) === 0;
   try {
-    // 생성 동사 포함 필수 — applyInteractivePrompt가 '전체 구성(디렉터)'으로 분기한다.
-    await applyInteractivePrompt(docId, `${topic} 놀이 게임 만들어줘`, [], onBusy).catch(() => null);
-    if (isEmpty()) await applyInteractivePrompt(docId, `${topic} 게임 만들어줘`, [], onBusy).catch(() => null);
+    // 빈 노드에 온 프롬프트는 생성 동사 유무와 무관하게 전체 구성(runFullCreation)으로 흐른다 —
+    // 이 경로도 이제 디자인 에이전트·교사 카드까지 다른 경로와 같은 사슬을 탄다.
+    await applyInteractivePrompt(docId, `${topic} 놀이 게임`, [], onBusy).catch(() => null);
+    if (isEmpty()) await applyInteractivePrompt(docId, `${topic} 게임`, [], onBusy).catch(() => null);
+    // 2차 시도까지 비었으면 조용히 끝내지 않는다 — 교사에게 알리고 게임 노드에 실패 표식.
+    if (isEmpty()) {
+      showToast('패키지 게임 생성에 실패했어요 — 게임 카드를 선택해 다시 요청해 주세요', 'error');
+      const bNow = useBoardStore.getState();
+      const gameNode = Object.values(bNow.nodes).find((n) => n.type === 'interactive' && n.data?.docId === docId);
+      if (gameNode) bNow.updateNodeRaw(gameNode.id, { data: { ...(gameNode.data ?? {}), genFailed: true } });
+    }
   } finally {
     gb.endGen();
   }

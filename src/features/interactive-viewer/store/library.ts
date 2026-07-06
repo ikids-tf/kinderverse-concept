@@ -29,8 +29,9 @@ function writeLib(l: SavedGame[]): void {
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(LIB_KEY, JSON.stringify(l)); // localStorage 미러가 클라우드로 동기화
-  } catch {
-    /* quota — 무시 */
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[inode-library] 저장 실패(quota) — 라이브러리 목록이 저장되지 않았다:', e);
   }
 }
 

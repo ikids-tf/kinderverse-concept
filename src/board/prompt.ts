@@ -1,14 +1,8 @@
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { useInteractiveStore } from '@/features/interactive-viewer/store/interactiveStore';
-import { composeInteractiveNode } from '@/features/interactive-viewer/authoring/composeNode';
 import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
-import { resolveIntent } from '@/features/interactive-viewer/resolver/resolveIntent';
-import { selectRecipe } from '@/features/interactive-viewer/resolver/selectRecipe';
-import { dressUpTeacherCard } from '@/features/interactive-viewer/resolver/fillSlots';
-import { designGame, type TeacherCard } from '@/features/interactive-viewer/resolver/designAgent';
+import { runFullCreation, cleanGameTopic } from '@/features/interactive-viewer/authoring/createChain';
 import { buildTeacherCard, ensurePrompts } from '@/features/interactive-viewer/resolver/teacherCard';
-import type { MechanismId } from '@/features/interactive-viewer/resolver/recipeTypes';
-import { assembleAndPlace } from '@/features/interactive-viewer/resolver/place';
 import { saveToLibrary } from '@/features/interactive-viewer/store/library';
 import { saveGameCard } from '@/features/interactive-viewer/store/gameCards';
 import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage } from './workflow';
@@ -64,17 +58,7 @@ function isNewInteractiveGame(text: string): boolean {
   return SOFT_GAME_RE.test(text) && !WORKSHEET_RE.test(text) && !PLAN_RE.test(text) && !/도안|색칠/.test(text);
 }
 
-/** 진행 표시용 '주제' — 생성 동사·군더더기를 걷어내고 교사가 입력한 핵심만 남긴다(길면 줄임). */
-function cleanGameTopic(text: string): string {
-  const t = (text || '')
-    // "이 이미지(들)로 / 이 사진으로 / 이걸로" 등 지시어 접두 제거(이미지 선택 게임 제목이 장황해짐).
-    .replace(/이\s*(이미지|사진|그림)들?(으)?로|이것?들?(으)?로|이걸로|선택한?\s*(이미지|사진|그림)들?(으)?로/g, ' ')
-    .replace(/만들어줘|만들어|만들기|만들|구성해줘|구성|생성해줘|생성|새로|짜줘|짜|해줘|주세요|줘/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const topic = t || (text || '').trim() || '인터랙티브';
-  return topic.length > 20 ? topic.slice(0, 20) + '…' : topic;
-}
+/* cleanGameTopic — 생성 사슬과 함께 createChain.ts 로 이동(진행 표시·교사 카드가 같은 주제어를 쓰도록). */
 
 /* ─── 포맷 선택(아이디어 / 놀이계획·수업) ─── "○○ 아이디어/놀이계획/수업/활동/프로젝트 수업
    만들어줘"는 바로 생성하지 않고 리스트·마인드맵·계획문서·패키지 중 무엇으로 만들지 화면 중앙
@@ -154,49 +138,14 @@ async function createInteractiveGame(text: string): Promise<void> {
   board.setGenerating(`🎮 「${topic}」 놀이를 준비하는 중…`);
   const onBusy = (m: string | null) => board.setGenerating(m ? `「${topic}」 ${m}` : `🎮 「${topic}」 놀이를 만드는 중…`);
   try {
-    useInteractiveStore.getState().ensure(docId);
-    let r: { ok: boolean; message: string } | null = null;
-    let card: TeacherCard | null = null;
-    let mechanism: MechanismId | null = null;
-
-    // 1) 게임 디자인 에이전트(Tier1 지능층) — 메커니즘 선택 + 풍부한 내용 + 교사 활동 카드.
-    //    구조는 만들지 않는다 — 받은 '내용'을 결정론 Resolver(assembleAndPlace)가 조립·검증한다.
-    //    단, 옷입히기(dress-up)는 결정론 레시피(날씨 테이블)가 정답이라 에이전트를 건너뛴다(LLM 변동 회피).
-    const isDressUp = selectRecipe(text)?.mechanism === 'dress-up';
-    const designed = isDressUp ? null : await designGame(text, onBusy);
-    if (designed) {
-      const placed = await assembleAndPlace(docId, designed.mechanism, designed.input, onBusy);
-      if (placed.ok) {
-        r = { ok: true, message: placed.message };
-        card = designed.card;
-        mechanism = designed.mechanism;
-      }
-    }
-    // 2) 결정론 Resolver(규칙 매칭) — 에이전트 실패/한도 시 바닥을 받친다(즉시·안정).
-    if (!r) {
-      const intent = await resolveIntent(text, onBusy);
-      if (intent) {
-        const placed = await assembleAndPlace(docId, intent.mechanism, intent.input, onBusy);
-        if (placed.ok) {
-          r = { ok: true, message: placed.message };
-          mechanism = intent.mechanism;
-          if (isDressUp) card = dressUpTeacherCard(text); // 옷입히기 교사 카드(결정론·날씨별)
-        }
-      }
-    }
-    // 3) compose 폴백(롱테일 — 동사 매칭 실패).
-    if (!r) r = await composeInteractiveNode(docId, text, onBusy);
+    // 생성 본문(디자인 에이전트 → 조립 → 폴백 → 라이브러리·교사 카드)은 공용 사슬 하나로 —
+    // 노드/풀스크린/패키지 경로와 완전히 같은 품질을 보장한다(createChain.runFullCreation).
+    const r = await runFullCreation(docId, text, onBusy);
     showToast(r.message, r.ok ? 'success' : 'error');
-    // 생성 성공 → 갤러리/인터랙티브 홈에 자동 리스트(라이브러리 등록) + 교사 카드 동반 저장.
-    if (r.ok) {
-      const doc = useInteractiveStore.getState().peek(docId);
-      if (doc && doc.elements.length > 0) {
-        saveToLibrary(doc);
-        // ★ 모든 게임은 항상 교사 카드를 갖는다 — 에이전트 카드가 없으면 결정론 생성, 발문은 늘 채운다.
-        if (!card) card = isDressUp ? dressUpTeacherCard(text) : buildTeacherCard(mechanism ?? 'tap-select', topic, doc.title);
-        card = ensurePrompts(card, topic);
-        saveGameCard(docId, card);
-      }
+    // 실패로 빈 노드만 남으면 정리 — 보드에 빈 '인터랙티브' 카드가 잔류하지 않게(거짓 성공 제거).
+    if (!r.ok) {
+      const d = useInteractiveStore.getState().peek(docId);
+      if (!d || d.elements.length === 0) deleteNodesCmd([nodeId]);
     }
   } finally {
     board.endGen();
@@ -242,25 +191,46 @@ async function createInteractiveGameFromImages(imgs: Array<{ src: string; kind?:
       const el = makeImageElement(ref, 'board-copy', at, CANVAS);
       store.mutate(docId, (doc) => withElementAdded(doc, el));
     }
-    // 2) 배치된 이미지로 '탭 놀이'를 결정론으로 배선한다. 인터랙티브 노드 시스템은 '제공 이미지로
-    //    자동 게임 구성'을 지원하지 않으므로(compose·resolver는 라벨로 이미지를 새로 생성, 엔진 frozen,
-    //    editInteractiveNode는 최소수정이라 게임을 안 만듦) — 탭하면 통통 튀고 칭찬하는 보편 상호작용을
-    //    코드로 입혀 그 자리에서 바로 즐길 수 있게 한다(교사는 노드 프롬프트바로 규칙을 더 다듬을 수 있음).
+    // 2) 배치된 이미지로 '모두 찾기 놀이'를 결정론으로 배선한다. 인터랙티브 노드 시스템은 '제공
+    //    이미지로 자동 게임 구성'을 지원하지 않으므로(compose·resolver는 라벨로 이미지를 새로 생성,
+    //    엔진 frozen, editInteractiveNode는 최소수정이라 게임을 안 만듦) — 목표(모두 눌러 보기)와
+    //    승리 연출까지 코드로 입힌다: 요소별 flag 가드(재탭 중복 카운트 방지) → count → 칭찬 speak,
+    //    다 누르면 숨겨 둔 승리 텍스트 reveal(교사는 노드 프롬프트바로 규칙을 더 다듬을 수 있음).
     const PRAISE = ['잘했어요! 🎉', '멋져요! 👏', '최고예요! ⭐', '와, 좋아요! 😊', '신나요! 🥳', '대단해요! 💖'];
     board.setGenerating(`🎮 「${topic}」 놀이를 만드는 중…`);
     store.mutate(docId, (doc) => {
       const imgEls = doc.elements.filter((e) => e.kind === 'image' && e.origin === 'board-copy');
-      const title = makeTextElement(`${topic} — 그림을 눌러 보세요!`, { x: CANVAS.w / 2, y: 70 });
+      const n = imgEls.length;
+      const CNT = 'cnt';
+      const title = makeTextElement(`${topic} — 그림을 모두 눌러 보세요!`, { x: CANVAS.w / 2, y: 70 });
+      // 승리 텍스트 — sceneEnter 로 숨겼다가 카운터가 목표에 닿으면 reveal(다른 요소 위에 보이게 z 상향).
+      const winBase = makeTextElement(`와, 그림 ${n}개를 모두 눌러 봤어요! 🎉`, { x: CANVAS.w / 2, y: CANVAS.h / 2 - 40 });
+      const win = { ...winBase, transform: { ...winBase.transform, z: 9 } };
+      const flags = imgEls.map((el) => ({ id: `found_${el.id}`, initial: false }));
       const behaviors = imgEls.flatMap((el, i) => {
-        const sayId = `say_${el.id}`;
+        const F = `found_${el.id}`;
         return [
-          { id: `tap_${el.id}`, target: el.id, trigger: 'tap' as const, action: 'animate' as const, params: { preset: 'bounce' as const }, then: [sayId] },
-          { id: sayId, target: el.id, trigger: 'afterComplete' as const, action: 'speak' as const, params: { text: PRAISE[i % PRAISE.length], mode: 'bubble' as const } },
+          // flag 가드 — 아직 안 누른 그림만 반응(재탭해도 카운터가 다시 오르지 않게).
+          { id: `tap_${el.id}`, target: el.id, trigger: 'tap' as const, action: 'animate' as const, params: { preset: 'bounce' as const }, when: { kind: 'flag' as const, flagId: F, is: false }, then: [`flag_${el.id}`] },
+          { id: `flag_${el.id}`, target: el.id, trigger: 'afterComplete' as const, action: 'setFlag' as const, params: { flagId: F, value: true }, then: [`cnt_${el.id}`] },
+          { id: `cnt_${el.id}`, target: el.id, trigger: 'afterComplete' as const, action: 'count' as const, params: { counterId: CNT, by: 1 }, then: [`say_${el.id}`] },
+          { id: `say_${el.id}`, target: el.id, trigger: 'afterComplete' as const, action: 'speak' as const, params: { text: PRAISE[i % PRAISE.length], mode: 'bubble' as const }, then: ['showwin'] },
         ];
       });
-      return { ...doc, title: `${topic} 놀이`, elements: [title, ...doc.elements], behaviors: [...(doc.behaviors ?? []), ...behaviors] };
+      const finish = [
+        { id: 'hidewin', target: win.id, trigger: 'sceneEnter' as const, action: 'hide' as const, params: { targets: [win.id] } },
+        { id: 'showwin', target: win.id, trigger: 'afterComplete' as const, action: 'reveal' as const, params: { targets: [win.id] }, when: { kind: 'counter' as const, counterId: CNT, op: '>=' as const, value: n } },
+      ];
+      return {
+        ...doc,
+        title: `${topic} 놀이`,
+        elements: [title, ...doc.elements, win],
+        behaviors: [...(doc.behaviors ?? []), ...behaviors, ...finish],
+        counters: [...(doc.counters ?? []), { id: CNT, initial: 0, label: `눌러 봤어요 · 모두 ${n}개`, display: { x: 600, y: 36 } }],
+        flags: [...(doc.flags ?? []), ...flags],
+      };
     });
-    showToast('고른 이미지로 놀이를 만들었어요 — 그림을 누르면 반응해요', 'success');
+    showToast('고른 이미지로 놀이를 만들었어요 — 그림을 모두 눌러 보세요', 'success');
     // 라이브러리 등록 + 교사 카드(모든 게임은 교사 카드를 갖는다).
     const doc = useInteractiveStore.getState().peek(docId);
     if (doc && doc.elements.length > 0) {
@@ -283,7 +253,7 @@ export function spawnSavedGameOnBoard(docId: string): void {
 }
 
 /** 보드에서 인터랙티브 노드가 단독 선택된 채 프롬프트 — 그 노드(docId)에 바로 게임을
-    구성/수정한다. applyInteractivePrompt가 분기: 빈 노드 + 생성 의도 → 전체 구성,
+    구성/수정한다. applyInteractivePrompt가 분기: 빈 노드 → 전체 구성(runFullCreation),
     그 외 → 맥락 인지 편집. 풀스크린(kv:inode-prompt)과 완전히 동일한 경로. */
 async function promptInteractiveNode(nodeId: string, docId: string, text: string): Promise<void> {
   const board = useBoardStore.getState();

@@ -20,8 +20,9 @@ function write(m: PoseMap): void {
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(KEY, JSON.stringify(m)); // localStorage 미러가 클라우드로 동기화
-  } catch {
-    /* quota 초과 — 무시(측면 포즈는 폴백으로 정면 유지) */
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[actor-poses] 저장 실패(quota) — 측면 포즈는 정면으로 폴백:', e); // 측면 미저장이어도 재생은 유지
   }
 }
 

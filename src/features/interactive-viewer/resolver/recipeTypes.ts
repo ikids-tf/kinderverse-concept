@@ -22,7 +22,8 @@ export type MechanismId =
   | 'combine'
   | 'memory-flip'
   | 'free-create'
-  | 'dress-up';
+  | 'dress-up'
+  | 'shadow-quiz';
 
 /** 한 항목(내용 슬롯). label 이 곧 'gen:label' 이미지 또는 텍스트가 된다. */
 export interface RecipeItem {
@@ -32,7 +33,7 @@ export interface RecipeItem {
   correct?: boolean;
   /** sort-to-bin/slot-fill — 이 항목이 들어갈 정답 통/빈칸 key. */
   binKey?: string;
-  /** 선택 — 도달/정답 시 말풍선 텍스트. */
+  /** 선택 — 이 항목을 골랐을 때 말풍선 텍스트(정답=칭찬, 오답=교정 대사). */
   speak?: string;
 }
 
@@ -46,6 +47,16 @@ export interface RecipeBin {
 export interface RecipePair {
   left: string;
   right: string;
+}
+
+/** 한 문제(shadow-quiz) — 정답 1개 + 오답들. 질문은 정답의 '그림자(실루엣)'가 된다. */
+export interface RecipeRound {
+  /** 정답 라벨 — 그림자(질문)이자 선택지 중 정답. */
+  answer: string;
+  /** 오답 선택지 라벨들(2개 권장). */
+  distractors: string[];
+  /** 정답을 맞혔을 때 칭찬 말풍선(선택). */
+  speak?: string;
 }
 
 /**
@@ -62,10 +73,19 @@ export interface RecipeInput {
   bins?: RecipeBin[];
   /** 짝(pair-match). */
   pairs?: RecipePair[];
+  /** 문제 목록(shadow-quiz) — 한 문제씩 그림자를 보고 정답을 고른다. 없으면 items 풀에서 파생. */
+  rounds?: RecipeRound[];
   /** 액터(이동 캐릭터) 라벨 — sequence-order · path-trace. */
   actorLabel?: string;
   /** 목표 지점 라벨 — path-trace. */
   goalLabel?: string;
+  /** ── 대사 계약(P1-1) — 디자인 에이전트가 채우고 레시피가 onSpeak 로 배선한다(비면 메커니즘별 기본 문구). ── */
+  /** 도입 안내 — 놀이 시작(sceneEnter) 시 들려줄 한 문장(유아어 해요체). */
+  introText?: string;
+  /** 완료(승리) 축하 — 모두 해냈을 때 들려줄 한 문장. */
+  winText?: string;
+  /** 오답 교정 — 틀렸을 때 다독이는 공통 한 문장(items[].speak 가 있으면 항목별 speak 우선). */
+  wrongText?: string;
   /** 캔버스 배경 토큰('pastel.cream'|'pastel.peach'|'pastel.mint'|'pastel.sky' 또는 '#rrggbb'). */
   background?: string;
   /** 장면 배경(이미지) 설명 — 있으면 꼬리에서 generateSceneBackground 로 그려 캔버스에 깐다.

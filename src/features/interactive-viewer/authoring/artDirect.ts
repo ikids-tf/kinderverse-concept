@@ -92,9 +92,12 @@ const PLACEHOLDER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="240" hei
 <circle cx="168" cy="74" r="9" fill="#F2A98A"/></svg>`;
 const PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(PLACEHOLDER_SVG);
 
-/** task 'image' — 실패 시 retries 만큼 재시도. data URI 반환(없으면 null). */
+/** task 'image' — 실패 시 retries 만큼 재시도. data URI 반환(없으면 null).
+    재시도 사이 지수 백오프(800→2400ms) — 레이트리밋에 백오프 없이 3연타하면 전부 같은 이유로
+    실패해 재시도가 무의미하던 문제 해소(잠깐 쉬면 살아나는 429 계열을 실제로 구제). */
 async function genImage(label: string, style: string, retries = 2): Promise<string | null> {
   for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 800 * 3 ** (attempt - 1)));
     const res = await callGateway({
       task: 'image',
       provider: 'gemini',
@@ -104,6 +107,24 @@ async function genImage(label: string, style: string, retries = 2): Promise<stri
     if (res.ok && !res.mocked && res.image) return res.image;
   }
   return null;
+}
+
+/**
+ * 동시성 제한 워커 풀 — 이미지 생성 잡을 concurrency 개씩만 병렬로 돌린다.
+ * (전 라벨 Promise.all 동시 발사 → 프로바이더 레이트리밋 연쇄 실패 → 플레이스홀더 다발이 되던
+ *  것을 차단. 잡 큐를 워커 while 루프가 나눠 소진 — 총 시간은 소폭 늘지만 성공률이 오른다.)
+ * fillTokenImages 외에 place.ts 의 swap/배경/시트 패스도 이 풀을 재사용한다.
+ */
+export async function runImageJobs(jobs: Array<() => Promise<void>>, concurrency = 3): Promise<void> {
+  if (!jobs.length) return;
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const job = jobs[next++];
+      await job();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, () => worker()));
 }
 
 /**
@@ -302,9 +323,12 @@ async function assignImage(el: RawEl, dataUri: string | null, doCutout: boolean)
 }
 
 /**
- * "gen:" 토큰을 통일 스타일 + 누끼(투명) 그림으로 채운다 — 각 대상을 '개별' 생성한다(병렬).
+ * "gen:" 토큰을 통일 스타일 + 누끼(투명) 그림으로 채운다 — 각 대상을 '개별' 생성한다
+ * (동시성 3 워커 풀 — 전량 동시 발사로 인한 레이트리밋 연쇄 실패 방지).
  * (한 장→분할 방식은 칸 경계에서 대상이 잘려 폐기. 같은 라벨도 강한 공통 스타일로 일관되게 나온다.)
  * 라벨 없는 이미지·상한 초과분·생성 실패분은 폴백(플레이스홀더/도형).
+ * @returns 플레이스홀더(자리그림)로 끝난 '그림 수'(라벨·액터 단위) — 호출부가 성공 메시지에
+ *          "그림 N개는 나중에 다시"를 표기해 조용한 성공 위장을 막는다.
  */
 export async function fillTokenImages(
   raw: RawNode,
@@ -316,7 +340,7 @@ export async function fillTokenImages(
     /** 액터의 측면 포즈(이동 중 사용) 콜백 — 정면은 메인 src, 측면은 별도 저장한다. */
     onActorSide?: (elId: string, sideDataUri: string) => void;
   },
-): Promise<void> {
+): Promise<number> {
   const doCut = opts.cutout ?? true;
   const els = Array.isArray(raw.elements) ? raw.elements : [];
   // gen:/genf: 이미지 대상 수집(라벨 없는 이미지는 도형 폴백). front=정면 캐릭터(genf).
@@ -331,7 +355,7 @@ export async function fillTokenImages(
     }
     all.push({ el, label, front: isFrontEl(el), elId: String((el as { id?: unknown }).id ?? '') });
   }
-  if (!all.length) return;
+  if (!all.length) return 0;
 
   // 액터(정면+측면 2포즈)는 개별 생성. 나머지는 '같은 라벨 1회 생성→공유'로 중복 제거 —
   // 예: 꾸미기의 팔레트 썸네일과 캐릭터 위 오버레이가 같은 라벨이면 한 번만 그려 둘 다에 적용
@@ -346,14 +370,24 @@ export async function fillTokenImages(
     else byLabel.set(key, [t]);
   }
 
-  // 생성 단위(액터 + distinct 라벨)에 상한 적용 — 초과분은 도형 폴백.
+  // 생성 단위(액터 + distinct 라벨)에 상한 적용 — 초과분은 '무음 도형 강등' 대신 플레이스홀더
+  // (자리그림)로 두고 아래에서 onBusy 로 통보한다(어떤 항목이 빠졌는지 보이게 + 나중에 다시 그리게).
+  // 우선순위: 액터(필수) → 요소 배열 순 distinct 라벨. 레시피가 제목→액터→놀이 아이템→장식 순으로
+  // 요소를 쌓으므로 배열 순서가 곧 '필수 아이템 우선'이다.
+  let placeholders = 0; // 플레이스홀더로 끝난 그림 수(상한 초과 + 생성 실패)
   const keptFronts = fronts.slice(0, MAX_IMAGES);
-  for (const t of fronts.slice(MAX_IMAGES)) { t.el.kind = 'shape'; delete t.el.src; }
+  const overflow: Target[] = [...fronts.slice(MAX_IMAGES)];
+  let overCount = fronts.length > MAX_IMAGES ? fronts.length - MAX_IMAGES : 0; // 초과 '그림 수'(라벨·액터 단위)
   let budget = MAX_IMAGES - keptFronts.length;
   const keptLabels: Array<[string, Target[]]> = [];
   for (const entry of byLabel) {
     if (budget > 0) { keptLabels.push(entry); budget--; }
-    else for (const t of entry[1]) { t.el.kind = 'shape'; delete t.el.src; }
+    else { overflow.push(...entry[1]); overCount++; }
+  }
+  if (overflow.length) {
+    opts.onBusy?.(`🖼️ 그림 상한(${MAX_IMAGES}장) 초과 — ${overCount}개는 자리그림으로 두었어요`);
+    placeholders += overCount;
+    await Promise.all(overflow.map((t) => assignImage(t.el, null, false))); // PLACEHOLDER 배정(네트워크 없음)
   }
 
   // 진행률 — 교사가 '몇 개 중 몇 개째'인지 보며 기다리게(서로 다른 그림 수 기준).
@@ -383,6 +417,7 @@ export async function fillTokenImages(
       }
     } else {
       const img = await genImage(t.label, FRONT_TOKEN_STYLE);
+      if (!img) placeholders++; // 정면 단독 폴백까지 실패 → 플레이스홀더로 끝남
       await assignImage(t.el, img, doCut);
       const s = t.el.src;
       saveIfReal(t.label, s && typeof s === 'object' ? (s as { src?: unknown }).src : undefined);
@@ -396,6 +431,7 @@ export async function fillTokenImages(
     const label = group[0].label; // (키엔 front 프리픽스가 붙어 있어 깨끗한 라벨은 group에서)
     const style = group[0].front ? CHARACTER_FRONT_STYLE : isNumberedLabel(label) ? NUMBER_TOKEN_STYLE : TOKEN_STYLE;
     const img = await genImage(label, style);
+    if (!img) placeholders++; // 재시도(백오프) 후에도 실패 → 플레이스홀더로 끝남
     const cut = img ? (doCut ? await cutout(img) : img) : null;
     for (const t of group) await assignImage(t.el, cut, false); // 이미 누끼 처리됨(중복 누끼 방지)
     saveIfReal(label, cut); // 라이브러리(IDB) 저장 — 라벨당 1회, 실제 PNG만
@@ -403,7 +439,8 @@ export async function fillTokenImages(
     tick();
   });
 
-  await Promise.all([...frontJobs, ...labelJobs].map((job) => job()));
+  await runImageJobs([...frontJobs, ...labelJobs]); // 동시성 3 풀 — 레이트리밋 연쇄 실패 방지
+  return placeholders;
 }
 
 /**
@@ -424,6 +461,54 @@ export async function generateCutoutAsset(label: string, doCutout = true, front 
     return ref;
   } catch {
     return { id: `swap_${label.slice(0, 8)}`, src: PLACEHOLDER, assetKind: 'generated' };
+  }
+}
+
+/** data URI → HTMLImageElement(로드 완료). data URI 는 same-origin 이라 캔버스를 오염(taint)시키지 않는다. */
+function loadImageEl(uri: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('image load fail'));
+    img.src = uri;
+  });
+}
+
+/** 누끼(투명 배경) 그림 → 실루엣(그림자) data URI. 불투명 영역만 어두운 색으로 채운다(source-in).
+    그림자 퀴즈(shadow-quiz)의 '질문'을 정답 그림과 똑같은 형태로 만들기 위함(같은 원본에서 파생). */
+export async function toSilhouette(cutoutUri: string, color = '#2B2F3A'): Promise<string> {
+  const img = await loadImageEl(cutoutUri);
+  const w = img.naturalWidth || 512;
+  const h = img.naturalHeight || 512;
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  if (!ctx) return cutoutUri; // 캔버스 불가 — 원본 유지(최소한 형태는 보임)
+  ctx.drawImage(img, 0, 0, w, h);
+  ctx.globalCompositeOperation = 'source-in'; // 기존(그림) 알파가 있는 곳에만 채움 → 실루엣
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, w, h);
+  return c.toDataURL('image/png');
+}
+
+/** 정답 라벨 → { real: 원본 누끼, shadow: 실루엣 } AssetRef 한 쌍. 정답을 '한 번' 그려 그림자와
+    정답 그림을 함께 만든다(shadow-quiz — 그림자가 정답 그림과 정확히 일치). 생성 실패 시 null. */
+export async function generateShadowPair(label: string): Promise<{ real: AssetRef; shadow: AssetRef } | null> {
+  warmupBackgroundRemoval();
+  const img = await genImage(label, TOKEN_STYLE);
+  if (!img) return null;
+  const cut = await cutout(img);
+  try {
+    const real = await urlToAssetRef(cut, 'generated');
+    const shadow = await urlToAssetRef(await toSilhouette(cut), 'generated');
+    // 원본(정답 그림)만 라이브러리에 저장 — 실루엣은 파생물이라 저장 안 함.
+    if (real.src.startsWith('data:image/') && !real.src.startsWith('data:image/svg')) {
+      void saveAsset(label, 'image', real.src, undefined, undefined, 'game');
+    }
+    return { real, shadow };
+  } catch {
+    return null;
   }
 }
 

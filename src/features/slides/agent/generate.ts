@@ -330,7 +330,8 @@ export async function fillDeckImages(
 function enforceActivitySlides(deck: DeckSpec, request: string): void {
   type S = DeckSpec['slides'][number];
   const topic = ((deck.title || request).replace(/슬라이드|만들어\s*줘?|수업\s*자료|자료|수업|활동/g, '').trim()) || deck.title;
-  const stripEmoji = (x: string) => x.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '').replace(/^[\s\-—•·]+/, '').trim();
+  // ️(변형 선택자)는 결합 문자라 문자 클래스 안에 두면 no-misleading-character-class — 대안(alternation)으로 분리.
+  const stripEmoji = (x: string) => x.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]|\u{FE0F}/gu, '').replace(/^[\s\-—•·]+/, '').trim();
   const textOf = (s: S, t: string) => {
     const b = s.blocks.find((x) => x.type === t) as { text?: string } | undefined;
     return b?.text ?? '';

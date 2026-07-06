@@ -34,6 +34,7 @@ import {
   makeShapeElement,
   makeTextElement,
   removeBgFromAssetRef,
+  sanitizeDoc,
   urlToAssetRef,
   withElementAdded,
 } from '../runtime/assetIngest';
@@ -251,12 +252,15 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         e.stopImmediatePropagation();
-        mutate(docId, (d) => ({
-          ...d,
-          elements: d.elements.filter((x) => !ids.has(x.id)),
-          behaviors: d.behaviors.filter((b) => !ids.has(b.target)),
-          connections: d.connections.filter((c) => !ids.has(c.from) && !ids.has(c.to)),
-        }));
+        // sanitizeDoc — 삭제로 생긴 잔여 참조(then/after·moveAlongPath)를 커밋 전에 청소(리로드 증발 방지).
+        mutate(docId, (d) =>
+          sanitizeDoc({
+            ...d,
+            elements: d.elements.filter((x) => !ids.has(x.id)),
+            behaviors: d.behaviors.filter((b) => !ids.has(b.target)),
+            connections: d.connections.filter((c) => !ids.has(c.from) && !ids.has(c.to)),
+          }),
+        );
         setSelectedElIds([]);
         return;
       }
@@ -297,10 +301,13 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
   const center = () => ({ x: doc.canvas.size.w / 2, y: doc.canvas.size.h / 2 });
 
   const setBehaviorFor = (elId: string, beh: Behavior | null) =>
-    mutate(docId, (d) => ({
-      ...d,
-      behaviors: [...d.behaviors.filter((b) => b.target !== elId), ...(beh ? [beh] : [])],
-    }));
+    // 기존 동작 교체/제거로 사라진 behavior id가 다른 동작의 then/after에 남지 않게 sanitize.
+    mutate(docId, (d) =>
+      sanitizeDoc({
+        ...d,
+        behaviors: [...d.behaviors.filter((b) => b.target !== elId), ...(beh ? [beh] : [])],
+      }),
+    );
 
   // 조건(when) — 요소의 동작이 '언제 실행될지' 게이트(예: 스위치 켜졌을 때만).
   const setConditionFor = (elId: string, cond: Behavior['when'] | null) =>
@@ -421,12 +428,14 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
     mutate(docId, (d) => ({ ...d, elements: d.elements.map((e) => (e.id === elId ? { ...e, text } : e)) }));
 
   const removeElement = (elId: string) => {
-    mutate(docId, (d) => ({
-      ...d,
-      elements: d.elements.filter((e) => e.id !== elId),
-      behaviors: d.behaviors.filter((b) => b.target !== elId),
-      connections: d.connections.filter((c) => c.from !== elId && c.to !== elId),
-    }));
+    mutate(docId, (d) =>
+      sanitizeDoc({
+        ...d,
+        elements: d.elements.filter((e) => e.id !== elId),
+        behaviors: d.behaviors.filter((b) => b.target !== elId),
+        connections: d.connections.filter((c) => c.from !== elId && c.to !== elId),
+      }),
+    );
     setSelectedElIds([]);
   };
 
@@ -469,7 +478,8 @@ export function InteractiveOverlay({ docId, initialMode = 'edit', onClose, onExi
       return { ...d, connections: [...d.connections, { id: newId('conn'), kind: 'link' as const, from, to }] };
     });
   const removeConnection = (id: string) =>
-    mutate(docId, (d) => ({ ...d, connections: d.connections.filter((c) => c.id !== id) }));
+    // 삭제된 경로를 참조하는 moveAlongPath가 남으면 저장분 전체가 검증 실패로 증발 — sanitize로 동반 정리.
+    mutate(docId, (d) => sanitizeDoc({ ...d, connections: d.connections.filter((c) => c.id !== id) }));
 
   // 이미지 요소 호버 액션 — 마이보드 카드의 편집/풀스크린을 그대로(같은 컴포넌트) 재사용.
   const editImage = (elId: string, origin: { x: number; y: number; w: number; h: number }) => {

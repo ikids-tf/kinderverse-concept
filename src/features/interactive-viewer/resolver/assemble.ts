@@ -15,7 +15,27 @@ import type {
   InteractiveNode,
   Transform,
 } from '../schema/interactiveNode';
-import type { RecipeInput } from './recipeTypes';
+import type { MechanismId, RecipeInput } from './recipeTypes';
+
+/**
+ * 도입 안내 기본 문구(메커니즘별 결정론 테이블) — 대사 계약(introText)이 비어 오는
+ * 룰 폴백 경로에서도 놀이가 '어떻게 하는지' 안내로 시작하도록 보장한다.
+ * 레시피가 `input.introText ?? DEFAULT_INTRO[mech]` 로 소비(fillSlots 는 채우지 않음 — 여기가 바닥).
+ */
+export const DEFAULT_INTRO: Record<MechanismId, string> = {
+  'sequence-order': '순서를 잘 보고 차례대로 눌러 볼까요?',
+  'path-trace': '친구를 살살 끌어서 길을 따라 데려다 줄까요?',
+  'pair-match': '서로 어울리는 짝을 찾아 끌어다 이어 볼까요?',
+  'tap-select': '맞는 것을 모두 찾아서 눌러 볼까요?',
+  'sort-to-bin': '어디에 들어갈지 생각해서 알맞은 곳에 담아 볼까요?',
+  'slot-fill': '빈칸에 꼭 맞는 조각을 끌어다 채워 볼까요?',
+  'branch-choose': '어떤 것이 맞을지 잘 생각해서 골라 볼까요?',
+  combine: '두 가지를 합치면 무엇이 될까요? 끌어서 합쳐 봐요!',
+  'memory-flip': '카드를 하나씩 뒤집어서 무엇이 숨어 있는지 볼까요?',
+  'free-create': '마음에 드는 것을 골라서 예쁘게 꾸며 볼까요?',
+  'dress-up': '오늘 날씨에 어울리는 옷을 골라 입혀 볼까요?',
+  'shadow-quiz': '그림자만 보고 누구인지 알아맞혀 볼까요? 아래에서 골라 눌러요!',
+};
 
 /** Counter/Flag 는 스키마가 '값(zod)'으로만 export → 인덱스 접근으로 타입 파생. */
 type Counter = NonNullable<InteractiveNode['counters']>[number];
@@ -75,6 +95,20 @@ export function sheetImageEl(id: string, label: string, t: Partial<Transform> = 
     origin: 'upload',
     assetKind: 'generated',
     transform: tf({ w: 300, h: 390, ...t }),
+  };
+}
+
+/** 그림자(실루엣) 이미지 요소 — `shadow:label` 로 두면 place.fillShadowImages 가 정답을 한 번 그려
+    그 원본의 실루엣(그림자)을 만들어 채운다(같은 라벨의 `gen:` 정답 선택지와 원본을 공유 → 그림자와
+    정답 그림이 정확히 일치). shadow-quiz(누구의 그림자일까?)의 질문용. */
+export function shadowImageEl(id: string, label: string, t: Partial<Transform> = {}): ElementNode {
+  return {
+    id,
+    kind: 'image',
+    src: { id: `a_${id}`, src: `shadow:${label}`, assetKind: 'generated' },
+    origin: 'upload',
+    assetKind: 'generated',
+    transform: tf({ w: 300, h: 300, ...t }),
   };
 }
 

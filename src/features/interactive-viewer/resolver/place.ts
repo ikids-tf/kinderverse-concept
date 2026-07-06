@@ -11,7 +11,7 @@
  * ⚠ composeInteractiveNode/buildNode 는 호출하지 않는다(LLM 포함 — 롱테일 폴백 전용).
  *   export 된 꼬리 함수(fillTokenImages/autoLayout/safeParse)만 직접 태운다.
  */
-import { fillTokenImages, generateCharacterSheet, generateCutoutAsset, generateSceneBackground } from '../authoring/artDirect';
+import { fillTokenImages, generateCharacterSheet, generateCutoutAsset, generateSceneBackground, generateShadowPair, runImageJobs } from '../authoring/artDirect';
 import { urlToAssetRef } from '../runtime/assetIngest';
 import { autoLayout } from '../authoring/layout';
 import { offsetLane } from '../authoring/extendLane';
@@ -24,6 +24,18 @@ import { buildRecipe, getRecipe } from './index';
 import type { MechanismId, RecipeInput } from './recipeTypes';
 
 const LANE_W = 1280;
+
+/** dress-up '밖에 나가기' 실외 배경 생성 실패 시의 폴백 — 전면 단색 판(도형 강등) 대신
+    하늘-잔디 그라데이션으로 '실외' 느낌을 유지한다. 게임 콘텐츠는 Milray 면제(파스텔 허용)이고
+    SVG 데이터 URI라 CSS 변수를 못 써 직접 색을 쓴다(CARD_BACK_URI·PLACEHOLDER 와 동일 관례). */
+const SKY_GRASS_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">' +
+  '<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#AEDCF5"/><stop offset="1" stop-color="#EAF7FE"/></linearGradient>' +
+  '<linearGradient id="grass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#CBEBA4"/><stop offset="1" stop-color="#A9DA7E"/></linearGradient></defs>' +
+  '<rect width="1280" height="560" fill="url(#sky)"/><rect y="520" width="1280" height="280" fill="url(#grass)"/>' +
+  '<ellipse cx="250" cy="140" rx="120" ry="44" fill="#FFFFFF" opacity="0.9"/><ellipse cx="340" cy="168" rx="88" ry="34" fill="#FFFFFF" opacity="0.8"/>' +
+  '<ellipse cx="950" cy="105" rx="150" ry="50" fill="#FFFFFF" opacity="0.85"/></svg>';
+const SKY_GRASS_URI = 'data:image/svg+xml;utf8,' + encodeURIComponent(SKY_GRASS_SVG);
 
 /** 액터(이동 캐릭터) id — moveAlongPath 대상이며 tap/sequenceTap 대상이 아닌 순수 이동체.
     composeNode.actorFrontIds 와 동일 규칙(정면+측면 2포즈 생성 대상). */
@@ -47,8 +59,9 @@ async function fillSwapImages(raw: { behaviors?: Array<Record<string, unknown>> 
     const to = b.action === 'swap' ? (b.params as { to?: { src?: unknown } } | undefined)?.to : undefined;
     return typeof to?.src === 'string' && (to.src.startsWith('gen:') || to.src.startsWith('genf:'));
   });
-  await Promise.all(
-    targets.map(async (b) => {
+  // 동시성 3 풀(runImageJobs) — 카드 수만큼 동시 발사해 레이트리밋으로 연쇄 실패하던 것을 방지.
+  await runImageJobs(
+    targets.map((b) => async () => {
       const to = (b.params as { to: { src: string } }).to;
       const front = to.src.startsWith('genf:'); // 정면 캐릭터(옷입히기 착장) → CHARACTER_FRONT_STYLE
       const label = to.src.slice(front ? 5 : 4).trim();
@@ -61,7 +74,7 @@ async function fillSwapImages(raw: { behaviors?: Array<Record<string, unknown>> 
 /**
  * ★ 배경 이미지 패스(별도) — src 가 'bggen:라벨' 인 요소(전체 화면 배경 — dress-up '실외' 등)를
  *   generateSceneBackground(누끼 없음·풀블리드)로 채운다. fillTokenImages 는 'gen:'만 누끼 처리하므로
- *   배경은 여기서 따로 채운다(배경을 누끼하면 하늘·바닥이 잘려 깨진다). 실패 시 도형 폴백.
+ *   배경은 여기서 따로 채운다(배경을 누끼하면 하늘·바닥이 잘려 깨진다). 실패 시 하늘-잔디 SVG 폴백.
  */
 async function fillSceneImages(raw: { elements?: Array<Record<string, unknown>> }): Promise<void> {
   const els = Array.isArray(raw.elements) ? raw.elements : [];
@@ -73,14 +86,19 @@ async function fillSceneImages(raw: { elements?: Array<Record<string, unknown>> 
     }
     return null;
   };
-  await Promise.all(
+  // 동시성 3 풀 — 날씨-라운드처럼 배경이 여러 장일 때 동시 발사로 전부 실패하는 것을 방지.
+  await runImageJobs(
     els
       .map((e) => ({ e, label: srcOf(e) }))
       .filter((t): t is { e: Record<string, unknown>; label: string } => !!t.label)
-      .map(async ({ e, label }) => {
+      .map(({ e, label }) => async () => {
         const ref = await generateSceneBackground(label);
         if (ref) e.src = ref;
-        else { e.kind = 'shape'; delete e.src; }
+        else {
+          // 실패 폴백 — 도형 강등(전면 단색 판) 대신 하늘-잔디 그라데이션으로 '실외' 장면을 유지
+          // (dress-up '밖에 나가기'가 밋밋한 판때기가 되지 않게).
+          e.src = { id: `a_fb_${String((e as { id?: unknown }).id ?? 'bg')}`, src: SKY_GRASS_URI, assetKind: 'generated' };
+        }
       }),
   );
 }
@@ -100,16 +118,47 @@ async function fillCharacterSheets(raw: { elements?: Array<Record<string, unknow
   const targets = els.map((e) => ({ e, label: labelOf(e) })).filter((t): t is { e: Record<string, unknown>; label: string } => !!t.label);
   if (targets.length < 2) {
     // 1개뿐이면 시트가 의미 없음 — 개별 정면 생성.
-    await Promise.all(targets.map(async (t) => { t.e.src = await generateCutoutAsset(t.label, true, true); }));
+    await runImageJobs(targets.map((t) => async () => { t.e.src = await generateCutoutAsset(t.label, true, true); }));
     return;
   }
   const sheet = await generateCharacterSheet(targets.map((t) => t.label));
   if (sheet && sheet.length === targets.length) {
     await Promise.all(targets.map(async (t, i) => { try { t.e.src = await urlToAssetRef(sheet[i], 'generated'); } catch { t.e.kind = 'shape'; delete t.e.src; } }));
   } else {
-    // 시트 생성 실패 → 개별 정면 생성(일관성↓이지만 깨지지 않게).
-    await Promise.all(targets.map(async (t) => { t.e.src = await generateCutoutAsset(t.label, true, true); }));
+    // 시트 생성 실패 → 개별 정면 생성(일관성↓이지만 깨지지 않게). 동시성 3 풀로 레이트리밋 회피.
+    await runImageJobs(targets.map((t) => async () => { t.e.src = await generateCutoutAsset(t.label, true, true); }));
   }
+}
+
+/**
+ * ★ 그림자 패스(별도) — src 가 'shadow:라벨' 인 요소(그림자 퀴즈의 질문)를 채운다. 정답을 한 번 그려
+ *   원본(정답 선택지 'gen:라벨')과 실루엣(그림자)을 함께 만들어, 그림자가 정답 그림과 정확히 일치하게 한다.
+ *   같은 라벨의 'gen:' 요소(정답 선택지·다른 문제의 오답)도 이 원본으로 미리 채워 fillTokenImages 가
+ *   다시 안 그리게 한다(일관 + 생성 절약). ★ fillTokenImages 보다 먼저 돌려야 공유가 성립한다.
+ */
+async function fillShadowImages(raw: { elements?: Array<Record<string, unknown>> }): Promise<void> {
+  const els = Array.isArray(raw.elements) ? raw.elements : [];
+  const prefixLabel = (e: Record<string, unknown>, prefix: string): string | null => {
+    const s = e.src;
+    const v = typeof s === 'string' ? s : s && typeof s === 'object' && typeof (s as { src?: unknown }).src === 'string' ? (s as { src: string }).src : null;
+    return typeof v === 'string' && v.startsWith(prefix) ? v.slice(prefix.length).trim() : null;
+  };
+  const labels = [...new Set(els.map((e) => prefixLabel(e, 'shadow:')).filter((l): l is string => !!l))];
+  if (!labels.length) return;
+  // 동시성 3 풀 — 문제 수만큼 동시 발사로 인한 레이트리밋 연쇄 실패 방지.
+  await runImageJobs(
+    labels.map((label) => async () => {
+      const pair = await generateShadowPair(label);
+      for (const e of els) {
+        if (prefixLabel(e, 'shadow:') === label) {
+          if (pair) e.src = pair.shadow;
+          else { e.kind = 'shape'; delete e.src; } // 실패 폴백 — 빈 그림자 대신 도형
+        } else if (pair && prefixLabel(e, 'gen:') === label) {
+          e.src = pair.real; // 같은 라벨 정답 선택지·오답에 원본 공유(그림자와 일치)
+        }
+      }
+    }),
+  );
 }
 
 /** 좌표 클램프(화면 밖 이탈 방지) — composeNode.clampNode 와 동일. */
@@ -128,14 +177,14 @@ function clampNode(node: InteractiveNode): InteractiveNode {
 /**
  * 꼬리 실행 — 레인 1개짜리 독립 1280 게임에만 돈다.
  * fillTokenImages(gen:→그림+누끼) → safeParse → autoLayout → clamp.
- * 검증 실패(레시피 버그) 시 null.
+ * 검증 실패(레시피 버그) 시 null. misses = 플레이스홀더로 끝난 그림 수(성공 메시지에 표기용).
  */
 async function runTail(
   node: InteractiveNode,
   manualLayout: boolean,
   sceneDesc?: string,
   onBusy?: (m: string | null) => void,
-): Promise<InteractiveNode | null> {
+): Promise<{ node: InteractiveNode; misses: number } | null> {
   // 장면 배경 생성을 토큰 그림과 '병렬'로 — 색 토큰 배경(pastel.*)일 때만(compose 동일).
   // 설명은 테마 sceneDesc 우선, 없으면 노드 title 폴백.
   const needBg = typeof node.canvas.background === 'string';
@@ -143,7 +192,10 @@ async function runTail(
 
   // fillTokenImages 는 raw 객체를 in-place 변형 → 깊은 복제본을 넘긴다.
   const raw = JSON.parse(JSON.stringify(node)) as Parameters<typeof fillTokenImages>[0];
-  await fillTokenImages(raw, {
+  // ★ 그림자(shadow:) 먼저 — 정답을 한 번 그려 실루엣+원본을 만들고 같은 라벨 'gen:' 선택지를 미리 채운다.
+  //   (fillTokenImages 앞에서 돌아야 정답 선택지가 원본을 공유해 그림자와 일치한다.)
+  await fillShadowImages(raw as { elements?: Array<Record<string, unknown>> });
+  const misses = await fillTokenImages(raw, {
     onBusy,
     theme: node.title,
     frontIds: actorFrontIds(node),
@@ -162,7 +214,7 @@ async function runTail(
     const bgRef = await bgPromise;
     if (bgRef) laid = { ...laid, canvas: { ...laid.canvas, background: bgRef } };
   }
-  return clampNode(laid);
+  return { node: clampNode(laid), misses };
 }
 
 export interface PlaceResult {
@@ -192,8 +244,11 @@ export async function assembleAndPlace(
 
   // 2) 꼬리(그림·배치·배경) — 독립 게임에만. manualLayout 레시피는 autoLayout 생략.
   onBusy?.('✏️ 놀이 화면을 짜는 중…');
-  const game = await runTail(built.node, !!getRecipe(mechanism)?.manualLayout, input.sceneDesc, onBusy);
-  if (!game) return { ok: false, lane: 0, message: '게임 생성에 실패했어요(검증)' };
+  const tail = await runTail(built.node, !!getRecipe(mechanism)?.manualLayout, input.sceneDesc, onBusy);
+  if (!tail) return { ok: false, lane: 0, message: '게임 생성에 실패했어요(검증)' };
+  const game = tail.node;
+  // 플레이스홀더로 끝난 그림이 있으면 성공 메시지에 표기 — '전부 그려진 척' 조용한 위장 방지.
+  const missNote = tail.misses > 0 ? ` (그림 ${tail.misses}개는 나중에 다시 그려야 해요)` : '';
 
   // 3) 레인 배치.
   const isEmpty = base.elements.length === 0;
@@ -201,7 +256,7 @@ export async function assembleAndPlace(
   if (isEmpty) {
     // 레인 0 — 게임이 곧 노드(평행이동 없음). id 는 docId 로 맞춰져 있음.
     store.mutate(docId, () => game);
-    return { ok: true, lane: 0, message: `'${game.title}' 게임을 만들었어요` };
+    return { ok: true, lane: 0, message: `'${game.title}' 게임을 만들었어요${missNote}` };
   }
   // 기존 노드 → 다음 밴드로 평행이동 머지(id 전부 재매핑, story 생략).
   const laneIdx = Math.max(1, Math.round(base.canvas.size.w / LANE_W));
@@ -215,5 +270,5 @@ export async function assembleAndPlace(
     counters: [...(d.counters ?? []), ...piece.counters],
     flags: [...(d.flags ?? []), ...piece.flags],
   }));
-  return { ok: true, lane: laneIdx, message: '확장 레인을 추가했어요' };
+  return { ok: true, lane: laneIdx, message: `확장 레인을 추가했어요${missNote}` };
 }

@@ -20,6 +20,7 @@ import type { Behavior, Connection, ElementNode, InteractiveNode } from '../../s
 import type { Recipe, RecipeInput } from '../recipeTypes';
 import {
   CANVAS,
+  DEFAULT_INTRO,
   assembleNode,
   conn,
   flag,
@@ -71,8 +72,11 @@ function buildDressUp(input: RecipeInput): InteractiveNode {
     textEl(BACK, '← 돌아가기', { x: 1006, y: 650, w: 236, h: 34, z: 20 }),
   ];
 
-  // 시작 — 실외 배경·돌아가기 버튼·모든 착장 모습 숨김(맨몸·옷만 보임).
-  const behaviors: Behavior[] = [onHide('hidestart', KID, 'sceneEnter', [BG_OUT, BACK_BG, BACK, ...allDressedIds])];
+  // 시작 — 실외 배경·돌아가기 버튼·모든 착장 모습 숨김(맨몸·옷만 보임) + 도입 안내.
+  const behaviors: Behavior[] = [
+    onHide('hidestart', KID, 'sceneEnter', [BG_OUT, BACK_BG, BACK, ...allDressedIds]),
+    onSpeak('intro', TITLE, 'sceneEnter', input.introText ?? DEFAULT_INTRO['dress-up'], { delay: 600 }),
+  ];
 
   const connections: Connection[] = [];
   items.forEach((it, i) => {
@@ -163,7 +167,11 @@ function buildWeatherRounds(input: RecipeInput): InteractiveNode {
     ...allGo.filter((x) => !goEls(first.key).includes(x)),
     ...allBk,
   ];
-  const behaviors: Behavior[] = [onHide('hidestart', KID, 'sceneEnter', hideStart)];
+  const behaviors: Behavior[] = [
+    onHide('hidestart', KID, 'sceneEnter', hideStart),
+    // 도입 안내 — 날씨·옷 고르기 놀이의 초대(제목은 날씨별로 갈리므로 항상 보이는 HOWTO 에 건다).
+    onSpeak('intro', HOWTO, 'sceneEnter', input.introText ?? DEFAULT_INTRO['dress-up'], { delay: 600 }),
+  ];
 
   // 날씨 썸네일 — 모든 날씨 요소·착장 숨김 → 그 날씨 실내·제목·밖에나가기 + 맨몸 공개(옷 다시 고르게).
   weathers.forEach((w) => {
