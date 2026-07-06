@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -196,6 +197,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 뷰어 안 팝업(볼륨 슬라이더·다운로드 메뉴)이 열려 있는 동안 — 이동 손잡이(드래그
   // 레이어)가 팝업 위를 덮어 클릭/호버를 가로채므로, 열려 있으면 손잡이를 통과시킨다.
   const [embedControlsOpen, setEmbedControlsOpen] = useState(false);
+  const navigate = useNavigate(); // 문서 편집 — 연필 버튼으로 전용 편집 페이지(/doc/:id/edit)로 이동
   // 3D 뷰어 전용 — 평소엔 메뉴 없이 3D만, 클릭하면 모든 UI를 보여 주고, 커서가
   // 카드를 벗어나면 2초 뒤 다시 숨긴다(호버하면 이동 핸들만 살짝 나타난다).
   const [show3dUi, setShow3dUi] = useState(false);
@@ -1973,9 +1975,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                const r = cardRef.current?.getBoundingClientRect();
-                setFieldDraft(node.text ?? '');
-                setDocEdit(r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null);
+                navigate(`/doc/${node.id}/edit`); // 전용 편집 페이지(좌 편집창·중 문서·하 프롬프트바)
               }}
               title="문서 편집"
               aria-label="문서 편집"

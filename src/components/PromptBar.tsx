@@ -183,6 +183,9 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   // 인터랙티브 노드 풀스크린(편집) — 입력이 그 노드 편집으로 간다. 선택 수로 칩/문구를 바꾼다.
   const inodeFs = useUIStore((s) => s.inodeFsDocId);
   const inodeSelCount = useUIStore((s) => s.inodeFsSelCount);
+  // 문서 편집 페이지 — 입력이 그 문서(선택 영역)로 간다. 선택 수로 칩/문구를 바꾼다.
+  const docEditFs = useUIStore((s) => s.docEditNodeId);
+  const docEditSelCount = useUIStore((s) => s.docEditSelCount);
   const setVideoCompose = useUIStore((s) => s.setVideoCompose);
 
   const sendToRouter = useRouterStore((s) => s.send);
@@ -426,8 +429,14 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   // current selection. On My Board it scopes to the selected card(s)/frame.
   // 인터랙티브 노드 편집 중에는 보드 선택이 아니라 '노드 안 요소' 선택 수로 칩/강조를 잡는다.
   const boardSelectionCount = location.pathname.startsWith('/board') ? boardSelection.length : 0;
-  const selChipCount = inodeFs ? inodeSelCount : boardSelectionCount;
+  const selChipCount = inodeFs ? inodeSelCount : docEditFs ? docEditSelCount : boardSelectionCount;
   const placeholder = (() => {
+    // 문서 편집 페이지 — 입력은 그 문서로. 선택 영역 있으면 그 영역만, 없으면 문서 전체.
+    if (docEditFs) {
+      return docEditSelCount > 0
+        ? `고른 영역 ${docEditSelCount}곳만 고쳐요 — 예) 더 쉬운 말로 바꿔 줘`
+        : '문서를 어떻게 고칠까요?  예) 목표를 더 구체적으로 · 화요일 활동 바꿔 줘';
+    }
     // 인터랙티브 노드 풀스크린(편집) — 입력은 그 노드로. 선택 있으면 그 요소에, 없으면 전체.
     if (inodeFs) {
       return inodeSelCount > 0
@@ -521,8 +530,8 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   async function runGeneration(text: string) {
     genCancel.current = false;
     setFavoritesOpen(false);
-    if (location.pathname.startsWith('/board')) {
-      finalizeSend(text);
+    if (location.pathname.startsWith('/board') || location.pathname.startsWith('/doc')) {
+      finalizeSend(text); // 보드·문서 편집 — 타이핑 애니 없이 즉시 실행(진행은 boardStore.generating)
       return;
     }
     setGenerating(true);
@@ -544,6 +553,13 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
     setGenText('');
     setDraft('');
     const path = location.pathname;
+
+    // 0) 문서 편집 페이지 → 그 문서의 선택 영역 수정으로 라우팅(보드로 새지 않는다).
+    //    페이지가 kv:doc-edit-prompt 를 수신해 applyDocPrompt 로 적용한다.
+    if (path.startsWith('/doc')) {
+      window.dispatchEvent(new CustomEvent('kv:doc-edit-prompt', { detail: { prompt: text } }));
+      return;
+    }
 
     // 1) My Board → ALWAYS handle on the board (act on the selected card/frame,
     //    or spawn a new card from the prompt). Never navigate to chat.

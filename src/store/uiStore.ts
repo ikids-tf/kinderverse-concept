@@ -59,6 +59,14 @@ interface UIState {
   inodeFsSelCount: number;
   setInodeFs: (docId: string | null) => void;
   setInodeFsSelCount: (n: number) => void;
+
+  /** 문서 편집 페이지(/doc/:nodeId/edit)가 떠 있을 때 그 문서 노드 id. 설정되면 프롬프트바
+      입력은 보드로 새지 않고 그 문서의 선택 영역 수정(AI)으로 라우팅된다. */
+  docEditNodeId: string | null;
+  /** 그 문서에서 현재 선택한 영역(섹션) 수(프롬프트바 칩/플레이스홀더용). 0이면 문서 전체. */
+  docEditSelCount: number;
+  setDocEdit: (nodeId: string | null) => void;
+  setDocEditSelCount: (n: number) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -71,10 +79,14 @@ export const useUIStore = create<UIState>((set) => ({
   gameViewerFsNodeId: null,
   inodeFsDocId: null,
   inodeFsSelCount: 0,
+  docEditNodeId: null,
+  docEditSelCount: 0,
 
   setGameViewerFs: (id) => set({ gameViewerFsNodeId: id }),
   setInodeFs: (docId) => set(docId ? { inodeFsDocId: docId } : { inodeFsDocId: null, inodeFsSelCount: 0 }),
   setInodeFsSelCount: (n) => set({ inodeFsSelCount: n }),
+  setDocEdit: (nodeId) => set(nodeId ? { docEditNodeId: nodeId } : { docEditNodeId: null, docEditSelCount: 0 }),
+  setDocEditSelCount: (n) => set({ docEditSelCount: n }),
   setPromptBarLeftInset: (px) => set({ promptBarLeftInset: px }),
   setPromptBarCollapsed: (v) => set(v ? { promptBarCollapsed: true, favoritesOpen: false } : { promptBarCollapsed: false }),
   togglePromptBar: () =>

@@ -32,7 +32,7 @@ export function AppShell() {
     const path = location.pathname;
     // Home, AI 채팅, and My Board keep the bar open (the bar is the board's
     // primary command surface); every other page enters open then auto-closes.
-    const keepOpen = path === '/' || path === AI_CHAT_PATH || path === '/board';
+    const keepOpen = path === '/' || path === AI_CHAT_PATH || path === '/board' || path.startsWith('/doc');
     setPromptBarCollapsed(false); // always enter expanded
     if (keepOpen) return;
     const t = setTimeout(() => setPromptBarCollapsed(true), 1000);

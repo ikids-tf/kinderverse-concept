@@ -19,6 +19,7 @@ const ProfilePage = lazyPage(() => import('@/pages/ProfilePage'), 'ProfilePage')
 const AIChatPage = lazyPage(() => import('@/pages/AIChatPage'), 'AIChatPage');
 const TokensDemoPage = lazyPage(() => import('@/pages/TokensDemoPage'), 'TokensDemoPage');
 const EvalPage = lazyPage(() => import('@/pages/EvalPage'), 'EvalPage');
+const DocEditPage = lazyPage(() => import('@/pages/DocEditPage'), 'DocEditPage');
 
 export const router = createBrowserRouter([
   {
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       { path: 'chat', element: <AIChatPage /> },
       { path: 'tokens', element: <TokensDemoPage /> },
       { path: 'eval', element: <EvalPage /> },
+      { path: 'doc/:nodeId/edit', element: <DocEditPage /> },
     ],
   },
 ]);
