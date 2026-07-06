@@ -357,6 +357,25 @@ export function BoardCanvas() {
   // 텍스트·메모·이미지·영상(임베드)·프레임만 연결 가능(도형·러너 제외).
   const LINKABLE = useMemo(() => new Set(['text', 'sticky', 'image', 'frame']), []);
   const [portsId, setPortsId] = useState<string | null>(null);
+  // 호버한 노드에서 부모→자식 방향으로 '빛(전기)'이 흐르는 링크 + 스태거용 깊이.
+  // 호버 노드로 들어오는 부모 링크 + 호버 노드에서 뻗어나가는 서브트리 전체(최종 자식까지).
+  const flowSet = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!portsId) return m;
+    const q: Array<{ id: string; d: number }> = [{ id: portsId, d: 0 }];
+    const seen = new Set<string>([portsId]);
+    while (q.length) {
+      const { id, d } = q.shift()!;
+      for (const l of liveLinks) {
+        if (l.from === id) {
+          if (!m.has(l.id)) m.set(l.id, d);
+          if (!seen.has(l.to)) { seen.add(l.to); q.push({ id: l.to, d: d + 1 }); }
+        }
+      }
+    }
+    for (const l of liveLinks) if (l.to === portsId && !m.has(l.id)) m.set(l.id, 0);
+    return m;
+  }, [portsId, liveLinks]);
   const [linkLine, setLinkLine] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   // 연결 직후 생성 제안 — 빈 메모/이미지 카드를 다른 요소와 이으면
   // "연결된 요소 'X'에 대한 내용/이미지를 생성할까요?" 확인 카드를 띄운다.
@@ -1141,6 +1160,37 @@ export function BoardCanvas() {
             return (
               <g key={l.id}>
                 <path d={d} fill="none" stroke="var(--accent)" strokeWidth={2 / viewport.zoom} strokeLinecap="round" opacity={0.65} />
+                {/* 호버 시 부모→자식으로 흐르는 빛 — 라인 두께 그대로, 앞뒤가 투명하게 페이드된 밝은
+                    그라데이션 펄스가 선을 따라 이동(1초). 그라데이션 축을 부모→자식으로 정렬해 방향 보장. */}
+                {flowSet.has(l.id) && (
+                  <>
+                    <defs>
+                      <linearGradient id={`kvflow-${l.id}`} gradientUnits="userSpaceOnUse" x1={x1} y1={y1} x2={x2} y2={y2}>
+                        <stop offset="0" stopColor="var(--accent)" stopOpacity="0" />
+                        <stop offset="0.3" stopColor="var(--accent)" stopOpacity="0" />
+                        <stop offset="0.5" stopColor="#FFFFFF" stopOpacity="1" />
+                        <stop offset="0.7" stopColor="var(--accent)" stopOpacity="0" />
+                        <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
+                        <animateTransform
+                          attributeName="gradientTransform"
+                          type="translate"
+                          from={`${-1.25 * (x2 - x1)} ${-1.25 * (y2 - y1)}`}
+                          to={`${1.25 * (x2 - x1)} ${1.25 * (y2 - y1)}`}
+                          dur="1s"
+                          begin={`${(flowSet.get(l.id) ?? 0) * 0.14}s`}
+                          repeatCount="indefinite"
+                        />
+                      </linearGradient>
+                    </defs>
+                    <path
+                      d={d}
+                      fill="none"
+                      stroke={`url(#kvflow-${l.id})`}
+                      strokeWidth={2 / viewport.zoom}
+                      strokeLinecap="round"
+                    />
+                  </>
+                )}
                 <circle cx={x2} cy={y2} r={3.5 / viewport.zoom} fill="var(--accent)" opacity={0.85} />
                 {/* 넉넉한 투명 히트 영역 — 클릭으로 연결 해제(undo 가능) */}
                 {!classroom && (

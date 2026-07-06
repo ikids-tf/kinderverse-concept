@@ -30,12 +30,14 @@ export function BoardMinimap() {
     const rects = list.map((n) => {
       const isFrame = n.type === 'frame';
       const isLoose = !isFrame && !n.data?.frameId; // 프레임 밖(자유 배치) 자료
+      // ⚠ bg-fg/NN 같은 투명도 modifier는 --fg가 hex(#141311)라 rgba(0,0,0,0)=투명으로
+      //   깨진다(채움이 안 보임). 솔리드 토큰 색(bg-fg / bg-fg-muted)만 쓴다.
       const cls = isFrame
-        ? 'absolute rounded-[1px] border border-fg/30' // 프레임 — 외곽선
+        ? 'absolute rounded-[1px] border border-fg-muted' // 프레임 — 외곽선
         : isLoose
-          ? 'absolute rounded-[1px] bg-fg/75' // 프레임 밖 자료 — 진하게 또렷이
-          : 'absolute rounded-[1px] bg-fg/25'; // 프레임 안 요소 — 연한 회색
-      const min = isLoose ? 4 : 2;
+          ? 'absolute rounded-[1px] bg-fg' // 프레임 밖 자료 — 가장 진하게
+          : 'absolute rounded-[1px] bg-fg-muted'; // 프레임 안 요소 — 뚜렷한 회색
+      const min = isLoose ? 4 : 2.5;
       return (
         <div
           key={n.id}
