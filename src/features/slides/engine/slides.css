@@ -59,6 +59,7 @@ body.chrome:not(.present):not(.fs) .bar { display: flex; }
 }
 .bar-group { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 
+/* 고스트 버튼 — 테두리 없는 조용한 아이콘(과밀한 필 무더기 방지). 호버 시에만 면이 떠오른다. */
 .ibtn {
   display: inline-flex;
   align-items: center;
@@ -66,15 +67,15 @@ body.chrome:not(.present):not(.fs) .bar { display: flex; }
   flex: 0 0 auto;
   width: 30px;
   height: 30px;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--r-pill);
-  background: var(--surface);
+  background: transparent;
   color: var(--fg-2);
   cursor: pointer;
-  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+  transition: color 150ms ease, background 150ms ease;
 }
-.ibtn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.ibtn:disabled { opacity: 0.4; cursor: default; }
+.ibtn:hover:not(:disabled) { background: var(--surface-2); color: var(--accent); }
+.ibtn:disabled { opacity: 0.35; cursor: default; }
 .ibtn svg { display: block; width: 16px; height: 16px; }
 
 .pbtn {
@@ -100,14 +101,16 @@ body.chrome:not(.present):not(.fs) .bar { display: flex; }
   top: calc(100% + 6px);
   left: 0;
   z-index: 20;
-  width: 188px;
+  width: 272px;
+  max-height: 62vh;
+  overflow-y: auto;
   padding: var(--sp-1);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface);
   box-shadow: var(--shadow-lg);
 }
-.lay-menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.lay-menu-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
 .lay-item {
   display: flex;
   flex-direction: column;
@@ -134,49 +137,387 @@ body.chrome:not(.present):not(.fs) .bar { display: flex; }
 .lay-item .mini svg { display: block; width: 100%; height: 100%; }
 .lay-item span { font: 500 10px / 1.1 var(--font-sans); }
 
-/* ── 테마 피커(앱 크롬 — Milray 토큰) ── */
-.theme-dot { width: 12px; height: 12px; border-radius: var(--r-pill); flex: 0 0 auto; box-shadow: inset 0 0 0 1px rgba(20, 19, 17, 0.1); }
-.theme-menu {
+/* ── 더보기(⋯) 메뉴 — 테마·배경·내보내기·삭제(앱 크롬 — Milray 토큰) ── */
+.more-menu {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 20;
-  width: 170px;
-  padding: var(--sp-1);
+  z-index: 50;
+  width: 196px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface);
-  box-shadow: var(--shadow-lg);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  box-shadow: var(--shadow-pop);
 }
-.theme-item {
+.more-label {
+  padding: 2px 6px;
+  font: 600 var(--fs-xs) var(--font-sans);
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+}
+.more-swatches { display: flex; gap: 6px; padding: 2px 6px 4px; }
+.more-swatch {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.more-swatch:hover { transform: scale(1.12); }
+.more-swatch.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.more-swatch > span { position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px; border-radius: var(--r-pill); }
+.more-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+.more-item {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg);
+  font: 500 13px var(--font-sans);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.more-item:hover:not(:disabled) { background: var(--surface-2); color: var(--accent); }
+.more-item:disabled { opacity: 0.5; cursor: default; }
+.more-item.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
+
+/* ── 작업 공간 — 편집 페이지에선 좌 툴 패널 + 중앙 무대 2단, 평소엔 무대만 ── */
+.workspace { display: flex; flex: 1 1 auto; min-height: 0; }
+.stage-col { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; }
+
+/* ── 페이지 내비 — 장표 아래·썸네일 위 중앙(교사 요청 위치). 발표/풀스크린에선 숨김. ── */
+.stage-nav {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 0 6px;
+}
+body.chrome:not(.present):not(.fs) .stage-nav,
+body.editfs:not(.present):not(.fs) .stage-nav { display: flex; }
+
+/* ── 편집 페이지(?edit=1 / 단독 토글) — 집중 편집 워크스페이스(앱 크롬 — Milray 토큰).
+   구조는 Google Slides 편집기 참조: 헤더(제목) + 기능 그룹 툴바 행(구분선) + 좌 필름스트립
+   + 중앙 캔버스 + 하단 발표자 노트. 톤은 Milray(크림 서페이스·코랄 단일 악센트) 유지. ── */
+body.editfs .bar { display: none; } /* 카드 툴바 대신 편집 헤더+툴바 행 */
+body.editfs .stage { padding: var(--sp-5); }
+
+/* 헤더 — 오버라인 라벨 + 큰 제목(좌) · 완료 버튼(우). 넉넉한 높이로 편집 맥락을 또렷이. */
+.edit-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
+  gap: var(--sp-4);
+  flex: 0 0 auto;
+  padding: var(--sp-3) var(--sp-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: relative;
+  z-index: 6;
+}
+.edit-head-title { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.edit-overline {
+  font: 700 11px var(--font-sans);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding-left: 10px;
+}
+.edit-title { font-size: var(--fs-lg); padding: 4px 10px; }
+/* 완료 버튼 — 헤더에선 더 크게(주 종료 액션). */
+.edit-head .pbtn { height: 40px; padding: 0 22px; font-size: var(--fs-sm); gap: 7px; }
+.edit-head .pbtn svg { width: 17px; height: 17px; }
+
+/* 기능 그룹 툴바 행 — 라벨 붙은 버튼 + 얇은 세로 구분선(그룹 경계). 헤더보다 한 톤 낮춘 면. */
+.edit-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 9px var(--sp-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  position: relative;
+  z-index: 5;
+}
+.et-grp { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.et-sep { width: 1px; height: 26px; background: var(--border); margin: 0 6px; flex: 0 0 auto; }
+.et-spacer { flex: 1 1 auto; }
+.et-label {
+  font: 700 11px var(--font-sans);
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  padding: 0 3px 0 2px;
+  white-space: nowrap;
+}
+/* 테마 트리거 — 현재 테마를 작은 면+악센트 점으로 미리 보여준다. */
+.et-theme-dot {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+}
+.et-theme-dot > span { position: absolute; right: 2px; bottom: 2px; width: 7px; height: 7px; border-radius: var(--r-pill); }
+
+/* 테마 드롭다운 — 이름 + 스타일 미리보기 카드(무엇인지 '보고' 고른다). */
+.et-theme-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  width: 236px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  max-height: 64vh;
+  overflow-y: auto;
+}
+.theme-card {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.theme-card:hover { background: var(--surface-2); }
+.theme-card.on { border-color: var(--accent); background: var(--coral-soft); }
+/* 미니 슬라이드 미리보기 — 면 색 위에 잉크색 'Aa'(세리프/산세리프) + 악센트 바. */
+.tc-prev {
+  position: relative;
+  flex: 0 0 auto;
+  width: 48px;
+  height: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.tc-aa { font-weight: 700; font-size: 15px; line-height: 1; }
+.tc-bar { width: 18px; height: 3px; border-radius: 2px; }
+.tc-text { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
+.tc-name { font: 600 var(--fs-sm) var(--font-sans); color: var(--fg); }
+.theme-card.on .tc-name { color: var(--accent); }
+.tc-desc { font: 400 11px var(--font-sans); color: var(--fg-muted); }
+.tc-check { flex: 0 0 auto; display: inline-flex; color: var(--accent); }
+.tc-check svg { width: 16px; height: 16px; display: block; }
+
+/* 아이콘 전용 버튼(되돌리기/다시) — 36px 정사각, 호버 시 면이 떠오른다. */
+.et-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.et-icon:hover:not(:disabled) { background: var(--surface); color: var(--accent); }
+.et-icon:disabled { opacity: 0.35; cursor: default; }
+.et-icon svg { width: 18px; height: 18px; display: block; }
+
+/* 라벨 붙은 툴바 버튼(아이콘 + 글자) — 무엇을 하는지 바로 읽힌다. */
+.et-tbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 13px;
+  flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: var(--r-sm);
   background: transparent;
   color: var(--fg-2);
-  font: 500 var(--fs-sm) var(--font-sans);
+  font: 600 var(--fs-sm) var(--font-sans);
+  white-space: nowrap;
   cursor: pointer;
-  transition: background 150ms ease;
-  text-align: left;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
 }
-.theme-item:hover { background: var(--surface-2); }
-.theme-item.on { color: var(--accent); font-weight: 600; }
-.theme-chip {
+.et-tbtn:hover:not(:disabled) { background: var(--surface); border-color: var(--border); color: var(--accent); }
+.et-tbtn:disabled { opacity: 0.5; cursor: default; }
+.et-tbtn svg { width: 17px; height: 17px; flex: 0 0 auto; display: block; }
+.et-tbtn-cur { font-weight: 700; color: var(--fg); }
+.et-tbtn:hover .et-tbtn-cur { color: var(--accent); }
+.et-tbtn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 8%, transparent); border-color: color-mix(in srgb, var(--danger) 35%, transparent); color: var(--danger); }
+
+/* 좁은 화면 — 그룹 라벨을 숨겨 툴바 넘침 방지(버튼 자체 라벨은 유지). */
+@media (max-width: 940px) { .et-label { display: none; } }
+
+/* 좌측 필름스트립 — 세로 썸네일(Google Slides 구조). 선택 = 코랄 보더(기존 .rail-thumb.on 재사용). */
+.filmstrip {
   flex: 0 0 auto;
-  position: relative;
-  width: 26px;
-  height: 18px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  overflow: hidden;
+  width: 252px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: var(--sp-4) var(--sp-4) var(--sp-6);
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
 }
-.theme-chip-acc { position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-radius: var(--r-pill); }
+.filmstrip .rail-thumb { width: 208px; height: 117px; flex: 0 0 auto; border-radius: var(--r-md); }
+.filmstrip .rail-thumb.on { box-shadow: 0 0 0 3px var(--coral-soft); border-width: 2px; }
+.filmstrip .rail-thumb-num {
+  left: 6px; bottom: 6px;
+  min-width: 20px; height: 20px;
+  font-size: 11px;
+}
+.filmstrip .rail-drop { width: 208px; height: 3px; align-self: center; margin: 0; flex: 0 0 auto; }
+.filmstrip .rail-add {
+  width: 208px; height: 44px; flex: 0 0 auto;
+  border-radius: var(--r-md);
+  gap: 6px;
+  font: 600 var(--fs-sm) var(--font-sans);
+}
+.filmstrip .rail-add::after { content: '슬라이드 추가'; }
+
+/* 발표자 노트 — 캔버스 아래(화면엔 렌더되지 않는 교사 대본·발문). */
+.notes-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  flex: 0 0 auto;
+  padding: var(--sp-3) var(--sp-6);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.notes-label {
+  flex: 0 0 auto;
+  padding-top: 8px;
+  font: 700 11px var(--font-sans);
+  letter-spacing: 0.1em;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.notes-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 54px;
+  resize: none;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg);
+  font: 400 var(--fs-sm) / 1.5 var(--font-sans);
+  outline: none;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+.notes-input:hover { border-color: var(--border); }
+.notes-input:focus { border-color: var(--accent); background: var(--bg); }
+.notes-input::placeholder { color: var(--fg-muted); opacity: 0.8; }
+
+/* ── 배경 편집 — 빈 캔버스 클릭 시 배경(면) 선택: 코랄 링 + 상단 툴바(이미지·색·제거) ── */
+.scaler.bg-selected .slide-canvas { box-shadow: inset 0 0 0 3px var(--s-accent); }
+.bg-toolbar {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 42;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+.bg-tt { font: 700 11px var(--font-sans); letter-spacing: 0.08em; color: var(--fg-muted); margin-right: 2px; white-space: nowrap; }
+.bg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--fg-2);
+  font: 600 var(--fs-xs) var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.bg-btn:hover { background: var(--surface-2); color: var(--accent); }
+.bg-btn svg { width: 15px; height: 15px; flex: 0 0 auto; display: block; }
+.bg-btn.danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
+.bg-cchip { width: 15px; height: 15px; border-radius: var(--r-pill); border: 1px solid var(--border); flex: 0 0 auto; }
+
+/* 배경 색 팔레트 팝오버 */
+.bg-colorpop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 51;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+.bg-swatch {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.bg-swatch:hover { transform: scale(1.1); }
+.bg-swatch.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.bg-default {
+  grid-column: span 5;
+  width: 100%;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px;
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: 600 var(--fs-xs) var(--font-sans);
+}
+.bg-default:hover { transform: none; border-color: var(--accent); color: var(--accent); }
+.bg-default.on { box-shadow: none; border-color: var(--accent); color: var(--accent); }
 
 /* ── 무대(스테이지) — 슬라이드를 가운데, 회색 배경 위에 띄운다 ── */
 .stage {
@@ -204,6 +545,9 @@ body.present .stage, body.fs .stage { padding: 0; background: var(--s-bg); }
   border-radius: var(--r-lg);
   box-shadow: var(--s-shadow);
   overflow: hidden;
+  /* 한국어 단어 단위 줄바꿈 — 단어 중간이 끊기면(예: "안/전") 아마추어 표식. 전체 상속. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow: none; }
 
@@ -211,14 +555,22 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 .slide-canvas { --sl-accent: var(--s-accent); }
 .slide-canvas[data-accent='gold'] { --sl-accent: var(--s-accent-2); }
 
-/* 슬라이드 공통 패딩 컨테이너 — 레이아웃마다 '비균일'하게 재정의(균일 마진 = 아마추어 표식). */
+/* 슬라이드 공통 패딩 컨테이너 — 레이아웃마다 '비균일'하게 재정의(균일 마진 = 아마추어 표식).
+   align-items:flex-start — 흐름 텍스트는 '내용만큼만' 차지해, 글자를 직접 눌러야 선택되고 주변
+   빈 곳을 누르면 배경이 선택된다(전폭 그리드·리스트는 아래에서 다시 stretch). */
 .sl {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   padding: 84px 104px;
 }
+/* 카드·단계·비교·지표 셀 내부 텍스트도 내용만큼만(빈 셀 여백 클릭이 텍스트로 안 잡히게). */
+.sl-card, .sl-step, .sl-comp-col, .sl-stat-cell, .sl-feature-text { align-items: flex-start; }
+/* 전폭이어야 하는 콘텐츠 블록은 다시 stretch(그리드·리스트·차트). */
+.sl-cards, .sl-steps, .sl-compare, .sl-stats, .sl-checklist, .sl-agenda,
+.sl-bullets, .sl-cols, .sl-grid, .sl-chart { align-self: stretch; }
 
 /* ── 공통 크롬 — 오버라인(eyebrow) + 쪽번호 ── */
 .sl-eyebrow {
@@ -263,10 +615,201 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 .sl--title .sl-title { font-size: 94px; line-height: 1.03; max-width: 86%; }
 .sl--title .sl-subtitle { font-size: 29px; max-width: 60%; margin-top: 2px; }
 
+/* 표지 커버 아트 — image 블록이 있으면 좌 텍스트 55% / 우 엣지 투 엣지 아트 패널. */
+.sl--title.has-art { padding: 0; flex-direction: row; align-items: stretch; gap: 0; }
+.sl--title.has-art::before { display: none; } /* 코랄 바는 텍스트 컬럼(::before)으로 이동 */
+.sl-title-text {
+  flex: 0 0 55%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 24px;
+  padding: 100px 56px 100px 132px;
+}
+.sl-title-text::before {
+  content: '';
+  width: 60px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--sl-accent);
+  margin-bottom: 4px;
+}
+.sl--title.has-art .sl-title { font-size: 76px; max-width: 100%; }
+.sl--title.has-art .sl-subtitle { max-width: 92%; }
+.sl-title-art { flex: 1 1 auto; min-width: 0; display: flex; background: var(--s-canvas-2); }
+.sl-title-art .sl-img, .sl-title-art .sl-ph { width: 100%; height: 100%; border-radius: 0; border: none; }
+
 /* section-divider(섹션 구분) — 큰 호흡, 큰 좌측 여백, 강한 eyebrow + 거대한 제목. */
 .sl--section { padding: 120px 120px 120px 140px; align-items: flex-start; justify-content: center; gap: 18px; }
 .sl--section .sl-eyebrow { font-size: 22px; }
 .sl--section .sl-title { font-size: 86px; line-height: 1.05; max-width: 92%; }
+.sl-section-sub { font-family: var(--s-body); font-weight: 400; font-size: 27px; line-height: 1.5; color: var(--s-fg-2); max-width: 62%; margin-top: 6px; }
+
+/* agenda(차례) — 큰 번호(01·02·…) 목차, 헤어라인 구분. 6항목까지 한 화면에 들어간다. */
+.sl--agenda { padding: 64px 130px; gap: 26px; justify-content: flex-start; }
+.sl--agenda .sl-title { font-size: 52px; }
+.sl-agenda { list-style: none; counter-reset: ag; margin: 0; padding: 0; display: flex; flex-direction: column; max-width: 88%; min-height: 0; overflow: hidden; }
+.sl-agenda li {
+  counter-increment: ag;
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--s-border);
+  font-family: var(--s-body);
+  font-weight: 500;
+  font-size: 28px;
+  line-height: 1.35;
+  color: var(--s-fg);
+}
+.sl-agenda li::before {
+  content: counter(ag, decimal-leading-zero);
+  flex: 0 0 62px;
+  font-family: var(--s-display);
+  font-weight: 700;
+  font-size: 34px;
+  letter-spacing: 0.02em;
+  color: var(--sl-accent);
+}
+.sl-agenda .btxt { flex: 1 1 auto; min-width: 0; outline: none; }
+
+/* checklist(체크) — 체크 칩 2열 그리드(준비물·약속·유의점). */
+.sl--check { padding: 76px 104px; gap: 32px; justify-content: flex-start; }
+.sl--check .sl-title { font-size: 54px; }
+.sl-checklist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 18px 26px; align-content: start; }
+.sl-checklist li {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 24px;
+  background: var(--s-canvas-2);
+  border-radius: var(--r-md);
+  font-family: var(--s-body);
+  font-weight: 500;
+  font-size: 26px;
+  line-height: 1.4;
+  color: var(--s-fg-2);
+}
+.sl-checklist li::before {
+  content: '✓';
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-pill);
+  background: var(--sl-accent);
+  color: var(--s-canvas);
+  font-weight: 700;
+  font-size: 20px;
+}
+.sl-checklist .btxt { flex: 1 1 auto; min-width: 0; outline: none; }
+.sl-checklist .bullet-add { grid-column: 1 / -1; }
+
+/* cards(카드) — 개념 카드 2~4장, 상단 악센트 바 + 제목·설명. */
+.sl--cards { padding: 70px 96px; gap: 30px; justify-content: flex-start; }
+.sl--cards .sl-title { font-size: 50px; }
+.sl-cards { flex: 1 1 auto; min-height: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 24px; }
+.sl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 34px 30px;
+  background: var(--s-canvas-2);
+  border: 1px solid var(--s-border);
+  border-radius: var(--r-lg);
+  min-width: 0;
+}
+.sl-card::before { content: ''; width: 44px; height: 5px; border-radius: var(--r-pill); background: var(--sl-accent); margin-bottom: 4px; }
+.sl-card-t { font-family: var(--s-display); font-weight: 700; font-size: 30px; line-height: 1.25; color: var(--s-fg); }
+.sl-card-b { font-family: var(--s-body); font-weight: 400; font-size: 23px; line-height: 1.55; color: var(--s-fg-2); }
+
+/* steps(단계) — 번호 원이 붙는 가로 스텝 3~4개. */
+.sl--steps { padding: 70px 96px; gap: 34px; justify-content: flex-start; }
+.sl--steps .sl-title { font-size: 50px; }
+.sl-steps { flex: 1 1 auto; min-height: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 22px; align-content: center; counter-reset: st; }
+.sl-step {
+  counter-increment: st;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 30px 26px;
+  background: var(--s-canvas-2);
+  border-top: 5px solid var(--sl-accent);
+  border-radius: var(--r-md);
+  min-width: 0;
+}
+.sl-step::before {
+  content: counter(st);
+  width: 52px;
+  height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-pill);
+  background: var(--sl-accent);
+  color: var(--s-canvas);
+  font-family: var(--s-body);
+  font-weight: 700;
+  font-size: 26px;
+  margin-bottom: 6px;
+}
+.sl-step-t { font-family: var(--s-body); font-weight: 700; font-size: 27px; line-height: 1.3; color: var(--s-fg); }
+.sl-step-b { font-family: var(--s-body); font-weight: 400; font-size: 22px; line-height: 1.5; color: var(--s-fg-2); }
+
+/* compare(비교) — 좌우 두 패널, 상단 보더 색으로 대비(1차/2차 악센트). */
+.sl--compare { padding: 70px 96px; gap: 28px; justify-content: flex-start; }
+.sl--compare .sl-title { font-size: 50px; }
+.sl-compare { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.sl-comp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 34px;
+  background: var(--s-canvas-2);
+  border-radius: var(--r-lg);
+  border-top: 6px solid var(--sl-accent);
+  min-width: 0;
+}
+.sl-comp-col:last-child { border-top-color: var(--s-accent-2); }
+.sl-comp-h { font-family: var(--s-body); font-weight: 700; font-size: 28px; color: var(--s-fg); }
+.sl-comp-b { font-family: var(--s-body); font-weight: 400; font-size: 24px; line-height: 1.6; color: var(--s-fg-2); }
+
+/* stat-row(지표 나열) — 지표 카드 2~3개, 좌측 악센트 보더 + 큰 수치. */
+.sl--stats { padding: 76px 104px; gap: 38px; justify-content: flex-start; }
+.sl--stats .sl-title { font-size: 50px; }
+.sl-stats { flex: 1 1 auto; min-height: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 24px; align-content: center; }
+.sl-stat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 38px 32px;
+  background: var(--s-canvas-2);
+  border-left: 6px solid var(--sl-accent);
+  border-radius: var(--r-md);
+  min-width: 0;
+}
+.sl-stat-cell .num { font-family: var(--s-display); font-weight: 700; font-size: 76px; line-height: 1; letter-spacing: -0.02em; color: var(--sl-accent); }
+.sl-stat-cell .lab { font-family: var(--s-body); font-weight: 600; font-size: 23px; line-height: 1.35; color: var(--s-fg-2); }
+
+/* image-full(풀 이미지) — 풀블리드 이미지 + 하단 그라데이션 스크림 + 오버레이 제목.
+   미디어·스크림은 absolute(z0), 텍스트는 흐름(z1) — freeze 좌표계(.sl 기준)가 깨지지 않는다. */
+.sl--full { padding: 76px 104px; justify-content: flex-end; gap: 12px; }
+.sl-full-media { position: absolute; inset: 0; z-index: 0; display: flex; }
+.sl-full-media .sl-img { width: 100%; height: 100%; border-radius: 0; }
+.sl-full-media .sl-ph { flex: 1 1 auto; border-radius: 0; border: none; }
+.sl-full-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(180deg, rgba(10, 9, 8, 0) 38%, rgba(10, 9, 8, 0.66) 100%);
+  pointer-events: none;
+}
+.sl--full > .sl-eyebrow, .sl--full > .sl-title, .sl--full > .sl-subtitle, .sl--full > .sl-free { position: relative; z-index: 1; }
+.sl--full .sl-title { font-size: 72px; color: #fdfcf9; max-width: 84%; }
+.sl--full .sl-subtitle { font-size: 28px; color: rgba(253, 252, 249, 0.88); max-width: 70%; }
+.sl--full .sl-eyebrow { color: #ffd9a8; }
 
 /* big-text(강조) — 한 문장. */
 .sl--big { padding: 96px 120px; align-items: flex-start; justify-content: center; gap: 16px; }
@@ -341,11 +884,21 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 }
 .bullet-add:hover { border-color: var(--s-accent); color: var(--s-accent); }
 
-/* two-column(두 단) — 비대칭 60/40 그리드. */
+/* two-column(두 단) — 비대칭 60/40 그리드. subtitle 2개가 있으면 컬럼 헤더가 붙는다. */
 .sl--two { padding: 80px 104px; gap: 26px; justify-content: flex-start; }
 .sl--two .sl-title { font-size: 52px; max-width: 78%; }
 .sl-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1.5fr 1fr; gap: 56px; align-content: start; }
 .sl-cols .sl-body { font-size: 27px; line-height: 1.6; }
+.sl-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sl-col-h {
+  align-self: flex-start;
+  font-family: var(--s-body);
+  font-weight: 700;
+  font-size: 24px;
+  color: var(--sl-accent);
+  padding-bottom: 8px;
+  border-bottom: 3px solid var(--sl-accent);
+}
 
 /* image-feature — 텍스트 좌 56% · 이미지 우 44%(엣지 투 엣지). */
 .sl--feature { padding: 0; flex-direction: row; align-items: stretch; }
@@ -378,6 +931,7 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 /* hero-image / photo-grid — 이미지 자리표시. chart — recharts 차트(SlideChart). */
 .sl--hero { padding: 76px 104px; gap: 26px; }
 .sl--hero .sl-title { font-size: 56px; max-width: 80%; }
+.sl-hero-sub { font-family: var(--s-body); font-weight: 400; font-size: 26px; line-height: 1.5; color: var(--s-fg-2); max-width: 70%; margin-top: -8px; }
 .sl-ph {
   display: flex;
   flex-direction: column;
@@ -399,8 +953,12 @@ body.present .slide-canvas, body.fs .slide-canvas { border-radius: 0; box-shadow
 .sl--grid { padding: 72px 104px; gap: 22px; }
 .sl--grid .sl-eyebrow { margin-bottom: 2px; }
 /* minmax(0,1fr) — 행/열 최소를 0으로(기본 1fr=minmax(auto,1fr)는 이미지 '자연 높이'를 최소로 잡아
-   2행이 슬라이드를 넘쳐 아래 2장이 잘리던 문제). 그리드 높이에 맞춰 4칸이 정확히 나뉘고, 이미지는 contain. */
+   2행이 슬라이드를 넘쳐 아래 2장이 잘리던 문제). 그리드 높이에 맞춰 칸이 정확히 나뉘고, 이미지는 contain.
+   data-count(2~6)에 따라 열·행이 변한다(기본 2×2). */
 .sl-grid { flex: 1 1 auto; min-height: 0; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.sl-grid[data-count='2'] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.sl-grid[data-count='3'] { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); }
+.sl-grid[data-count='5'], .sl-grid[data-count='6'] { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
 .sl-grid .sl-ph .ph-ic { font-size: 38px; }
 
 .sl--chart { padding: 72px 104px; gap: 18px; }
@@ -590,33 +1148,7 @@ body.chrome:not(.present):not(.fs) .sl-img { cursor: pointer; }
   white-space: nowrap;
 }
 
-/* 내보내기(PDF/PPTX) 메뉴 + 진행 스피너 */
-.export-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 5px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-pop);
-}
-.export-item {
-  padding: 8px 14px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--fg);
-  font: 500 13px var(--font-sans);
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.export-item:hover { background: var(--surface-2); color: var(--accent); }
+/* 내보내기 진행 스피너(더보기 버튼 안) */
 .be-spin {
   display: inline-block;
   width: 15px;

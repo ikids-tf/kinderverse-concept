@@ -63,9 +63,12 @@ interface UIState {
   /** 문서 편집 페이지(/doc/:nodeId/edit)가 떠 있을 때 그 문서 노드 id. 설정되면 프롬프트바
       입력은 보드로 새지 않고 그 문서의 선택 영역 수정(AI)으로 라우팅된다. */
   docEditNodeId: string | null;
-  /** 그 문서에서 현재 선택한 영역(섹션) 수(프롬프트바 칩/플레이스홀더용). 0이면 문서 전체. */
+  /** 그 문서에서 현재 선택한 영역(섹션·표 행) 수(프롬프트바 칩/플레이스홀더용). 0이면 문서 전체. */
   docEditSelCount: number;
+  /** 선택 영역의 표시 라벨(placeholder 용, 예: "'주간 교육 목표'" · "'1주차' 외 2곳"). '' = 없음. */
+  docEditSelLabel: string;
   setDocEdit: (nodeId: string | null) => void;
+  setDocEditSel: (count: number, label: string) => void;
   setDocEditSelCount: (n: number) => void;
 }
 
@@ -81,11 +84,14 @@ export const useUIStore = create<UIState>((set) => ({
   inodeFsSelCount: 0,
   docEditNodeId: null,
   docEditSelCount: 0,
+  docEditSelLabel: '',
 
   setGameViewerFs: (id) => set({ gameViewerFsNodeId: id }),
   setInodeFs: (docId) => set(docId ? { inodeFsDocId: docId } : { inodeFsDocId: null, inodeFsSelCount: 0 }),
   setInodeFsSelCount: (n) => set({ inodeFsSelCount: n }),
-  setDocEdit: (nodeId) => set(nodeId ? { docEditNodeId: nodeId } : { docEditNodeId: null, docEditSelCount: 0 }),
+  // 해제 시 count·label 함께 리셋 — 다음 편집 세션/다른 컨텍스트로 이전 선택이 새지 않게.
+  setDocEdit: (nodeId) => set(nodeId ? { docEditNodeId: nodeId } : { docEditNodeId: null, docEditSelCount: 0, docEditSelLabel: '' }),
+  setDocEditSel: (count, label) => set({ docEditSelCount: count, docEditSelLabel: label }),
   setDocEditSelCount: (n) => set({ docEditSelCount: n }),
   setPromptBarLeftInset: (px) => set({ promptBarLeftInset: px }),
   setPromptBarCollapsed: (v) => set(v ? { promptBarCollapsed: true, favoritesOpen: false } : { promptBarCollapsed: false }),

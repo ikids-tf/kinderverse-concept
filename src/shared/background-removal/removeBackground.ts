@@ -8,6 +8,7 @@
  * 🔴 LICENSE(상용 출시 전 반드시 교체): 현재 모델 = briaai/RMBG-1.4 (BRIA, 비상업) — 사용자
  *   승인 하 프로토타입 채택. 상업 출시 시 MIT/Apache 대안으로 교체할 것(worker.ts MODEL_ID).
  */
+import { SPECKLE_MAX_PX } from './matte';
 import type { AssetKind, RBInput, RemoveBgOptions, RemoveBgResult, Tier, WorkerResponse } from './types';
 
 /** 서버 미세경계 티어 엔드포인트 — 아직 미배포. true가 되기 전엔 항상 온디바이스. */
@@ -35,6 +36,14 @@ interface Pending {
 }
 const pending = new Map<number, Pending>();
 
+/** 모든 대기 작업을 같은 오류로 실패시키고 워커를 폐기(다음 호출에서 새로 생성해 복구). */
+function failAllPending(message: string): void {
+  const err = new Error(message);
+  for (const p of pending.values()) p.reject(err);
+  pending.clear();
+  worker = null; // 죽은 워커 폐기 → getWorker가 새 워커를 만든다
+}
+
 function getWorker(): Worker {
   if (!worker) {
     worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -47,11 +56,20 @@ function getWorker(): Worker {
         if (m.id != null) {
           pending.get(m.id)?.reject(new Error(m.message));
           pending.delete(m.id);
+        } else {
+          // id 없는 치명 오류(모델 로드 실패 등) — 어느 작업 것인지 못 짚으니 전부 실패시킨다
+          // (그냥 두면 대기 작업이 영영 안 끝나 '로딩만 계속' 상태가 된다).
+          failAllPending(m.message || '배경 제거 엔진 오류');
         }
-      } else if (m.type === 'progress' && m.id != null) {
-        pending.get(m.id)?.onProgress?.({ stage: m.stage, progress: m.progress });
+      } else if (m.type === 'progress') {
+        if (m.id != null) pending.get(m.id)?.onProgress?.({ stage: m.stage, progress: m.progress });
+        // 모델 로딩 등 id 없는 진행은 브로드캐스트 — 첫 실행 다운로드 단계를 UI에 알린다.
+        else for (const p of pending.values()) p.onProgress?.({ stage: m.stage, progress: m.progress });
       }
     };
+    // 워커가 통째로 죽으면(스크립트 오류·OOM) onmessage가 다신 안 온다 → 대기 작업 전부 실패 처리.
+    worker.onerror = (ev) => failAllPending(`배경 제거 워커 오류: ${ev.message || 'unknown'}`);
+    worker.onmessageerror = () => failAllPending('배경 제거 워커 메시지 오류');
     worker.postMessage({ type: 'warmup' }); // 모델 1회 로드·워밍업(첫 실제 호출을 빠르게)
   }
   return worker;
@@ -113,11 +131,21 @@ export async function removeBackground(input: RBInput, opts: RemoveBgOptions): P
   const w = getWorker();
   const id = ++seq;
   const out = await new Promise<{ blob: Blob; width: number; height: number }>((resolve, reject) => {
-    pending.set(id, { resolve, reject, onProgress: opts.onProgress });
+    // 타임아웃 — 모델 다운로드가 지연/실패해도 fetch가 걸려 있으면 워커가 오류를 안 낼 수 있다.
+    // 그러면 '로딩만 무한' 상태가 되므로, 상한을 두고 명확한 오류로 끝낸다(첫 다운로드 여유 포함).
+    const timeout = window.setTimeout(() => {
+      if (!pending.has(id)) return;
+      pending.delete(id);
+      reject(new Error('배경 제거가 너무 오래 걸려요 — 모델 다운로드 지연이나 네트워크 문제일 수 있어요. 새로고침 후 다시 시도해 주세요.'));
+    }, 180_000);
+    const done = <T>(fn: (v: T) => void) => (v: T) => { window.clearTimeout(timeout); fn(v); };
+    const resolveT = done(resolve);
+    const rejectT = done(reject);
+    pending.set(id, { resolve: resolveT, reject: rejectT, onProgress: opts.onProgress });
     if (opts.signal) {
       if (opts.signal.aborted) {
         pending.delete(id);
-        reject(new DOMException('aborted', 'AbortError'));
+        rejectT(new DOMException('aborted', 'AbortError'));
         return;
       }
       opts.signal.addEventListener(
@@ -125,12 +153,12 @@ export async function removeBackground(input: RBInput, opts: RemoveBgOptions): P
         () => {
           // 추론 중간 취소는 불가(모델은 끝까지 실행) — 결과만 폐기한다.
           pending.delete(id);
-          reject(new DOMException('aborted', 'AbortError'));
+          rejectT(new DOMException('aborted', 'AbortError'));
         },
         { once: true },
       );
     }
-    w.postMessage({ type: 'run', id, blob });
+    w.postMessage({ type: 'run', id, blob, mainOnly: opts.mainOnly === true });
   });
 
   const dataUrl = await blobToDataUrl(out.blob);
@@ -144,11 +172,15 @@ export async function removeBackground(input: RBInput, opts: RemoveBgOptions): P
    (3) 가장자리 침식 을 단계적으로 적용해 흩어진 점·헤일로만 정확히 깎는다. */
 export async function cleanupBackground(
   input: RBInput,
-  opts: { level?: number; keepMainOnly?: boolean; gentle?: boolean } = {},
+  opts: { level?: number; keepMainOnly?: boolean; gentle?: boolean; fillHoles?: 'small' | 'all' } = {},
 ): Promise<{ dataUrl: string; removed: number }> {
   const level = Math.max(1, Math.floor(opts.level ?? 1));
   const keepMainOnly = opts.keepMainOnly ?? false;
   const gentle = opts.gentle ?? false; // 캐릭터(아이) — 침식으로 손·발·흰옷이 깎이지 않게 약하게
+  // 구멍 채움 폭 — 'small'(기본) = 스펙클만. 'all' = 에워싸인 구멍 전부(공격적 복구):
+  //  · gentle(옷입히기 캐릭터)은 흰옷·밝은 면 내부 보존을 구멍 채움에 의존하므로 항상 'all'.
+  //  · 재실행 level≥3 = 교사가 반복해서 정리를 요청한 시점 — 의도가 명시됐으니 'all'로 승격.
+  const fillHoles: 'small' | 'all' = opts.fillHoles ?? ((keepMainOnly && gentle) || level >= 3 ? 'all' : 'small');
   const bmp = await normalizeToBitmap(input);
   const scale = Math.min(1, MAX_EDGE / Math.max(bmp.width, bmp.height));
   const w = Math.max(1, Math.round(bmp.width * scale));
@@ -290,13 +322,16 @@ export async function cleanupBackground(
     }
   }
 
-  // ── 내부 구멍 메우기(imfill) — 매트가 반짝이·질감을 배경으로 오인해 '객체 안에' 만든
-  //    투명 점/구멍을 복원한다(사용자 보고: 객체 내부가 조금씩 뚫림). 표준 hole-filling:
-  //    테두리에서 투명 영역을 따라 '도달하는' 픽셀만 진짜 바깥 배경으로 두고, 에워싸여
-  //    도달하지 못하는 투명 픽셀(=내부 구멍)만 불투명(255)으로 되살린다.
-  //      · 외곽의 부드러운 반투명(안티에일리어스)은 바깥에 닿아 그대로 보존된다.
-  //      · RGB는 원본이 살아 있어 알파만 올리면 객체 표면이 자연스럽게 드러난다.
-  //    (도넛처럼 '진짜로 뚫린' 내부 공간은 드물어 — 그런 자산은 되돌리기로 대응.)
+  // ── 내부 구멍 메우기(맥락적 imfill) — 매트가 반짝이·질감을 배경으로 오인해 '객체 안에'
+  //    만든 투명 구멍을 복원한다. ⚠️ 두 가지 함정을 피한다:
+  //      1) 여기는 캔버스를 이미 거친 뒤라 **α=0 픽셀의 RGB가 프리멀티플라이로 검정(0,0,0)
+  //         소실**된 상태다(실측 확정 — "RGB는 원본이 살아 있다"는 과거 주석은 틀린 전제였고
+  //         그래서 우체통 틈이 검정으로 채워졌다). 알파만 올리면 검정 덩어리가 되므로, 소실
+  //         픽셀은 주변 불투명 색을 BFS로 끌어와 인페인트한다 — 근사 복원일 뿐 원색 복원은
+  //         이 경로에선 원리적으로 불가능하다(원색 복원은 워커 postProcessMatte 전담).
+  //      2) 에워싸였다고 다 오류 구멍이 아니다 — 우체통-기둥 사이처럼 '진짜 뚫린 틈'이
+  //         흔하다. 원본 색·raw 확신도가 없는 여기서는 기본적으로 스펙클(≤SPECKLE_MAX_PX)만
+  //         메우고, fillHoles:'all'(gentle 캐릭터·정리 에스컬레이션)일 때만 전부 메운다.
   {
     const T = 128; // 전경 판정 임계(이 미만 = 배경/구멍 후보)
     const reached = new Uint8Array(N); // 테두리에서 투명영역을 따라 도달한 '진짜 바깥 배경'
@@ -314,8 +349,59 @@ export async function cleanupBackground(
       if (y > 0) seed(p - w);
       if (y < h - 1) seed(p + w);
     }
-    for (let p = 0; p < N; p++) {
-      if (data[p * 4 + 3] < T && !reached[p]) data[p * 4 + 3] = 255; // 에워싸인 구멍 → 불투명 복원
+    // 에워싸인 투명 성분을 라벨링 — 모드에 맞는 크기만 채움 대상으로 수집.
+    const maxFill = fillHoles === 'all' ? Infinity : SPECKLE_MAX_PX;
+    const holeLabel = new Int32Array(N);
+    const fillPixels: number[] = [];
+    for (let s = 0; s < N; s++) {
+      if (data[s * 4 + 3] >= T || reached[s] || holeLabel[s] !== 0) continue;
+      const comp: number[] = [];
+      let hp = 0;
+      stack[hp++] = s;
+      holeLabel[s] = 1;
+      while (hp > 0) {
+        const p = stack[--hp];
+        comp.push(p);
+        const x = p % w, y = (p / w) | 0;
+        if (x > 0 && data[(p - 1) * 4 + 3] < T && !reached[p - 1] && holeLabel[p - 1] === 0) { holeLabel[p - 1] = 1; stack[hp++] = p - 1; }
+        if (x < w - 1 && data[(p + 1) * 4 + 3] < T && !reached[p + 1] && holeLabel[p + 1] === 0) { holeLabel[p + 1] = 1; stack[hp++] = p + 1; }
+        if (y > 0 && data[(p - w) * 4 + 3] < T && !reached[p - w] && holeLabel[p - w] === 0) { holeLabel[p - w] = 1; stack[hp++] = p - w; }
+        if (y < h - 1 && data[(p + w) * 4 + 3] < T && !reached[p + w] && holeLabel[p + w] === 0) { holeLabel[p + w] = 1; stack[hp++] = p + w; }
+      }
+      if (comp.length <= maxFill) fillPixels.push(...comp);
+    }
+    if (fillPixels.length > 0) {
+      // RGB 소실(α 낮음 → 프리멀티플라이 파괴) 픽셀은 주변 색을 파도(BFS)로 전파해 복원.
+      const needColor = new Uint8Array(N);
+      let queue: number[] = [];
+      for (const p of fillPixels) {
+        if (data[p * 4 + 3] < 24) needColor[p] = 1; // α<24 = RGB 신뢰 불가(양자화 파괴)
+        data[p * 4 + 3] = 255;
+      }
+      for (const p of fillPixels) if (needColor[p]) queue.push(p);
+      let guard = 0;
+      while (queue.length > 0 && guard++ < 4096) {
+        const next: number[] = [];
+        for (const p of queue) {
+          const x = p % w, y = (p / w) | 0;
+          let r = 0, g = 0, b = 0, n = 0;
+          const take = (q: number) => {
+            if (!needColor[q] && data[q * 4 + 3] >= 24) { r += data[q * 4]; g += data[q * 4 + 1]; b += data[q * 4 + 2]; n++; }
+          };
+          if (x > 0) take(p - 1);
+          if (x < w - 1) take(p + 1);
+          if (y > 0) take(p - w);
+          if (y < h - 1) take(p + w);
+          if (n > 0) {
+            data[p * 4] = Math.round(r / n);
+            data[p * 4 + 1] = Math.round(g / n);
+            data[p * 4 + 2] = Math.round(b / n);
+            needColor[p] = 2; // 이번 라운드에 채움(다음 라운드부터 소스로 사용)
+          } else next.push(p);
+        }
+        for (const p of queue) if (needColor[p] === 2) needColor[p] = 0;
+        queue = next;
+      }
     }
   }
 

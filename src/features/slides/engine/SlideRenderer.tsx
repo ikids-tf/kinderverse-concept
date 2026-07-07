@@ -26,6 +26,7 @@ export const SlideRenderer: FC<{
       data-layout={slide.layout}
       data-accent={slide.accentRole ?? 'coral'}
       data-bg={slide.background ? '1' : undefined}
+      style={slide.bgColor ? { background: slide.bgColor } : undefined}
     >
       <SlideBg background={slide.background} />
       <Cmp slide={slide} theme={theme} editable={editable} h={h} selected={selected ?? NO_SELECTION} thumbnail={thumbnail} />

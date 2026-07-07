@@ -183,9 +183,10 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   // 인터랙티브 노드 풀스크린(편집) — 입력이 그 노드 편집으로 간다. 선택 수로 칩/문구를 바꾼다.
   const inodeFs = useUIStore((s) => s.inodeFsDocId);
   const inodeSelCount = useUIStore((s) => s.inodeFsSelCount);
-  // 문서 편집 페이지 — 입력이 그 문서(선택 영역)로 간다. 선택 수로 칩/문구를 바꾼다.
+  // 문서 편집 페이지 — 입력이 그 문서(선택 영역)로 간다. 선택 수·라벨로 칩/문구를 바꾼다.
   const docEditFs = useUIStore((s) => s.docEditNodeId);
   const docEditSelCount = useUIStore((s) => s.docEditSelCount);
+  const docEditSelLabel = useUIStore((s) => s.docEditSelLabel);
   const setVideoCompose = useUIStore((s) => s.setVideoCompose);
 
   const sendToRouter = useRouterStore((s) => s.send);
@@ -431,11 +432,15 @@ export function PromptBar({ variant = 'docked' }: { variant?: 'docked' | 'inline
   const boardSelectionCount = location.pathname.startsWith('/board') ? boardSelection.length : 0;
   const selChipCount = inodeFs ? inodeSelCount : docEditFs ? docEditSelCount : boardSelectionCount;
   const placeholder = (() => {
-    // 문서 편집 페이지 — 입력은 그 문서로. 선택 영역 있으면 그 영역만, 없으면 문서 전체.
+    // 문서 편집 페이지 — 입력은 그 문서로. 선택 영역 있으면 그 영역 이름을, 없으면 문서 전체.
+    // 라벨은 페이지가 50자 이내로 절단해 준다(placeholder 줄바꿈 시 잘려 보이는 textarea 특성 보호).
     if (docEditFs) {
-      return docEditSelCount > 0
-        ? `고른 영역 ${docEditSelCount}곳만 고쳐요 — 예) 더 쉬운 말로 바꿔 줘`
-        : '문서를 어떻게 고칠까요?  예) 목표를 더 구체적으로 · 화요일 활동 바꿔 줘';
+      if (docEditSelCount > 0) {
+        return docEditSelLabel
+          ? `${docEditSelLabel} — 어떻게 고칠까요? 예) 더 쉬운 말로`
+          : `고른 영역 ${docEditSelCount}곳만 고쳐요 — 예) 더 쉬운 말로 바꿔 줘`;
+      }
+      return '문서 전체를 고쳐요 — 왼쪽 설정(연령·키워드)이 함께 반영돼요';
     }
     // 인터랙티브 노드 풀스크린(편집) — 입력은 그 노드로. 선택 있으면 그 요소에, 없으면 전체.
     if (inodeFs) {

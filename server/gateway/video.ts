@@ -12,11 +12,49 @@
      ※ predict 계열은 inlineData가 아니라 bytesBase64Encoded를 쓴다(generateContent와 구분). */
 
 /** 기본 Veo 모델 — GEMINI_API_KEY가 있고 KV_GEMINI_VIDEO_MODEL 미설정 시 사용.
-    기본을 fast로 둬(저가 ≈$0.15/초 · 할당량 여유) 모든 PC가 별도 .env 없이 동작하게 한다.
-    고품질이 필요하면 env로 veo-3.0-generate-001(≈$0.40/초)·veo-2.0-generate-001 교체. */
-export const DEFAULT_GEMINI_VIDEO_MODEL = 'veo-3.0-fast-generate-001';
+    기본을 fast로 둬(저가·할당량 여유) 모든 PC가 별도 .env 없이 동작하게 한다.
+    ※ 모델 ID는 Google이 수시로 폐기·개명한다(구 veo-3.0-*·veo-2.0-* GA는 현재 다수 키에서
+    404). 그래서 하드코딩에만 의존하지 않고, 404가 나면 pickAvailableVideoModel이 이 키로
+    실제 쓸 수 있는 Veo 모델을 조회해 자동 대체한다(아래). 고품질이 필요하면 env로 교체. */
+export const DEFAULT_GEMINI_VIDEO_MODEL = 'veo-3.1-fast-generate-preview';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+/** 세션 캐시 — 한 번 성공(또는 자동 해석)한 모델을 재사용해 매 호출 404 왕복·ListModels를 막는다. */
+let resolvedVideoModel: string | null = null;
+
+/** 이 키로 실제 쓸 수 있는 Veo 모델 중 최적을 고른다(predictLongRunning 지원 + 이름에 veo).
+    선호: fast(저가) > lite > 표준, 동급이면 버전 높은 순. 조회 실패/후보 없으면 null.
+    구성 모델이 404(NOT_FOUND — 키에 권한 없음/폐기·개명)일 때만 호출된다. */
+async function pickAvailableVideoModel(geminiKey: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_BASE}/models?key=${encodeURIComponent(geminiKey)}&pageSize=200`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+    };
+    const cands = (data.models ?? [])
+      .filter(
+        (m) =>
+          typeof m.name === 'string' &&
+          /veo/i.test(m.name) &&
+          (m.supportedGenerationMethods ?? []).includes('predictLongRunning'),
+      )
+      .map((m) => (m.name as string).replace(/^models\//, ''));
+    if (!cands.length) return null;
+    const versionRank = (id: string): number => {
+      const m = /veo-(\d+)\.(\d+)/.exec(id);
+      return m ? Number(m[1]) * 100 + Number(m[2]) : 0;
+    };
+    const tierRank = (id: string): number => (/fast/i.test(id) ? 2 : /lite/i.test(id) ? 1 : 0);
+    cands.sort(
+      (a, b) => tierRank(b) - tierRank(a) || versionRank(b) - versionRank(a) || a.localeCompare(b),
+    );
+    return cands[0];
+  } catch {
+    return null;
+  }
+}
 
 export interface StartVideoOpts {
   geminiKey?: string;
@@ -87,10 +125,14 @@ async function fetchVeo(url: string, init?: RequestInit): Promise<Response> {
   }
 }
 
-/** 429를 교사용 안내 메시지로(나머지는 진단용 원문). */
+/** 429·404를 교사용 안내 메시지로(나머지는 진단용 원문). */
 function formatVeoHttpError(status: number, model: string, body: string): string {
   if (status === 429) {
-    return 'Veo 사용량 한도(429)에 걸렸어요 — 1~2분 뒤 다시 시도해 주세요. 계속 실패하면 Google AI Studio에서 Veo 할당량·결제를 확인하거나 KV_GEMINI_VIDEO_MODEL을 veo-3.0-fast-generate-001로 바꿔 보세요.';
+    return 'Veo 사용량 한도(429)에 걸렸어요 — 1~2분 뒤 다시 시도해 주세요. 계속 실패하면 Google AI Studio에서 Veo 할당량·결제를 확인해 주세요.';
+  }
+  if (status === 404) {
+    // 자동 대체까지 실패한 경우에만 도달(이 키로 쓸 수 있는 Veo 모델이 없음).
+    return `영상 모델 "${model}"을(를) 이 API 키로 찾을 수 없어요(404) — 모델이 폐기됐거나 키에 권한이 없어요. Google AI Studio에서 Veo 사용 가능 여부를 확인하거나 .env의 KV_GEMINI_VIDEO_MODEL을 지워(자동 선택) 다시 시도해 주세요.`;
   }
   return `veo ${model} HTTP ${status}: ${body.slice(0, 240)}`;
 }
@@ -116,7 +158,6 @@ async function toBytes(src: string): Promise<{ mime: string; b64: string } | nul
 /** Veo 생성 시작 → 오퍼레이션 이름. 키 없으면 mocked. */
 export async function startVideo(opts: StartVideoOpts): Promise<StartVideoResult> {
   if (!opts.geminiKey) return { real: false, mocked: true, error: 'no GEMINI_API_KEY' };
-  const model = opts.model || DEFAULT_GEMINI_VIDEO_MODEL;
 
   const instance: Record<string, unknown> = { prompt: opts.prompt };
   if (opts.imageDataUri) {
@@ -132,21 +173,34 @@ export async function startVideo(opts: StartVideoOpts): Promise<StartVideoResult
   if (opts.negativePrompt) parameters.negativePrompt = opts.negativePrompt;
   if (opts.personGeneration) parameters.personGeneration = opts.personGeneration;
 
-  try {
-    const url = `${API_BASE}/models/${encodeURIComponent(model)}:predictLongRunning?key=${encodeURIComponent(
-      opts.geminiKey,
-    )}`;
-    const res = await fetchVeo(url, {
+  const key = opts.geminiKey;
+  const post = (m: string): Promise<Response> =>
+    fetchVeo(`${API_BASE}/models/${encodeURIComponent(m)}:predictLongRunning?key=${encodeURIComponent(key)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ instances: [instance], parameters }),
     });
+
+  try {
+    // 우선순위: 명시 model > 세션에 해석해둔 모델 > 코드 기본값.
+    let active = opts.model || resolvedVideoModel || DEFAULT_GEMINI_VIDEO_MODEL;
+    let res = await post(active);
+    // 404(NOT_FOUND — 이 키에 그 모델이 없음/폐기·개명)면 실제 쓸 수 있는 Veo로 1회 자동 대체.
+    // 구 GA(veo-3.0-*·veo-2.0-*)가 키에서 사라져도 여기서 스스로 복구된다(사용자 보고: 404 반복).
+    if (res.status === 404) {
+      const alt = await pickAvailableVideoModel(key);
+      if (alt && alt !== active) {
+        active = alt;
+        res = await post(active);
+      }
+    }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      return { real: false, error: formatVeoHttpError(res.status, model, body) };
+      return { real: false, error: formatVeoHttpError(res.status, active, body) };
     }
     const data = (await res.json()) as { name?: string };
-    if (!data.name) return { real: false, error: `${model}: no operation name in response` };
+    if (!data.name) return { real: false, error: `${active}: no operation name in response` };
+    resolvedVideoModel = active; // 성공 모델 캐시 → 다음 호출부터 404 왕복 없이 바로 사용
     return { op: data.name, real: true };
   } catch (e) {
     return { real: false, error: e instanceof Error ? e.message : String(e) };

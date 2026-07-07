@@ -1,6 +1,6 @@
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { useBoardsStore } from '@/store/boardsStore';
-import { recordSpawnedNodes, captureNodes, pushRedesign, addPresetNodeCmd } from './commands';
+import { recordSpawnedNodes, captureNodes, pushRedesign, addPresetNodeCmd, addLinkCmd } from './commands';
 import { useInteractiveStore } from '@/features/interactive-viewer/store/interactiveStore';
 import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
 import { gridDeOverlap } from './align';
@@ -1314,6 +1314,141 @@ export async function planFromNode(nodeId: string): Promise<void> {
     fitFrameToChildren(frameId);
   }
   recordSpawnedNodes([id], '계획안 만들기');
+}
+
+/* ---------------- 아이디어 ↔ 문서 링크 생성 (보드 연결 확인창) ----------------
+   BoardCanvas onLinkUp 에서 아이디어 리스트↔문서를 이으면 확인 팝오버가 뜨고,
+   여기 두 함수가 실제 생성을 한다(기존 planFromNode/generateIdeaList 배관 재사용). */
+
+/** 대상 문서 노드의 유형 → 생성할 문서 종류·라벨. record/letter 등은 근거 없는 생성을 피해
+    안전하게 놀이계획으로 폴백(하드룰 4: 무근거 생성 금지). */
+export type IdeaDocKind = 'plan' | 'project' | 'worksheet';
+export function classifyDocTarget(node: { data?: Record<string, unknown>; text?: string } | undefined): {
+  kind: IdeaDocKind;
+  label: string;
+} {
+  const role = node?.data?.role;
+  const text = node?.text ?? '';
+  if (role === 'worksheet') return { kind: 'worksheet', label: '활동지' };
+  if (role === 'plan' && /프로젝트/.test(text)) return { kind: 'project', label: '프로젝트 수업' };
+  if (role === 'plan') return { kind: 'plan', label: '주간 놀이계획' };
+  return { kind: 'plan', label: '놀이계획' };
+}
+
+/** 아이디어 리스트 노드가 맞는지(선택형 아이디어를 담은 문서). */
+export function isIdeaListNode(node: { data?: Record<string, unknown> } | undefined): boolean {
+  return node?.data?.role === 'idealist' || Array.isArray(node?.data?.ideaItems);
+}
+
+/** 아이디어로부터 문서를 생성한다 — 대상 문서(targetDocId)의 유형으로, 아이디어 노드의
+    '선택된' 아이디어(없으면 전체)를 입력 삼아 새 문서 카드를 만들고 아이디어→문서로 잇는다. */
+export async function genDocFromIdeas(ideaNodeId: string, targetDocId: string): Promise<void> {
+  const b = useBoardStore.getState();
+  const ideaNode = b.nodes[ideaNodeId];
+  const target = b.nodes[targetDocId];
+  if (!ideaNode || !target) return;
+  const items = Array.isArray(ideaNode.data?.ideaItems) ? (ideaNode.data.ideaItems as IdeaItem[]) : [];
+  const selIds = Array.isArray(ideaNode.data?.selectedIdeaIds) ? (ideaNode.data.selectedIdeaIds as string[]) : [];
+  let selected = items.filter((it) => selIds.includes(it.id));
+  if (!selected.length) selected = items; // 미선택 → 전체 아이디어로
+  const labels = selected.map((it) => it.label).filter(Boolean);
+  if (!labels.length) {
+    showToast('사용할 아이디어가 없어요 — 아이디어를 먼저 골라 주세요', 'error');
+    return;
+  }
+  const { kind, label } = classifyDocTarget(target);
+  const isProject = kind === 'project';
+  const topic = (String(ideaNode.data?.ideaTitle ?? '') || labels[0] || '놀이').replace(/\s*놀이 아이디어$/, '').trim();
+
+  const id = newId('sticky');
+  const width = kind === 'worksheet' ? DOC_WIDTH : PLAN_DOC_W;
+  b.beginGen();
+  b.addNodeRaw({
+    id,
+    type: 'sticky',
+    x: Math.round(ideaNode.x + ideaNode.w + 48),
+    y: Math.round(ideaNode.y),
+    w: width,
+    h: 260,
+    autoH: true,
+    text: `📋 ${label}을(를) 만들고 있어요…`,
+    color: 'paper',
+    data: { doc: true, role: kind === 'worksheet' ? 'worksheet' : 'plan', loadingDoc: true },
+  });
+  addLinkCmd(ideaNodeId, id); // 아이디어 → 새 문서 연결(부모→자식)
+  useBoardStore.getState().setSelection([id]);
+  useBoardStore.getState().setGenerating(`📋 ${label}을(를) 만들고 있어요…`);
+  try {
+    if (kind === 'worksheet') {
+      const res = await runStudioWorksheet(labels.join(', '), buildAgentContext('studio'));
+      fillPlaceholderDoc(id, worksheetText(res.payload), res.payload);
+    } else {
+      const res = await runPlan(topic, labels, buildAgentContext('plan'), isProject ? { project: true } : undefined);
+      fillPlaceholderDoc(id, isProject ? projectDocMarkdown(res.payload) : planDocMarkdown(res.payload), res.payload);
+    }
+    showToast(`${label}을(를) 만들었어요`, 'success');
+  } catch {
+    failPlaceholderDoc(id, `${label} 생성에 실패했어요 — 다시 시도해 주세요.`);
+  } finally {
+    useBoardStore.getState().setGenerating(null);
+    useBoardStore.getState().endGen();
+  }
+  recordSpawnedNodes([id], `${label} 생성`);
+}
+
+/** 문서(docNodeId)를 근거로 아이디어 count개를 만들어, 연결된 아이디어 리스트 노드(ideaNodeId)를 채운다. */
+export async function genIdeasFromDoc(docNodeId: string, ideaNodeId: string, count = 12): Promise<void> {
+  const b = useBoardStore.getState();
+  const doc = b.nodes[docNodeId];
+  const ideaNode = b.nodes[ideaNodeId];
+  if (!doc || !ideaNode) return;
+  const docText = (doc.text ?? '').trim();
+  if (!docText) {
+    showToast('참고할 문서 내용이 없어요', 'error');
+    return;
+  }
+  const topic =
+    (coreTopic(docText.replace(/^#\s+/, '')) || docText.split('\n')[0].replace(/^#\s+/, '')).slice(0, 24).trim() || '놀이';
+
+  b.beginGen();
+  useBoardStore.getState().updateNodeRaw(ideaNodeId, {
+    data: { ...(ideaNode.data ?? {}), ideaLoading: true },
+  });
+  useBoardStore.getState().setGenerating('💡 이 문서로 놀이 아이디어를 모으고 있어요…');
+  try {
+    // runPlanIdeas 는 grounding 인자가 없어 요청문에 문서를 실어 근거로 삼는다.
+    const req = `${topic}\n\n[아래 문서의 주제·활동 흐름에 어울리는 새로운 놀이 아이디어를 제안해줘 — 문서에 이미 있는 활동과 겹치지 않게]\n${docText.slice(0, 1400)}`;
+    const ideas = await runPlanIdeas(req, buildAgentContext('plan'), count);
+    const cur = useBoardStore.getState().nodes[ideaNodeId];
+    if (!ideas.length || !cur) {
+      showToast('아이디어를 만들지 못했어요 — 다시 시도해 주세요', 'error');
+      return;
+    }
+    const md = `# 💡 ${topic} 놀이 아이디어 ${ideas.length}가지\n\n${ideas
+      .map((it, i) => `${i + 1}. **${it.label}**${it.desc ? ` — ${it.desc}` : ''}`)
+      .join('\n')}`;
+    useBoardStore.getState().updateNodeRaw(ideaNodeId, {
+      text: md,
+      data: {
+        ...(cur.data ?? {}),
+        doc: true,
+        role: 'idealist',
+        ideaItems: ideas,
+        selectedIdeaIds: [],
+        ideaTitle: `${topic} 놀이 아이디어`,
+        ideaLoading: false,
+      },
+    });
+    showToast('💡 아이디어를 만들었어요', 'success');
+  } catch {
+    const cur = useBoardStore.getState().nodes[ideaNodeId];
+    if (cur) useBoardStore.getState().updateNodeRaw(ideaNodeId, { data: { ...(cur.data ?? {}), ideaLoading: false } });
+    showToast('아이디어 생성에 실패했어요 — 다시 시도해 주세요', 'error');
+  } finally {
+    useBoardStore.getState().setGenerating(null);
+    useBoardStore.getState().endGen();
+  }
+  recordSpawnedNodes([ideaNodeId], '문서 → 아이디어');
 }
 
 /* ---------------- classification ---------------- */

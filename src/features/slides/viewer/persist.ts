@@ -4,7 +4,9 @@
 
 import type { DeckSpec } from '../schema/deckspec';
 
-const key = (id: string) => `kv-deck-${id}`;
+/** 덱의 localStorage 키 — 카드 뷰어와 편집 오버레이(별도 iframe)가 storage 이벤트로 동기화할 때도 쓴다. */
+export const deckKey = (id: string) => `kv-deck-${id}`;
+const key = deckKey;
 
 export function loadDeck(id: string): DeckSpec | null {
   try {

@@ -1,0 +1,100 @@
+/* 문서 편집 — 문서 콘텐츠 스킨(꾸미기 템플릿) 엔진.
+ *
+ * ⚠️ 스코프: `.kv-doc-md[data-doc-skin]`(self-match) = '문서 콘텐츠'만. 슬라이드 콘텐츠·게임
+ * 화면과 같은 Milray 면제 대상(문서 스킨 — CLAUDE.md §2-1 예외 계열). 패널·버튼 등 앱
+ * 크롬은 여전히 Milray 토큰만 쓴다. index.css 의 .kv-doc-md 가 @layer components 안에
+ * 있어, 이 파일(무레이어)은 캐스케이드에서 항상 이긴다(로드 순서 무관 — CSS @layer 규칙).
+ *
+ * 값은 CSS 변수(--d-*)로 받는다 — 팔레트는 docSkins.ts 의 40개 변형 데이터가 인라인
+ * style 로 공급(React 커스텀 프로퍼티 선례: game-viewer theme.ts). 구조 차이는
+ * data-doc-h1(제목 트리트먼트 4종)과 패밀리 프리픽스([data-doc-skin^='nature'])로 처리.
+ * ★ --d-orn 은 content: var() 소비 — 값이 '따옴표 포함 문자열'이어야 한다(공급자 책임).
+ */
+
+/* ── 편집 전용 선택 어포던스(테마 아님 — Milray 코랄, 앱 크롬) ───────────── */
+.kv-doc-md tr.kv-docrow {
+  cursor: pointer;
+}
+.kv-doc-md tr.kv-docrow:hover td {
+  background: var(--coral-soft, #fbe3d7);
+}
+.kv-doc-md tr.kv-docrow-on td {
+  background: var(--coral-soft, #fbe3d7);
+}
+.kv-doc-md tr.kv-docrow-on td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent, #f2733e);
+}
+
+/* ── 종이(중앙 캔버스) ──────────────────────────────────────────────────── */
+.kv-doc-paper[data-doc-skin] {
+  background: var(--d-paper, var(--surface));
+}
+
+/* ── 색 변수 소비(모든 스킨 공통) ───────────────────────────────────────── */
+.kv-doc-md[data-doc-skin] h1 {
+  background: var(--d-h1-bg, var(--surface-2));
+  border-left-color: var(--d-accent, var(--accent));
+  color: var(--d-ink, var(--fg));
+}
+.kv-doc-md[data-doc-skin] h2 {
+  border-left-color: var(--d-accent, var(--accent));
+  color: var(--d-ink, var(--fg));
+}
+.kv-doc-md[data-doc-skin] thead th {
+  background: var(--d-th-bg, var(--surface-2));
+  color: var(--d-ink, var(--fg));
+}
+.kv-doc-md[data-doc-skin] th,
+.kv-doc-md[data-doc-skin] td {
+  border-color: var(--d-line, var(--border));
+}
+/* 표 짝수행 얼룩(참고 무드의 칼럼 틴트) — 선택 하이라이트(kv-docrow-on)가 이긴다. */
+.kv-doc-md[data-doc-skin] tbody tr:nth-child(even):not(.kv-docrow-on):not(:hover) td {
+  background: var(--d-row-tint, transparent);
+}
+.kv-doc-md[data-doc-skin] hr {
+  border-top-color: var(--d-line, var(--tan-2));
+}
+.kv-doc-md[data-doc-skin] hr::after {
+  content: var(--d-orn, '❀');
+  color: var(--d-accent, var(--accent));
+}
+.kv-doc-md[data-doc-skin] blockquote {
+  background: var(--d-callout, var(--coral-soft));
+  border-left-color: var(--d-accent, var(--accent));
+}
+
+/* ── h1 트리트먼트 4종(data-doc-h1) ─────────────────────────────────────── */
+/* band = index.css 기본(좌 액센트 밴드) — 추가 규칙 불필요. */
+.kv-doc-md[data-doc-h1='underline'] h1 {
+  background: transparent;
+  border-left: 0;
+  border-bottom: 3px solid var(--d-accent, var(--accent));
+  border-radius: 0;
+  padding-left: 0;
+}
+.kv-doc-md[data-doc-h1='center'] h1 {
+  background: transparent;
+  border-left: 0;
+  border-bottom: 2px solid var(--d-accent, var(--accent));
+  border-radius: 0;
+  text-align: center;
+}
+.kv-doc-md[data-doc-h1='banner'] h1 {
+  background: var(--d-h1-bg);
+  border-left: 0;
+  border-radius: 10px;
+  text-align: center;
+  padding: 0.6rem 1rem;
+}
+
+/* ── 패밀리 구조 규칙(변형 id 프리픽스) ─────────────────────────────────── */
+/* 숲속 자연 — 잎사귀 불릿. */
+.kv-doc-md[data-doc-skin^='nature'] ul {
+  list-style: none;
+  padding-left: 0.2rem;
+}
+.kv-doc-md[data-doc-skin^='nature'] ul > li::before {
+  content: '🍃 ';
+  font-size: 0.8em;
+}

@@ -5,7 +5,7 @@ import { runFullCreation, cleanGameTopic } from '@/features/interactive-viewer/a
 import { buildTeacherCard, ensurePrompts } from '@/features/interactive-viewer/resolver/teacherCard';
 import { saveToLibrary } from '@/features/interactive-viewer/store/library';
 import { saveGameCard } from '@/features/interactive-viewer/store/gameCards';
-import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage } from './workflow';
+import { generateIntoFrame, regenImageCard, genTextCard, viewportCenterBoardPoint, searchVideosForViewer, activityTextForVideo, spawnVideoPlayer, spawnSlidesViewer, slideFrameToEmpty, generateActivityImages, removeBgFromNode, generateStyledSeriesFromImage } from './workflow';
 import { urlToAssetRef, makeImageElement, makeTextElement, withElementAdded } from '@/features/interactive-viewer/runtime/assetIngest';
 import { ASSET_KINDS, type AssetKind } from '@/shared/assetKind';
 import { parseEmptyPrimitiveRequest } from './primitives';
@@ -70,6 +70,11 @@ const FMT_IDEA_RE = /아이디어|생각\s*그물|브레인\s*스토밍|놀이\s
 // 더 구체적인 산출물이 지정된 요청은 오버레이로 가로채지 않고 각자 경로로 보낸다
 // (예: "수업 슬라이드", "활동 이미지", "활동지", "수업 동영상").
 const FMT_SPECIFIC_RE = /슬라이드|장표|이미지|사진|일러스트|삽화|동영상|영상|비디오|클립|활동지|워크시트|도안|색칠|컬러링|통신문|안내문|안내장|공지|편지|소식지|관찰|게임|퀴즈|환경판|게시판|포스터/;
+/* 슬라이드(장표·프레젠테이션) 요청 — 선택이 없어도 슬라이드 뷰어를 깔고 장표 에이전트로 생성한다.
+   (슬라이드 전용 경로가 없어 "○○ 슬라이드 만들어줘"가 활동지/스튜디오로 새던 오라우팅 차단.) */
+const SLIDE_RE = /슬라이드|장표|프레젠테이션|프리젠테이션|피피티|\bppt\b/i;
+/* 뷰어 단어만(주제·생성동사 없이) — 빈 슬라이드 뷰어만 깐다(동영상 그릇 우선과 동일). */
+const SLIDE_BARE_RE = /^(슬라이드|장표|프레젠테이션|프리젠테이션|피피티|ppt)(\s*(뷰어|보기|만들기))?$/i;
 function fmtTopic(text: string): string {
   // coreTopic 은 끝 '이/가'를 조사로 깎아 '물놀이'→'물놀' 식으로 명사를 훼손한다 →
   // 여기선 포맷/주제어/생성동사만 직접 제거해 주제 명사를 보존한다.
@@ -472,6 +477,18 @@ export function handleBoardPrompt(text: string): boolean {
         detail: { mode: 'text', viewerId: vid, anchorId: vid, request: text, topic: coreTopic(text) },
       }),
     );
+    return true;
+  }
+
+  // 슬라이드 요청은 선택이 없어도 '슬라이드'로 만든다 — 활동지/스튜디오로 새지 않게.
+  //   · 뷰어 단어만("슬라이드"/"장표") → 빈 슬라이드 뷰어만 깐다(그릇 우선).
+  //   · "○○ 슬라이드 만들어줘" → 뷰어를 깔고 장표 에이전트로 바로 DeckSpec 생성.
+  if (sel.length === 0 && SLIDE_RE.test(text)) {
+    const dv = spawnSlidesViewer();
+    useBoardStore.getState().focusNode(dv);
+    slideFrameToEmpty(dv); // 다른 요소와 겹치지 않게 가까운 빈자리로
+    const sgen = /만들|생성|그려|작성|써\s*줘|추가|넣어|짜\s*줘|구성|기획|해\s*줘|줘/.test(text);
+    if (!SLIDE_BARE_RE.test(text.trim()) && sgen) void generateSlidesForViewer(dv, text);
     return true;
   }
 

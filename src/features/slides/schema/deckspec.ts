@@ -27,11 +27,18 @@ export type Language = 'ko' | 'ja' | 'en';
 export const LAYOUTS = [
   'title',
   'section-divider',
+  'agenda',
   'big-text',
   'big-stat',
+  'stat-row',
   'two-column',
+  'compare',
+  'cards',
+  'steps',
   'image-feature',
+  'image-full',
   'bullets',
+  'checklist',
   'hero-image',
   'photo-grid',
   'quote',
@@ -111,6 +118,8 @@ export interface Slide {
   blocks: Block[];
   /** 슬라이드 배경 이미지(선택). */
   background?: SlideBackground;
+  /** 슬라이드 배경 단색(선택) — 테마 면색(--s-canvas) 대신 이 색을 쓴다. 배경 이미지가 있으면 이미지가 위를 덮는다. */
+  bgColor?: string;
   /** 상단 오버라인 라벨(섹션·맥락) — 전문 덱의 작은 대문자 트래킹 라벨. 선택. */
   eyebrow?: string;
   /** eyebrow 텍스트 스타일 오버라이드(교사 편집). 선택. */
@@ -159,6 +168,67 @@ export function defaultBlocks(layout: Layout): Block[] {
     case 'section-divider':
       // eyebrow(슬라이드 필드) + 큰 섹션 제목. 막과 막 사이의 호흡.
       return [{ type: 'title', text: '섹션 제목' }];
+    case 'agenda':
+      // 오늘의 순서 — 큰 번호(01·02·…)가 붙는 목차. bullets 항목 = 순서 이름.
+      return [
+        { type: 'title', text: '오늘의 순서' },
+        { type: 'bullets', items: ['첫 번째 활동', '두 번째 활동', '세 번째 활동'] },
+      ];
+    case 'cards':
+      // 개념 카드 2~4장 — (subtitle=카드 제목, body=한 줄 설명) 쌍이 순서대로 카드가 된다.
+      return [
+        { type: 'title', text: '핵심 포인트' },
+        { type: 'subtitle', text: '🌱 첫 번째 카드' },
+        { type: 'body', text: '한 줄 설명을 적어요.' },
+        { type: 'subtitle', text: '💧 두 번째 카드' },
+        { type: 'body', text: '한 줄 설명을 적어요.' },
+        { type: 'subtitle', text: '☀️ 세 번째 카드' },
+        { type: 'body', text: '한 줄 설명을 적어요.' },
+      ];
+    case 'steps':
+      // 진행 순서 — 번호 원이 붙는 가로 스텝. (subtitle=단계 이름, body=설명) 쌍.
+      return [
+        { type: 'title', text: '진행 순서' },
+        { type: 'subtitle', text: '준비하기' },
+        { type: 'body', text: '무엇을 준비하는지 적어요.' },
+        { type: 'subtitle', text: '해 보기' },
+        { type: 'body', text: '어떻게 하는지 적어요.' },
+        { type: 'subtitle', text: '나누기' },
+        { type: 'body', text: '무엇을 나누는지 적어요.' },
+      ];
+    case 'compare':
+      // 좌우 비교 — subtitle(왼 라벨)+body(왼 내용) / subtitle(오른 라벨)+body(오른 내용).
+      return [
+        { type: 'title', text: '무엇이 다를까요?' },
+        { type: 'subtitle', text: '왼쪽' },
+        { type: 'body', text: '왼쪽 내용을 적어요.' },
+        { type: 'subtitle', text: '오른쪽' },
+        { type: 'body', text: '오른쪽 내용을 적어요.' },
+      ];
+    case 'stat-row':
+      // 지표 2~3개 나란히 — (subtitle=수치, caption=라벨) 쌍.
+      return [
+        { type: 'title', text: '한눈에 보는 지표' },
+        { type: 'subtitle', text: '96%' },
+        { type: 'caption', text: '출석률' },
+        { type: 'subtitle', text: '12회' },
+        { type: 'caption', text: '바깥 놀이' },
+        { type: 'subtitle', text: '5개' },
+        { type: 'caption', text: '새 놀이 영역' },
+      ];
+    case 'image-full':
+      // 풀블리드 이미지 + 하단 오버레이 제목 — 도입 훅·몰입 전환용.
+      return [
+        { type: 'image', role: 'background', prompt: '', assetId: null },
+        { type: 'title', text: '제목' },
+        { type: 'subtitle', text: '한 줄 부제' },
+      ];
+    case 'checklist':
+      // 준비물·약속·유의점 — 체크 칩 그리드. bullets 항목 = 점검 항목.
+      return [
+        { type: 'title', text: '준비물 체크' },
+        { type: 'bullets', items: ['첫 번째 준비물', '두 번째 준비물', '세 번째 준비물', '네 번째 준비물'] },
+      ];
     case 'big-stat':
       // caption=라벨(위) · title=큰 수치 · subtitle=맥락(아래)
       return [
@@ -251,8 +321,14 @@ export function relayout(slide: Slide, layout: Layout): Slide {
     else if (isBullets(b)) oldBullets = b.items;
   }
   // body가 없으면 title/subtitle을, title이 없으면 body를 — 인접 타입끼리 폴백.
+  // 단, subtitle이 2개 이상이면 '쌍' 시맨틱(cards/steps/compare/stat-row)으로 보고 타입 간
+  // 훔쳐 쓰기를 금지한다 — title 슬롯이 첫 subtitle을 소비하면 이후 쌍 전체가 엇짝이 된다.
+  const paired = textPool.subtitle.length > 1;
   const fallbackText = (t: TextBlockType): string | undefined => {
-    const order: TextBlockType[] = t === 'title' ? ['title', 'subtitle', 'body'] : t === 'body' ? ['body', 'subtitle', 'title'] : [t];
+    const order: TextBlockType[] =
+      t === 'title' ? (paired ? ['title'] : ['title', 'subtitle', 'body'])
+      : t === 'body' ? (paired ? ['body'] : ['body', 'subtitle', 'title'])
+      : [t];
     for (const k of order) if (textPool[k].length) return textPool[k].shift();
     return undefined;
   };

@@ -110,24 +110,42 @@ function canvasToBlob(cv: HTMLCanvasElement): Promise<Blob> {
   return new Promise((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error('toBlob 실패'))), 'image/png'));
 }
 
-function drawUrlToCanvas(url: string, cap = MAX_EDIT_EDGE): Promise<HTMLCanvasElement> {
+/** 외부(cross-origin) http(s) URL인가 — data:/blob:/같은 출처는 오염되지 않으니 CORS 불필요. */
+function isRemoteUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url) && !url.startsWith(window.location.origin);
+}
+
+/** 이미지 1장 로드. useCors면 crossOrigin='anonymous'로 받아 캔버스 오염(export 불가)을 막는다. */
+function loadImg(url: string, useCors: boolean): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => {
-      const scale = Math.min(1, cap / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
-      const w = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
-      const h = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
-      const cv = document.createElement('canvas');
-      cv.width = w;
-      cv.height = h;
-      const ctx = cv.getContext('2d');
-      if (!ctx) return reject(new Error('no 2d context'));
-      ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(img, 0, 0, w, h);
-      resolve(cv);
-    };
+    if (useCors) img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('image load failed'));
     img.src = url;
+  });
+}
+
+function drawUrlToCanvas(url: string, cap = MAX_EDIT_EDGE): Promise<HTMLCanvasElement> {
+  // 외부 URL은 CORS로 로드해 캔버스 오염을 막는다(오염되면 toDataURL/getImageData가 SecurityError로
+  // 막혀 배경 제거·색 지우기 등 모든 편집이 조용히 실패한다). CORS가 실패하면 오염되더라도 최소한
+  // 화면엔 보이도록 비-CORS로 폴백한다(그 경우 편집은 export 지점에서 명확한 안내로 걸린다).
+  const remote = isRemoteUrl(url);
+  const loaded = remote
+    ? loadImg(url, true).catch(() => loadImg(url, false))
+    : loadImg(url, false);
+  return loaded.then((img) => {
+    const scale = Math.min(1, cap / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+    const w = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+    const h = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext('2d');
+    if (!ctx) throw new Error('no 2d context');
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return cv;
   });
 }
 
@@ -306,6 +324,19 @@ export interface EditTarget {
 export function ImageEditorModal({ nodeId, target, onClose, origin }: { nodeId?: string; target?: EditTarget; onClose: () => void; origin?: OriginRect | null }) {
   // 카드 위치에서 커지며 열리고 닫을 때 그 위치로 작아진다 + 배경 조작 차단.
   const { requestClose, onContentTransitionEnd, contentStyle, backdropStyle } = useZoomModal(origin, onClose);
+  const rootRef = useRef<HTMLDivElement | null>(null); // 모달 루트 — 보드로 새는 이벤트 차단용
+  // 휠 줌 차단 — 보드 줌은 '네이티브 non-passive wheel' 리스너(BoardCanvas)라 합성 이벤트로는
+  // 못 막는다. 모달 루트에서 네이티브로 전파를 끊어, 모달 위 휠이 뒤 보드를 확대/이동하지 않게.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const blockWheel = (e: WheelEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    el.addEventListener('wheel', blockWheel, { passive: false });
+    return () => el.removeEventListener('wheel', blockWheel);
+  }, []);
   const viewRef = useRef<HTMLCanvasElement | null>(null); // 화면 표시용
   const workRef = useRef<HTMLCanvasElement | null>(null); // 풀해상도 작업 캔버스
   const undoRef = useRef<ImageData[]>([]);
@@ -556,26 +587,50 @@ export function ImageEditorModal({ nodeId, target, onClose, origin }: { nodeId?:
 
   const onRemoveBg = async () => {
     const work = workRef.current;
-    if (!work || busy) return;
+    if (busy) return;
+    if (!work) {
+      // 이미지가 아직 로드 전이거나 로드에 실패한 상태 — 조용히 무시하면 '눌러도 아무 반응
+      // 없음'으로 보인다(사용자 보고). 반드시 안내를 낸다.
+      showToast('이미지를 아직 불러오는 중이에요 — 잠시 후 다시 눌러 주세요', 'error');
+      return;
+    }
     setBusy('배경을 지우고 있어요… (처음 한 번은 조금 걸려요)');
     try {
       const url = work.toDataURL('image/png');
-      const r = await removeBackground(url, { assetKind: 'unknown' });
-      // 복잡한 배경은 매트에 흩어진 점이 남는다 → 주 피사체만 남기고 노이즈를 자동 제거해
-      // 누끼 결과가 곧바로 깨끗하게 보이도록 한다('정리' 버튼은 추가 보정용으로 유지).
-      let outUrl = r.dataUrl;
-      try {
-        const cleaned = await cleanupBackground(r.dataUrl, { level: 1, keepMainOnly: true });
-        outUrl = cleaned.dataUrl;
-      } catch { /* 정리 실패 시 원본 누끼 유지 */ }
+      const r = await removeBackground(url, {
+        assetKind: 'unknown',
+        // 단일 피사체 누끼 — 워커가 주 피사체 유지·구멍 맥락 분류·디프린지까지 완결한다
+        // (matte.ts postProcessMatte). 여기서 cleanupBackground(keepMainOnly)를 덧대면
+        // 안 된다: 캔버스를 거친 뒤라 α=0 픽셀 RGB가 검정으로 소실돼, 그 단계의 구멍
+        // 메우기가 '진짜 틈'을 검정 덩어리로 되살리는 사고가 났었다(우체통 사례).
+        mainOnly: true,
+        // 첫 실행은 모델(수십 MB) 다운로드가 대부분의 시간 — 단계를 알려 '멈춘 것처럼' 보이지 않게.
+        onProgress: (p) =>
+          setBusy(
+            p.stage?.startsWith('loading-model')
+              ? '🧠 AI 모델을 처음 불러오는 중… (수십 초 걸릴 수 있어요)'
+              : '배경을 지우고 있어요…',
+          ),
+      });
       pushUndo();
-      const cv = await drawUrlToCanvas(outUrl);
+      const cv = await drawUrlToCanvas(r.dataUrl);
       workRef.current = cv;
       redraw();
       bumpWork();
       force((v) => v + 1);
-    } catch {
-      showToast('배경 제거에 실패했어요', 'error');
+    } catch (err) {
+      // 실제 원인을 콘솔에 남긴다(진단용) — 그동안은 catch가 삼켜 F12로도 원인을 못 봤다.
+      // eslint-disable-next-line no-console
+      console.error('[배경 제거] 실패:', err);
+      const msg = err instanceof Error ? err.message : '';
+      const tainted = err instanceof DOMException ? err.name === 'SecurityError' : /Tainted|SecurityError/i.test(msg);
+      showToast(
+        tainted
+          ? '이 이미지는 외부 링크라 편집할 수 없어요 — 다시 생성하거나 저장한 이미지를 사용해 주세요'
+          : msg && msg.length < 90 ? `배경 제거 실패 — ${msg}` : '배경 제거에 실패했어요 — 새로고침 후 다시 시도해 주세요',
+        'error',
+        4800,
+      );
     } finally {
       setBusy(null);
     }
@@ -718,18 +773,24 @@ export function ImageEditorModal({ nodeId, target, onClose, origin }: { nodeId?:
       : null;
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 120 }}>
-      {/* 배경 — 어둡게(풀스크린 뷰어와 동일한 딤) + 페이드 인/아웃 + 클릭 닫기.
+    <div
+      ref={rootRef}
+      style={{ position: 'fixed', inset: 0, zIndex: 120 }}
+      // 포털이어도 React 합성 이벤트는 '컴포넌트 트리'(BoardCanvas)로 버블링된다 — 포인터/클릭을
+      // 여기서 끊어, 배경을 드래그해도 뒤 보드가 팬(화면 이동)·선택 해제되지 않게 한다.
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* 배경 — 어둡게(풀스크린 뷰어와 동일한 딤) + 페이드 인/아웃. 배경 클릭으로는 닫히지 않는다
+          (편집 중 오클릭 방지) — 닫기는 우상단 버튼/Esc로만.
           🔴 색은 인라인 rgba로 고정 — 토큰 알파(bg-fg/80)는 게임뷰어 크롬(preflight 제외)에서
              제대로 적용되지 않아 배경이 비쳐 보이던 문제 해결(ImageFullscreen과 동일 처리). */}
       <div
-        onClick={requestClose}
         className="absolute inset-0"
         style={{ background: 'rgba(20,19,17,.82)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', ...backdropStyle }}
       />
       {/* 본문 — 카드 위치에서 커지고/작아진다 */}
       <div
-        onClick={requestClose}
         onTransitionEnd={onContentTransitionEnd}
         className="absolute inset-0 flex flex-col"
         style={contentStyle}

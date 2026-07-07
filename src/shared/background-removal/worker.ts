@@ -18,6 +18,7 @@
  */
 // transformers.js의 동적 출력은 정적 타입이 느슨해 일부 any 캐스팅을 쓴다(주석 표기).
 import { AutoModel, AutoProcessor, RawImage, env } from '@huggingface/transformers';
+import { postProcessMatte, refineMatte } from './matte';
 import type { WorkerRequest, WorkerResponse } from './types';
 
 // 원격(HF CDN) 모델만 — 로컬 경로 탐색 끔.
@@ -58,12 +59,27 @@ function load(): Promise<Loaded> {
   return loadPromise;
 }
 
-async function infer(loaded: Loaded, id: number, blob: Blob): Promise<void> {
+async function infer(loaded: Loaded, id: number, blob: Blob, mainOnly: boolean): Promise<void> {
   const { model, processor } = loaded;
   post({ type: 'progress', id, stage: 'segmenting' });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const image: any = await (RawImage as any).fromBlob(blob);
+  // ⚠️ 입력 알파는 **추론 전에** 캡처해야 한다 — processor가 RawImage를 제자리에서
+  // RGB(3채널)로 변환할 수 있어, 추론 뒤 image.rgba()는 알파를 255로 '재구성'한다
+  // (실측: 재실행 시 입력 투명 영역이 불투명 검정으로 되살아나던 원인).
+  const nPix = image.width * image.height;
+  const inA = new Uint8Array(nPix);
+  let inTrans = 0;
+  if (image.channels === 4) {
+    const src = image.data as Uint8Array;
+    for (let i = 0; i < nPix; i++) {
+      inA[i] = src[i * 4 + 3];
+      if (inA[i] < 8) inTrans++;
+    }
+  } else {
+    inA.fill(255); // 3채널 입력(JPEG 등) — 전부 불투명
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { pixel_values } = await (processor as any)(image);
   // RMBG-1.4: 입력 키 'input', 출력 키 'output'(이미 0..1 정규화된 매트 — 시그모이드 불필요).
@@ -75,12 +91,29 @@ async function infer(loaded: Loaded, id: number, blob: Blob): Promise<void> {
     output[0].mul(255).to('uint8'),
   ).resize(image.width, image.height);
 
-  // 모델 매트를 그대로 알파 채널에 주입(충실 출력). 잔여 노이즈 정리는 호출부의
-  // cleanupBackground(모델 없이 알파 despeckle)에서 단계적으로 수행한다.
+  // 매트 다듬기 2단 — 모두 '워커 안'에서 끝낸다(여기만 raw 매트=모델 확신도와
+  // 프리멀티플라이 이전의 원본 RGB가 살아 있다 — 캔버스를 거치면 α=0 픽셀 RGB가
+  // 검정으로 소실돼 구멍 복원이 불가능해진다. 실측 확정: putImageData→PNG,
+  // drawImage→getImageData 두 지점 모두에서 소실).
+  //  1) refineMatte: 전역 헤이즈 보정(테두리 링에서 배경 수준 추정 → smoothstep).
+  //  2) postProcessMatte: 맥락적 후처리 — 주 피사체 유지·에워싸인 구멍의
+  //     진짜 틈/오류 구멍 분류(이미지 적응 raw 앵커+배경색 크로마)·디프린지. matte.ts 참고.
+  const md = mask.data as Uint8Array;
+  const raw = md.slice(); // refine 이전 원본 매트(모델 확신도) 보존
+  const levels = refineMatte(md, image.width, image.height);
   const rgba = image.rgba();
   const data = new Uint8ClampedArray(rgba.data);
-  const md = mask.data as Uint8Array;
-  for (let i = 0; i < md.length; i++) data[i * 4 + 3] = md[i];
+  post({ type: 'progress', id, stage: 'post-processing' }); // 마지막 수백 ms가 '멈춤'으로 안 보이게
+  // 입력 알파 가드 — 이미 누끼된 PNG를 재실행하면 α=0 픽셀의 RGB가 입력 단계에서 이미
+  // 검정으로 소실돼 있다. (a) 그런 입력에선 색 판정·디프린지를 끄고(colorTrusted=false),
+  // (b) 최종 알파를 입력 알파(위에서 추론 전 캡처한 inA)와 min 병합해 '구멍 복원'이
+  //     검정을 되살리지 못하게 한다.
+  postProcessMatte(md, raw, data, image.width, image.height, {
+    mainOnly,
+    bgLevel: levels.p25,
+    colorTrusted: inTrans / md.length < 0.02,
+  });
+  for (let i = 0; i < md.length; i++) data[i * 4 + 3] = Math.min(md[i], inA[i]);
 
   const canvas = new OffscreenCanvas(rgba.width, rgba.height);
   const ctx = canvas.getContext('2d');
@@ -97,7 +130,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       await load();
       post({ type: 'ready', device: 'wasm' });
     } else if (msg.type === 'run') {
-      await infer(await load(), msg.id, msg.blob);
+      await infer(await load(), msg.id, msg.blob, msg.mainOnly === true);
     }
   } catch (err) {
     const id = 'id' in msg ? (msg as { id?: number }).id : undefined;

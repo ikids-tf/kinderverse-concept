@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://kinderverse.app/schemas/deckspec.schema.json",
   "title": "DeckSpec",
-  "description": "킨더버스 슬라이드 생성의 계약. Claude(장표 에이전트)가 생성하고 슬라이드 엔진이 소비한다. 텍스트는 절대 이미지에 굽지 않으며, 레이아웃은 아래 enum 중에서만 고른다. (원본: slides-feature/deckspec.schema.json — src 사본은 deckspec.ts와 1:1.)",
+  "description": "킨더버스 슬라이드 생성의 계약(deckspec.ts와 1:1). Claude(장표 에이전트)가 생성하고 슬라이드 엔진이 소비한다. 텍스트는 절대 이미지에 굽지 않으며, 레이아웃은 아래 enum 중에서만 고른다.",
   "type": "object",
   "required": ["category", "theme", "ratio", "ageBand", "title", "slides"],
   "additionalProperties": false,
@@ -14,8 +14,8 @@
     },
     "theme": {
       "type": "string",
-      "enum": ["milray.light", "milray.warm"],
-      "description": "Milray Park 모드. dark 없음."
+      "enum": ["warm", "ivory", "midnight", "slate", "sage", "bloom", "mono"],
+      "description": "슬라이드 콘텐츠 테마(themes.css --s-*). 장표 에이전트가 주제·분위기에 맞게 선택."
     },
     "ratio": {
       "type": "string",
@@ -48,23 +48,49 @@
   "definitions": {
     "slide": {
       "type": "object",
-      "required": ["layout", "blocks"],
+      "required": ["layout"],
       "additionalProperties": false,
       "properties": {
         "layout": {
           "type": "string",
-          "enum": ["title", "hero-image", "big-text", "two-column", "bullets", "photo-grid", "quote", "chart"],
-          "description": "고정 레이아웃 카탈로그. 이 밖의 자유 레이아웃 금지."
+          "enum": [
+            "title",
+            "section-divider",
+            "agenda",
+            "big-text",
+            "big-stat",
+            "stat-row",
+            "two-column",
+            "compare",
+            "cards",
+            "steps",
+            "image-feature",
+            "image-full",
+            "bullets",
+            "checklist",
+            "hero-image",
+            "photo-grid",
+            "quote",
+            "chart",
+            "interactive"
+          ],
+          "description": "고정 레이아웃 카탈로그. 이 밖의 자유 레이아웃 금지. interactive는 blocks 없이 nodeId로 인터렉티브 노드를 재생."
         },
         "blocks": {
           "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/definitions/block" }
+          "items": { "$ref": "#/definitions/block" },
+          "description": "layout!=='interactive'면 1개 이상 필수."
         },
-        "speakerNote": {
-          "type": "string",
-          "description": "교사용 진행 멘트(선택). 슬라이드에는 렌더되지 않음."
-        }
+        "background": { "$ref": "#/definitions/slideBackground" },
+        "bgColor": { "type": "string", "description": "슬라이드 배경 단색(테마 면색 대신). 배경 이미지가 있으면 이미지가 위를 덮는다." },
+        "eyebrow": { "type": "string", "description": "상단 오버라인 라벨(내용 슬라이드의 2~4단어 라벨)." },
+        "eyebrowStyle": { "$ref": "#/definitions/blockStyle" },
+        "eyebrowPos": { "$ref": "#/definitions/blockPos" },
+        "number": { "type": "boolean", "description": "쪽번호 표시(내용 슬라이드 true, 표지·섹션·풀이미지 false)." },
+        "accentRole": { "type": "string", "enum": ["coral", "gold"], "description": "슬라이드 악센트 역할(기본 coral=테마 1차)." },
+        "speakerNote": { "type": "string", "description": "교사용 진행 멘트(선택). 슬라이드에는 렌더되지 않음." },
+        "nodeId": { "type": "string", "description": "layout==='interactive' 전용 — 재생할 인터렉티브 노드 docId." },
+        "advance": { "type": "string", "enum": ["teacher", "onComplete"], "description": "interactive 전용 — 완료 시 진행 방식." }
       }
     },
     "block": {
@@ -75,13 +101,51 @@
         { "$ref": "#/definitions/chartBlock" }
       ]
     },
+    "blockStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fontPx": { "type": "number" },
+        "fontFam": { "type": "string", "enum": ["serif", "sans"] },
+        "bold": { "type": "boolean" },
+        "color": { "type": "string", "enum": ["default", "secondary", "muted", "accent", "gold"] },
+        "align": { "type": "string", "enum": ["left", "center", "right"] }
+      },
+      "description": "블록 스타일 오버라이드(교사 미세 조정). 색은 토큰 키만 — 임의 hex 금지."
+    },
+    "blockPos": {
+      "type": "object",
+      "required": ["xPct", "yPct", "wPct"],
+      "additionalProperties": false,
+      "properties": {
+        "xPct": { "type": "number" },
+        "yPct": { "type": "number" },
+        "wPct": { "type": "number" },
+        "hPct": { "type": "number" },
+        "rot": { "type": "number" }
+      },
+      "description": "자유 배치(캔버스 % 좌표). 있으면 흐름에서 빼내 절대 배치."
+    },
+    "slideBackground": {
+      "type": "object",
+      "required": ["assetId"],
+      "additionalProperties": false,
+      "properties": {
+        "assetId": { "type": "string" },
+        "dim": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fit": { "type": "string", "enum": ["cover", "contain"] }
+      },
+      "description": "슬라이드 배경 이미지(assetId 참조) + 가독 스크림."
+    },
     "textBlock": {
       "type": "object",
       "required": ["type", "text"],
       "additionalProperties": false,
       "properties": {
         "type": { "type": "string", "enum": ["title", "subtitle", "body", "caption"] },
-        "text": { "type": "string" }
+        "text": { "type": "string" },
+        "style": { "$ref": "#/definitions/blockStyle" },
+        "pos": { "$ref": "#/definitions/blockPos" }
       }
     },
     "bulletsBlock": {
@@ -90,7 +154,9 @@
       "additionalProperties": false,
       "properties": {
         "type": { "type": "string", "enum": ["bullets"] },
-        "items": { "type": "array", "minItems": 1, "maxItems": 7, "items": { "type": "string" } }
+        "items": { "type": "array", "minItems": 1, "maxItems": 7, "items": { "type": "string" } },
+        "style": { "$ref": "#/definitions/blockStyle" },
+        "pos": { "$ref": "#/definitions/blockPos" }
       }
     },
     "imageBlock": {
@@ -102,7 +168,9 @@
         "role": { "type": "string", "enum": ["hero", "inline", "background", "icon"] },
         "prompt": { "type": "string" },
         "characterRef": { "type": "string" },
-        "assetId": { "type": ["string", "null"], "default": null }
+        "assetId": { "type": ["string", "null"], "default": null },
+        "fit": { "type": "string", "enum": ["cover", "contain"] },
+        "pos": { "$ref": "#/definitions/blockPos" }
       }
     },
     "chartBlock": {
@@ -113,7 +181,8 @@
         "type": { "type": "string", "enum": ["chart"] },
         "chartType": { "type": "string", "enum": ["bar", "line", "pie", "radar"] },
         "data": { "type": "array", "items": { "type": "object" } },
-        "caption": { "type": "string" }
+        "caption": { "type": "string" },
+        "pos": { "$ref": "#/definitions/blockPos" }
       }
     }
   }

@@ -4,6 +4,31 @@
 
 import type { AgeBand, Curriculum } from '@/ai/pedagogy';
 
+/* 세분 연령(만 나이) — 놀이계획 문서의 대상 선택 UI 전용. 유아교육 현장은 반을 만 나이로
+   운영하므로 0~1/2/3/4/5세를 개별 선택하게 한다. 광역 AgeBand(0-2·3-5)는 기존 소비자
+   (워크시트·계획 생성 등)와의 호환을 위해 계속 유지하고, age_years 를 넣으면 그로부터 파생한다. */
+export type AgeYears = '0-1' | '2' | '3' | '4' | '5';
+
+export const AGE_OPTIONS: ReadonlyArray<{ value: AgeYears; label: string; short: string; band: AgeBand }> = [
+  { value: '0-1', label: '만 0~1세', short: '0~1세', band: '0-2' },
+  { value: '2', label: '만 2세', short: '2세', band: '0-2' },
+  { value: '3', label: '만 3세', short: '3세', band: '3-5' },
+  { value: '4', label: '만 4세', short: '4세', band: '3-5' },
+  { value: '5', label: '만 5세', short: '5세', band: '3-5' },
+];
+
+/** 세분 연령 → 광역 AgeBand(payload 호환용). */
+export function bandForAge(years: AgeYears): AgeBand {
+  return AGE_OPTIONS.find((o) => o.value === years)?.band ?? '3-5';
+}
+
+/** 문서 표시용 대상 라벨 — 세분 연령이 있으면 '만 N세', 없으면 광역 밴드 라벨. */
+export function ageLabel(p: { age_years?: string; age_band: AgeBand }): string {
+  const opt = AGE_OPTIONS.find((o) => o.value === p.age_years);
+  if (opt) return opt.label;
+  return p.age_band === '0-2' ? '영아(0–2세)' : '유아(3–5세)';
+}
+
 export type RegistryType =
   | 'RecordDraftCard'
   | 'PlayStoryCard'
@@ -64,6 +89,8 @@ export interface WeeklyPlanGridProps {
   id?: string; // plan id (worksheet links back via link_plan_id)
   title: string;
   age_band: AgeBand;
+  /** 세분 연령(만 나이) — 있으면 문서 대상 라벨·AI 맥락에 우선 사용. age_band 는 이로부터 파생. */
+  age_years?: AgeYears;
   curriculum: Curriculum;
   days: PlanDay[];
   notes?: string;
@@ -302,6 +329,7 @@ export function validateRegistryPayload(raw: unknown): RegistryValidation {
           id: typeof p.id === 'string' ? p.id : undefined,
           title: String(p.title ?? '주간 놀이계획'),
           age_band,
+          age_years: AGE_OPTIONS.some((o) => o.value === p.age_years) ? (p.age_years as AgeYears) : undefined,
           curriculum: asCurriculum(p.curriculum, age_band),
           days,
           notes: typeof p.notes === 'string' ? p.notes : undefined,

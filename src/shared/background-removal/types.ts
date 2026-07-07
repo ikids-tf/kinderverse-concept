@@ -21,6 +21,8 @@ export interface RemoveBgOptions {
   onProgress?: (p: RBProgress) => void;
   /** 비민감 소재(generated/object)에 한해 서버 미세경계 티어 허용(기본 false). */
   allowServerTier?: boolean;
+  /** true = 단일 피사체 누끼(최대 성분만 유지, 이미지 편집기 등). 기본 false = 다중 객체 보존. */
+  mainOnly?: boolean;
 }
 
 export type Tier = 'on-device' | 'server';
@@ -38,7 +40,7 @@ export interface RemoveBgResult {
 /* ── Worker 프로토콜 ───────────────────────────────────────────── */
 export type WorkerRequest =
   | { type: 'warmup' }
-  | { type: 'run'; id: number; blob: Blob };
+  | { type: 'run'; id: number; blob: Blob; mainOnly?: boolean };
 
 export type WorkerResponse =
   | { type: 'ready'; device: string }

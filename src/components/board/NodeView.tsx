@@ -29,6 +29,9 @@ import { MotionPathNode } from './MotionPathNode';
 import { InteractiveNodeCard } from '@/features/interactive-viewer/node/InteractiveNodeCard';
 import { PromptBar } from '@/components/PromptBar';
 import { useUIStore } from '@/store/uiStore';
+import { resolveDocSkin } from '@/features/doc-edit/docSkins';
+import { DocDecoLayer } from '@/features/doc-edit/DocDecoLayer';
+import '@/features/doc-edit/doc-themes.css'; // 문서 카드 꾸미기 스킨(data-doc-skin)
 
 /* Renders one board node (reference board model): frame container, runner control,
    image card (real src), and content-sized sticky/text memos. Selection ring +
@@ -204,6 +207,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // 풀스크린 — body 레벨 포털 오버레이로 화면 전체를 덮는다(캔버스 변형 밖이라
   // 확실히 꽉 차고, 보드의 다른 요소를 가려 클릭·선택을 차단). Esc·✕로 닫는다.
   const [fsOpen, setFsOpen] = useState(false);
+  // 슬라이드 '편집 페이지' 오버레이 — 뷰어가 kv-embed-fullscreen에 edit:true를 실어 보내면
+  // ?fs=1(발표) 대신 ?edit=1(집중 편집 워크스페이스)로 연다. 닫기는 편집 페이지의 완료(kv-fs-exit).
+  const [fsEdit, setFsEdit] = useState(false);
   // 게임 뷰어 풀스크린: 확대 애니가 끝난 뒤에 하단 보드 프롬프트바를 띄운다(부드럽게).
   const [fsBarReady, setFsBarReady] = useState(false);
   // 풀스크린이 '그 카드 위치'에서 커지도록 origin(카드 화면 사각형)을 기억한다.
@@ -329,8 +335,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
       // 뷰어 안 ⛶ → 풀스크린 오버레이 열기(3D 뷰어와 동일 경로). 동영상은 현재 src를
       // 함께 받아(파일 재생 등 videoAssetId가 없는 경우) 오버레이에 로드한다.
       if (d?.type === 'kv-embed-fullscreen') {
-        const fd = e.data as { type?: string; src?: string } | null;
+        const fd = e.data as { type?: string; src?: string; edit?: boolean } | null;
         fsVideoSrcRef.current = typeof fd?.src === 'string' ? fd.src : null;
+        setFsEdit(fd?.edit === true); // 슬라이드 편집 페이지(?edit=1) / 일반 발표(?fs=1)
         openFs();
         return;
       }
@@ -1573,7 +1580,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             <ZoomOverlay
               ref={fsOverlayRef}
               origin={fsOrigin}
-              onClose={() => { setFsOpen(false); setFsOrigin(null); useUIStore.getState().setGameViewerFs(null); }}
+              onClose={() => { setFsOpen(false); setFsOrigin(null); setFsEdit(false); useUIStore.getState().setGameViewerFs(null); }}
               zIndex={9999}
               backdropClassName="bg-bg"
             >
@@ -1585,7 +1592,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               <iframe
                 ref={fsFrameRef}
                 src={(() => {
-                  let u = `${embedStr}${embedStr.includes('?') ? '&' : '?'}fs=1`;
+                  // 편집 페이지 오버레이(fsEdit)는 ?edit=1 — 뷰어가 좌 툴 패널의 집중 편집 워크스페이스로 뜬다.
+                  let u = `${embedStr}${embedStr.includes('?') ? '&' : '?'}${fsEdit ? 'edit=1' : 'fs=1'}`;
                   const vs = typeof node.data?.viewerSrc === 'string' ? node.data.viewerSrc : '';
                   if ((isMagicViewer || isVideoViewer) && vs) u += `&src=${encodeURIComponent(vs)}`;
                   const t = typeof node.data?.title === 'string' ? (node.data.title as string) : '';
@@ -1614,8 +1622,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               {/* 닫기 — Esc로도 닫힌다. 동영상 플레이어는 뷰어 우상단 버튼(#fs)을 ✕로 바꿔
                   스스로 닫으므로(kv-fs-exit) 여기 ✕는 두지 않는다(이중 표시 방지). 자체 ✕가
                   없는 다른 뷰어를 위해서만 둔다. */}
-              {/* 게임 뷰어는 자체 툴바의 ⛶→X 버튼이 닫기를 담당(kv-fs-exit) → 별도 ✕ 안 둔다. */}
-              {!isVideoPlayer && !isGameViewer && (
+              {/* 게임 뷰어는 자체 툴바의 ⛶→X 버튼이 닫기를 담당(kv-fs-exit) → 별도 ✕ 안 둔다.
+                  슬라이드 편집 페이지(fsEdit)는 헤더의 완료 버튼이 닫는다 → 별도 ✕ 안 둔다. */}
+              {!isVideoPlayer && !isGameViewer && !fsEdit && (
                 <button
                   onClick={closeOverlay}
                   title="전체 화면 닫기 (Esc)"
@@ -1694,6 +1703,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     const heroContain = false;
     const docImages = Array.isArray(node.data?.docImages) ? (node.data.docImages as string[]) : [];
     const loadingDoc = !!node.data?.loadingDoc;
+    // 문서 편집 페이지에서 고른 꾸미기 스킨(docSkins.ts + doc-themes.css) — 기본 룩이면 null.
+    const docSkin = resolveDocSkin(node.data);
+    const docDecoImages = Array.isArray(node.data?.docDecoImages) ? (node.data.docDecoImages as string[]) : [];
     // 활동지엔 장식 스티커를 붙이지 않는다(인쇄·오리기에 방해).
     // 계획안(plan)도 공식 문서 톤 유지 — 기존 보드에 저장된 decorations까지 렌더 차단.
     const decorations = worksheetProps || node.data?.role === 'plan'
@@ -1876,7 +1888,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             </div>
           </div>
         ) : isDoc ? (
-          <div className="kv-doc-md text-sm leading-relaxed text-fg">
+          // data-doc-skin: 문서 편집 페이지에서 고른 꾸미기 스킨이 보드 카드에도 반영.
+          // relative = 주제 스티커 이미지 레이어(DocDecoLayer)의 기준점.
+          <div
+            className="kv-doc-md relative text-sm leading-relaxed text-fg"
+            data-doc-skin={docSkin?.id}
+            data-doc-h1={docSkin?.h1}
+            style={docSkin?.style}
+          >
+            {docSkin?.variant.withImages && docDecoImages.length > 0 && <DocDecoLayer images={docDecoImages} compact />}
             {heroImage && (
               <img
                 src={heroImage}
@@ -2048,6 +2068,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 <div
                   onClick={(e) => e.stopPropagation()}
                   className="kv-doc-md max-h-[88vh] w-full max-w-3xl overflow-auto rounded-lg border border-border bg-surface p-t8 text-base leading-relaxed text-fg shadow-2xl"
+                  data-doc-skin={docSkin?.id}
+                  data-doc-h1={docSkin?.h1}
+                  style={docSkin?.style}
                 >
                   {heroImage && (
                     <img src={heroImage} alt="" draggable={false} className={`mb-t4 block w-full rounded-md border border-border ${heroContain ? 'bg-white object-contain' : 'object-cover'}`} style={heroContain ? { maxHeight: 720 } : { maxHeight: 140 }} />

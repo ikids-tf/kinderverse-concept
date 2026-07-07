@@ -14,7 +14,7 @@ import { fitFrameToChildren, frameSubtree } from './frames';
 import { recordSpawnedNodes, replaceImageCmd, addImageNodeCmd } from './commands';
 import { worldBox } from './geometry';
 import { linkedComponent } from './links';
-import type { RegistryPayload } from '@/ui-registry/contracts';
+import { ageLabel, type RegistryPayload } from '@/ui-registry/contracts';
 
 /* Workflow-to-board (reference board model): a "새 놀이계획" frame holds a runner
    control; each step spawns BOARD-NATIVE cards inside the frame — image steps →
@@ -276,7 +276,7 @@ export function planText(p: RegistryPayload): string {
 export function planDocMarkdown(p: RegistryPayload): string {
   if (p.type !== 'WeeklyPlanGrid') return planText(p);
   const pr = p.props;
-  const band = pr.age_band === '0-2' ? '영아(0–2세)' : '유아(3–5세)';
+  const band = ageLabel(pr);
   const cur = pr.curriculum === 'standard' ? '표준보육과정' : '누리과정';
   const cell = (s?: string) => (s && s.trim() ? s.replace(/\|/g, '/').replace(/\n+/g, ' ').trim() : '—');
   const areas = [...new Set(pr.days.map((d) => d.area).filter((a) => !!a && !!a.trim()))];
@@ -316,7 +316,7 @@ export function planDocMarkdown(p: RegistryPayload): string {
 export function projectDocMarkdown(p: RegistryPayload): string {
   if (p.type !== 'WeeklyPlanGrid') return planText(p);
   const pr = p.props;
-  const band = pr.age_band === '0-2' ? '영아(0–2세)' : '유아(3–5세)';
+  const band = ageLabel(pr);
   const cur = pr.curriculum === 'standard' ? '표준보육과정' : '누리과정';
   const cell = (s?: string) => (s && s.trim() ? s.replace(/\|/g, '/').replace(/\n+/g, ' ').trim() : '—');
   const areas = [...new Set(pr.days.map((d) => d.area).filter((a) => !!a && !!a.trim()))];
@@ -1362,6 +1362,42 @@ export function spawnVideoPlayer(nearId?: string): string {
     data: { embed: '/video-player.html', title: '동영상 플레이어' },
   });
   recordSpawnedNodes([id], '동영상 뷰어 추가');
+  return id;
+}
+
+/** 슬라이드 뷰어(빈) 카드를 보드에 추가하고 id를 돌려준다. 인스턴스마다 고유 ?id=deck_…로
+    덱(localStorage 키)을 분리한다(덱이 섞이지 않게). 선택 없이 "○○ 슬라이드 만들어줘" 트리거가 쓴다.
+    nearId가 있으면 그 카드 오른쪽 옆에, 없으면 화면 중앙에. */
+export function spawnSlidesViewer(nearId?: string): string {
+  const b = useBoardStore.getState();
+  const W = 720;
+  const H = 470;
+  const GAP = 40;
+  const near = nearId ? b.nodes[nearId] : undefined;
+  let x: number;
+  let y: number;
+  if (near) {
+    const nb = worldBox(near);
+    x = Math.round(nb.x + nb.w + GAP);
+    y = Math.round(nb.y);
+  } else {
+    const c = viewportCenterBoardPoint();
+    x = Math.round(c.x - W / 2);
+    y = Math.round(c.y - H / 2);
+  }
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id,
+    type: 'sticky',
+    x,
+    y,
+    w: W,
+    h: H,
+    autoH: false,
+    text: '슬라이드',
+    data: { embed: `/slides-viewer.html?id=${newId('deck')}`, title: '슬라이드' },
+  });
+  recordSpawnedNodes([id], '슬라이드 뷰어 추가');
   return id;
 }
 

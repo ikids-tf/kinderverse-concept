@@ -7,7 +7,7 @@ import { placeTrayItem } from '@/board/tray';
 import { moveNodesCmd, captureNodes, pushRedesign, addLinkCmd, removeLinkCmd, relinkCmd, attachMotionSlotCmd, type NodeSnap } from '@/board/commands';
 import { linkSequence } from '@/board/links';
 import { nearestMotionSlot } from '@/board/motionGeometry';
-import { linkDescendants, migrateMindMapEdges } from '@/board/composer';
+import { linkDescendants, migrateMindMapEdges, genDocFromIdeas, genIdeasFromDoc, classifyDocTarget, isIdeaListNode } from '@/board/composer';
 import { regenImageCard, genTextCard, spawnVideoPlayer, activityTextForVideo } from '@/board/workflow';
 import { generateVideoForViewer } from '@/board/video';
 import { getVideoAsset } from '@/board/videoAssets';
@@ -380,6 +380,14 @@ export function BoardCanvas() {
   // 연결 직후 생성 제안 — 빈 메모/이미지 카드를 다른 요소와 이으면
   // "연결된 요소 'X'에 대한 내용/이미지를 생성할까요?" 확인 카드를 띄운다.
   const [proposal, setProposal] = useState<{ id: string; topic: string; kind: 'memo' | 'image' } | null>(null);
+  // 아이디어 리스트 ↔ 문서 연결 확인 팝오버:
+  //  · mode 'doc'  — 아이디어→문서 연결 → 선택 아이디어로 '{라벨}' 문서 생성
+  //  · mode 'idea' — 문서→아이디어 연결 → 그 문서 기반 아이디어 12개 생성(아이디어 노드 채움)
+  const [ideaDocLink, setIdeaDocLink] = useState<
+    | { mode: 'doc'; ideaId: string; docId: string; anchorId: string; label: string }
+    | { mode: 'idea'; ideaId: string; docId: string; anchorId: string }
+    | null
+  >(null);
   // 유튜브 뷰어에 자료를 연결했을 때 뜨는 선택 팝오버: 영상 추천 vs 웹 검색.
   const [viewerLink, setViewerLink] = useState<{ viewerId: string; content: string; topic: string; sourceId?: string } | null>(null);
   // 슬라이드 뷰어에 자료(문서 등)를 연결 → "이 자료로 슬라이드를 만들까요 / 연결만 할까요?" 팝오버.
@@ -619,6 +627,26 @@ export function BoardCanvas() {
               if (content) {
                 setSlideLink({ viewerId: slidesViewer.id, content, topic: topicOf(other), sourceId: other?.id });
               }
+            } else if (
+              // 아이디어 리스트 ↔ 생성 문서(계획안·프로젝트·활동지) 연결 → 확인 팝오버.
+              // 드래그 방향으로 동작을 정한다: 아이디어에서 끌면 '문서 생성', 문서에서 끌면 '아이디어 생성'.
+              (() => {
+                const fromN = ss.nodes[st.from];
+                const toN = ss.nodes[target.id];
+                const isDoc = (n?: BoardNode) =>
+                  !!n?.data?.doc && ['plan', 'worksheet', 'record', 'letter'].includes(String(n?.data?.role ?? ''));
+                if (isIdeaListNode(fromN) && isDoc(toN)) {
+                  setIdeaDocLink({ mode: 'doc', ideaId: st.from, docId: target.id, anchorId: target.id, label: classifyDocTarget(toN).label });
+                  return true;
+                }
+                if (isDoc(fromN) && isIdeaListNode(toN)) {
+                  setIdeaDocLink({ mode: 'idea', ideaId: target.id, docId: st.from, anchorId: target.id });
+                  return true;
+                }
+                return false;
+              })()
+            ) {
+              /* 팝오버는 위 IIFE 에서 세팅됨 */
             } else {
               // 빈 카드만 제안 — 채워진 이미지끼리 잇는 슬라이드 체인을 방해하지 않게.
               const emptyMemo = (n: BoardNode) =>
@@ -1312,6 +1340,58 @@ export function BoardCanvas() {
                     style={{ fontSize: 12 / z, padding: `${5 / z}px ${16 / z}px` }}
                   >
                     취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 아이디어 ↔ 문서 연결 팝오버 — 대상(드롭한) 노드 아래 중앙. 링크는 이미 만들어져
+            있고, 여기서 '생성'을 누르면 선택 아이디어로 문서를 만들거나(문서 생성), 그 문서로
+            아이디어 12개를 만든다(아이디어 생성). '연결만'은 선만 남기고 닫는다. */}
+        {ideaDocLink && nodes[ideaDocLink.anchorId] && (() => {
+          const an = nodes[ideaDocLink.anchorId];
+          const ab = worldBox(an);
+          const z = viewport.zoom;
+          const isDoc = ideaDocLink.mode === 'doc';
+          const genLabel = isDoc ? `📋 ${ideaDocLink.label} 만들기` : '💡 아이디어 12개 만들기';
+          const question = isDoc
+            ? '고른 아이디어로 문서를 만들까요?'
+            : '이 문서로 놀이 아이디어를 만들까요?';
+          const run = () => {
+            const dl = ideaDocLink;
+            setIdeaDocLink(null);
+            if (dl.mode === 'doc') void genDocFromIdeas(dl.ideaId, dl.docId);
+            else void genIdeasFromDoc(dl.docId, dl.ideaId);
+          };
+          return (
+            <div
+              className="absolute z-40"
+              style={{ left: ab.x + ab.w / 2, top: ab.y + ab.h + 10 / z, transform: 'translateX(-50%)' }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div
+                className="rounded-lg border border-border bg-surface text-center shadow-lg"
+                style={{ padding: `${10 / z}px ${14 / z}px`, width: 'max-content', maxWidth: 360 / z }}
+              >
+                <p className="text-fg" style={{ fontSize: 13 / z, margin: 0, marginBottom: 9 / z, lineHeight: 1.45 }}>
+                  {question}
+                </p>
+                <div className="flex items-center justify-center" style={{ gap: 6 / z }}>
+                  <button
+                    onClick={run}
+                    className="rounded-pill bg-accent font-semibold text-on-accent hover:bg-accent-hover"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${16 / z}px` }}
+                  >
+                    {genLabel}
+                  </button>
+                  <button
+                    onClick={() => setIdeaDocLink(null)}
+                    className="rounded-pill border border-border bg-surface text-fg-2 hover:bg-surface-2"
+                    style={{ fontSize: 12 / z, padding: `${5 / z}px ${16 / z}px` }}
+                  >
+                    연결만
                   </button>
                 </div>
               </div>
