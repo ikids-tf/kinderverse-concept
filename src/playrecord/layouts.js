@@ -1253,15 +1253,17 @@ const MS_OFFX = Math.round((A4.W - 1097 * MS_S) / 2);      // 좌우중앙 19
 const sX = (v) => Math.round(v * MS_S) + MS_OFFX;
 const sY = (v) => Math.round(v * MS_S);
 const sD = (v) => Math.round(v * MS_S);
-const MS_ASSET = "/generated-assets/monthly-summer";
+// 기존 여름바다 스티커 재사용 — 주제망(topicweb-record)·주안(weekly-record) 큐레이션 세트.
+const MS_TW = "/generated-assets/topicweb-record";
+const MS_WK = "/generated-assets/weekly-record";
 const MS_BG = "linear-gradient(180deg,#eaf7ff 0%,#cbe9f9 12%,#9ad6f2 32%,#66b9e5 55%,#4098d4 78%,#3079b7 100%)";
 const MS_JUA = "'Jua', sans-serif";
 const MS_WEEK_DEF = [
-  { title: "바다 생명과 함께해요",  ideas: ["상어 탈출 달리기", "물총 위기 생물 보호", "잠수함 생물 꾸미기"],                          stk: "clownfish", sw: 74, sh: 72, ac: "#f39c4e", tc: "#dd7f2b" },
-  { title: "바다의 비밀을 탐구해요", ideas: ["모래성 쌓기 게임", "소금물 농도 실험", "바다 플로깅 규칙", "찰흙 바다 친구들", "해초 댄스"], stk: "treasure",  sw: 70, sh: 67, ac: "#37b6c3", tc: "#1f8a97" },
-  { title: "바다를 지키는 우리",   ideas: ["바다 거북 구조대", "친환경 신고함", "바다 생물 수수께끼", "여름 과일 패턴", "바다 보호 포스터"], stk: "turtle",    sw: 80, sh: 64, ac: "#5cc078", tc: "#3a9c56" },
-  { title: "신나는 바다 놀이",     ideas: ["바다를 지키는 약속", "시원한 파도가 쏴아", "여름 날씨 관찰", "물놀이 안전 규칙", "바다 쓰레기 악기"], stk: "dolphin",   sw: 74, sh: 70, ac: "#4c9fe0", tc: "#2e79bd" },
-  { title: "바다를 닮은 예술가",   ideas: ["파란 바다 협동화", "바다 속 생물 관찰", "종이컵 문어 만들기", "바다 여행 집 쓰기", "해변 쓰레기 줍기"], stk: "jellyfish", sw: 66, sh: 69, ac: "#ef7fa0", tc: "#d85a80" },
+  { title: "바다 생명과 함께해요",  ideas: ["상어 탈출 달리기", "물총 위기 생물 보호", "잠수함 생물 꾸미기"],                          stk: `${MS_TW}/crab.png`,       subj: "a cute crab",       sw: 74, sh: 60, ac: "#f39c4e", tc: "#dd7f2b" },
+  { title: "바다의 비밀을 탐구해요", ideas: ["모래성 쌓기 게임", "소금물 농도 실험", "바다 플로깅 규칙", "찰흙 바다 친구들", "해초 댄스"], stk: `${MS_TW}/sandcastle.png`, subj: "a cute sand castle", sw: 76, sh: 72, ac: "#37b6c3", tc: "#1f8a97" },
+  { title: "바다를 지키는 우리",   ideas: ["바다 거북 구조대", "친환경 신고함", "바다 생물 수수께끼", "여름 과일 패턴", "바다 보호 포스터"], stk: `${MS_TW}/turtle.png`,     subj: "a cute sea turtle", sw: 78, sh: 66, ac: "#5cc078", tc: "#3a9c56" },
+  { title: "신나는 바다 놀이",     ideas: ["바다를 지키는 약속", "시원한 파도가 쏴아", "여름 날씨 관찰", "물놀이 안전 규칙", "바다 쓰레기 악기"], stk: `${MS_WK}/dolphin-big.png`, subj: "a cute jumping dolphin", sw: 78, sh: 78, ac: "#4c9fe0", tc: "#2e79bd" },
+  { title: "바다를 닮은 예술가",   ideas: ["파란 바다 협동화", "바다 속 생물 관찰", "종이컵 문어 만들기", "바다 여행 집 쓰기", "해변 쓰레기 줍기"], stk: `${MS_TW}/octopus.png`,   subj: "a cute octopus",    sw: 72, sh: 72, ac: "#ef7fa0", tc: "#d85a80" },
 ];
 const MS_WEEKX = [40, 243.59, 447.19, 650.8, 854.39];
 const MS_OUTDOOR_DEF = ["🐢 바다 거북 구조대 놀이", "🚶 바닷속 탐험하며 걷기", "💌 바다 보호 약속 카드", "🌊 파도 모양 만들기", "🐚 바다 생태계 걷기", "🏰 모래 바닷속 생물 표현"];
@@ -1270,19 +1272,19 @@ const MS_OUTDOOR_POS = [
   { x: 605.73, y: 963.36, w: 160.02, bd: "#8fc9e6" }, { x: 762.75, y: 963.36, w: 157.84, bd: "#c4b0e0" }, { x: 60, y: 1008.36, w: 191.34, bd: "#f4b58a" },
 ];
 const MS_HEADER_STK = [
-  { n: "seagulls", x: 34, y: 20, w: 141, h: 136, subj: "two cute white seagulls flying" },
-  { n: "sailboat", x: 924, y: 22, w: 121, h: 134, subj: "a cute colorful striped sailboat" },
-  { n: "whale", x: 80, y: 161, w: 137, h: 144, subj: "a cute chubby blue whale spouting water" },
-  { n: "flamingo-float", x: 485, y: 157, w: 111, h: 117, subj: "a cute pink flamingo pool float ring" },
-  { n: "shark", x: 858, y: 163, w: 129, h: 108, subj: "a cute friendly grey baby shark" },
+  { src: `${MS_TW}/seagull.png`,     x: 34,  y: 20,  w: 141, h: 136, subj: "two cute white seagulls flying" },
+  { src: `${MS_TW}/parasol.png`,     x: 928, y: 22,  w: 117, h: 134, subj: "a cute beach parasol" },
+  { src: `${MS_WK}/dolphin-big.png`, x: 80,  y: 161, w: 137, h: 144, subj: "a cute jumping dolphin" },
+  { src: `${MS_TW}/tube.png`,        x: 485, y: 157, w: 111, h: 117, subj: "a cute swim ring float" },
+  { src: `${MS_WK}/dolphin-small.png`, x: 862, y: 168, w: 121, h: 100, subj: "a cute small dolphin" },
 ];
 const MS_BANNER_STK = [
-  { n: "coral-cave", x: 30, y: 1505.48, w: 171, h: 122.5, subj: "an underwater rocky coral cave with sea plants" },
-  { n: "seaweed", x: 196, y: 1508.62, w: 93, h: 117, subj: "cute green seaweed plants" },
-  { n: "starfish", x: 316, y: 1547.69, w: 103, h: 82, subj: "a cute orange starfish" },
-  { n: "coral", x: 764, y: 1510.69, w: 127, h: 119, subj: "a cute pink and orange coral" },
-  { n: "hermit-crab", x: 886, y: 1547.59, w: 95, h: 82, subj: "a cute hermit crab" },
-  { n: "whale", x: 974, y: 1533.39, w: 117, h: 91, subj: "a cute small blue whale" },
+  { src: `${MS_TW}/palm.png`,      x: 34,  y: 1503, w: 150, h: 128, subj: "a cute palm tree" },
+  { src: `${MS_WK}/seaweed.png`,   x: 196, y: 1508.62, w: 93, h: 117, subj: "cute green seaweed plants" },
+  { src: `${MS_TW}/starfish.png`,  x: 316, y: 1547.69, w: 88,  h: 82,  subj: "a cute orange starfish" },
+  { src: `${MS_TW}/conch.png`,     x: 766, y: 1516, w: 112, h: 108, subj: "a cute seashell conch" },
+  { src: `${MS_TW}/crab.png`,      x: 892, y: 1550, w: 96,  h: 78,  subj: "a cute crab" },
+  { src: `${MS_TW}/sunset.png`,    x: 980, y: 1520, w: 118, h: 104, subj: "a cute sunset over the sea" },
 ];
 const MS_BOT_ROWS = [
   { key: "safety", x: 40,  y: 1075.36, badgeBg: "#fbe0d2", badgeTc: "#c2551c", label: "🛟 안전 교육",   def: "바닷가에서는 어른과 함께 다니고, 깊은 물에 혼자 들어가지 않아요. 물놀이 전 준비운동을 하고, 서로 밀거나 뛰지 않아요." },
@@ -1301,7 +1303,7 @@ export function buildMonthlyPlanSummerDoc(payload) {
   const d = payload || {};
   const m = maker();
   const els = [m.bg({ bg: MS_BG })];
-  const stk = (n, x, y, w, h, id, subj) => els.push({ id, type: "image", src: `${MS_ASSET}/${n}.png`, fit: "contain", sticker: true, subject: subj, x: sX(x), y: sY(y), w: sD(w), h: sD(h), rotation: 0, style: { radius: 0 } });
+  const stk = (src, x, y, w, h, id, subj) => els.push({ id, type: "image", src, fit: "contain", sticker: true, subject: subj, x: sX(x), y: sY(y), w: sD(w), h: sD(h), rotation: 0, style: { radius: 0 } });
   const SHADOW = "0 4px 14px rgba(30,70,110,0.10)";
 
   // ── 헤더 배지·제목·부제 ──
@@ -1344,11 +1346,11 @@ export function buildMonthlyPlanSummerDoc(payload) {
     els.push(m.text(sX(138.08), sY(top), sD(r.w), sD(22), has(row.area) ? row.area : r.area, { fontSize: sD(13), fontFamily: MS_JUA, color: "#ffffff", align: "center", valign: "center" }));
     els.push(m.text(sX(138.08 + r.w + 20), sY(top + 0.5), sD(560), sD(21), has(row.content) ? row.content : r.content, { fontSize: sD(15), fontFamily: BODY_FONT, color: "#3a4653", align: "left", valign: "center" }));
   });
-  stk("seahorse", 876, 423.6, 64, 81, "mscur0", "a cute yellow seahorse");
-  stk("shell", 956, 432.6, 70, 63, "mscur1", "a cute pink seashell");
+  stk(`${MS_TW}/seahorse.png`, 876, 423.6, 64, 81, "mscur0", "a cute yellow seahorse");
+  stk(`${MS_TW}/conch.png`, 956, 432.6, 70, 63, "mscur1", "a cute seashell conch");
 
   // ── 헤더 데코 스티커(배경 위, 콘텐츠 사이) ──
-  MS_HEADER_STK.forEach((s, i) => stk(s.n, s.x, s.y, s.w, s.h, `mshd${i}`, s.subj));
+  MS_HEADER_STK.forEach((s, i) => stk(s.src, s.x, s.y, s.w, s.h, `mshd${i}`, s.subj));
 
   // ── 예상 놀이 흐름 섹션 타이틀 + 5주차 카드 ──
   els.push(m.text(sX(150), sY(537.69), sD(797), sD(28), "🫧 5주간의 바다 여행 · 예상 놀이 흐름 🫧", { fontSize: sD(24), fontFamily: MS_JUA, color: "#0f5c96", align: "center", valign: "center" }, { textRole: "title" }));
@@ -1361,7 +1363,7 @@ export function buildMonthlyPlanSummerDoc(payload) {
     els.push(m.shape(sX(wx), sY(cy), sD(CW), sD(CH), { bg: "#ffffff", radius: sD(16), stroke: "#dce9f2", strokeWidth: 2, shadow: SHADOW }));
     els.push(m.shape(sX(wx + 81.8), sY(cy + 12), sD(38), sD(38), { bg: def.ac, radius: sD(19) }));
     els.push(m.text(sX(wx + 81.8), sY(cy + 12), sD(38), sD(38), `${w.week ? w.week : i + 1}주`, { fontSize: sD(15), fontFamily: MS_JUA, color: "#ffffff", align: "center", valign: "center" }));
-    stk(def.stk, wx + (CW - def.sw) / 2, cy + 56, def.sw, def.sh, `mswk${i}`, `a cute ${def.stk} sea creature`);
+    stk(def.stk, wx + (CW - def.sw) / 2, cy + 56, def.sw, def.sh, `mswk${i}`, def.subj);
     els.push(m.text(sX(wx + 8), sY(cy + 128), sD(CW - 16), sD(44), wtitle, { fontSize: fitFontSize(wtitle, sD(CW - 16), sD(44), sD(18), 12), fontFamily: MS_JUA, color: def.tc, align: "center", valign: "center" }, { textRole: "title" }));
     els.push(m.text(sX(wx + 12), sY(cy + 178), sD(CW - 22), sD(128), ideas.map((t) => `· ${t}`).join("\n"), { fontSize: fitFontSize(ideas.map((t) => `· ${t}`).join("\n"), sD(CW - 22), sD(128), sD(14), 9), fontFamily: BODY_FONT, color: "#3a4653", align: "left", valign: "top" }));
   });
@@ -1389,7 +1391,7 @@ export function buildMonthlyPlanSummerDoc(payload) {
 
   // ── 하단 모래 배너 + 스티커 + 문구 ──
   els.push(m.shape(0, sY(1525), A4.W, sD(145), { bg: "linear-gradient(180deg,#fbeecb 0%,#f3ddac 100%)", radius: 0 }));
-  MS_BANNER_STK.forEach((s, i) => stk(s.n, s.x, s.y, s.w, s.h, `msbn${i}`, s.subj));
+  MS_BANNER_STK.forEach((s, i) => stk(s.src, s.x, s.y, s.w, s.h, `msbn${i}`, s.subj));
   els.push(m.text(sX(430), sY(1560), sD(330), sD(40), "놀이 흥미와 요구, 상황에 따라 변경될 수 있으며, 함께 만들어가는 놀이중심 교육과정으로 운영합니다.", { fontSize: sD(15), fontFamily: MS_JUA, color: "#4a6b86", align: "center", valign: "center" }));
 
   return doc("놀이중심 월간계획안", MS_BG, els);
