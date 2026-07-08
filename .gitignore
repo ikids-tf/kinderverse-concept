@@ -23,3 +23,9 @@ npm-debug.log*
 # Claude Code local settings (per-machine; not shared)
 .claude/settings.local.json
 .omc
+
+# bkit plugin local state (per-machine)
+.bkit/
+
+# 대용량 미연결 스티커 스테이징 리소스(앱 미참조) — 레포 부풀림 방지, 디스크에만 보관
+public/assets/deco/tag/1-3차 태그 스티커 리소스/

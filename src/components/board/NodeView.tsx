@@ -12,7 +12,10 @@ import { runWorkflowStep, spawnWebViewer, type RunnerData, type StepKind } from 
 import { consumeGameCreate } from '@/board/gameHandoff';
 import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren, frameContentSig } from '@/board/frames';
 import { alignFrameCmd } from '@/board/align';
-import { runComposerChip, expandMindMapBranch, planFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
+import { runComposerChip, expandMindMapBranch, planFromNode, monthlyPlanFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
+import { openMindmapInEditor, isMindmapDoc, openMindmapDocInEditor } from '@/playrecord-integration/fromMindmap';
+import { openPlanInEditor, openMonthlyInEditor, frameHasPlan } from '@/playrecord-integration/fromPlan';
+import { openRecordInEditor, frameHasRecord } from '@/playrecord-integration/fromRecord';
 import type { RouteTarget } from '@/ai/contract';
 import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
 import { WorksheetSheet } from '@/ui-registry/worksheet-sheet';
@@ -1045,6 +1048,33 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             {!narrow && '정렬'}
           </button>
           )}
+          {/* 마인드맵(주제망) 편집디자인 버튼은 상단이 아니라 프레임 '하단 중앙'에 별도 CTA로 배치(아래 참고). */}
+          {/* 주간계획(WeeklyPlanGrid)을 담은 프레임 — verse 편집 캔버스(주안 weeklyplan)로 열기 */}
+          {!node.data?.mindmap && frameHasPlan(node.id) && (
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); openPlanInEditor(node.id); }}
+            title="이 주간계획을 편집 디자인(주안 캔버스)으로 열기"
+            className="inline-flex items-center gap-t2 whitespace-nowrap rounded-pill border border-border bg-surface px-t4 py-t2 text-sm font-medium text-fg-2 shadow-sm hover:border-accent hover:text-accent"
+            style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+          >
+            <Icon name="studio" size={16} className="shrink-0" />
+            {!narrow && '편집디자인'}
+          </button>
+          )}
+          {/* 놀이기록(PlayStoryCard)을 담은 프레임 — verse 편집 캔버스(놀이기록 카드형)로 열기 */}
+          {!node.data?.mindmap && frameHasRecord(node.id) && (
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); openRecordInEditor(node.id); }}
+            title="이 놀이기록을 편집 디자인(스티커·꾸미기 캔버스)으로 열기"
+            className="inline-flex items-center gap-t2 whitespace-nowrap rounded-pill border border-border bg-surface px-t4 py-t2 text-sm font-medium text-fg-2 shadow-sm hover:border-accent hover:text-accent"
+            style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+          >
+            <Icon name="studio" size={16} className="shrink-0" />
+            {!narrow && '편집디자인'}
+          </button>
+          )}
           <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -1071,6 +1101,21 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           {!narrow && (isSaved ? '저장됨' : '자료보관')}
           </button>
         </div>
+        )}
+
+        {/* 마인드맵(주제망) 하단 중앙 — 이 주제망으로 '편집 디자인'을 만드는 CTA.
+            클릭하면 topicweb payload 로 편집 캔버스(스티커·꾸미기)를 연다. */}
+        {!!node.data?.mindmap && !presenting && (
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); openMindmapInEditor(node.id); }}
+          title="이 주제망으로 편집 디자인(스티커·꾸미기 캔버스)을 만들기"
+          className="absolute bottom-0 left-1/2 z-10 inline-flex -translate-x-1/2 translate-y-1/2 items-center gap-t2 whitespace-nowrap rounded-pill border border-accent bg-accent px-t5 py-t2 text-sm font-semibold text-on-accent shadow-md hover:opacity-90"
+          style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+        >
+          <Icon name="studio" size={16} className="shrink-0" />
+          편집 디자인 만들기
+        </button>
         )}
 
         {/* 프레임 하단 안내 행들(추천 칩 · 정정 칩 · 보관함 안내) — 하나의 세로 flex
@@ -1966,10 +2011,17 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); void planFromNode(node.id); }}
-              title="이 활동으로 계획안 만들기"
+              title="이 활동으로 주간계획안 만들기"
               className="flex h-7 w-7 items-center justify-center rounded-full text-fg-2 transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
             >
               <Icon name="calendar" size={15} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); void monthlyPlanFromNode(node.id); }}
+              title="이 활동으로 월간계획안 만들기"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-fg-2 transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
+            >
+              <Icon name="plan" size={15} />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); void worksheetFromNode(node.id); }}
@@ -2129,13 +2181,34 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 <Icon name="heart" size={14} fill={node.data?.liked ? 'currentColor' : 'none'} />
               </button>
             </div>
-            <button
-              onClick={(e) => { e.stopPropagation(); setDraft(node.text ?? ''); setEditing(true); }}
-              title="문서 편집"
-              className="flex h-9 items-center gap-t1 rounded-pill border border-border bg-surface px-t3 text-xs font-semibold text-fg-2 shadow-lg transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
-            >
-              <Icon name="writing" size={14} /> 편집
-            </button>
+            <div className="flex items-center gap-t1">
+              {/* 놀이기록(PlayStoryCard)·주안(WeeklyPlanGrid) 문서 → 편집 디자인(스티커·꾸미기 캔버스) 생성 */}
+              {(() => {
+                const t = (node.data?.payload as { type?: string } | undefined)?.type;
+                let open: ((id: string) => void) | null = null;
+                if (t === 'PlayStoryCard') open = openRecordInEditor;
+                else if (t === 'WeeklyPlanGrid') open = node.data?.monthly ? openMonthlyInEditor : openPlanInEditor;
+                else if (isMindmapDoc(node)) open = openMindmapDocInEditor; // 마크다운 마인드맵 문서 → 주제망 캔버스
+                if (!open) return null;
+                const openFn = open;
+                return (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openFn(node.id); }}
+                    title="이 문서로 편집 디자인(스티커·꾸미기 캔버스)을 만들기"
+                    className="flex h-9 items-center gap-t1 rounded-pill border border-accent bg-accent px-t3 text-xs font-semibold text-on-accent shadow-lg transition-opacity duration-150 ease-soft hover:opacity-90"
+                  >
+                    <Icon name="studio" size={14} /> 편집디자인 만들기
+                  </button>
+                );
+              })()}
+              <button
+                onClick={(e) => { e.stopPropagation(); setDraft(node.text ?? ''); setEditing(true); }}
+                title="문서 편집"
+                className="flex h-9 items-center gap-t1 rounded-pill border border-border bg-surface px-t3 text-xs font-semibold text-fg-2 shadow-lg transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
+              >
+                <Icon name="writing" size={14} /> 편집
+              </button>
+            </div>
           </div>
         )}
         {node.locked && <LockBadge />}

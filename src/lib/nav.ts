@@ -23,6 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'class', label: '우리반', path: '/class', icon: 'class', group: 'mid' },
   { id: 'calendar', label: '캘린더', path: '/calendar', icon: 'calendar', group: 'mid' },
   { id: 'folder', label: '자료보관', path: '/folder', icon: 'folder', group: 'mid' },
+  { id: 'playeditor', label: '편집디자인', path: '/play-editor', icon: 'studio', group: 'mid' },
 
   { id: 'profile', label: '프로필', path: '/profile', icon: 'user', group: 'bottom' },
 ];

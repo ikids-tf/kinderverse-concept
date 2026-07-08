@@ -1451,6 +1451,50 @@ export async function genIdeasFromDoc(docNodeId: string, ideaNodeId: string, cou
   recordSpawnedNodes([ideaNodeId], '문서 → 아이디어');
 }
 
+/** 활동 노드 → '월간계획안(월안)' 문서 생성. 주간계획안 만들기와 동일한 흐름이되
+    한 달(5주차) 놀이 흐름으로 생성하고, data.monthly 로 표시해 '편집디자인'이 월안 캔버스로 열리게 한다. */
+export async function monthlyPlanFromNode(nodeId: string): Promise<void> {
+  const b = useBoardStore.getState();
+  const node = b.nodes[nodeId];
+  if (!node) return;
+  const frameId = node.data?.frameId as string | undefined;
+  const act = node.data?.activity as MindActivity | undefined;
+  const activity = act?.label || (node.text ?? '').split('\n')[0].trim() || '활동';
+  const seed = [activity, act?.method, act?.area].filter((s): s is string => !!s && !!s.trim());
+
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id, type: 'sticky',
+    x: Math.round(node.x + node.w + 48), y: Math.round(node.y), w: PLAN_DOC_W, h: 260, autoH: true,
+    text: '📅 월간계획안을 만들고 있어요…', color: 'paper',
+    data: { doc: true, role: 'plan', monthly: true, loadingDoc: true, ...(frameId ? { frameId } : {}) },
+  });
+  if (frameId && useBoardStore.getState().nodes[frameId]?.data?.mindmap) {
+    linkMindMap(nodeId, id);
+  }
+  useBoardStore.getState().setSelection([id]);
+  useBoardStore.getState().setGenerating('📅 월간계획안을 만들고 있어요…');
+
+  try {
+    const res = await runPlan(activity, seed, buildAgentContext('plan'), { monthly: true });
+    const cur = useBoardStore.getState().nodes[id];
+    b.updateNodeRaw(id, {
+      text: planDocMarkdown(res.payload),
+      data: { ...(cur?.data ?? {}), doc: true, role: 'plan', monthly: true, payload: res.payload, loadingDoc: false },
+    });
+  } catch {
+    const cur = useBoardStore.getState().nodes[id];
+    b.updateNodeRaw(id, { text: `‘${activity}’ 월간계획안 생성에 실패했어요.`, data: { ...(cur?.data ?? {}), loadingDoc: false } });
+  } finally {
+    useBoardStore.getState().setGenerating(null);
+  }
+  if (frameId) {
+    await new Promise((r) => setTimeout(r, 260));
+    fitFrameToChildren(frameId);
+  }
+  recordSpawnedNodes([id], '월간계획안 만들기');
+}
+
 /* ---------------- classification ---------------- */
 
 function estimateComplexity(text: string, r: RouterOutput): 'simple' | 'complex' {

@@ -5,6 +5,11 @@ import { devGateway } from './vite-plugins/devGateway';
 
 // https://vite.dev/config/
 export default defineConfig({
+  // preview 하니스가 PORT 환경변수로 포트를 주입하면 그 포트에 바인딩(프록시 정합).
+  server: process.env.PORT ? { port: Number(process.env.PORT), strictPort: true } : undefined,
+  // playrecord 편집기(react-rnd)가 참조하는 process.env.DRAGGABLE_DEBUG 를 브라우저 번들에서 정의
+  // → 없으면 편집 시 "process is not defined" 크래시.
+  define: { 'process.env.DRAGGABLE_DEBUG': 'false' },
   plugins: [react(), devGateway()],
   resolve: {
     alias: {

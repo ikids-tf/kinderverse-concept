@@ -123,9 +123,22 @@ export async function runPlan(
   request: string,
   selected: string[],
   ctx?: string,
-  opts?: { project?: boolean },
+  opts?: { project?: boolean; monthly?: boolean },
 ): Promise<PlanResult> {
   const sel = selected.length ? `선택된 활동: ${selected.join(' / ')}` : '';
+  // ── 월간(월안) ── 요일이 아니라 '주차(1주~5주)'로 한 달의 놀이 흐름을 구성한다.
+  //   days를 주차로 채워 WeeklyPlanGrid 로 반환(월안 편집 캔버스가 주차 흐름으로 매핑).
+  const monthlyUser = `요청: "${request}"\n${sel}
+유아 교사가 실제로 쓰는 수준의 '월간(한 달) 놀이계획'을 작성하라. 요일별이 아니라 한 주제를 한 달간 '주차별로 점점 확장'하며 논다.
+[작성 규칙]
+- days = '주차' 5개. 각 day는 "N주차" 형식(예: "1주차", "2주차" … "5주차").
+- area = 그 주차의 소주제(놀이 흐름 제목, 8~16자. 예: "바다 생명과 함께해요", "바다를 지키는 우리").
+- activity = 그 주차에 유아가 하는 놀이 3~5가지를 쉼표로 이어 쓴다(유아가 주어, 놀이 중심). 예: "상어 탈출 달리기, 물총 생물 보호, 잠수함 생물 꾸미기".
+- materials = 그 주차 주요 준비물 2~4가지.
+- goal = 그 주차 기대하는 경험 1문장.
+- title = 이 달의 놀이 제목(예: "여름 바다로 풍덩!"). notes = ① 유아 흥미·놀이 흐름에 따라 융통성 있게 운영 ② 안전 유의점 1가지 ③ 가정연계 1가지.
+JSON만 출력:
+{ "type": "WeeklyPlanGrid", "props": { "title": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "days": [ { "day": string, "area": string, "activity": string, "materials": string, "goal": string } ], "notes": string } }`;
   // ── 프로젝트 수업 ── 일반 주간계획과 달리 하나의 주제를 1주~한 달 '단계별'로 깊이 탐구한다
   //   (프로젝트 접근법: 준비→도입→전개→마무리). days를 요일이 아니라 '단계'로 채운다.
   const projectUser = `요청: "${request}"\n${sel}
@@ -154,7 +167,7 @@ JSON만 출력:
 - notes: ① "유아의 흥미와 놀이 흐름에 따라 계획은 융통성 있게 변경·확장합니다" 취지의 문장 ② 이 주제 놀이의 안전 유의점 1가지 ③ (컨텍스트에 있으면) 알레르기·개별 배려.
 JSON만 출력:
 { "type": "WeeklyPlanGrid", "props": { "title": string, "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "days": [ { "day": string, "area": string, "activity": string, "materials": string, "goal": string } ], "notes": string } }`;
-  const user = opts?.project ? projectUser : playUser;
+  const user = opts?.project ? projectUser : opts?.monthly ? monthlyUser : playUser;
 
   const first = await callGateway({
     task: 'plan',
