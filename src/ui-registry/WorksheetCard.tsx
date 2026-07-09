@@ -41,6 +41,16 @@ export function WorksheetCard({
         ) : undefined
       }
     >
+      {/* 연결된 놀이계획 표시 (SKILL §4.1) — link_plan_id 있으면 배지로 노출. */}
+      {props.link_plan_id && (
+        <div className="mb-t3">
+          <span className="inline-flex items-center gap-t1 rounded-pill bg-accent-soft px-t3 py-1 text-overline text-accent">
+            <Icon name="link" size={12} />
+            놀이계획 연결
+          </span>
+        </div>
+      )}
+
       {/* 인쇄용 활동지 A4 한 장 — 제목·안내 텍스트 레이어 + 활동 그림. */}
       <div className="mx-auto" style={{ maxWidth: 380 }}>
         <WorksheetSheet props={props} className="rounded-md border border-border" />

@@ -1859,6 +1859,12 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               layers={layersOn ? (wsLayers ?? []) : undefined}
               onLayersChange={setLayers}
             />
+            {/* 연결된 놀이계획 표시 (SKILL §4.1) — 이미지 카드 'AI 생성' 라벨과 같은 좌상단 오버레이. */}
+            {worksheetProps.link_plan_id && (
+              <span className="absolute left-2 top-2 z-20 inline-flex items-center gap-t1 rounded-pill bg-accent-soft/95 px-t2 py-0.5 text-[10px] font-semibold text-accent shadow-sm">
+                <Icon name="link" size={11} /> 놀이계획 연결
+              </span>
+            )}
             {worksheetImg && (
               <div className="absolute right-2 top-2 z-20 flex gap-1 opacity-0 transition-opacity duration-150 group-hover/ws:opacity-100">
                 <button

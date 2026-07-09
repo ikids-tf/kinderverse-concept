@@ -395,9 +395,16 @@ export async function runWorkflowStep(runnerId: string, kind: StepKind): Promise
       const cur = useBoardStore.getState().nodes[id];
       if (cur) useBoardStore.getState().updateNodeRaw(id, { data: { ...(cur.data ?? {}), payload: res.payload } });
     } else if (kind === 'worksheet') {
+      // 같은 프레임의 계획안(WeeklyPlanGrid)을 찾아 link_plan_id로 연결 (SKILL §4.1 경로A).
+      const planNode = Object.values(useBoardStore.getState().nodes).find(
+        (n) =>
+          n.data?.frameId === frameId &&
+          (n.data?.payload as { type?: string } | undefined)?.type === 'WeeklyPlanGrid',
+      );
+      const linkPlanId = (planNode?.data?.payload as { props?: { id?: string } } | undefined)?.props?.id;
       // 활동지 = 인쇄용 A4 시트(생성 그림 + 제목/안내 텍스트 레이어). payload를 카드에
       // 실어야 NodeView가 WorksheetSheet로 렌더한다 — 텍스트 문서로 떨어지지 않게.
-      const res = await runStudioWorksheet(topic, ctx);
+      const res = await runStudioWorksheet(topic, ctx, linkPlanId);
       const id = spawnDocCard(frameId, worksheetText(res.payload), 'worksheet');
       const cur = useBoardStore.getState().nodes[id];
       if (cur) useBoardStore.getState().updateNodeRaw(id, { data: { ...(cur.data ?? {}), payload: res.payload } });
