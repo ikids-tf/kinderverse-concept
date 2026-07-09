@@ -84,7 +84,13 @@ import {
 /** 진행 단계 메시지 — 프롬프트바·보드 상태 필에 라이브로 스트리밍된다. */
 const say = (m: string) => useBoardStore.getState().setGenerating(m);
 
-export async function composeFromPrompt(text: string, forceRoute?: RouteTarget): Promise<void> {
+export async function composeFromPrompt(
+  text: string,
+  forceRoute?: RouteTarget,
+  /** 마인드맵 전용 — 센터(주제) 노드를 이 값으로 강제한다(아이디어 다중선택 시 포괄 주제).
+      미전달이면 text에서 mindMapTopic으로 추출. */
+  opts?: { mindTopic?: string },
+): Promise<void> {
   // 복수 생성 허용 — 단일 실행 가드 대신 genActive 카운터로 동시 작업을 추적한다.
   useBoardStore.getState().beginGen();
   say('🧭 요청을 분석하고 있어요…');
@@ -129,7 +135,7 @@ export async function composeFromPrompt(text: string, forceRoute?: RouteTarget):
     const routerConfident = !!out.route_to && out.confidence >= 0.7;
     if (out.route_to === 'mindmap' || (!routerConfident && MINDMAP_RE.test(text))) {
       useBoardStore.getState().setGenerating('🧠 생각그물을 그리고 있어요…');
-      const ids = await buildMindMap(text);
+      const ids = await buildMindMap(text, opts?.mindTopic);
       recordSpawnedNodes(ids, '마인드맵 생성');
       return;
     }
@@ -532,10 +538,13 @@ function mindMapTopic(text: string): string {
     connected by lines, with concept images on a few branches. Returns spawned ids
     (the caller records them as one undoable step). No `composing` guard — it runs
     inside composeFromPrompt's guard. */
-async function buildMindMap(text: string): Promise<string[]> {
-  const topic = mindMapTopic(text);
+async function buildMindMap(text: string, topicOverride?: string): Promise<string[]> {
+  // 센터(주제)는 포괄 주제 우선 — 주어지면(아이디어 다중선택 등) 그 값을, 아니면 text에서 추출.
+  //   포괄 주제를 쓸 땐 원문(선택 라벨들)을 grounding으로 넘겨 그 아이디어를 반영한 가지를 뽑는다
+  //   (라벨을 이어붙인 긴 문자열이 센터가 되던 문제 수정).
+  const topic = topicOverride?.trim() || mindMapTopic(text);
   const ctx = buildAgentContext('plan');
-  const acts = await runMindMapActivities(topic, ctx, 7);
+  const acts = await runMindMapActivities(topic, ctx, 7, topicOverride?.trim() ? text : undefined);
   // 660 = a radial map reaches ~660px left of its center (branch + image leaf);
   // reserving it keeps the whole map clear of existing content.
   return seedMindMap(topic, acts.slice(0, 8), composeOrigin(660), ctx);
@@ -1042,8 +1051,17 @@ async function runIdeaExpansion(frameId: string, chipId: string, action: Compose
   // 라벨 중심 프롬프트 — 선택 아이디어(들)에 정확히 초점을 맞춘다(desc 동봉 시 plan 주제가 드리프트했음).
   // 복수 선택이면 라벨을 묶어 한 결과물에 함께 반영(주간 계획=여러 활동, 마인드맵=여러 가지, 이미지=함께 그린 장면).
   if (action === 'idea_plan') void composeFromPrompt(`${joined} 놀이계획`, 'plan');
-  else if (action === 'idea_mindmap') void composeFromPrompt(joined, 'mindmap');
-  else if (action === 'idea_image') void composeFromPrompt(`${joined} 활동 장면 그림`, 'studio');
+  else if (action === 'idea_mindmap') {
+    // 마인드맵 센터(주제)는 '아이디어를 포괄한 주제'로 — 여러 개 고르면 리스트/프레임 제목의
+    //   핵심(예: "여름 놀이 아이디어" → "여름"), 하나면 그 아이디어 자체(소주제). 선택 라벨을 그대로
+    //   이어붙인 긴 문자열이 센터가 되던 문제를 막는다.
+    let mindTopic: string | undefined;
+    if (labels.length > 1) {
+      const rawTitle = String(card?.data?.ideaTitle ?? b.nodes[frameId]?.data?.title ?? '').trim();
+      mindTopic = rawTitle.replace(/놀이|프로젝트|아이디어|패키지|리스트|목록/g, ' ').replace(/\s+/g, ' ').trim() || undefined;
+    }
+    void composeFromPrompt(joined, 'mindmap', { mindTopic });
+  } else if (action === 'idea_image') void composeFromPrompt(`${joined} 활동 장면 그림`, 'studio');
 }
 
 /** 활동지가 '필요한' 활동을 고른다 — 세기·분류·짝짓기·선긋기·색칠·그리기·쓰기·미로 등

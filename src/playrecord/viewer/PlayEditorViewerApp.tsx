@@ -73,7 +73,7 @@ export function PlayEditorViewerApp() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#faf8f5' }}>
+    <div className="pe-embed" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#faf8f5' }}>
       <div
         onPointerDown={onDown}
         onPointerMove={onMove}

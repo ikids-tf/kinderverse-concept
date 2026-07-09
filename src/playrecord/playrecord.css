@@ -253,6 +253,23 @@
   overflow-y: auto;
   font-size: 12px;
 }
+/* 편집디자인이 보드 iframe 카드로 임베드될 때(.pe-embed) — 카드 바깥엔 공간이 없어
+   우측 편집툴(.dpanel)이 카드 오른쪽 밖으로 잘려 "안 열리는" 것처럼 보였다. 임베드
+   컨텍스트에선 ① 캔버스(.dframe-wrap) 가용 폭을 우측 거터(--pe-gutter)만큼 줄여 캔버스를
+   왼쪽으로 밀고 ② 편집툴을 그 우측 거터 안(캔버스 위에 겹치지 않게)에 띄운다(모달은 그대로).
+   scale = wrap.clientWidth / frame.w 이므로 wrap 폭만 줄이면 A4가 왼쪽 영역에 맞춰 축소된다. */
+.pe-embed {
+  --pe-gutter: 192px; /* 패널 176 + 좌우 여백 */
+}
+.pe-embed .dframe-wrap {
+  width: calc(100% - var(--pe-gutter));
+}
+.pe-embed .dpanel {
+  left: auto;
+  right: 8px;
+  top: 8px;
+  max-height: calc(100% - 16px);
+}
 .dpanel-head {
   display: flex;
   align-items: center;
