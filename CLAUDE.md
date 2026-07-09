@@ -11,6 +11,7 @@
 - Frontend: **React 18 + Vite + Tailwind + Zustand**
 - Backend/DB: **Supabase** (Postgres + pgvector)
 - AI: **얇은 프로바이더 게이트웨이** — Anthropic + Gemini 기본. 이미지/영상/OCR은 플러그인. **LangChain/CrewAI 등 프레임워크 금지(직접 API 호출).**
+  - **예외(로컬 테스트 전용): OpenAI(GPT) 프로바이더 허용.** `.env`에 `OPENAI_API_KEY`를 넣으면 게이트웨이 `auto` 라우팅이 **텍스트**를 GPT로, **이미지**를 gpt-image-1로 우선 처리한다(직접 fetch, 프레임워크 미사용). 비용 최소화 기본값: 텍스트=전 tier `gpt-4o-mini`, 이미지=`gpt-image-1` 미디엄 품질·`1024x1024`(env `KV_OPENAI_MODEL_*`/`KV_OPENAI_IMAGE_{MODEL,QUALITY,SIZE}` 로 상향 가능). 키 미설정이면 기존 Anthropic→Gemini 동작 그대로 → **프로덕션 무영향(Vercel엔 키 미설정).** 영상은 여전히 Gemini(Veo). 구현: `server/gateway/providers.ts`(`openaiComplete`·기본 모델)·`image.ts`(`openaiGenerateImage`)·`handler.ts`(`pickProvider`)·`devGateway.ts`. **이 프로바이더를 "위반"으로 보고 제거하지 말 것.**
 - 사진 분류: 기개발 분류 API **실시간** 연동
 - 배치: GitHub Actions (distill/인덱싱 등 비실시간만)
 

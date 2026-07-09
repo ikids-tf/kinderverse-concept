@@ -32,6 +32,20 @@ export const DEFAULT_GEMINI_MODELS: Record<Tier, string> = {
   high: 'gemini-2.5-pro',
 };
 
+// OpenAI — 로컬 테스트 전용(charter §1 은 Anthropic+Gemini 기본). OPENAI_API_KEY 가
+// 설정된 개발 환경에서만 auto 가 이 프로바이더를 고른다. 프로덕션은 키 미설정 → 무영향.
+// 비용 최소화: 전 tier 를 최저가 텍스트 모델(gpt-4o-mini)로. 필요 시 KV_OPENAI_MODEL_* 로 상향.
+export const DEFAULT_OPENAI_MODELS: Record<Tier, string> = {
+  low: 'gpt-4o-mini',
+  mid: 'gpt-4o-mini',
+  high: 'gpt-4o-mini',
+};
+
+// OpenAI 이미지(gpt-image-1) — 로컬 테스트 이미지 생성. 비용 최소화 기본값: 미디엄 품질 + 최소 사이즈.
+export const DEFAULT_OPENAI_IMAGE_MODEL = 'gpt-image-1';
+export const DEFAULT_OPENAI_IMAGE_QUALITY = 'medium'; // low | medium | high | auto
+export const DEFAULT_OPENAI_IMAGE_SIZE = '1024x1024'; // gpt-image-1 최소(정사각) = 최저가
+
 /* ---- Anthropic Messages API (direct fetch) ---- */
 
 export async function anthropicComplete(opts: ProviderCallOpts): Promise<ProviderCallResult> {
@@ -64,6 +78,46 @@ export async function anthropicComplete(opts: ProviderCallOpts): Promise<Provide
     .map((b) => b.text as string)
     .join('');
   return { text, usage: data.usage };
+}
+
+/* ---- OpenAI Chat Completions (direct fetch, no SDK) — 로컬 테스트 전용 ---- */
+
+export async function openaiComplete(opts: ProviderCallOpts): Promise<ProviderCallResult> {
+  const messages: Array<{ role: string; content: string }> = [];
+  if (opts.system) messages.push({ role: 'system', content: opts.system });
+  for (const m of opts.messages) messages.push({ role: m.role, content: m.content });
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${opts.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      max_tokens: opts.maxTokens ?? 1024,
+      messages,
+      ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`openai ${res.status}: ${detail.slice(0, 300)}`);
+  }
+
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  };
+  const text = data.choices?.[0]?.message?.content ?? '';
+  return {
+    text,
+    usage: {
+      input_tokens: data.usage?.prompt_tokens,
+      output_tokens: data.usage?.completion_tokens,
+    },
+  };
 }
 
 /* ---- Gemini generateContent (direct fetch) ---- */
