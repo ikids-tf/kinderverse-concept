@@ -389,7 +389,7 @@ export function BoardCanvas() {
     | null
   >(null);
   // 유튜브 뷰어에 자료를 연결했을 때 뜨는 선택 팝오버: 영상 추천 vs 웹 검색.
-  const [viewerLink, setViewerLink] = useState<{ viewerId: string; content: string; topic: string; sourceId?: string } | null>(null);
+  const [viewerLink, setViewerLink] = useState<{ viewerId: string; content: string; topic: string; sourceId?: string; linkId?: string } | null>(null);
   // 슬라이드 뷰어에 자료(문서 등)를 연결 → "이 자료로 슬라이드를 만들까요 / 연결만 할까요?" 팝오버.
   const [slideLink, setSlideLink] = useState<{ viewerId: string; content: string; topic: string; sourceId?: string } | null>(null);
   // 동영상 생성 확인 팝오버(과금·시간 게이트) — 선 연결(이미지/계획 카드↔동영상 뷰어),
@@ -572,20 +572,41 @@ export function BoardCanvas() {
             const pair = [ss.nodes[st.from], ss.nodes[target.id]].filter(Boolean) as BoardNode[];
             const topicOf = (n?: BoardNode) =>
               n ? ((n.text ?? '') || String(n.data?.title ?? '')).split('\n')[0].trim() : '';
-            const viewer = pair.find((n) => String(n.data?.embed ?? '').includes('youtube-viewer'));
+            // 동영상 대상 해석 — 유튜브 뷰어 '본체'뿐 아니라 그 뷰어의 썸네일(yt-result)이나
+            // 동영상 서브프레임에 연결해도 그 뷰어를 대상으로 삼는다. 패키지에선 뷰어·썸네일·자료
+            // 카드가 몰려 있어 뷰어 본체에 정확히 맞히기 어려웠다(→ 영상이 안 붙던 원인).
+            const resolveVideoViewerId = (n: BoardNode): string | undefined => {
+              if (String(n.data?.embed ?? '').includes('youtube-viewer')) return n.id;
+              if (n.data?.role === 'yt-result' && typeof n.data?.ytTarget === 'string') return n.data.ytTarget as string;
+              if (n.type === 'frame') {
+                const kid = Object.values(ss.nodes).find(
+                  (k) => k.data?.frameId === n.id && String(k.data?.embed ?? '').includes('youtube-viewer'),
+                );
+                if (kid) return kid.id;
+              }
+              return undefined;
+            };
+            // 한쪽이 동영상 대상으로 해석되고, 반대쪽은 '내용' 노드일 때만 영상 링크로 본다.
+            let videoViewerId: string | undefined;
+            let videoOther: BoardNode | undefined;
+            for (const n of pair) {
+              const vid = resolveVideoViewerId(n);
+              const other = pair.find((p) => p !== n);
+              if (vid && ss.nodes[vid] && other && !resolveVideoViewerId(other)) {
+                videoViewerId = vid;
+                videoOther = other;
+                break;
+              }
+            }
             const videoPlayerViewer = pair.find((n) => String(n.data?.embed ?? '').includes('video-player'));
             const slidesViewer = pair.find((n) => String(n.data?.embed ?? '').includes('slides-viewer'));
-            if (viewer) {
-              // 유튜브 뷰어에 자료를 연결 → 즉시 추천(뷰어 아래 가로 중앙 썸네일,
-              // 클릭 = 재생). 놀이계획안이면 요일별 활동마다 영상 1개씩, 그 외엔
-              // 내용 기반 교사 맞춤 3개.
-              const other = pair.find((n) => n !== viewer);
-              const content = other
-                ? [String(other.data?.title ?? ''), other.text ?? ''].filter(Boolean).join('\n').trim()
-                : '';
+            if (videoViewerId && videoOther) {
+              // 유튜브 뷰어(또는 그 썸네일·서브프레임)에 자료를 연결 → 뷰어 옆에 "영상 추천 / 웹 검색"
+              // 팝오버(자동 실행 X). 놀이계획안이면 요일별 활동마다 영상 1개씩, 그 외엔 내용 기반 3개.
+              const other = videoOther;
+              const content = [String(other.data?.title ?? ''), other.text ?? ''].filter(Boolean).join('\n').trim();
               if (content) {
-                // 자동 실행하지 않고 — 뷰어 옆에 "영상 추천 / 웹 검색"을 물어보는 팝오버를 띄운다.
-                setViewerLink({ viewerId: viewer.id, content, topic: topicOf(other), sourceId: other?.id });
+                setViewerLink({ viewerId: videoViewerId, content, topic: topicOf(other), sourceId: other.id, linkId: created });
               }
             } else if (videoPlayerViewer) {
               // 동영상 플레이어에 자료를 연결 → 영상 생성 확인 팝오버(과금·시간 게이트).
@@ -1406,11 +1427,14 @@ export function BoardCanvas() {
           const vb = worldBox(vn);
           const z = viewport.zoom;
           const run = (mode: 'videos' | 'web') => {
-            const { viewerId, content, sourceId } = viewerLink;
+            const { viewerId, content, sourceId, linkId } = viewerLink;
             setViewerLink(null);
             if (mode === 'videos') {
-              // '영상 추천'은 일회성 — 트리거로 쓰인 자료↔뷰어 연결선을 지운다(잡동사니 방지).
-              if (sourceId) {
+              // '영상 추천'은 일회성 — 트리거로 쓰인 연결선을 지운다(잡동사니 방지). 썸네일·서브프레임에
+              // 연결한 경우엔 자료↔뷰어가 아니라 자료↔(썸네일/프레임)이므로 실제 링크 id로 지운다.
+              if (linkId) {
+                removeLinkCmd(linkId);
+              } else if (sourceId) {
                 const trig = useBoardStore
                   .getState()
                   .links.find(
