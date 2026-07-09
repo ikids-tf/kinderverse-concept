@@ -95,3 +95,9 @@ export const useBoardsStore = create<BoardsState>((set, get) => ({
   renameBoard: (id, title) =>
     set((s) => ({ boards: s.boards.map((b) => (b.id === id ? { ...b, title } : b)) })),
 }));
+
+// 개발용 — 콘솔/프리뷰 하네스에서 보드 목록·스냅샷 점검 및 복구에 쓴다(__kvBoard 와 동일 패턴).
+// 프로덕션 빌드에선 no-op.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __kvBoards?: typeof useBoardsStore }).__kvBoards = useBoardsStore;
+}
