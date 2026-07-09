@@ -4,7 +4,7 @@
 
 export type Tier = 'low' | 'mid' | 'high';
 export type TierOrAuto = Tier | 'auto';
-export type Provider = 'anthropic' | 'gemini';
+export type Provider = 'anthropic' | 'gemini' | 'openai';
 export type ProviderOrAuto = Provider | 'auto';
 
 export interface GatewayMessage {

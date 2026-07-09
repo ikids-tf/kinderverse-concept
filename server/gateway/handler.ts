@@ -13,9 +13,11 @@ import type { RecordInput } from '../../src/ai/prompt-record.js';
 import {
   anthropicComplete,
   geminiComplete,
+  openaiComplete,
   geminiSearch,
   DEFAULT_ANTHROPIC_MODELS,
   DEFAULT_GEMINI_MODELS,
+  DEFAULT_OPENAI_MODELS,
   type ProviderCallResult,
 } from './providers.js';
 import {
@@ -31,6 +33,12 @@ import { synthSpeech } from './tts.js';
 export interface GatewayConfig {
   anthropicKey?: string;
   geminiKey?: string;
+  /** OpenAI (로컬 테스트 전용) — 설정되면 auto 가 GPT 를 우선 선택. 프로덕션은 미설정. */
+  openaiKey?: string;
+  /** OpenAI 이미지(gpt-image-1) 로컬 테스트 — 비용 최소화 기본값(미디엄·1024²). env 로 오버라이드. */
+  openaiImageModel?: string;
+  openaiImageQuality?: string;
+  openaiImageSize?: string;
   /** Gemini image model, e.g. gemini-2.0-flash-preview-image-generation. */
   imageModel?: string;
   /** Gemini Veo video model, e.g. veo-3.0-generate-001 (전용 영상 엔드포인트에서 사용). */
@@ -52,17 +60,21 @@ function defaultTier(task: string): Tier {
 function resolveModel(config: GatewayConfig, provider: Provider, tier: Tier): string {
   const override = config.models?.[`${provider}.${tier}`];
   if (override) return override;
-  return provider === 'anthropic' ? DEFAULT_ANTHROPIC_MODELS[tier] : DEFAULT_GEMINI_MODELS[tier];
+  if (provider === 'anthropic') return DEFAULT_ANTHROPIC_MODELS[tier];
+  if (provider === 'openai') return DEFAULT_OPENAI_MODELS[tier];
+  return DEFAULT_GEMINI_MODELS[tier];
 }
 
 function pickProvider(req: GatewayRequest, config: GatewayConfig): Provider | null {
   const wanted = req.provider ?? 'auto';
   const hasA = !!config.anthropicKey;
   const hasG = !!config.geminiKey;
-  if (wanted === 'anthropic') return hasA ? 'anthropic' : hasG ? 'gemini' : null;
-  if (wanted === 'gemini') return hasG ? 'gemini' : hasA ? 'anthropic' : null;
-  // auto — prefer Anthropic (charter default), then Gemini.
-  return hasA ? 'anthropic' : hasG ? 'gemini' : null;
+  const hasO = !!config.openaiKey;
+  if (wanted === 'openai') return hasO ? 'openai' : hasA ? 'anthropic' : hasG ? 'gemini' : null;
+  if (wanted === 'anthropic') return hasA ? 'anthropic' : hasO ? 'openai' : hasG ? 'gemini' : null;
+  if (wanted === 'gemini') return hasG ? 'gemini' : hasA ? 'anthropic' : hasO ? 'openai' : null;
+  // auto — 로컬 테스트: OpenAI 키가 있으면 GPT 우선. 없으면 charter 기본(Anthropic → Gemini).
+  return hasO ? 'openai' : hasA ? 'anthropic' : hasG ? 'gemini' : null;
 }
 
 export async function handleGatewayRequest(
@@ -100,6 +112,10 @@ export async function handleGatewayRequest(
       prompt: meta.prompt ?? meta.caption ?? '유아 활동 개념 일러스트',
       caption: meta.caption ?? '활동',
       aspectRatio: meta.aspectRatio,
+      openaiKey: config.openaiKey,
+      openaiImageModel: config.openaiImageModel,
+      openaiImageQuality: config.openaiImageQuality,
+      openaiImageSize: config.openaiImageSize,
     });
     return { ok: true, image, mocked: !real, error: real ? undefined : detail };
   }
@@ -191,7 +207,12 @@ export async function handleGatewayRequest(
     return { ok: false, error: 'no AI provider configured (set ANTHROPIC_API_KEY or GEMINI_API_KEY)' };
   }
 
-  const apiKey = provider === 'anthropic' ? config.anthropicKey! : config.geminiKey!;
+  const apiKey =
+    provider === 'anthropic'
+      ? config.anthropicKey!
+      : provider === 'openai'
+        ? config.openaiKey!
+        : config.geminiKey!;
 
   // ---- Tier list: requested tier first, then cascade fallback. ----
   const primary: Tier = req.tier && req.tier !== 'auto' ? req.tier : defaultTier(req.task);
@@ -212,7 +233,11 @@ export async function handleGatewayRequest(
         maxTokens: req.maxTokens,
       };
       const result: ProviderCallResult =
-        provider === 'anthropic' ? await anthropicComplete(opts) : await geminiComplete(opts);
+        provider === 'anthropic'
+          ? await anthropicComplete(opts)
+          : provider === 'openai'
+            ? await openaiComplete(opts)
+            : await geminiComplete(opts);
       return {
         ok: true,
         text: result.text,

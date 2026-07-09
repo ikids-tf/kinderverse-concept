@@ -36,17 +36,72 @@ interface ImageOpts {
   caption: string;
   /** 종횡비 힌트(예: '3:4' 세로). 모델이 지원하면 적용, 아니면 무시. */
   aspectRatio?: string;
+  /** OpenAI(gpt-image-1) 로컬 테스트 이미지 생성 — 설정되면 Gemini보다 우선. */
+  openaiKey?: string;
+  openaiImageModel?: string;
+  openaiImageQuality?: string; // low | medium | high | auto
+  openaiImageSize?: string; // 1024x1024 | 1536x1024 | 1024x1536 | auto
 }
 
 /* Default Gemini image-generation model — used when GEMINI_API_KEY is set but no
    KV_GEMINI_IMAGE_MODEL override is provided. Override in .env if the id changes. */
 const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image';
 
+/* OpenAI Images(gpt-image-1) — 로컬 테스트 전용, 비용 최소화(미디엄·최소 사이즈) 기본값.
+   gpt-image-1 은 항상 b64_json 을 반환한다. quality/size 로 과금이 결정된다. */
+async function openaiGenerateImage(opts: {
+  apiKey: string;
+  model: string;
+  prompt: string;
+  quality: string;
+  size: string;
+}): Promise<string> {
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${opts.apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: opts.model,
+      prompt: opts.prompt,
+      n: 1,
+      size: opts.size,
+      quality: opts.quality,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`openai image ${res.status}: ${detail.slice(0, 200)}`);
+  }
+  const data = (await res.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+  const b64 = data.data?.[0]?.b64_json;
+  if (b64) return `data:image/png;base64,${b64}`;
+  const url = data.data?.[0]?.url;
+  if (url) return url;
+  throw new Error('openai image: no image in response');
+}
+
 /** Returns { image: dataURI, real, detail? }. Falls back to a placeholder, with
     `detail` describing why (for diagnostics; non-sensitive). */
 export async function generateImage(
   opts: ImageOpts,
 ): Promise<{ image: string; real: boolean; detail?: string }> {
+  // 로컬 테스트: OpenAI 키가 있으면 gpt-image-1(미디엄·최소 사이즈)로 우선 생성(비용 최소화).
+  if (opts.openaiKey) {
+    try {
+      const image = await openaiGenerateImage({
+        apiKey: opts.openaiKey,
+        model: opts.openaiImageModel || 'gpt-image-1',
+        prompt: opts.prompt,
+        quality: opts.openaiImageQuality || 'medium',
+        size: opts.openaiImageSize || '1024x1024',
+      });
+      return { image, real: true };
+    } catch (e) {
+      // 실패 시 Gemini/placeholder 로 폴백(아래로 진행).
+      if (!opts.geminiKey) {
+        return { image: placeholderImage(opts.caption), real: false, detail: e instanceof Error ? e.message : String(e) };
+      }
+    }
+  }
   const model = opts.model || DEFAULT_IMAGE_MODEL;
   if (!opts.geminiKey) {
     return { image: placeholderImage(opts.caption), real: false, detail: 'no GEMINI_API_KEY' };
