@@ -259,7 +259,9 @@
    왼쪽으로 밀고 ② 편집툴을 그 우측 거터 안(캔버스 위에 겹치지 않게)에 띄운다(모달은 그대로).
    scale = wrap.clientWidth / frame.w 이므로 wrap 폭만 줄이면 A4가 왼쪽 영역에 맞춰 축소된다. */
 .pe-embed {
-  --pe-gutter: 192px; /* 패널 176 + 좌우 여백 */
+  /* 패널 실측 = 176(내용) + 20(패딩) + 2(테두리) = 198. 여기에 우측 8 + 문서와의 간격 14를
+     더해 거터를 잡아야 A4 오른쪽 끝이 패널을 침범하지 않는다(기존 192는 6~14px 겹쳤음). */
+  --pe-gutter: 220px;
 }
 .pe-embed .dframe-wrap {
   width: calc(100% - var(--pe-gutter));
@@ -269,6 +271,34 @@
   right: 8px;
   top: 8px;
   max-height: calc(100% - 16px);
+}
+/* '꾸미기 그림' 열기 버튼(요소 미선택 시 편집툴 기본 닫힘) — 패널과 같은 우측 자리에 작게. */
+.dpanel-fab {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 10px);
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent, #f2733e);
+  border: none;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dpanel-fab:hover {
+  filter: brightness(1.05);
+}
+.pe-embed .dpanel-fab {
+  left: auto;
+  right: 8px;
+  top: 8px;
 }
 .dpanel-head {
   display: flex;

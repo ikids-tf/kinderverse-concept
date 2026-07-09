@@ -19,6 +19,8 @@ export function DesignFrame({ data, selected, zoom = 1, onChange, photos, decoAs
   // 레이어 순서(z-order) 버튼 직후에는 선택 요소를 '실제 배열 순서 z'로 렌더 → 앞으로/뒤로 결과가 즉시 눈에 보임.
   // (평소엔 선택한 스티커를 위로 띄워(z20) 편집을 돕지만, 그러면 '맨 앞'을 눌러도 이미 위에 있어 변화가 안 보인다.)
   const [flatZ, setFlatZ] = useState(false);
+  // 꾸미기 그림 갤러리(요소 미선택 시) — 기본 닫힘. 사용자가 '꾸미기 그림' 버튼으로 연다.
+  const [showDeco, setShowDeco] = useState(false);
   const histRef = useRef([]); // 실행취소 스택(요소 배열 스냅샷, 무제한)
 
   useLayoutEffect(() => {
@@ -220,10 +222,18 @@ export function DesignFrame({ data, selected, zoom = 1, onChange, photos, decoAs
           onClose={() => { setActiveId(null); setSelIds([]); }}
         />
       )}
-      {/* 아무 요소도 선택 안 된 상태 → 꾸미기 그림 갤러리(누르면 새 스티커 추가) */}
-      {selected && !activeEl && Array.isArray(decoAssets) && decoAssets.length > 0 && (
+      {/* 요소 미선택 상태의 편집툴(꾸미기 갤러리)은 기본 닫힘 — 버튼을 눌러야 열린다. */}
+      {selected && !activeEl && Array.isArray(decoAssets) && decoAssets.length > 0 && !showDeco && (
+        <button className="dpanel-fab" onPointerDown={(e) => e.stopPropagation()} onClick={() => setShowDeco(true)} title="꾸미기 그림 추가">
+          ✨ 꾸미기 그림
+        </button>
+      )}
+      {selected && !activeEl && Array.isArray(decoAssets) && decoAssets.length > 0 && showDeco && (
         <div className="dpanel" onPointerDown={(e) => e.stopPropagation()}>
-          <div className="dpanel-label">꾸미기 그림 추가</div>
+          <div className="dpanel-head">
+            <span>꾸미기 그림 추가</span>
+            <button className="dpanel-x" onClick={() => setShowDeco(false)} title="닫기">×</button>
+          </div>
           <div className="dpanel-sublabel">그림을 누르면 캔버스에 추가돼요</div>
           <div className="dpanel-gallery">
             {decoAssets.map((g) => (

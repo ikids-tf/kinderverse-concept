@@ -255,6 +255,10 @@ export function BoardCanvas() {
     before: NodeSnap[];
   }>({ mode: null, id: '', cx: 0, cy: 0, startScale: 1, startRot: 0, startDist: 1, startAng: 0, ax: 0, ay: 0, minW: 120, minH: 48, before: [] });
 
+  // 핸들 드래그(크기/회전) 중엔 전체 오버레이를 띄운다 — iframe 임베드 카드(편집디자인·뷰어) 위를
+  // 포인터가 지나도 iframe이 pointermove를 가로채지 못하게 해 리사이즈가 끊기지 않게 한다.
+  const [handleDragging, setHandleDragging] = useState(false);
+
   /** 프리폼 리사이즈 대상 — 내용이 박스 크기에 맞춰 리플로되는 타입. */
   const FREEFORM_RESIZE = useMemo(() => new Set(['frame', 'text', 'sticky']), []);
 
@@ -306,6 +310,7 @@ export function BoardCanvas() {
     window.removeEventListener('pointerup', onHandleUp);
     if (st.mode && st.before.length) pushRedesign([st.id], st.before, st.mode === 'rotate' ? '회전' : '크기 조절');
     st.mode = null;
+    setHandleDragging(false);
   }, [onHandleMove]);
 
   const onHandleDown = useCallback(
@@ -347,11 +352,24 @@ export function BoardCanvas() {
         before: captureNodes([id]),
       };
       lockTextSelection();
+      setHandleDragging(true);
       window.addEventListener('pointermove', onHandleMove);
       window.addEventListener('pointerup', onHandleUp);
     },
     [handlePointerToWorld, onHandleMove, onHandleUp, FREEFORM_RESIZE],
   );
+
+  // 핸들 드래그(크기/회전) '또는' 노드 드래그(이동) 중엔 모든 iframe의 pointer-events를 꺼서,
+  // 포인터가 임베드 카드(동영상·편집디자인·뷰어) 위를 지나도 iframe이 pointermove를 가로채
+  // 리사이즈·이동이 끊기지 않게 한다. (drag 는 매 이동마다 새 객체라 boolean 으로 의존.)
+  const draggingNode = drag !== null;
+  useEffect(() => {
+    if (!handleDragging && !draggingNode) return;
+    const frames = Array.from(document.querySelectorAll('iframe'));
+    const prev = frames.map((f) => f.style.pointerEvents);
+    frames.forEach((f) => { f.style.pointerEvents = 'none'; });
+    return () => { frames.forEach((f, i) => { f.style.pointerEvents = prev[i]; }); };
+  }, [handleDragging, draggingNode]);
 
   // ── 연결 포트(호버 시 좌/우 원형 버튼) + 포트 드래그로 선 잇기 ──────────────
   // 텍스트·메모·이미지·영상(임베드)·프레임만 연결 가능(도형·러너 제외).
