@@ -5,7 +5,14 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import type { WorksheetCardProps, WorksheetLayer } from './contracts';
-import { SHEET_TITLE_PCT, SHEET_INSTR_PCT } from './worksheet-a4';
+import {
+  SHEET_INSTR_PCT,
+  HEADER_LABEL_PCT,
+  HEADER_THEME_PCT,
+  HEADER_META_PCT,
+  HEADER_TITLE_PCT,
+  HEADER_FIELD_PCT,
+} from './worksheet-a4';
 
 /** 인라인 편집 가능한 텍스트(contentEditable) — 보드에서 교사가 제목·안내를 직접 고친다.
    글자는 이미지가 아니라 실제 텍스트라 언제든 수정·인쇄에 반영된다. */
@@ -183,28 +190,80 @@ export function WorksheetSheet({
             onRemove={() => removeLayer(l.id)}
           />
         ))}
-      {/* 제목·안내 텍스트 레이어 — 그림 상단(비워 둔 자리)에 또렷하게 오버레이.
-          글자 크기는 시트 너비(cqw)에 비례 → 다운로드 PNG와 동일한 비율(SHEET_TITLE_PCT 등). */}
-      <div className="absolute inset-x-0 top-0 flex flex-col items-center px-[7%] pt-[3.5%]">
-        <EditableText
-          value={props.title}
-          editable={editable}
-          onCommit={(v) => onEdit?.({ title: v || props.title })}
-          placeholder="제목"
-          className="block break-keep text-center font-extrabold leading-tight text-accent [text-shadow:0_1px_10px_rgba(255,255,255,0.95),0_0_3px_rgba(255,255,255,0.95)]"
-          style={{ fontSize: `${SHEET_TITLE_PCT}cqw` }}
-        />
+      {/* ── 상단 헤더(주제·영역·활동명·반·이름) — A4 인쇄 서식. 그림 위 흰 밴드에 좌측 정렬.
+          글자 크기는 시트 너비(cqw)에 비례 → 다운로드 PNG(worksheet-a4)와 동일 비율. ── */}
+      <div className="absolute inset-x-0 top-0">
+        <div className="overflow-hidden border-b-2 border-border bg-white/95 px-[6%] pb-[1.4%] pt-[2.6%] leading-none [&_*]:leading-none">
+          {/* 주제(강조) · 영역 */}
+          <div className="flex items-baseline justify-between gap-[3%]">
+            <span className="flex min-w-0 items-baseline gap-[1.2%]">
+              <span className="shrink-0 font-semibold text-fg-disabled" style={{ fontSize: `${HEADER_LABEL_PCT}cqw` }}>주제</span>
+              <EditableText
+                value={props.theme || props.topic || ''}
+                editable={editable}
+                onCommit={(v) => onEdit?.({ theme: v })}
+                placeholder="주제"
+                className="block min-w-0 flex-1 truncate font-extrabold text-accent"
+                style={{ fontSize: `${HEADER_THEME_PCT}cqw` }}
+              />
+            </span>
+            <span className="flex shrink-0 items-baseline gap-[1.2%]">
+              <span className="shrink-0 font-semibold text-fg-disabled" style={{ fontSize: `${HEADER_LABEL_PCT}cqw` }}>영역</span>
+              <EditableText
+                value={props.area || props.type || ''}
+                editable={editable}
+                onCommit={(v) => onEdit?.({ area: v })}
+                placeholder="영역"
+                className="block font-bold text-fg-2"
+                style={{ fontSize: `${HEADER_META_PCT}cqw` }}
+              />
+            </span>
+          </div>
+          {/* 활동명(강조) */}
+          <div className="mt-[0.6cqw] flex items-baseline gap-[1.2%]">
+            <span className="shrink-0 font-semibold text-fg-disabled" style={{ fontSize: `${HEADER_LABEL_PCT}cqw` }}>활동명</span>
+            <EditableText
+              value={props.title}
+              editable={editable}
+              onCommit={(v) => onEdit?.({ title: v || props.title })}
+              placeholder="활동명"
+              className="block min-w-0 flex-1 truncate font-extrabold text-fg"
+              style={{ fontSize: `${HEADER_TITLE_PCT}cqw` }}
+            />
+          </div>
+          {/* 반 / 이름 — 손으로 적는 기입란 */}
+          <div className="mt-[1cqw] flex items-baseline gap-[6%] text-fg-disabled" style={{ fontSize: `${HEADER_FIELD_PCT}cqw` }}>
+            <span className="flex items-baseline gap-[1.5%]">
+              <span className="font-semibold">반</span>
+              <span className="inline-block border-b-2 border-border-strong/70" style={{ width: '22cqw' }}>&nbsp;</span>
+            </span>
+            <span className="flex items-baseline gap-[1.5%]">
+              <span className="font-semibold">이름</span>
+              <span className="inline-block border-b-2 border-border-strong/70" style={{ width: '26cqw' }}>&nbsp;</span>
+            </span>
+          </div>
+        </div>
+        {/* 활동 안내문(알약) — 헤더 아래, 활동 그림 위 */}
         {(props.instruction || editable) && (
-          <EditableText
-            value={props.instruction ?? ''}
-            editable={editable}
-            onCommit={(v) => onEdit?.({ instruction: v })}
-            placeholder="활동 안내문"
-            className="mt-[1cqw] block max-w-full rounded-pill bg-accent-soft/95 px-t3 py-0.5 text-center leading-snug text-fg-2 shadow-sm"
-            style={{ fontSize: `${SHEET_INSTR_PCT}cqw` }}
-          />
+          <div className="flex justify-center px-[6%] pt-[1.2cqw]">
+            <EditableText
+              value={props.instruction ?? ''}
+              editable={editable}
+              onCommit={(v) => onEdit?.({ instruction: v })}
+              placeholder="활동 안내문"
+              className="block max-w-full rounded-pill bg-accent-soft/95 px-t3 py-0.5 text-center leading-snug text-fg-2 shadow-sm"
+              style={{ fontSize: `${SHEET_INSTR_PCT}cqw` }}
+            />
+          </div>
         )}
       </div>
+      {/* ── 하단 교사 안내 푸터(objective) — 필요 시 얇은 저채도 띠 ── */}
+      {!!props.objective?.trim() && (
+        <div className="absolute inset-x-0 bottom-0 flex items-baseline gap-[1.5%] border-t-2 border-border bg-accent-soft/30 px-[6%] py-[1cqw]">
+          <span className="shrink-0 font-extrabold text-accent" style={{ fontSize: `${HEADER_LABEL_PCT}cqw` }}>교사 안내</span>
+          <span className="truncate text-fg-2" style={{ fontSize: `${HEADER_META_PCT}cqw` }}>{props.objective}</span>
+        </div>
+      )}
     </div>
   );
 }

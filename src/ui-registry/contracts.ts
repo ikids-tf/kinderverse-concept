@@ -125,12 +125,19 @@ export interface WorksheetLayer {
 export interface WorksheetCardProps {
   title: string;
   age_band: AgeBand;
+  /** 세분 연령(만 나이) — 있으면 헤더 대상 라벨·난이도(3/4/5세)에 우선 사용. age_band 는 이로부터 파생. */
+  age_years?: AgeYears;
   curriculum: Curriculum;
   objective: string;
   materials: string[];
   steps: string[];
   domains?: string[];
   link_plan_id?: string;
+  // ── A4 인쇄 헤더(상단 서식) ──
+  /** 주제 — 놀이/프로젝트 주제(예: "여름 바다"). 헤더 '주제' 칸. 없으면 topic 으로 대체. */
+  theme?: string;
+  /** 영역 — 활동 카테고리(예: "수·셈"). 헤더 '영역' 칸. 활동 유형에서 파생. */
+  area?: string;
   // ── 레퍼런스 추천 확장 ──
   topic?: string;
   instruction?: string; // 활동지 안내문(텍스트 레이어로 표시)
@@ -379,12 +386,15 @@ export function validateRegistryPayload(raw: unknown): RegistryValidation {
         props: {
           title: String(p.title ?? '활동지'),
           age_band,
+          age_years: AGE_OPTIONS.some((o) => o.value === p.age_years) ? (p.age_years as AgeYears) : undefined,
           curriculum: asCurriculum(p.curriculum, age_band),
           objective,
           materials: isStringArray(p.materials) ? p.materials : [],
           steps,
           domains: isStringArray(p.domains) ? p.domains : undefined,
           link_plan_id: typeof p.link_plan_id === 'string' ? p.link_plan_id : undefined,
+          theme: typeof p.theme === 'string' ? p.theme : undefined,
+          area: typeof p.area === 'string' ? p.area : undefined,
           topic: typeof p.topic === 'string' ? p.topic : undefined,
           instruction: typeof p.instruction === 'string' ? p.instruction : undefined,
           type: typeof p.type === 'string' ? p.type : undefined,

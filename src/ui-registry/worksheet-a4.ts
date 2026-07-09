@@ -12,8 +12,17 @@ const CORAL = '#F2733E';
 // 제목·안내 글자 크기를 "시트 너비" 비율로 정의 → 화면(cqw)과 다운로드(캔버스)를 일치.
 export const SHEET_TITLE_PCT = 5.6; // 시트 너비의 5.6%
 export const SHEET_INSTR_PCT = 2.9; // 시트 너비의 2.9%
-const SHEET_TOP_PCT = 3.5; // 상단 여백(시트 높이 대비 — 화면 pt와 맞춤)
-const SHEET_SIDE_PCT = 7; // 좌우 여백(시트 너비 대비)
+
+// ── A4 인쇄 헤더 서식(주제·영역·활동명·반·이름) — 화면(worksheet-sheet)과 상수 공유 ──
+export const HEADER_LABEL_PCT = 2.5; // 라벨(주제/영역/활동명/반/이름)
+export const HEADER_THEME_PCT = 3.7; // 주제 값(강조)
+export const HEADER_META_PCT = 3.0; // 영역 값
+export const HEADER_TITLE_PCT = 5.0; // 활동명 값(강조)
+export const HEADER_FIELD_PCT = 3.0; // 반/이름 기입란
+export const HEADER_SIDE_PCT = 6; // 헤더 좌우 여백
+export const FOOTER_BAND_H_PCT = 7; // 교사 안내 푸터 높이(시트 높이 대비)
+const HEADER_LABEL_COLOR = '#9A8E82'; // 라벨 muted
+const HEADER_LINE_COLOR = '#DCD3C7'; // 구분선/기입란 선
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -95,42 +104,123 @@ export async function composeWorksheetA4(
     }
   }
 
-  // 글자 크기·여백을 화면(cqw)과 동일한 "시트 너비 비율"로 계산 → 다운로드 크기 일치.
-  const sidePad = Math.round((A4.w * SHEET_SIDE_PCT) / 100);
-  const topPad = Math.round((A4.h * SHEET_TOP_PCT) / 100);
-  ctx.textAlign = 'center';
+  // ── 상단 헤더(주제·영역·활동명·반·이름) — 흰 밴드 위 좌측 정렬 A4 서식 ──
+  const hpad = Math.round((A4.w * HEADER_SIDE_PCT) / 100);
+  const theme = props.theme || props.topic || '';
+  const area = props.area || props.type || '';
+  const actTitle = props.title || '활동지';
 
-  // 제목 — 그림 상단(빈 자리)에 흰 후광으로 또렷하게 오버레이.
-  const title = props.title || '활동지';
-  const titleSize = fitFont(ctx, title, Math.round((A4.w * SHEET_TITLE_PCT) / 100), A4.w - sidePad * 2, '800');
-  ctx.font = `800 ${titleSize}px ${FONT}`;
-  ctx.textBaseline = 'alphabetic';
-  const titleY = topPad + titleSize;
-  ctx.save();
-  ctx.shadowColor = 'rgba(255,255,255,0.95)';
-  ctx.shadowBlur = 16;
+  const labelSize = Math.round((A4.w * HEADER_LABEL_PCT) / 100);
+  const themeSize = Math.round((A4.w * HEADER_THEME_PCT) / 100);
+  const metaSize = Math.round((A4.w * HEADER_META_PCT) / 100);
+  const hTitleSize = Math.round((A4.w * HEADER_TITLE_PCT) / 100);
+  const fieldSize = Math.round((A4.w * HEADER_FIELD_PCT) / 100);
+
+  // 행 baseline 위치(그림 위 흰 밴드 안에서 3줄).
+  const topPad = Math.round((A4.h * 3.2) / 100);
+  const areaX = Math.round(A4.w * 0.62);
+  const row1 = topPad + themeSize; // 주제 / 영역
+  const row2 = row1 + Math.round(hTitleSize * 0.6) + hTitleSize; // 활동명
+  const row3 = row2 + Math.round(fieldSize * 1.1) + fieldSize; // 반 / 이름
+  const headerBottom = row3 + Math.round((A4.h * 2) / 100);
+
+  // 흰 밴드로 그림 상단을 덮어 헤더 서식을 또렷하게 + 하단 구분선.
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillText(title, A4.w / 2, titleY); // 후광 두 겹
-  ctx.fillText(title, A4.w / 2, titleY);
-  ctx.restore();
-  ctx.fillStyle = CORAL;
-  ctx.fillText(title, A4.w / 2, titleY);
-  const y = titleY + Math.round((A4.w * 1) / 100); // 화면 mt-[1cqw]와 동일 간격
+  ctx.fillRect(0, 0, A4.w, headerBottom);
+  ctx.strokeStyle = HEADER_LINE_COLOR;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(hpad, headerBottom - 2);
+  ctx.lineTo(A4.w - hpad, headerBottom - 2);
+  ctx.stroke();
 
-  // 안내문(알약 띠) — 그림 위 오버레이.
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  // 라벨+값 한 쌍(공유 baseline, 값이 우측 한계를 넘으면 폰트 축소). 반환: 값 끝 x.
+  const drawLV = (label: string, value: string, x: number, by: number, valSize: number, color: string, weight: string, maxRight: number): number => {
+    ctx.font = `700 ${labelSize}px ${FONT}`;
+    ctx.fillStyle = HEADER_LABEL_COLOR;
+    ctx.fillText(label, x, by);
+    const lw = ctx.measureText(label).width;
+    const vx = x + lw + Math.round(valSize * 0.4);
+    let vs = valSize;
+    ctx.font = `${weight} ${vs}px ${FONT}`;
+    while (vx + ctx.measureText(value).width > maxRight && vs > 18) {
+      vs -= 2;
+      ctx.font = `${weight} ${vs}px ${FONT}`;
+    }
+    ctx.fillStyle = color;
+    ctx.fillText(value, vx, by);
+    return vx + ctx.measureText(value).width;
+  };
+
+  // Row1: 주제(강조·코랄) 좌 / 영역 우.  Row2: 활동명(강조).
+  drawLV('주제', theme, hpad, row1, themeSize, CORAL, '800', areaX - Math.round(A4.w * 0.02));
+  drawLV('영역', area, areaX, row1, metaSize, '#5A4F45', '700', A4.w - hpad);
+  drawLV('활동명', actTitle, hpad, row2, hTitleSize, '#2E2A26', '800', A4.w - hpad);
+
+  // Row3: 반 ____  이름 ____ (손으로 적는 기입란).
+  const drawField = (label: string, x: number, by: number, lineW: number): number => {
+    ctx.font = `700 ${fieldSize}px ${FONT}`;
+    ctx.fillStyle = HEADER_LABEL_COLOR;
+    ctx.fillText(label, x, by);
+    const lw = ctx.measureText(label).width;
+    const lineX = x + lw + Math.round(fieldSize * 0.4);
+    ctx.strokeStyle = HEADER_LINE_COLOR;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(lineX, by + Math.round(fieldSize * 0.15));
+    ctx.lineTo(lineX + lineW, by + Math.round(fieldSize * 0.15));
+    ctx.stroke();
+    return lineX + lineW;
+  };
+  const classEnd = drawField('반', hpad, row3, Math.round(A4.w * 0.22));
+  drawField('이름', classEnd + Math.round(A4.w * 0.05), row3, Math.round(A4.w * 0.28));
+
+  // ── 활동 안내문(알약 띠) — 헤더 아래, 활동 그림 위 오버레이 ──
   if (props.instruction) {
-    const insSize = fitFont(ctx, props.instruction, Math.round((A4.w * SHEET_INSTR_PCT) / 100), A4.w - sidePad * 2 - 60, '500');
+    const insSize = fitFont(ctx, props.instruction, Math.round((A4.w * SHEET_INSTR_PCT) / 100), A4.w - hpad * 2 - 60, '500');
+    ctx.textAlign = 'center';
     ctx.font = `500 ${insSize}px ${FONT}`;
     const tw = ctx.measureText(props.instruction).width;
     const pillW = tw + insSize * 2;
-    const pillH = insSize + insSize;
+    const pillH = insSize * 2;
     const pillX = (A4.w - pillW) / 2;
+    const pillY = headerBottom + Math.round((A4.h * 1.2) / 100);
     ctx.fillStyle = '#FBE6D9';
-    roundRect(ctx, pillX, y, pillW, pillH, pillH / 2);
+    roundRect(ctx, pillX, pillY, pillW, pillH, pillH / 2);
     ctx.fill();
     ctx.fillStyle = '#6E6155';
     ctx.textBaseline = 'middle';
-    ctx.fillText(props.instruction, A4.w / 2, y + pillH / 2);
+    ctx.fillText(props.instruction, A4.w / 2, pillY + pillH / 2);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+  }
+
+  // ── 하단 교사 안내 푸터(objective) — 있으면 얇은 저채도 띠에 한 줄 ──
+  if (props.objective && props.objective.trim()) {
+    const fH = Math.round((A4.h * FOOTER_BAND_H_PCT) / 100);
+    const fy = A4.h - fH;
+    ctx.fillStyle = '#FBF7F1';
+    ctx.fillRect(0, fy, A4.w, fH);
+    ctx.strokeStyle = HEADER_LINE_COLOR;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, fy + 1.5);
+    ctx.lineTo(A4.w, fy + 1.5);
+    ctx.stroke();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = `800 ${labelSize}px ${FONT}`;
+    ctx.fillStyle = CORAL;
+    ctx.fillText('교사 안내', hpad, fy + fH / 2);
+    const lblW = ctx.measureText('교사 안내').width;
+    const goalX = hpad + lblW + Math.round(labelSize * 0.8);
+    const goalSize = fitFont(ctx, props.objective, metaSize, A4.w - goalX - hpad, '500');
+    ctx.font = `500 ${goalSize}px ${FONT}`;
+    ctx.fillStyle = '#5A4F45';
+    ctx.fillText(props.objective, goalX, fy + fH / 2);
     ctx.textBaseline = 'alphabetic';
   }
 

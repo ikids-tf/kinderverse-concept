@@ -8,6 +8,8 @@
      (제목 + 안내문 + 활동 영역 + 오리기 칸/절취선 + 캐릭터)을 통째로 묘사한다. */
 
 export type AgeBand = '0-2' | '3-5';
+/** 세분 연령(만 나이) — 난이도(3/4/5세) 조절·헤더 표시용. contracts.AgeYears 와 값 일치. */
+export type AgeYears = '0-1' | '2' | '3' | '4' | '5';
 export type StyleCode = 'watercolor' | 'round_character' | 'pastel' | 'black_and_white';
 export type SelectedBy = 'user' | 'recommended';
 export type WorksheetMode = 'instant' | 'guided';
@@ -40,7 +42,8 @@ export interface TypeDef {
 const WORKSHEET_PAGE_ANCHOR =
   '한국 유아 교육용 인쇄 활동지 한 장, A4 세로(portrait), 깨끗한 흰 배경. ' +
   '요소(바구니·카드·그림)를 큼직하게, 지면을 가득 채우도록 배치해 빈 여백을 최소화한다. ' +
-  '맨 위 가운데는 제목이 들어갈 자리이므로 비워 두고, 좌우 위쪽 모서리에 {주제}와 어울리는 귀엽고 통통한 캐릭터를 하나씩(예: 다람쥐·곰) 장식으로 배치해 활동지를 꾸민다. ' +
+  '맨 위 약 20%(상단 띠)는 별도의 인쇄 서식 헤더가 덮을 자리이므로 반드시 깨끗이 비워 둔다 — 그 영역에 그림·캐릭터·중요한 요소를 넣지 말 것. 활동 요소는 상단 20% 아래에 배치한다. ' +
+  '{주제}와 어울리는 귀엽고 통통한 캐릭터를 하나씩(예: 다람쥐·곰) 아래쪽 좌우 모서리에 장식으로 배치해 활동지를 꾸민다. ' +
   '★반드시 지킬 것: (1) 활동지 어디에도 한글·영문 글자, 단어, 라벨, 설명 문구를 절대 렌더하지 말 것(빈 라벨 모양만 허용, 안은 비움). 점 잇기·숫자 따라쓰기의 숫자만 예외. ' +
   '(2) 오려 쓰는 카드 칸 안과 바구니 안에는 캐릭터·스티커·글자를 절대 넣지 말 것(오릴 그림 하나씩만 또렷하게). ';
 
@@ -379,7 +382,10 @@ const STYLE_ALIASES: Record<string, StyleCode> = {
 
 export interface WorksheetReco {
   age_band: AgeBand;
+  age_years?: AgeYears;
   topic: string;
+  /** 활동 카테고리(영역) — 헤더 '영역' 칸. */
+  area: string;
   type: string;
   title: string;
   instruction: string;
@@ -392,6 +398,23 @@ export interface WorksheetReco {
   cut_layout: CutLayout | null;
 }
 
+/** 활동 유형 → 카테고리(영역). CATEGORIES 역참조, 미분류는 '통합'. */
+export function categoryOf(type: string): string {
+  for (const [cat, list] of Object.entries(CATEGORIES)) {
+    if (list.includes(type)) return cat;
+  }
+  return '통합';
+}
+
+/** 연령별 난이도 — 세분 연령(3/4/5세)이 있으면 그에 맞춰, 없으면 밴드로.
+    3세=basic(단순·큰 요소), 4세=standard(비교·분류), 5세=extended(추론·심화). */
+export function difficultyFor(age_band: AgeBand, age_years?: AgeYears): Difficulty {
+  if (age_years === '5') return 'extended';
+  if (age_years === '4') return 'standard';
+  if (age_years === '3') return 'basic';
+  return age_band === '0-2' ? 'basic' : 'standard';
+}
+
 export interface CutLayout {
   pieces: string[];
   shared_edges: string[][];
@@ -402,13 +425,22 @@ export interface CutLayout {
 export function parseWorksheetRequest(
   request: string,
   ctx?: string,
-): { age_band: AgeBand; type?: string; style?: StyleCode; topic: string } {
+): { age_band: AgeBand; age_years?: AgeYears; type?: string; style?: StyleCode; topic: string } {
   const text = `${request} ${ctx ?? ''}`;
 
-  // 연령대
+  // 연령대 + 세분 연령(만 N세)
   let age_band: AgeBand = '3-5';
-  if (/0\s*[-~]\s*2|영아|0세|1세|2세|돌\b/.test(text)) age_band = '0-2';
-  else if (/3\s*[-~]\s*5|유아|만?\s*[345]\s*세|3세|4세|5세/.test(text)) age_band = '3-5';
+  let age_years: AgeYears | undefined;
+  const ym = text.match(/만\s*([0-5])\s*세|(?<![0-9])([0-5])\s*세/);
+  const yr = ym ? (ym[1] ?? ym[2]) : undefined;
+  if (yr === '0' || yr === '1') age_years = '0-1';
+  else if (yr === '2') age_years = '2';
+  else if (yr === '3') age_years = '3';
+  else if (yr === '4') age_years = '4';
+  else if (yr === '5') age_years = '5';
+  if (age_years) age_band = age_years === '3' || age_years === '4' || age_years === '5' ? '3-5' : '0-2';
+  else if (/0\s*[-~]\s*2|영아|돌\b/.test(text)) age_band = '0-2';
+  else if (/3\s*[-~]\s*5|유아/.test(text)) age_band = '3-5';
 
   // 유형
   let type: string | undefined;
@@ -434,12 +466,22 @@ export function parseWorksheetRequest(
   for (const alias of Object.keys(STYLE_ALIASES)) topic = topic.replace(alias, ' ');
   topic = topic
     .replace(/0\s*[-~]\s*2세?|3\s*[-~]\s*5세?|만?\s*[0-5]\s*세|영아|유아/g, ' ')
-    .replace(/활동지|워크시트|학습지|문제지|놀이지|도안|만들어\s*줘|만들어|그려\s*줘|그려|해\s*줘|주세요|같은|용\b|의\b|스타일|로\b/g, ' ')
+    .replace(/주제로|주제|활동지|워크시트|학습지|문제지|놀이지|도안|만들어\s*줘|만들어|그려\s*줘|그려|해\s*줘|주세요|같은|용\b|의\b|스타일|로\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (!topic) topic = request.trim();
+  // 서술 문장이 통째로 넘어온 경우(계획 활동 등) — 제목/헤더가 깨지지 않게 첫 절의 핵심만 남긴다.
+  if (topic.length > 16) {
+    const head = topic
+      .split(/[.!?。·…]/)[0]
+      .replace(/\s*(?:하며|하면서|하고\s*나서|해\s*보며|해보며|하여|해서)\b[\s\S]*$/u, '')
+      .replace(/(?:을|를|이|가|은|는|에|으로|로|와|과)\s+[가-힣]+(?:한다|그린다|만든다|본다|나눈다|정한다|결정한다|탐색한다|표현한다|익힌다|알아본다|살펴본다)\.?$/u, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (head && head.length >= 2) topic = head.length > 22 ? head.slice(0, 22).trim() : head;
+  }
 
-  return { age_band, type, style, topic };
+  return { age_band, age_years, type, style, topic };
 }
 
 /** 유형 추천: 연령 후보군 + 주제 키워드 가산. */
@@ -535,12 +577,13 @@ function buildCutLayout(type: string, age_band: AgeBand): CutLayout {
 /** 핵심: 슬롯 → 추천 조합(유형·스타일·난이도·image_prompt·cut_layout). */
 export function recommendWorksheet(input: {
   age_band: AgeBand;
+  age_years?: AgeYears;
   topic: string;
   type?: string;
   style?: StyleCode;
   mode?: WorksheetMode;
 }): WorksheetReco {
-  const { age_band, topic } = input;
+  const { age_band, age_years, topic } = input;
 
   // 유형
   const hasUserType = !!input.type && !!TYPES[input.type];
@@ -559,11 +602,13 @@ export function recommendWorksheet(input: {
 
   const needs_cut_layout = TYPES[type]?.needs_cut_layout ?? false;
   const image_prompt = assembleImagePrompt(type, topic, style);
-  const difficulty: Difficulty = age_band === '0-2' ? 'basic' : 'standard';
+  const difficulty: Difficulty = difficultyFor(age_band, age_years);
   const cut_layout = needs_cut_layout ? buildCutLayout(type, age_band) : null;
 
   return {
     age_band,
+    age_years,
+    area: categoryOf(type),
     topic,
     type,
     title: buildTitle(type, topic),

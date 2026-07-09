@@ -6,6 +6,7 @@ import { runPlan } from '@/ai/agents/plan';
 import { runWriting } from '@/ai/agents/writing';
 import { worksheetText, planDocMarkdown, DOC_WIDTH, PLAN_DOC_W } from './workflow';
 import { recordSpawnedNodes, captureNodes, pushRedesign } from './commands';
+import { relatedWorksheetTheme } from './links';
 import type { ReqIntent } from '@/store/promptChoiceStore';
 
 /* Apply a mismatched prompt to the current selection, the way the teacher chose in
@@ -39,15 +40,16 @@ async function genMemoText(topic: string, ctx: string): Promise<string> {
   return res.ok && res.text ? res.text.trim() : topic;
 }
 
-/** Generate the requested-type card fields from one source card's topic. */
-async function genFields(intent: ReqIntent, topic: string): Promise<NodeFields> {
+/** Generate the requested-type card fields from one source card's topic.
+    worksheet 는 관련 놀이 주제(theme)를 시드로 받아 헤더 '주제'를 그 흐름에 맞춘다. */
+async function genFields(intent: ReqIntent, topic: string, theme?: string): Promise<NodeFields> {
   switch (intent) {
     case 'image': {
       const r = await callGateway({ task: 'image', provider: 'auto', messages: [], meta: { prompt: topic, caption: topic } });
       return { type: 'image', src: r.image, text: topic, w: 220, h: 200, loading: false, data: { role: 'image' } };
     }
     case 'worksheet': {
-      const r = await runStudioWorksheet(topic, buildAgentContext('studio'));
+      const r = await runStudioWorksheet(topic, buildAgentContext('studio'), undefined, theme ? { theme } : undefined);
       return { type: 'sticky', text: worksheetText(r.payload), color: 'paper', autoH: true, w: DOC_WIDTH, h: 240, src: undefined, data: { doc: true, role: 'worksheet', payload: r.payload } };
     }
     case 'plan': {
@@ -88,9 +90,11 @@ export async function applyToSelection(
   try {
     for (const src of sources) {
       const frameId = src.data?.frameId as string | undefined;
+      // 활동지는 이 카드가 잇는 놀이 주제(자기 payload 주제·연결된 이미지 카드 캡션)를 헤더 '주제'로.
+      const theme = intent === 'worksheet' ? relatedWorksheetTheme(b.nodes, b.links, src.id) : undefined;
       let fields: NodeFields;
       try {
-        fields = await genFields(intent, topicOf(src, text));
+        fields = await genFields(intent, topicOf(src, text), theme);
       } catch {
         continue; // skip this card on failure, keep going
       }

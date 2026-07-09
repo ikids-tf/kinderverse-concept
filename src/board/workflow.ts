@@ -1102,13 +1102,16 @@ export async function generateActivityImages(sourceId: string): Promise<void> {
     b.addNodeRaw({
       id, type: 'image',
       x: colX, y: topY + i * STEP, w: W, h: IMG_H, autoH: true,
-      loading: true, text: act.slice(0, 40),
+      loading: true, text: heuristicActivityName(act), // 캡션 = 짧은 활동명(즉시 근사, 아래서 정제)
       data: { role: 'image', activityImage: true, ...(frameId ? { frameId } : {}) },
     });
     ids.push(id);
   });
   // 프레임이 새 이미지 열을 감싸도록 즉시 한 번 늘려 둔다(생성 전에도 자리 확보).
   if (frameId) fitFrameToChildren(frameId);
+
+  // 캡션용 짧은 활동명(문장 설명 → "여름 놀이 정하기" 등). 이미지 프롬프트는 원문(상세)을 쓴다.
+  const names = await shortActivityNames(list);
 
   // 2) 활동별로 채운다 — 먼저 보관함/갤러리에 유사 자료가 있으면 가져다 쓰고(생성 비용 0),
   //    없을 때만 '그 활동을 하는 유아의 모습'을 새로 그린다.
@@ -1123,7 +1126,7 @@ export async function generateActivityImages(sourceId: string): Promise<void> {
       useBoardStore.getState().updateNodeRaw(ids[i], {
         loading: false,
         src: reuse.url,
-        text: act.slice(0, 40),
+        text: names[i],
         data: { ...(cur?.data ?? {}), fromLibrary: true },
       });
       continue;
@@ -1132,9 +1135,9 @@ export async function generateActivityImages(sourceId: string): Promise<void> {
     try {
       const prompt =
         `유아(어린이)들이 '${act}' 놀이/활동을 즐겁고 활기차게 하고 있는 장면. 활동하는 동작이 분명히 드러나게. ${KV_ART_STYLE}`;
-      const res = await callGateway({ task: 'image', provider: 'auto', messages: [], meta: { prompt, caption: act } });
+      const res = await callGateway({ task: 'image', provider: 'auto', messages: [], meta: { prompt, caption: names[i] } });
       if (!useBoardStore.getState().nodes[ids[i]]) continue; // 생성 사이 사용자가 지운 경우
-      useBoardStore.getState().updateNodeRaw(ids[i], { loading: false, src: res.image, text: act.slice(0, 40) });
+      useBoardStore.getState().updateNodeRaw(ids[i], { loading: false, src: res.image, text: names[i] });
       if (res.image && !res.mocked) void saveAsset(act, 'image', res.image, planNode ? String(planNode.data?.title ?? '놀이 활동') : undefined);
     } catch {
       if (useBoardStore.getState().nodes[ids[i]]) useBoardStore.getState().updateNodeRaw(ids[i], { loading: false });
@@ -1148,6 +1151,46 @@ export async function generateActivityImages(sourceId: string): Promise<void> {
     fitFrameToChildren(frameId);
   }
   useBoardStore.getState().endGen();
+}
+
+/** 활동 설명 문장 → 카드 캡션용 '짧은 활동명'(휴리스틱, LLM 미가용/폴백용).
+    "모두가 좋아하는 여름 놀이를 정해 서로 이야기하며 결정한다." → "여름 놀이 정하기" 근사. */
+function heuristicActivityName(s: string): string {
+  let t = s.split('\n')[0].replace(/[#*]/g, '').trim();
+  t = t.split(/[.!?。·…]/)[0]; // 첫 문장만
+  t = t.replace(/\s*(?:하며|하면서|하고\s*나서|한\s*뒤|한\s*후|해\s*보며|해보며|하여|해서)\b[\s\S]*$/u, '').trim(); // 연결절 제거
+  t = t.replace(/(?:한다|그린다|만든다|본다|나눈다|정한다|결정한다|탐색한다|표현한다|익힌다|알아본다|살펴본다)\.?$/u, '').trim(); // 서술 종결 제거
+  if (t.length > 16) t = t.slice(0, 16).trim();
+  return t || s.slice(0, 16).trim();
+}
+
+/** 활동 설명들을 카드 캡션용 '짧은 활동명'으로 일괄 변환(LLM 저티어 우선, 휴리스틱 폴백).
+    이미지 프롬프트는 원문(상세)을 쓰되, 카드에 보이는 캡션만 짧은 활동명으로 정리한다. */
+async function shortActivityNames(activities: string[]): Promise<string[]> {
+  const fallback = activities.map(heuristicActivityName);
+  if (activities.length === 0) return [];
+  try {
+    const res = await callGateway({
+      task: 'list-subjects', tier: 'low', provider: 'auto', responseFormat: 'json',
+      system: '유아 활동 설명을 카드에 붙일 짧은 활동명으로 바꾼다. 명사 중심의 간결한 이름만.',
+      messages: [{ role: 'user', content:
+        `아래 활동 설명들을 각각 "짧은 활동명"으로 바꿔라(6~12자, 명사구, 예: "여름날씨 탐색하기" · "여름과일 색칠하기" · "여름 놀이 정하기"). 순서와 개수를 그대로 유지한다.\n${activities.map((a, i) => `${i + 1}. ${a}`).join('\n')}\nJSON만: {"names":[...]}` }],
+      maxTokens: 300,
+    });
+    if (res.ok && !res.mocked && res.text) {
+      const m = res.text.match(/\{[\s\S]*\}/);
+      if (m) {
+        const names = (JSON.parse(m[0]) as { names?: unknown[] }).names;
+        if (Array.isArray(names) && names.length === activities.length) {
+          return names.map((n, i) => {
+            const s = String(n ?? '').trim();
+            return s && s.length <= 20 ? s : fallback[i];
+          });
+        }
+      }
+    }
+  } catch { /* 폴백 */ }
+  return fallback;
 }
 
 /** "여러 그림을 각각 그려줘" 요청에서 각각 그릴 대상의 짧은 목록을 뽑는다(LLM 우선, 사전 폴백). */

@@ -6,6 +6,7 @@ import { validateRegistryPayload, type RegistryPayload, type StudioItem } from '
 import {
   parseWorksheetRequest,
   recommendWorksheet,
+  type AgeYears,
   type StyleCode,
   type WorksheetMode,
 } from '../worksheet-reference';
@@ -192,7 +193,20 @@ export interface WorksheetOpts {
   style?: StyleCode;
   mode?: WorksheetMode;
   ageBand?: '0-2' | '3-5';
+  /** 세분 연령(만 나이) — 3/4/5세 난이도 조절. 없으면 요청문에서 파싱. */
+  ageYears?: AgeYears;
+  /** 놀이/프로젝트 주제(예: "여름 바다") — 헤더 '주제' 칸. 없으면 활동 topic 으로 대체. */
+  theme?: string;
 }
+
+/* 연령별 난이도 가이드(스펙 §연령별 난이도) — 프롬프트에 실어 objective/steps 수준을 맞춘다. */
+const AGE_DIFFICULTY_GUIDE: Record<AgeYears, string> = {
+  '0-1': '그림 중심, 큰 형태 하나, 손으로 짚기·색칠 정도. 글자·숫자 없음.',
+  '2': '그림 중심, 선 긋기·색칠·붙이기, 1~3개 세기. 아주 단순하게.',
+  '3': '그림 중심 · 선 긋기 · 색칠 · 붙이기 · 1~5 수. 항목 수 적고 크게, 단순하게.',
+  '4': '비교하기 · 분류하기 · 연결하기 · 규칙 찾기 · 간단한 따라쓰기 · 1~10 수.',
+  '5': '문제 해결 · 추론 · 한글 · 수학 · 기록하기 · 프로젝트 확장. 이유 묻기·심화.',
+};
 
 export async function runStudioWorksheet(
   request: string,
@@ -202,23 +216,31 @@ export async function runStudioWorksheet(
 ): Promise<StudioResult> {
   // 1) 슬롯 파싱(자연어) + 명시 옵션 병합 → 레퍼런스 추천.
   const parsed = parseWorksheetRequest(request, ctx);
+  const ageYears = opts?.ageYears ?? parsed.age_years;
   const reco = recommendWorksheet({
     age_band: opts?.ageBand ?? parsed.age_band,
+    age_years: ageYears,
     topic: parsed.topic,
     type: opts?.type ?? parsed.type,
     style: opts?.style ?? parsed.style,
     mode: opts?.mode,
   });
+  const theme = opts?.theme?.trim() || reco.topic;
+  const ageLabel = ageYears
+    ? ageYears === '0-1' ? '만 0~1세' : `만 ${ageYears}세`
+    : reco.age_band === '0-2' ? '0~2세(영아)' : '3~5세(유아)';
 
   // 2) 교육 내용(목표/준비물/진행/영역)은 LLM이 선택된 유형·연령에 맞게 작성.
   const user = `활동지 설계 요청.
-- 주제: "${reco.topic}"
-- 활동 유형: "${reco.type}"
-- 대상 연령: ${reco.age_band === '0-2' ? '0~2세(영아)' : '3~5세(유아)'}
+- 놀이 주제: "${theme}"
+- 활동 소재: "${reco.topic}"
+- 활동 유형: "${reco.type}" (영역: ${reco.area})
+- 대상 연령: ${ageLabel}
 위 유형·연령에 맞는 A4 활동지의 교육 내용을 작성하라.
 [현장 기준]
 - 활동지는 그림 중심 한 장이다 — 유아는 글을 못 읽으므로 steps는 '교사가 진행하며 하는 말·행동' 기준으로 3~4단계(예: "그림을 함께 보며 '어떤 친구들이 있니?' 묻는다").
-- 연령별 난이도: 같은 활동이라도 만3세는 항목 수 적고 크게·단순하게, 만5세는 심화·확장(비교/이유 묻기). 대상 연령에 맞춰 objective와 steps의 수준을 조절하고 무근거 난이도 상향 금지.
+- ★ 놀이 주제 "${theme}"와 직접 연결되고, 놀이 흐름과 자연스럽게 이어지며, 실제 수업에서 바로 쓸 수 있어야 한다. 단순히 주제를 반복하지 말고 활동 목표가 드러나게.
+- 이 연령(${ageLabel}) 난이도 기준: ${ageYears ? AGE_DIFFICULTY_GUIDE[ageYears] : '연령에 맞춰 조절'} 무근거 난이도 상향 금지.
 - objective는 '기대 경험'으로: "~하며 ~을 경험한다 / ~에 관심을 가진다" 1문장.
 - materials는 활동지 외 실제 필요한 것만(색연필·가위·풀 등 2~4가지).
 JSON만 출력:
@@ -264,6 +286,9 @@ JSON만 출력:
   const props = result.value.props;
   props.title = reco.title;
   props.age_band = reco.age_band;
+  props.age_years = reco.age_years;
+  props.theme = theme;
+  props.area = reco.area;
   props.topic = reco.topic;
   props.instruction = reco.instruction;
   props.type = reco.type;

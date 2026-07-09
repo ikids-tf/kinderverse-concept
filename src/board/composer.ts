@@ -1,6 +1,7 @@
 import { useBoardStore, newId, type BoardNode } from '@/store/boardStore';
 import { useBoardsStore } from '@/store/boardsStore';
 import { recordSpawnedNodes, captureNodes, pushRedesign, addPresetNodeCmd, addLinkCmd } from './commands';
+import { relatedWorksheetTheme } from './links';
 import { useInteractiveStore } from '@/features/interactive-viewer/store/interactiveStore';
 import { applyInteractivePrompt } from '@/features/interactive-viewer/authoring/applyPrompt';
 import { gridDeOverlap } from './align';
@@ -953,7 +954,9 @@ export async function worksheetFromNode(nodeId: string): Promise<void> {
   useBoardStore.getState().setGenerating('✏️ 활동지를 만들고 있어요…');
 
   try {
-    const res = await runStudioWorksheet(activity, buildAgentContext('studio'));
+    // 이 카드가 잇는 놀이 주제(연결된 이미지 카드 캡션 등)를 헤더 '주제' 시드로.
+    const theme = relatedWorksheetTheme(b.nodes, b.links, nodeId);
+    const res = await runStudioWorksheet(activity, buildAgentContext('studio'), undefined, theme ? { theme } : undefined);
     fillPlaceholderDoc(id, worksheetText(res.payload), res.payload);
   } catch {
     failPlaceholderDoc(id, `‘${activity}’ 활동지 생성에 실패했어요.`);

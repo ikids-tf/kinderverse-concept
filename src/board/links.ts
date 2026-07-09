@@ -1,4 +1,4 @@
-import type { BoardLink } from '@/store/boardStore';
+import type { BoardLink, BoardNode } from '@/store/boardStore';
 
 /* 요소 연결(links) 헬퍼 — 포트 드래그로 만든 from→to 연결의 '순번 라벨'과
    '연결망'을 계산한다.
@@ -105,4 +105,46 @@ export function linkedComponent(id: string, links: BoardLink[]): string[] {
   if (set.size < 2) return [];
   const seq = linkSequence(links);
   return [...set].sort((a, z) => compareLabels(seq.get(a) ?? '999', seq.get(z) ?? '999'));
+}
+
+/** 방향 무시 직접 이웃(연결선으로 이어진 노드) id 목록. */
+export function neighborIds(links: BoardLink[], id: string): string[] {
+  const out: string[] = [];
+  for (const l of links) {
+    if (l.from === id) out.push(l.to);
+    else if (l.to === id) out.push(l.from);
+  }
+  return out;
+}
+
+function firstLine(t?: string): string {
+  return (t ?? '').split('\n').find((l) => l.trim())?.trim() ?? '';
+}
+
+const isImageNode = (n?: BoardNode): boolean => !!n && (n.type === 'image' || n.data?.role === 'image');
+
+/** 이 카드로 활동지를 만들 때 쓸 "관련 놀이 주제"를 찾는다(헤더 '주제' 시드).
+    우선순위: (1) 이 카드가 활동지/계획 문서면 그 payload 의 theme/topic 을 이어받고,
+    (2) 연결선으로 이어진 이미지 카드의 캡션, (3) 이 카드 자체가 이미지면 그 캡션. 없으면 undefined. */
+export function relatedWorksheetTheme(
+  nodes: Record<string, BoardNode>,
+  links: BoardLink[],
+  nodeId: string,
+): string | undefined {
+  const node = nodes[nodeId];
+  if (!node) return undefined;
+  const payload = node.data?.payload as { props?: { theme?: string; topic?: string } } | undefined;
+  const own = payload?.props?.theme || payload?.props?.topic;
+  if (own?.trim()) return own.trim();
+  for (const nid of neighborIds(links, nodeId)) {
+    if (isImageNode(nodes[nid])) {
+      const cap = firstLine(nodes[nid].text);
+      if (cap) return cap;
+    }
+  }
+  if (isImageNode(node)) {
+    const cap = firstLine(node.text);
+    if (cap) return cap;
+  }
+  return undefined;
 }
