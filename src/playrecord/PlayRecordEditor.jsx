@@ -5,7 +5,7 @@ import { toPng } from "html-to-image";
 import { Download, ImagePlus, Bookmark, BookmarkCheck } from "lucide-react";
 import { DesignFrame, DesignEl } from "./DesignFrame.jsx";
 import { pickerTemplates, templateLabel, isTemplateId, defaultTemplateId, buildVariant, buildVariantPages, blankPage, makePhotoSlot, LAYOUT_VERSION, saveStoryStickers, themeKeyOf } from "./layouts";
-import { resolveSticker, payloadDecoAssets } from "./stickerAssets";
+import { resolveSticker, payloadDecoAssets, galleryCutoutsForTheme } from "./stickerAssets";
 import { regenerateBySubject } from "./assetLibrary";
 
 function TemplateThumb({ doc, width = 116 }) {
@@ -32,6 +32,18 @@ export default function PlayRecordEditor({ value, selected, zoom = 1, onChange, 
   const docs = data.docs || {};
   const pages = docs[variant];
   const page = Math.min(data.page || 0, pages ? pages.length - 1 : 0);
+  const themeKey = variant.split("-")[0];
+
+  // 꾸미기 그림 추가 목록에 '보드 이미지 갤러리(IDB)의 컷아웃(투명 PNG) 중 현재 주제 매칭분'을 병합.
+  // 주제가 바뀌면 다시 로드. 비동기라 레이스 방지용 취소 플래그 사용.
+  const [galleryDeco, setGalleryDeco] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    galleryCutoutsForTheme(themeKey)
+      .then((list) => { if (!cancelled) setGalleryDeco(list); })
+      .catch(() => { if (!cancelled) setGalleryDeco([]); });
+    return () => { cancelled = true; };
+  }, [themeKey]);
 
   // 구 변형 키를 조합 id 로 마이그레이션(사용자가 고른 여름/캔버스 선택은 유지)
   useEffect(() => {
@@ -258,7 +270,7 @@ export default function PlayRecordEditor({ value, selected, zoom = 1, onChange, 
       )}
       <div className="prdoc-canvas" ref={canvasRef}>
         {activeDoc ? (
-          <DesignFrame key={`${variant}-${page}`} data={activeDoc} selected={selected} zoom={zoom} onChange={updatePage} photos={data.payload?.photos} decoAssets={payloadDecoAssets(data.payload, variant.split("-")[0])} onRegenerate={regenerateEl} />
+          <DesignFrame key={`${variant}-${page}`} data={activeDoc} selected={selected} zoom={zoom} onChange={updatePage} photos={data.payload?.photos} decoAssets={payloadDecoAssets(data.payload, themeKey, galleryDeco)} onRegenerate={regenerateEl} />
         ) : (
           <div className="prdoc-loading">불러오는 중…</div>
         )}

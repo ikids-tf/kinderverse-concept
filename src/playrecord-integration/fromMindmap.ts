@@ -2,7 +2,7 @@
 // 마인드맵 구조: frame(data.mindmap) + center(role 'mm-center', text=대주제) + branch들(role 'mm-branch', data.activity={label,method,materials,area}).
 // verse topic_web 구조: { topic_web: { main_topic, subtopics[].{ subtopic, play_ideas[] } } }.
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { usePlayEditorStore } from './store';
+import { spawnEditorCard } from './spawnEditorCard';
 
 interface MindActivity {
   label?: string;
@@ -40,7 +40,7 @@ export function mindmapFrameToPayload(frameId: string) {
 
 /** 마인드맵 프레임을 verse 편집기(주제망 = topicweb)로 연다. */
 export function openMindmapInEditor(frameId: string): void {
-  usePlayEditorStore.getState().openEditor('topicweb', mindmapFrameToPayload(frameId));
+  spawnEditorCard('topicweb', mindmapFrameToPayload(frameId));
 }
 
 // ───────────────────────── 마크다운 마인드맵 문서(kv-doc-md) → topic_web ─────────────────────────
@@ -117,5 +117,5 @@ export function parseMindmapDoc(text: string) {
 export function openMindmapDocInEditor(nodeId: string): void {
   const node = useBoardStore.getState().nodes[nodeId];
   if (!node) return;
-  usePlayEditorStore.getState().openEditor('topicweb', parseMindmapDoc(node.text || ''));
+  spawnEditorCard('topicweb', parseMindmapDoc(node.text || ''));
 }

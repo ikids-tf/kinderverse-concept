@@ -4,7 +4,7 @@
 // verse 놀이기록 read(): header.title / meta.theme / introduction.text / activities[].{title,summary} / learning.text / teacherSupport.text / photos[].
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
 import { defaultTemplateId } from '@/playrecord';
-import { usePlayEditorStore } from './store';
+import { spawnEditorCard } from './spawnEditorCard';
 
 interface PhotoSlot { caption?: string; placeholder?: boolean }
 interface PlayStoryProps {
@@ -67,5 +67,5 @@ export function openRecordInEditor(frameOrNodeId: string): void {
   if (!node) return;
   const payload = recordNodeToPayload(node);
   const variant = defaultTemplateId(payload, 'card') || 'default-card';
-  usePlayEditorStore.getState().openEditor(variant, payload);
+  spawnEditorCard(variant, payload);
 }

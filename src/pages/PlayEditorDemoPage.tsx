@@ -1,22 +1,27 @@
-// "편집디자인" 런처 — 놀이기록 / 놀이중심 주제망 / 놀이계획 주안 버튼.
-// 각 버튼은 usePlayEditorStore.openEditor(variant, payload) 로 전역 편집기 모달을 연다.
-// (모달은 AppShell 에 마운트됨. 이 버튼들은 나중에 각 기능 카드/화면으로 옮겨 붙일 수 있다.)
+// "편집디자인" 런처 — 놀이기록 / 주제망 / 주안 / 월안 버튼.
+// 각 버튼은 편집기를 '보드 카드(iframe)'로 생성한다(모달 아님 — 사용자 지시). spawnEditorCard 가
+// 보드 스토어에 노드를 얹은 뒤 /board 로 이동해 그 카드를 보여준다.
+import { useNavigate } from 'react-router-dom';
 import { STARTERS } from '@/playrecord-integration/starters';
-import { usePlayEditorStore } from '@/playrecord-integration/store';
+import { spawnEditorCard } from '@/playrecord-integration/spawnEditorCard';
 
 export function PlayEditorDemoPage() {
-  const openEditor = usePlayEditorStore((s) => s.openEditor);
+  const navigate = useNavigate();
+  const launch = (variant: string, payload: unknown) => {
+    spawnEditorCard(variant, payload); // 보드 스토어에 편집기 카드 노드 추가(전역)
+    navigate('/board'); // 보드로 이동 → 방금 만든 카드가 화면 중앙에 뜬다
+  };
   return (
     <div style={{ padding: 32, maxWidth: 720 }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6, color: '#2b2622' }}>편집디자인</h1>
       <p style={{ fontSize: 14, color: '#7c7269', marginBottom: 24 }}>
-        아래 버튼을 누르면 편집 캔버스가 모달로 열립니다. 스티커·주제 그림을 추가하고, 요소를 드래그·회전·재생성한 뒤 PNG로 저장하세요.
+        아래 버튼을 누르면 편집 캔버스가 <b>보드 카드</b>로 생성됩니다. 스티커·주제 그림을 추가하고, 요소를 드래그·회전·재생성한 뒤 PNG로 저장하세요.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {STARTERS.map((s) => (
           <button
             key={s.key}
-            onClick={() => openEditor(s.variant, s.payload)}
+            onClick={() => launch(s.variant, s.payload)}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '16px 20px', borderRadius: 12, cursor: 'pointer',
@@ -26,7 +31,7 @@ export function PlayEditorDemoPage() {
             }}
           >
             <span>{s.label} 편집디자인</span>
-            <span style={{ fontSize: 13, color: '#d97757', fontWeight: 700 }}>열기 →</span>
+            <span style={{ fontSize: 13, color: '#d97757', fontWeight: 700 }}>보드에 열기 →</span>
           </button>
         ))}
       </div>

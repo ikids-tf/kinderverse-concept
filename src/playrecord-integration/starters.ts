@@ -48,6 +48,26 @@ export const STARTERS: Starter[] = [
     },
   },
   {
+    key: 'monthly_plan',
+    label: '놀이계획 월안',
+    variant: 'monthlyplan-summer',
+    payload: {
+      header: { title: '여름 바다로 풍덩!' },
+      basic_info: { theme: '여름 바다', sub_theme: '바다와 친구들', period: '7/1 ~ 7/31', class_name: '무지개반', age_band: '3-5', month: '2026 · 7월' },
+      weekly_flow: [
+        { week: 1, sub_theme: '', play_ideas: [] },
+        { week: 2, sub_theme: '', play_ideas: [] },
+        { week: 3, sub_theme: '', play_ideas: [] },
+        { week: 4, sub_theme: '', play_ideas: [] },
+        { week: 5, sub_theme: '', play_ideas: [] },
+      ],
+      teacher_expectations: [],
+      curriculum_links: [],
+      outdoor_and_physical_play: [],
+      safety_education: '', character_education: '', events: [], home_connection: '',
+    },
+  },
+  {
     key: 'weekly_plan',
     label: '놀이계획 주안',
     variant: 'weeklyplan',
