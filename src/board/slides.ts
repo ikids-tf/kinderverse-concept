@@ -38,7 +38,10 @@ export async function generateSlidesForViewer(viewerId: string, request: string,
     await fillDeckImages(deck, (d, t) =>
       useBoardStore.getState().setGenerating(`🎨 슬라이드 이미지 ${d}/${t} 그리는 중…`),
     );
-    load();
+    // ★ 새 참조({...deck})로 넘긴다 — 같은 deck 참조를 다시 setDeck 하면 뷰어의 localStorage
+    //   영속화 effect(deps [deck])가 Object.is 로 미실행되어, 채운 assetId 가 저장되지 않는다.
+    //   그러면 새로고침 시 assetId=null 덱이 복원돼 이미지가 전부 자리표시로 "깨져" 보인다.
+    window.dispatchEvent(new CustomEvent('kv:slides-load', { detail: { viewerId, deck: { ...deck } } }));
     showToast(`🖼️ 슬라이드 ${deck.slides.length}장을 완성했어요`, 'success');
   } catch (e) {
     showToast(`슬라이드 생성에 실패했어요 — ${e instanceof Error ? e.message : String(e)}`, 'error', 4000);
