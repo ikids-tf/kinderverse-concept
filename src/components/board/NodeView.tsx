@@ -1222,6 +1222,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     // 배경제거(누끼) 이미지는 흰 카드 배경·테두리·그림자를 없애 보드 위에 '컷아웃'처럼
     // 투명하게 보이게 한다(흰 bg-surface가 비쳐 안 지워진 것처럼 보이던 문제 해결).
     const bgRemoved = node.data?.bgRemoved === true;
+    // 활동지·학습지·도안·색칠판 등 '문서형' 이미지는 전체가 보여야 한다(잘리면 활동이 깨짐) → contain.
+    // 일반 사진(아이 활동 모습 등)은 카드 틀을 꽉 채운다(cover). 누끼(컷아웃)도 전체 보이기.
+    const docLikeImage = /활동지|학습지|워크시트|worksheet|도안|색칠|패턴\s*놀이/i.test(node.text ?? '');
     return (
       <div
         ref={cardRef}
@@ -1248,7 +1251,8 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 src={(node.data?.thumb as string | undefined) || node.src}
                 alt={node.text ?? ''}
                 draggable={false}
-                className={`h-full w-full ${bgRemoved ? 'object-contain' : 'object-cover'}`}
+                // 누끼(컷아웃)·문서형(활동지·도안) 이미지는 전체 보이기(contain), 일반 사진은 채우기(cover).
+                className={`h-full w-full ${bgRemoved || docLikeImage ? 'object-contain' : 'object-cover'}`}
                 style={node.data?.flipX ? { transform: 'scaleX(-1)' } : undefined}
               />
             )

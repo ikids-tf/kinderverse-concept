@@ -176,7 +176,7 @@ export function WorksheetSheet({
       {layerMode ? (
         <div className="absolute inset-0 bg-white" />
       ) : props.image_url ? (
-        <img src={props.image_url} alt={props.title} draggable={false} className="absolute inset-0 h-full w-full object-cover" />
+        <img src={props.image_url} alt={props.title} draggable={false} className="absolute inset-0 h-full w-full object-contain" />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center text-fg-disabled">활동 그림 생성 중…</div>
       )}

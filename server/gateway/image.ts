@@ -47,6 +47,19 @@ interface ImageOpts {
    KV_GEMINI_IMAGE_MODEL override is provided. Override in .env if the id changes. */
 const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image';
 
+/** aspectRatio 힌트 → gpt-image-1 지원 사이즈. 세로(예 3:4)=1024x1536, 가로=1536x1024, 그 외=정사각.
+    프로덕션 Gemini는 imageConfig.aspectRatio로 3:4를 이미 반영하므로, 로컬 OpenAI도 같은 비율로 맞춘다
+    (활동지 등 세로 문서가 정사각 이미지로 나와 잘리는 문제 방지). KV_OPENAI_IMAGE_SIZE 설정 시 그 값이 우선. */
+function openaiSizeForAspect(ar?: string): string {
+  const m = ar?.match(/^\s*(\d+)\s*[:x]\s*(\d+)\s*$/);
+  if (!m) return '1024x1024';
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (h > w) return '1024x1536';
+  if (w > h) return '1536x1024';
+  return '1024x1024';
+}
+
 /* OpenAI Images(gpt-image-1) — 로컬 테스트 전용, 비용 최소화(미디엄·최소 사이즈) 기본값.
    gpt-image-1 은 항상 b64_json 을 반환한다. quality/size 로 과금이 결정된다. */
 async function openaiGenerateImage(opts: {
@@ -92,7 +105,7 @@ export async function generateImage(
         model: opts.openaiImageModel || 'gpt-image-1',
         prompt: opts.prompt,
         quality: opts.openaiImageQuality || 'medium',
-        size: opts.openaiImageSize || '1024x1024',
+        size: opts.openaiImageSize || openaiSizeForAspect(opts.aspectRatio),
       });
       return { image, real: true };
     } catch (e) {

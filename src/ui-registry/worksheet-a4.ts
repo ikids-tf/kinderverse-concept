@@ -92,10 +92,11 @@ export async function composeWorksheetA4(
       }
     }
   } else if (props.image_url) {
-    // 활동 그림 — 지면을 가득 채우도록(cover) 배경에 배치(상단 가운데는 비워 생성됨).
+    // 활동 그림 — 잘리지 않게 전체가 지면 안에 들어오도록(contain) 배치. 정사각 생성물은
+    // 폭을 가득 채우고 좌우가 잘리지 않으며(상단은 헤더가 덮는 예약 영역), 흰 여백만 허용.
     try {
       const img = await loadImage(props.image_url);
-      const scale = Math.max(A4.w / img.width, A4.h / img.height);
+      const scale = Math.min(A4.w / img.width, A4.h / img.height);
       const dw = img.width * scale;
       const dh = img.height * scale;
       ctx.drawImage(img, (A4.w - dw) / 2, (A4.h - dh) / 2, dw, dh);
