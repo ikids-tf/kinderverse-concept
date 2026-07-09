@@ -806,6 +806,8 @@ export function buildCardTrafficDoc(payload) {
 //         9칸 활동 카드(3×3, 번호배지·아이콘·사진 2·본문) + 하단 마무리 패널(아이들 그림·문구·미술도구).
 //   사진·텍스트 전부 편집 가능(m.photo / m.text). 아이콘·데코만 고정 이미지.
 const AUTUMN_BG = "linear-gradient(180deg,#fdf6e6 0%,#fbeecb 100%)";
+// 본문 폰트 — Figma 원본(55:870)은 Gowun Dodum(고운돋움). 제목·라벨·번호는 Jua(LABEL_FONT) 유지.
+const AUTUMN_BODY_FONT = "'Gowun Dodum', 'SUIT', sans-serif";
 const AUTUMN_S = 794 / 1149;                                  // 폭맞춤 스케일 0.6910
 const AUTUMN_OFFY = Math.round((A4.H - 1395.13 * AUTUMN_S) / 2); // 세로중앙 79
 const aX = (v) => Math.round(v * AUTUMN_S);
@@ -848,14 +850,15 @@ export function buildCardAutumnDoc(payload) {
   const c = read(payload);
   const m = maker();
   const els = [m.bg({ bg: AUTUMN_BG })];
-  // 디자인 스티커(데코·아이콘·하단 그림)는 크기·종류·위치를 고정(locked) → 이동·리사이즈·재생성·삭제 불가.
+  // 데코·아이콘·하단 그림 = 이미지 스티커. 기본 위치·크기는 Figma 원본 그대로지만 편집 가능
+  // (아래 '구조 도형만 잠금' 정책으로 이동·리사이즈·회전·삭제 자유 — 주간계획안과 동일).
   const img = (src, x, y, w, h, id) => els.push({
-    id, type: "image", src, fit: "contain", sticker: true, locked: true,
+    id, type: "image", src, fit: "contain", sticker: true,
     x: aX(x), y: aY(y), w: aD(w), h: aD(h), rotation: 0, style: { radius: 0 },
   });
 
-  // 하단 마무리 패널 배경(하단 끝까지 확장 — 배너처럼)
-  const panelTop = aY(1225.13);
+  // 하단 마무리 패널 배경(Figma 55:866 y=1228.13, h=164; 하단 끝까지 배너로 확장)
+  const panelTop = aY(1228.13);
   els.push(m.shape(0, panelTop, A4.W, A4.H - panelTop, { bg: "linear-gradient(180deg,#f7e2b0 0%,#f2d491 100%)", radius: 0 }));
 
   // 헤더 — 배지 / 제목 / 부제 / 놀이기간
@@ -864,9 +867,9 @@ export function buildCardAutumnDoc(payload) {
   const title = payload?.header?.title || payload?.meta?.theme || "풍성한 추석 놀이";
   els.push(m.text(aX(336.91), aY(70), aD(464.56), aD(74), title, { fontSize: Math.min(aD(74), fitFontSize(title, aD(464.56), aD(74), aD(74))), fontFamily: LABEL_FONT, color: "#5a4632", align: "center", valign: "center" }, { textRole: "title" }));
   const subtitle = has(c.subtitle) ? c.subtitle : "추석의 의미를 알아보고 전통문화를 경험하며 즐겁게 놀았어요!";
-  els.push(m.text(aX(297.67), aY(181), aD(542.95), aD(30), subtitle, { fontSize: aD(21), fontFamily: BODY_FONT, color: "#7a6244", align: "center", valign: "center" }));
-  els.push(m.text(aX(858), aY(117), aD(70), aD(18), "놀이 기간", { fontSize: aD(17), fontFamily: LABEL_FONT, color: "#8a6a3a", align: "center", valign: "center" }));
-  els.push(m.text(aX(812.67), aY(144), aD(157.65), aD(20), has(c.month) ? c.month : "2024. 9. 2 ~ 9. 13", { fontSize: aD(20), fontFamily: BODY_FONT, color: "#5a4632", align: "center", valign: "center" }));
+  els.push(m.text(aX(297.67), aY(181), aD(542.95), aD(30), subtitle, { fontSize: aD(21), fontFamily: AUTUMN_BODY_FONT, color: "#7a6244", align: "center", valign: "center" }));
+  els.push(m.text(aX(861.11), aY(121), aD(60.83), aD(17), "놀이 기간", { fontSize: aD(17), fontFamily: LABEL_FONT, color: "#8a6a3a", align: "center", valign: "center" }));
+  els.push(m.text(aX(812.67), aY(144), aD(157.65), aD(20), has(c.month) ? c.month : "2024. 9. 2 ~ 9. 13", { fontSize: aD(20), fontFamily: AUTUMN_BODY_FONT, color: "#5a4632", align: "center", valign: "center" }));
 
   // 헤더 데코 4 (감나무·보름달·청사초롱·송편)
   img(`${AUTUMN_ASSET}/deco-persimmon.png`, 29, 23, 132, 132, "adc0");
@@ -882,7 +885,7 @@ export function buildCardAutumnDoc(payload) {
   const quotes = c.activities.flatMap((a) => arr(a?.childQuotes)).filter(Boolean);
   AUTUMN_QUOTES.forEach((q, i) => {
     els.push(m.shape(aX(q.x), aY(q.y), aD(q.w), aD(q.h), { bg: q.bg, radius: aD(16), stroke: q.bd, strokeWidth: 2 }));
-    els.push(m.text(aX(q.x) + aD(18), aY(q.y), aD(q.w) - aD(30), aD(q.h), quotes[i] || q.text, { fontSize: aD(15), fontFamily: BODY_FONT, color: q.tc, align: "left", valign: "center" }));
+    els.push(m.text(aX(q.x) + aD(18), aY(q.y), aD(q.w) - aD(30), aD(q.h), quotes[i] || q.text, { fontSize: aD(15), fontFamily: AUTUMN_BODY_FONT, color: q.tc, align: "left", valign: "center" }));
   });
 
   // 9칸 활동 카드 (3×3)
@@ -894,23 +897,26 @@ export function buildCardAutumnDoc(payload) {
     els.push(m.shape(aX(cx), aY(cy), aD(CW), aD(CH), { bg: "#fffaf0", radius: aD(18), stroke: "#f6dfae", strokeWidth: 2, shadow: "0 4px 12px rgba(120,90,40,0.08)" }));
     els.push(m.shape(aX(cx + 18), aY(cy + 18), aD(34), aD(34), { bg: cd.accent, radius: aD(9) }));
     els.push(m.text(aX(cx + 18), aY(cy + 18), aD(34), aD(34), String(i + 1).padStart(2, "0"), { fontSize: aD(17), fontFamily: LABEL_FONT, color: "#fff", align: "center", valign: "center" }));
-    els.push(m.text(aX(cx + 62), aY(cy + 24), aD(155), aD(28), a.title || cd.title, { fontSize: aD(22), fontFamily: LABEL_FONT, color: cd.accent, align: "left", valign: "center" }, { textRole: "title" }));
+    els.push(m.text(aX(cx + 62), aY(cy + 24), aD(154.52), aD(22), a.title || cd.title, { fontSize: aD(22), fontFamily: LABEL_FONT, color: cd.accent, align: "left", valign: "center" }, { textRole: "title" }));
     img(`${AUTUMN_ASSET}/${cd.icon}`, cx + ic.x, cy + ic.y, cd.iw, cd.ih, `aic${i}`);
     els.push(m.photo(aX(cx + 18), aY(cy + 64), aD(153.16), aD(130), c.photos[2 * i] || null, { bg: "#fff", radius: aD(10), stroke: "#9ecdf1", strokeWidth: 2 }));
     els.push(m.photo(aX(cx + 179.16), aY(cy + 64), aD(153.17), aD(130), c.photos[2 * i + 1] || null, { bg: "#fff", radius: aD(10), stroke: "#9ecdf1", strokeWidth: 2 }));
     const body = a.summary || cd.body;
-    const bw = aD(CW - 36), bh = aD(52);
-    els.push(m.text(aX(cx + 18), aY(cy + 205), bw, bh, body, { fontSize: has(body) ? fitFontSize(body, bw, bh, aD(14.5), 7) : aD(14.5), fontFamily: BODY_FONT, color: "#6a5238", align: "left", valign: "top" }));
+    const bw = aD(307.75), bh = aD(44.19);
+    els.push(m.text(aX(cx + 18), aY(cy + 207), bw, bh, body, { fontSize: has(body) ? fitFontSize(body, bw, bh, aD(14.5), 7) : aD(14.5), fontFamily: AUTUMN_BODY_FONT, color: "#6a5238", align: "left", valign: "top" }));
   }
 
-  // 하단 마무리 패널 콘텐츠 — 아이들 그림 / 문구 / 미술도구
-  img(`${AUTUMN_ASSET}/footer-kids.png`, 40, 1247, 120, 120, "afk");
-  img(`${AUTUMN_ASSET}/footer-art.png`, 1007, 1258, 96, 96, "afa");
+  // 하단 마무리 패널 콘텐츠 — 아이들 그림 / 문구 / 미술도구 (Figma 55:867·868·869, 패널 y=1228.13 기준 절대좌표)
+  img(`${AUTUMN_ASSET}/footer-kids.png`, 40, 1250.13, 120, 120, "afk");
+  img(`${AUTUMN_ASSET}/footer-art.png`, 1007, 1260.63, 96, 96, "afa");
   const closing = has(c.support?.text)
     ? c.support.text
     : "아이들은 추석을 통해 우리 전통문화를 경험하고, 친구들과 함께 즐기며 더불어 생활하는 기쁨을 느꼈어요. 앞으로도 다양한 놀이를 통해 함께 성장하기를 응원합니다!";
-  els.push(m.text(aX(353.97), aY(1258), aD(459.25), aD(94), closing, { fontSize: fitFontSize(closing, aD(459.25), aD(94), aD(19), 10), fontFamily: BODY_FONT, color: "#5a4632", align: "center", valign: "center" }));
+  els.push(m.text(aX(353.97), aY(1263.67), aD(459.25), aD(91.6), closing, { fontSize: fitFontSize(closing, aD(459.25), aD(91.6), aD(19), 10), fontFamily: AUTUMN_BODY_FONT, color: "#5a4632", align: "center", valign: "center" }));
 
+  // 편집 정책 — 구조 도형(전체 배경·카드 판·번호 배지·말풍선 바탕·하단 패널)만 고정(locked)해 레이아웃을
+  // 유지하고, 텍스트·사진·이미지 스티커(데코·아이콘)는 편집 자유. (주간계획안 buildWeeklyPlanDoc 과 동일 정책.)
+  els.forEach((e) => { if (e.type === "shape") e.locked = true; });
   return doc(title, AUTUMN_BG, els);
 }
 
@@ -1211,9 +1217,9 @@ export function buildWeeklyPlanDoc(payload) {
   stk("seaweed.png", 973, bnY - 15, 93, 104, "wkbn2", "cute seaweed");
   stk("seaweed.png", 1047.97, bnY - 12, 93, 104, "wkbn3", "cute seaweed");
 
-  // 표 구조(테두리·분리선·배경)·스티커·데코는 디자인 유지를 위해 고정(locked),
-  // 텍스트는 편집 가능하게 남긴다 → 교사가 주제·기간·활동 등 내용을 캔버스에서 직접 수정.
-  els.forEach((e) => { if (e.type !== "text") e.locked = true; });
+  // 표 구조(테두리·분리선·셀 배경·배경 도형)만 locked(레이아웃 고정) →
+  // 텍스트·스티커는 이동·리사이즈·회전·편집·재생성 자유(다른 템플릿과 동일한 편집성).
+  els.forEach((e) => { if (e.type === "shape") e.locked = true; });
   return doc("놀이중심 주간계획안", WK_BG, els);
 }
 

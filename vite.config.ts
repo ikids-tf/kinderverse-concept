@@ -24,6 +24,7 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         slides: path.resolve(__dirname, 'slides-viewer.html'),
         game: path.resolve(__dirname, 'game-viewer.html'),
+        playedit: path.resolve(__dirname, 'playedit.html'),
       },
       output: {
         // Split big libraries into stable, separately-cached vendor chunks so no

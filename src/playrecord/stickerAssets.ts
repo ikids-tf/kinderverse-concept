@@ -7,6 +7,7 @@
 import { getAssetSmart } from "./assetLibrary";
 import { STICKER_MANIFEST, STICKER_SUBTAGS } from "./stickerManifest";
 import { themeFor } from "./layouts";
+import { listAssets } from "@/board/assets"; // 보드 이미지 갤러리(IDB) — 꾸미기 그림에 컷아웃 자산 병합용
 
 // 주제(layouts.js THEMES 의 key) → 서빙 가능한 스티커 URL 목록.
 // 자동 생성 매니페스트(deco 테마형 일러스트 → stk-*.png 사본) 사용. 일부 깨끗한 기본 PNG 보강.
@@ -103,6 +104,72 @@ function loadable(url: string): Promise<boolean> {
   return p;
 }
 
+// 컷아웃(투명 PNG) 여부 — 가장자리 8점의 알파를 표본해 과반이 투명하면 컷아웃으로 본다.
+// 태그 접미사('(배경제거)')에 의존하지 않는다: 시드/생성 경로마다 태그 규칙이 달라도 실제 투명도로 판별.
+// 결과 캐시(같은 URL 재검사 방지). CORS 차단으로 픽셀을 못 읽으면(taint) 보수적으로 false.
+const cutoutCache = new Map<string, Promise<boolean>>();
+function isCutoutUrl(url: string): Promise<boolean> {
+  let p = cutoutCache.get(url);
+  if (!p) {
+    p = new Promise<boolean>((res) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      let done = false;
+      const settle = (v: boolean) => { if (!done) { done = true; res(v); } };
+      img.onerror = () => settle(false);
+      img.onload = () => {
+        try {
+          const w = img.naturalWidth, h = img.naturalHeight;
+          if (!w || !h) return settle(false);
+          const c = document.createElement("canvas");
+          c.width = w; c.height = h;
+          const ctx = c.getContext("2d");
+          if (!ctx) return settle(false);
+          ctx.drawImage(img, 0, 0);
+          const pts: Array<[number, number]> = [
+            [0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1],
+            [(w >> 1), 0], [(w >> 1), h - 1], [0, (h >> 1)], [w - 1, (h >> 1)],
+          ];
+          let clear = 0;
+          for (const [x, y] of pts) if (ctx.getImageData(x, y, 1, 1).data[3] < 16) clear++;
+          settle(clear >= 5); // 가장자리 과반이 투명 → 컷아웃
+        } catch {
+          settle(false); // getImageData taint(CORS) 등 → 판별 불가 시 제외
+        }
+      };
+      img.src = url;
+      setTimeout(() => settle(false), 12000); // stall 안전장치
+    });
+    cutoutCache.set(url, p);
+  }
+  return p;
+}
+
+// 보드 이미지 갤러리(IDB)에서 '현재 주제'에 맞는 '컷아웃(투명 PNG)' 자산만 골라 꾸미기 그림 후보로 반환.
+//  · 주제 매칭: 자산 태그/그룹을 themeFor 로 분류해 현재 템플릿 주제(themeKey)와 같은 것만.
+//  · 컷아웃 필터: 실제 알파 채널로 투명 여부 판별(장면·배경 이미지는 제외).
+export async function galleryCutoutsForTheme(themeKey: string): Promise<Array<{ url: string; label: string }>> {
+  let assets: Array<{ tag: string; url: string; group?: string }>;
+  try {
+    assets = await listAssets(["image"]);
+  } catch {
+    return [];
+  }
+  // 주제 매칭 + URL 중복 제거
+  const seen = new Set<string>();
+  const matched: Array<{ tag: string; url: string }> = [];
+  for (const a of assets) {
+    if (!a.url || seen.has(a.url)) continue;
+    const k = (themeFor(`${a.tag} ${a.group ?? ""}`) as any)?.key || "default";
+    if (k !== themeKey) continue;
+    seen.add(a.url);
+    matched.push({ tag: a.tag, url: a.url });
+  }
+  // 컷아웃(투명)만 남긴다 — 병렬 판별.
+  const flags = await Promise.all(matched.map((a) => isCutoutUrl(a.url)));
+  return matched.filter((_, i) => flags[i]).map((a) => ({ url: a.url, label: a.tag }));
+}
+
 // 주제 스티커 1개를 해석한다. 기존 에셋이 (실제 로드되면) 재사용, 없으면 생성.
 export async function resolveSticker(ref: StickerAssetRef): Promise<ResolvedSticker | null> {
   const pool = THEME_DECO_ASSETS[ref.themeKey];
@@ -152,7 +219,11 @@ export function hasThemeStickerAssets(themeKey: string): boolean {
 // 놀이기록 payload 의 주제에 맞는 꾸미기 그림(서빙 가능한 에셋) 목록 — 편집 패널 "주제 그림"에 노출.
 // themeKey(현재 선택한 템플릿의 주제)를 주면 그걸 우선 사용 → 제목에 주제어가 없어도(예: "8월 놀이기록")
 // 선택한 여름/교통 템플릿에 맞는 스티커가 뜬다. 없으면(또는 default) payload 텍스트로 감지.
-export function payloadDecoAssets(payload: any, themeKey?: string): Array<{ url: string; label: string }> {
+export function payloadDecoAssets(
+  payload: any,
+  themeKey?: string,
+  extra: Array<{ url: string; label: string }> = [], // 갤러리 컷아웃 등 추가 후보(주제 스티커 뒤·항상노출 앞에 삽입)
+): Array<{ url: string; label: string }> {
   const text = `${payload?.meta?.theme || ""} ${payload?.header?.title || ""}`;
   const key = (themeKey && themeKey !== "default" && THEME_DECO_ASSETS[themeKey])
     ? themeKey
@@ -161,5 +232,8 @@ export function payloadDecoAssets(payload: any, themeKey?: string): Array<{ url:
   const themeList = urls.map((url, i) => ({ url, label: `${key}-${i + 1}` }));
   // 테이프/압정핀 꾸밈 스티커는 항상 노출
   const always = ALWAYS_DECO.map((url, i) => ({ url, label: `deco-${i + 1}` }));
-  return [...themeList, ...always];
+  // 이미 주제 스티커에 있는 URL 은 중복 제거
+  const themeUrls = new Set(themeList.map((t) => t.url));
+  const extraClean = extra.filter((e) => e.url && !themeUrls.has(e.url));
+  return [...themeList, ...extraClean, ...always];
 }

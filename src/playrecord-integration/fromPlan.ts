@@ -2,7 +2,7 @@
 // 계획 노드: data.role='plan' 이고 data.payload = { type:'WeeklyPlanGrid', props:{ title, days:[{day,area,activity,materials,goal}] } }.
 // 계획 doc 카드는 프레임 안(data.frameId)에 있으므로, 프레임에서 그 계획 노드를 찾아 매핑한다.
 import { useBoardStore, type BoardNode } from '@/store/boardStore';
-import { usePlayEditorStore } from './store';
+import { spawnEditorCard } from './spawnEditorCard';
 
 interface WeeklyDay { day?: string; area?: string; activity?: string; materials?: string; goal?: string }
 interface WeeklyPlanPayload { type?: string; props?: { title?: string; days?: WeeklyDay[] } }
@@ -52,7 +52,7 @@ export function planNodeToPayload(node: BoardNode) {
 export function openPlanInEditor(frameOrNodeId: string): void {
   const node = findPlanNode(frameOrNodeId);
   if (!node) return;
-  usePlayEditorStore.getState().openEditor('weeklyplan', planNodeToPayload(node));
+  spawnEditorCard('weeklyplan', planNodeToPayload(node));
 }
 
 /** 월간계획(WeeklyPlanGrid의 days=주차) → 월안(weekly_flow) payload 로 변환.
@@ -89,5 +89,5 @@ export function monthlyNodeToPayload(node: BoardNode) {
 export function openMonthlyInEditor(frameOrNodeId: string): void {
   const node = findPlanNode(frameOrNodeId);
   if (!node) return;
-  usePlayEditorStore.getState().openEditor('monthlyplan-summer', monthlyNodeToPayload(node));
+  spawnEditorCard('monthlyplan-summer', monthlyNodeToPayload(node));
 }

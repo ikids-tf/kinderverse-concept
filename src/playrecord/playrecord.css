@@ -4,6 +4,9 @@
  * (호스트 앱에 동일 변수/클래스가 있으면 값이 같아 무해하게 중복된다.)
  * ===================================================================== */
 
+/* Gowun Dodum(고운돋움) — 가을·추석 카드형 본문 폰트(Figma 놀이기록-카드형-가을추석 55:870 원본). */
+@import url('https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap');
+
 /* ── 폰트 (public/fonts 에 동봉 파일 필요) ── */
 @font-face { font-family: "SUIT"; font-weight: 400; font-display: swap; src: url("/fonts/SUIT-Regular.ttf") format("truetype"); }
 @font-face { font-family: "SUIT"; font-weight: 700; font-display: swap; src: url("/fonts/SUIT-Bold.ttf") format("truetype"); }
