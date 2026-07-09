@@ -47,6 +47,7 @@ import { findAsset, saveAsset } from './assets';
 import { runRecord } from '@/ai/agents/record';
 import { runWriting } from '@/ai/agents/writing';
 import { callGateway } from '@/ai/client';
+import { extractJson } from '@/ai/json';
 import { streamChat } from '@/ai/chat';
 import { buildAgentContext } from '@/ai/context';
 import { PAGE_ACTIONS } from '@/ai/actions';
@@ -1114,10 +1115,327 @@ async function runPackageGame(docId: string, topic: string): Promise<void> {
   }
 }
 
-/** 놀이/프로젝트 패키지(포맷 선택 2단계) — 한 주제 프레임에 아이디어 리스트·계획 문서·활동 예시
-    이미지(활동수)·시청각자료 5장·활동지(≥2)·동영상(뷰어+활동별 썸네일)·게임·이미지 링크를 한 세트로
-    프레임 '안'에 모은다. kind='project'면 계획 문서가 단계별 프로젝트 계획(1주~한 달 심화)으로 바뀐다.
-    새 에이전트 없이 기존 헬퍼 재사용. 자료는 2단계로 병렬 생성, 같은 캡션 자료는 보관함에서 재사용. */
+/* ---------------- Package Planner (동적 패키지 설계도) ----------------
+   놀이 패키지를 '하드코딩된 고정 자료 세트'가 아니라, Package Planner가 주제별로
+   설계한 JSON(play_ideas 12 + assets 6)으로 동적 구성한다. Planner는 실제 콘텐츠를
+   만들지 않는다 — 각 자료의 generation_prompt(무엇을 만들지 지시문)만 낸다. composer가
+   그 프롬프트를 기존 생성 함수(fillRegion/runStudioWorksheet/runPackageGame/
+   fillActivityVideos)에 넘겨 실제 콘텐츠를 만든다. */
+
+type AssetType =
+  | 'real_photo_image'
+  | 'generated_image'
+  | 'worksheet'
+  | 'game'
+  | 'science_video_subframe'
+  | 'song_video_subframe';
+
+type CallTarget =
+  | 'fillRegion'
+  | 'runStudioWorksheet'
+  | 'runPackageGame'
+  | 'fillActivityVideos';
+
+interface PlayIdea {
+  id: string;
+  type: string;
+  asset_types: AssetType[];
+  title: string;
+  description: string;
+}
+
+interface PackageAsset {
+  id: string;
+  source_play_id: string;
+  asset_type: AssetType;
+  type_label: string;
+  call_target: CallTarget;
+  activity_type: string;
+  title: string;
+  generation_prompt: string;
+  description: string;
+}
+
+interface PlayPackagePlan {
+  theme: string;
+  age: number;
+  package: {
+    play_ideas: PlayIdea[];
+    assets: PackageAsset[];
+  };
+}
+
+/** 정확히 이 6종 자산이 각각 1개씩 있어야 유효한 패키지 설계도. */
+const REQUIRED_ASSET_TYPES: AssetType[] = [
+  'real_photo_image',
+  'generated_image',
+  'worksheet',
+  'game',
+  'science_video_subframe',
+  'song_video_subframe',
+];
+
+/** asset_type → call_target 정규 매핑(모델이 틀리게 줘도 이 표로 강제 → 디스패치 안전). */
+const CALL_TARGET_BY_ASSET: Record<AssetType, CallTarget> = {
+  real_photo_image: 'fillRegion',
+  generated_image: 'fillRegion',
+  worksheet: 'runStudioWorksheet',
+  game: 'runPackageGame',
+  science_video_subframe: 'fillActivityVideos',
+  song_video_subframe: 'fillActivityVideos',
+};
+
+const DEFAULT_TYPE_LABEL: Record<AssetType, string> = {
+  real_photo_image: '실사 사진',
+  generated_image: '생성 이미지',
+  worksheet: '활동지',
+  game: '놀이 게임',
+  science_video_subframe: '탐구 영상',
+  song_video_subframe: '동요 영상',
+};
+
+function isAssetType(s: string): s is AssetType {
+  return (REQUIRED_ASSET_TYPES as string[]).includes(s);
+}
+
+/** Package Planner 시스템 프롬프트 — JSON만. 실제 콘텐츠 금지, generation_prompt만 생성. */
+const PACKAGE_PLANNER_SYSTEM = `너는 킨더버스 '놀이 패키지 플래너'다. 유아 놀이/프로젝트 패키지를 구성하는 '설계도(JSON)'만 만든다.
+너는 실제 콘텐츠(이미지·활동지·게임·영상)를 직접 생성하지 않는다 — 각 자료를 만들 '생성 프롬프트(generation_prompt)'만 작성한다.
+인사말·설명·코드펜스 없이 아래 형식의 JSON 객체 하나만 출력한다.
+
+{
+  "theme": string,
+  "age": number,
+  "package": {
+    "play_ideas": [ 12개 — { "id": string, "type": string, "asset_types": string[], "title": string, "description": string } ],
+    "assets": [ 6개 — 아래 6개 asset_type을 각각 정확히 1개씩 ]
+  }
+}
+
+[play_ideas — 12개]
+- 서로 겹치지 않는 유아 놀이 아이디어 12개. title 8~16자(놀이임이 드러나게), description 1~2문장(놀이 전개).
+- type: 놀이 유형 키워드(탐색·조작·신체·역할·표현·관찰 등 중 하나).
+- asset_types: 이 아이디어로 만들기 좋은 자료 유형(아래 asset_type 값들의 부분집합).
+
+[assets — 정확히 6개, asset_type 하나씩]
+각 asset = { "id", "source_play_id", "asset_type", "type_label", "call_target", "activity_type", "title", "generation_prompt", "description" }
+- asset_type 과 call_target 은 반드시 아래 쌍을 지킨다:
+  · "real_photo_image"        → "fillRegion"
+  · "generated_image"         → "fillRegion"
+  · "worksheet"               → "runStudioWorksheet"
+  · "game"                    → "runPackageGame"
+  · "science_video_subframe"  → "fillActivityVideos"
+  · "song_video_subframe"     → "fillActivityVideos"
+- source_play_id: play_ideas 중 하나의 id.
+- type_label: 한국어 표시명(예: 실사 사진 / 생성 이미지 / 활동지 / 놀이 게임 / 탐구 영상 / 동요 영상).
+- generation_prompt: 그 자료를 실제로 생성할 한국어 지시문(콘텐츠 자체가 아니라 '무엇을 만들지'). 이미지는 장면·구도, 활동지는 활동 유형, 게임은 놀이 게임 주제, 영상은 검색 주제.
+- activity_type: 연결된 놀이 유형 키워드.`;
+
+/** asset_type에 따라 영상 검색 쿼리를 분기 — 프레임 UI는 동일, 검색 로직만 다르다. */
+function getVideoQuery(asset: PackageAsset, theme: string): string {
+  if (asset.asset_type === 'song_video_subframe') {
+    return `${theme} 유아 동요 율동 ${asset.title}`;
+  }
+  if (asset.asset_type === 'science_video_subframe') {
+    return `${asset.title} 유아 탐구 실험 ${theme}`;
+  }
+  return asset.generation_prompt;
+}
+
+/** Planner 출력 최소 검증 + 정규화. 6종 자산이 모두 있고 generation_prompt가 채워졌는지 확인하고
+    call_target을 표준 매핑으로 강제한다. 하나라도 빠지면 null(→ 폴백). */
+function validatePackagePlan(obj: unknown, theme: string, age: number): PlayPackagePlan | null {
+  if (!obj || typeof obj !== 'object') return null;
+  const root = obj as { theme?: unknown; age?: unknown; package?: { play_ideas?: unknown; assets?: unknown } };
+  const pkg = root.package;
+  if (!pkg || typeof pkg !== 'object') return null;
+  const rawIdeas = Array.isArray(pkg.play_ideas) ? pkg.play_ideas : [];
+  const rawAssets = Array.isArray(pkg.assets) ? pkg.assets : [];
+  if (!rawIdeas.length || !rawAssets.length) return null;
+
+  const ideas: PlayIdea[] = rawIdeas
+    .map((it, i): PlayIdea | null => {
+      const o = (it ?? {}) as Record<string, unknown>;
+      const title = String(o.title ?? '').trim();
+      if (!title) return null;
+      return {
+        id: String(o.id ?? `pi_${i + 1}`),
+        type: String(o.type ?? 'play'),
+        asset_types: Array.isArray(o.asset_types) ? o.asset_types.map(String).filter(isAssetType) : [],
+        title,
+        description: String(o.description ?? '').trim(),
+      };
+    })
+    .filter((x): x is PlayIdea => x !== null);
+  if (!ideas.length) return null;
+
+  // 6종 asset_type을 각각 1개씩 — 첫 유효 자산만 채택. 하나라도 없으면 무효.
+  const byType = new Map<AssetType, PackageAsset>();
+  for (const it of rawAssets) {
+    const o = (it ?? {}) as Record<string, unknown>;
+    const at = String(o.asset_type ?? '');
+    if (!isAssetType(at) || byType.has(at)) continue;
+    const gp = String(o.generation_prompt ?? '').trim();
+    if (!gp) continue;
+    byType.set(at, {
+      id: String(o.id ?? `as_${at}`),
+      source_play_id: String(o.source_play_id ?? ideas[0].id),
+      asset_type: at,
+      type_label: String(o.type_label ?? DEFAULT_TYPE_LABEL[at]),
+      call_target: CALL_TARGET_BY_ASSET[at], // 표준 매핑 강제
+      activity_type: String(o.activity_type ?? ideas[0].type),
+      title: String(o.title ?? ideas[0].title).trim() || ideas[0].title,
+      generation_prompt: gp,
+      description: String(o.description ?? '').trim(),
+    });
+  }
+  const assets = REQUIRED_ASSET_TYPES.map((t) => byType.get(t)).filter((x): x is PackageAsset => x !== undefined);
+  if (assets.length !== REQUIRED_ASSET_TYPES.length) return null;
+
+  return {
+    theme: String(root.theme ?? theme) || theme,
+    age: typeof root.age === 'number' ? root.age : age,
+    package: { play_ideas: ideas, assets },
+  };
+}
+
+/** Planner 실패/무키 시의 결정적 폴백 설계도 — 12 아이디어 + 6 자산(각 1개). */
+function fallbackPackagePlan(theme: string, age: number): PlayPackagePlan {
+  const t = (theme || '놀이').trim();
+  const ideas: PlayIdea[] = Array.from({ length: 12 }, (_, i) => ({
+    id: `pi_${i + 1}`,
+    type: 'play',
+    asset_types: [],
+    title: `${t} 놀이 ${i + 1}`,
+    description: `${t}을(를) 주제로 유아가 직접 탐색하고 표현하는 놀이 ${i + 1}.`,
+  }));
+  const mk = (at: AssetType, title: string, gp: string): PackageAsset => ({
+    id: `as_${at}`,
+    source_play_id: ideas[0].id,
+    asset_type: at,
+    type_label: DEFAULT_TYPE_LABEL[at],
+    call_target: CALL_TARGET_BY_ASSET[at],
+    activity_type: 'play',
+    title,
+    generation_prompt: gp,
+    description: title,
+  });
+  const assets: PackageAsset[] = [
+    mk('real_photo_image', `${t} 실사 사진`, `${t}의 실제 모습을 담은 사실적인 사진 스타일 이미지 한 장`),
+    mk('generated_image', `${t} 활동 장면`, `${t} 놀이를 즐기는 유아들의 밝은 일러스트 이미지 한 장`),
+    mk('worksheet', `${t} 활동지`, `${t}을(를) 주제로 만 ${age}세가 할 수 있는 활동지`),
+    mk('game', `${t} 게임`, `${t} 놀이 게임`),
+    mk('science_video_subframe', `${t} 탐구`, `${t}`),
+    mk('song_video_subframe', `${t} 동요`, `${t}`),
+  ];
+  return { theme: t, age, package: { play_ideas: ideas, assets } };
+}
+
+/** Package Planner 호출 → JSON 파싱 → 최소 검증. 실패하면 결정적 폴백 설계도를 돌려준다
+    (항상 유효한 PlayPackagePlan 반환 — 호출부는 null 걱정 없이 실행만 한다). */
+async function buildPackagePlan(theme: string, ctx: string, kind: LessonKind, raw?: string): Promise<PlayPackagePlan> {
+  const age = 5; // 만 3~5세 대표값(누리 대상). 연령 슬롯이 생기면 여기로 주입.
+  const kindLabel = kind === 'project' ? '프로젝트' : '놀이';
+  const ground = raw?.trim() && raw.trim() !== theme ? `\n[요청 원문]\n${raw.trim().slice(0, 400)}` : '';
+  const tenant = ctx.trim() ? `\n[테넌트/교사 컨텍스트]\n${ctx.trim().slice(0, 600)}` : '';
+  try {
+    const res = await callGateway({
+      task: 'plan',
+      tier: 'mid',
+      provider: 'auto',
+      responseFormat: 'json',
+      fallback: ['high'],
+      system: PACKAGE_PLANNER_SYSTEM,
+      messages: [
+        {
+          role: 'user',
+          content: `주제: "${theme}"\n대상 연령: 만 ${age}세\n패키지 성격: ${kindLabel}${ground}${tenant}\n\n위 규칙대로 play_ideas 12개와 assets 6개(asset_type 하나씩)를 담은 JSON만 출력하라.`,
+        },
+      ],
+      meta: { kind: 'package', title: theme, selected: [] },
+      maxTokens: 4000,
+    });
+    if (res.ok && res.text) {
+      const parsed = validatePackagePlan(extractJson(res.text), theme, age);
+      if (parsed) return parsed;
+    }
+  } catch {
+    /* 네트워크·파싱 실패 → 폴백 */
+  }
+  return fallbackPackagePlan(theme, age);
+}
+
+/** 컨텍스트 — 자산 실행이 참조하는 프레임/스켈레톤 핸들. */
+interface PackageAssetExecCtx {
+  frameId: string;
+  ctx: string;
+  planId?: string;
+  theme: string;
+  created: string[];
+  ytId: string;
+  vFrameId: string;
+  /** 기존 구성의 활동 영상 쿼리 — Planner 영상 자산과 합쳐 한 번의 검색으로 채운다
+      (동영상 서브프레임은 단일 슬롯이라 동시 호출을 피한다). */
+  activities: string[];
+}
+
+/** ★ 추가(additive) 실행 — Planner 설계도의 자산을 '기존 구성 위에' 얹는다. 게임은 단일 슬롯이라
+    메인 블록에서 먼저 실행하고(빈 노드 방지), 여기서는 이미지·활동지 자산을 새 카드로 추가하고,
+    영상 자산은 기존 활동 영상 쿼리와 합쳐 같은 서브프레임에 한 번에 채운다(동시 호출 충돌 방지).
+    영상은 asset_type으로 검색 쿼리만 분기(getVideoQuery). */
+async function executePackageAssets(plan: PlayPackagePlan, ex: PackageAssetExecCtx): Promise<void> {
+  const assets = plan.package.assets;
+  const videoAssets = assets.filter((a) => a.call_target === 'fillActivityVideos');
+  const tasks: Promise<void>[] = [];
+
+  for (const asset of assets) {
+    if (asset.call_target === 'fillRegion') {
+      // real_photo_image · generated_image → 스튜디오 이미지 1장 추가(생성 프롬프트 사용).
+      tasks.push(
+        fillRegion(ex.frameId, 'studio.images', asset.generation_prompt, ex.ctx, undefined, 'story', undefined, 1)
+          .then((r) => { ex.created.push(...r.ids); })
+          .catch(() => {}),
+      );
+    } else if (asset.call_target === 'runStudioWorksheet') {
+      // worksheet → A4 워크시트 1장 추가(생성 프롬프트 + 계획 planId 컨텍스트).
+      tasks.push(
+        (async () => {
+          const cid = spawnPlaceholderDoc(ex.frameId, 'worksheet');
+          ex.created.push(cid);
+          try {
+            const res = await runStudioWorksheet(asset.generation_prompt, buildAgentContext('studio'), ex.planId);
+            fillPlaceholderDoc(cid, payloadText(res.payload), res.payload);
+          } catch {
+            failPlaceholderDoc(cid, `‘${asset.title}’ 활동지 생성에 실패했어요.`);
+          }
+        })(),
+      );
+    }
+    // runPackageGame: 단일 게임 슬롯 → 메인 블록에서 먼저 실행. fillActivityVideos: 아래에서 묶어 실행.
+  }
+
+  // 동영상 — 같은 서브프레임(vFrameId)·뷰어(ytId)에 Planner 영상 자산(탐구·동요) + 기존 활동 영상을
+  //   한 번에 채운다. topic=''로 넘겨 미리 만든 완성 쿼리를 그대로 검색에 쓴다(자산 영상 우선, 총 6개).
+  const assetQueries = videoAssets.map((a) => getVideoQuery(a, ex.theme));
+  const activityQueries = ex.activities.map((a) => `${ex.theme} ${a}`.trim());
+  const videoQueries = [...assetQueries, ...activityQueries].map((s) => s.trim()).filter(Boolean).slice(0, 6);
+  if (videoQueries.length) {
+    tasks.push(
+      fillActivityVideos(ex.ytId, ex.vFrameId, '', videoQueries)
+        .then((vids) => { ex.created.push(...vids); })
+        .catch(() => {}),
+    );
+  }
+
+  await Promise.all(tasks);
+}
+
+/** 놀이/프로젝트 패키지 — 한 주제 프레임에 ① 기존 구성(아이디어 리스트·계획 문서·시청각자료 5장·활동
+    예시 이미지·활동지≥2·활동별 동영상·게임·이미지 링크)을 그대로 유지하고, ② 그 위에 Package Planner가
+    주제/연령/요청에 맞춰 동적 설계한 자산(실사/생성 이미지·활동지·탐구/동요 영상)을 '추가로' 함께 얹는다.
+    게임·동영상 서브프레임은 단일 슬롯이라 Planner 프롬프트로 그 슬롯을 채운다(중복 생성 없음). Planner는
+    콘텐츠를 직접 만들지 않고 generation_prompt만 내며, executePackageAssets가 call_target별 기존 생성
+    함수로 실행한다. kind='project'면 계획 문서가 단계별 프로젝트 계획(1주~한 달 심화)으로 바뀐다. */
 export async function buildPlayPackage(topic: string, kind: LessonKind = 'play'): Promise<void> {
   const b = useBoardStore.getState();
   b.beginGen();
@@ -1188,13 +1506,24 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
     b.setSelection([frameId]); // addPresetNodeCmd가 게임 노드를 선택 → 프레임 선택으로 되돌림
     gridDeOverlap(frameId); // 스켈레톤 1차 정돈(자리 안정)
 
-    // 게임 생성을 '먼저' 시작 — 이미지 배치(10여 장)가 API를 다 쓴 뒤 마지막에 시작하면 빈 노드로
-    //   남던 문제를 막는다. 비동기·자체 gen 카운터(빈 채로 끝나면 1회 재시도).
-    void runPackageGame(gameDocId, t);
+    // ── Package Planner ── 주제/연령/요청에 따라 패키지 설계도(JSON)를 동적으로 받는다:
+    //   play_ideas 12 + assets 6. 실패해도 항상 유효한 폴백 설계도를 반환한다(호출부는 null 걱정 없음).
+    //   이 설계도의 자산은 '기존 구성' 위에 추가로 얹힌다(하드룰: 기존 유지 + 추가 함께 구성).
+    say('🧭 패키지 구성을 설계하고 있어요…');
+    const plan = await buildPackagePlan(t, ctx, kind, topic);
 
-    // ── 1단계 병렬 채움 ── 아이디어 · 계획 문서 · 시청각자료 5장(주제 핵심 사물 낱장 그림 카드).
-    //    계획은 프로젝트면 단계별 프로젝트 계획, 아니면 주간 놀이계획. 시청각자료는 같은 캡션만 재사용.
+    // 아이디어 리스트 — ★ 기존 방식(runPlanIdeas) 그대로 12개. 활동명 품질("~색칠하기·~만들기·여름
+    //   과일탐구" 스타일)을 위해 검증된 아이디어 에이전트를 쓴다. Planner의 play_ideas는 '자산 설계용'
+    //   이라 여기 표시 리스트와 별개(폴백 시 제너릭 이름이 리스트로 새지 않게 분리).
     let ideas: IdeaItem[] = [];
+
+    // 게임 먼저 시작(단일 게임 슬롯) — 이미지 배치가 API를 점유하기 전에 시작해 빈 노드로 남던 문제를
+    //   막는다. 프롬프트는 Planner의 game 자산에서, 없으면 주제로 폴백. 비동기·자체 gen 카운터.
+    const gameAsset = plan.package.assets.find((a) => a.asset_type === 'game');
+    void runPackageGame(gameDocId, gameAsset?.generation_prompt || t);
+
+    // ── 1단계 병렬 채움(기존 구성 유지) ── 아이디어 12 · 계획 문서 · 시청각자료 5장(주제 핵심 사물 낱장 그림 카드).
+    //    계획은 프로젝트면 단계별 프로젝트 계획, 아니면 주간 놀이계획. 시청각자료는 같은 캡션만 재사용.
     let planId: string | undefined;
     await Promise.all([
       runPlanIdeas(t, ctx, 12)
@@ -1225,12 +1554,13 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
     if (!activities.length) activities = ideas.slice(0, 5).map((it) => it.label);
     activities = activities.slice(0, 6);
 
-    // ── 2단계 병렬 채움 ── 활동 예시 이미지(활동수만큼) · 활동지≥2 · 활동별 동영상 썸네일.
+    // ── 2단계 병렬 채움 ── 기존 구성(활동 예시 이미지 · 활동지≥2 · 활동별 동영상) 위에 Planner 자산
+    //    (실사/생성 이미지 · 활동지 · 탐구/동요 영상)을 함께 얹는다. 영상은 같은 서브프레임에 한 번에.
     say('🎨 활동별 자료를 만들고 있어요…');
     await Promise.all([
-      // 활동 예시 이미지 — 계획 활동수만큼(최대 5). 같은 활동명 자료만 보관함에서 재사용, 나머지 생성.
+      // (기존) 활동 예시 이미지 — 계획 활동수만큼(최대 5). 같은 활동명 자료만 보관함에서 재사용.
       generateActivityImages(frameId).catch(() => {}),
-      // 활동지 ≥ 2 — 활동지가 필요한 활동을 골라 각각 A4 워크시트로.
+      // (기존) 활동지 ≥ 2 — 활동지가 필요한 활동을 골라 각각 A4 워크시트로.
       (async () => {
         for (const act of pickWorksheetActivities(activities, t)) {
           const cid = spawnPlaceholderDoc(frameId, 'worksheet');
@@ -1243,8 +1573,8 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
           }
         }
       })(),
-      // 동영상 — 활동별 영상 썸네일(클릭 → 위 유튜브 뷰어에서 재생). 동영상 서브프레임 멤버로 추가(뷰어 아래 행).
-      fillActivityVideos(ytId, vFrameId, t, activities).then((vids) => created.push(...vids)).catch(() => {}),
+      // (추가) Planner 설계도 자산 — 이미지/활동지 새 카드 추가 + 영상 자산은 기존 활동 영상과 합쳐 채움.
+      executePackageAssets(plan, { frameId, ctx, planId, theme: t, created, ytId, vFrameId, activities }),
     ]);
     // 동영상 서브프레임을 내용(뷰어 + 썸네일)에 맞춰 감싼다(프레임 안에 프레임이 깔끔히 닫히게).
     fitFrameToChildren(vFrameId);
