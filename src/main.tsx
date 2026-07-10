@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initBoardPersistence } from './board/persist';
 import { initCloudSync } from './lib/cloudSync';
+import { initCloudRealtime } from './lib/cloudRealtime';
 import { installLocalStorageMirror } from './lib/cloudMirror';
 import './index.css';
 
@@ -15,6 +16,7 @@ void (async () => {
   installLocalStorageMirror(); // 이후 모든 localStorage 쓰기를 클라우드로 미러(앱 로드 전 설치)
   await initCloudSync();
   initBoardPersistence();
+  initCloudRealtime(); // 열린 탭에도 다른 기기의 변경을 실시간 반영(보드는 스토어까지)
 
   if (import.meta.env.DEV) {
     void import('./dev/perfTools');

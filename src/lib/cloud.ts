@@ -90,21 +90,56 @@ export async function cloudPull<T = unknown>(key: string): Promise<T | null> {
   }
 }
 
+/* ── 변경 알림(Realtime 브로드캐스트용) ─────────────────────────────────────
+   push/delete가 클라우드에 반영된 '후' 리스너에게 알린다. cloudRealtime이 구독해
+   다른 탭/기기에 "이 키 바뀜"을 방송한다. 리스너 없으면 no-op(순환 import 회피용 콜백 등록). */
+export interface CloudMutation {
+  k: string;
+  /** 행에 기록된 updated_at — 수신측 신선도 판정용. */
+  at?: string;
+  deleted?: boolean;
+}
+let mutationListener: ((m: CloudMutation) => void) | null = null;
+export function onCloudMutation(cb: (m: CloudMutation) => void): void {
+  mutationListener = cb;
+}
+
 /** 즉시 push(이미지 외부화 후 upsert). 실패는 콘솔 경고만(앱 흐름 방해 안 함). */
 export async function cloudPushNow(key: string, value: unknown): Promise<void> {
   if (!isCloudEnabled() || !supabase) return;
   try {
     const externalized = await externalizeAssets(value);
+    const at = new Date().toISOString();
     const { error } = await supabase
       .from(KV_TABLE)
-      .upsert({ k: key, v: externalized as unknown, updated_at: new Date().toISOString() });
+      .upsert({ k: key, v: externalized as unknown, updated_at: at });
     if (error) {
       // eslint-disable-next-line no-console
       console.warn('[cloud] push 실패', key, error.message);
+    } else {
+      mutationListener?.({ k: key, at });
     }
   } catch (e) {
     // eslint-disable-next-line no-console
     console.warn('[cloud] push 오류', key, e);
+  }
+}
+
+/** 클라우드 행 삭제(보드 삭제 시 per-board 스냅샷 행 정리). 실패는 경고만. */
+export async function cloudDeleteNow(key: string): Promise<void> {
+  if (!isCloudEnabled() || !supabase) return;
+  try {
+    const { error } = await supabase.from(KV_TABLE).delete().eq('k', key);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[cloud] delete 실패', key, error.message);
+    } else {
+      markLocalWrite(key); // 삭제도 로컬 쓰기 — 옛 클라우드 스냅으로의 부활 방지
+      mutationListener?.({ k: key, at: new Date().toISOString(), deleted: true });
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[cloud] delete 오류', key, e);
   }
 }
 
