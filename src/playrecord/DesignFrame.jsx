@@ -893,9 +893,9 @@ function EditableEl({ el, scale, active, flatZ, editing, onSelect, onCycle, onEd
       //    적용돼(스펙상 rotate 후 transform) translate 가 회전된 좌표계에서 일어난다. 그러면 회전 요소가
       //    선택(EditableEl)/해제(DesignEl) 토글 시 (R−I)·(x,y) 만큼 위치가 튀는 버그가 생긴다.
       //    회전을 내부 래퍼로 옮기면 박스는 순수 translate(위치)만 → DesignEl(left/top+rotate)과 정확히 일치.
-      // 선택한 스티커/텍스트는 편집을 위해 위로 띄우되(z20), 사진·도형은 띄우지 않는다
-      // → 앞으로 올린 스티커가 사진을 선택해도 다시 가려지지 않음. 재정렬 직후(flatZ)엔 실제 순서로 렌더해 결과를 즉시 보여줌.
-      style={{ zIndex: active && !flatZ && el.type !== "shape" && el.type !== "photo" ? 20 : 1 }}
+      // 선택한 텍스트만 편집을 위해 위로 띄우되(z20), 이미지·사진·도형은 띄우지 않는다(실제 순서 그대로 = WYSIWYG).
+      // → 이미지도 '앞으로/맨 앞' 레이어 이동이 즉시 눈에 보인다(띄우면 선택 시 이미 위라 이동이 안 보였음).
+      style={{ zIndex: active && !flatZ && el.type === "text" ? 20 : 1 }}
     >
       {active && !editing && (
         <div
