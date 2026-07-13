@@ -15,6 +15,7 @@ import {
   placeInFrame,
   planText,
   planDocMarkdown,
+  playIdeaListMarkdown,
   projectDocMarkdown,
   worksheetText,
   topicFor,
@@ -42,7 +43,7 @@ import { ruleBasedVariant, asLayoutVariant, ruleBasedSpec } from './design-spec'
 import { runDesignDirector } from '@/ai/agents/design';
 import { pickTemplate, type FrameTemplate, type FrameRegion, type FillAgent } from './templates';
 import { runRouter } from '@/ai/agents/router';
-import { runPlanIdeas, runPlan, runMindMapActivities, type MindActivity, type IdeaItem } from '@/ai/agents/plan';
+import { runPlanIdeas, runPlayIdeaList, runPlan, runMindMapActivities, type MindActivity, type IdeaItem } from '@/ai/agents/plan';
 import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImage, KV_ART_STYLE, KV_CUTOUT_STYLE } from '@/ai/agents/studio';
 import { findAsset, saveAsset } from './assets';
 import { runRecord } from '@/ai/agents/record';
@@ -991,10 +992,9 @@ export async function generateIdeaList(topic: string): Promise<void> {
   });
   b.focusNode(frameId);
   try {
-    const ideas = await runPlanIdeas(t, buildAgentContext('plan'), 20).catch(() => [] as IdeaItem[]);
-    const lines = ideas.map((it, i) => `${i + 1}. **${it.label}**${it.desc ? ` — ${it.desc}` : ''}`);
-    const md = lines.length
-      ? `# 💡 ${t} 놀이 아이디어 ${lines.length}가지\n\n${lines.join('\n')}`
+    const ideas = await runPlayIdeaList(t, buildAgentContext('plan'), 6).catch(() => [] as IdeaItem[]);
+    const md = ideas.length
+      ? playIdeaListMarkdown(ideas, `${t} 놀이 아이디어`)
       : `# 💡 ${t} 놀이 아이디어\n\n아이디어 생성에 실패했어요. 다시 시도해 주세요.`;
     // role 'idealist' → NodeView가 선택형 행으로 렌더(각 아이디어 클릭 선택). text는 내보내기·폴백용.
     const cardId = spawnDocCard(frameId, md, 'idealist', 560);
@@ -1079,6 +1079,31 @@ function pickWorksheetActivities(activities: string[], topic: string): string[] 
   const picks = ordered.slice(0, 3);
   while (picks.length < 2) picks.push(`${topic} 활동 ${picks.length + 1}`); // 활동이 모자라도 최소 2개
   return picks;
+}
+
+/** 활동지 중복 제거 — 활동/생성프롬프트 문자열을 정규화(공백·활동지 상투어·꼬리 번호 제거)한 키로 묶어
+    같은 내용 활동지가 한 번만 생성되게 한다. 서로 다른 활동은 그대로 유지(패키지는 여러 장 유지, 중복만 제거).
+    예전엔 레거시(계획 활동) 루프와 Planner 자산 루프가 같은 주제 활동지를 각각 만들어 거의 똑같은
+    활동지가 3~4장 생기던 문제를 이 합침·중복제거로 없앤다. */
+function dedupeWorksheetJobs(jobs: string[]): string[] {
+  const norm = (s: string) =>
+    String(s || '')
+      .toLowerCase()
+      .replace(/\s+/g, '')
+      .replace(/활동지|워크시트|을주제로|를주제로|주제로|만\d+세가?|할수있는|만들기|해요/g, '')
+      .replace(/\d+$/, '')
+      .trim();
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const j of jobs) {
+    const raw = String(j || '').trim();
+    if (!raw) continue;
+    const key = norm(raw) || raw.toLowerCase(); // 상투어만 있어 비면 원문으로 폴백(과잉 병합 방지)
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(raw);
+  }
+  return out;
 }
 
 /** 이미지 링크 카드를 패키지 프레임 '안'에 만든다(role 'source' + frameId 멤버) — 활동수만큼,
@@ -1419,21 +1444,8 @@ async function executePackageAssets(plan: PlayPackagePlan, ex: PackageAssetExecC
           .then((r) => { ex.created.push(...r.ids); })
           .catch(() => {}),
       );
-    } else if (asset.call_target === 'runStudioWorksheet') {
-      // worksheet → A4 워크시트 1장 추가(생성 프롬프트 + 계획 planId 컨텍스트).
-      tasks.push(
-        (async () => {
-          const cid = spawnPlaceholderDoc(ex.frameId, 'worksheet');
-          ex.created.push(cid);
-          try {
-            const res = await runStudioWorksheet(asset.generation_prompt, buildAgentContext('studio'), ex.planId);
-            fillPlaceholderDoc(cid, payloadText(res.payload), res.payload);
-          } catch {
-            failPlaceholderDoc(cid, `‘${asset.title}’ 활동지 생성에 실패했어요.`);
-          }
-        })(),
-      );
     }
+    // worksheet: 호출부(buildPlayPackage)에서 레거시 활동지와 합쳐 중복 제거 후 생성 → 여기선 만들지 않는다.
     // runPackageGame: 단일 게임 슬롯 → 메인 블록에서 먼저 실행. fillActivityVideos: 아래에서 묶어 실행.
   }
 
@@ -1577,26 +1589,34 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
     if (!activities.length) activities = ideas.slice(0, 5).map((it) => it.label);
     activities = activities.slice(0, 6);
 
-    // ── 2단계 병렬 채움 ── 기존 구성(활동 예시 이미지 · 활동지≥2 · 활동별 동영상) 위에 Planner 자산
-    //    (실사/생성 이미지 · 활동지 · 탐구/동요 영상)을 함께 얹는다. 영상은 같은 서브프레임에 한 번에.
+    // ── 2단계 병렬 채움 ── 기존 구성(활동 예시 이미지 · 활동지 · 활동별 동영상) 위에 Planner 자산
+    //    (실사/생성 이미지 · 탐구/동요 영상)을 함께 얹는다. 영상은 같은 서브프레임에 한 번에.
+    // ★ 활동지는 레거시(계획 활동)와 Planner 설계 활동지를 '하나의 목록'으로 합쳐 정규화 키로 중복
+    //   제거한 뒤 한 경로에서만 생성한다 — 같은 주제 활동지가 두 경로에서 각각 만들어져 거의 똑같은
+    //   활동지가 여러 장 생기던 문제 해결(사용자 선택: 여러 장 유지, 중복만 제거). Planner 활동지는
+    //   여기서 처리하므로 executePackageAssets는 더 이상 활동지를 만들지 않는다.
+    const worksheetJobs = dedupeWorksheetJobs([
+      ...pickWorksheetActivities(activities, t),
+      ...plan.package.assets.filter((a) => a.call_target === 'runStudioWorksheet').map((a) => a.generation_prompt),
+    ]);
     say('🎨 활동별 자료를 만들고 있어요…');
     await Promise.all([
       // (기존) 활동 예시 이미지 — 계획 활동수만큼(최대 5). 같은 활동명 자료만 보관함에서 재사용.
       generateActivityImages(frameId).catch(() => {}),
-      // (기존) 활동지 ≥ 2 — 활동지가 필요한 활동을 골라 각각 A4 워크시트로.
+      // 활동지 — 중복 제거된 목록만큼 각각 A4 워크시트로(레거시 + Planner 통합).
       (async () => {
-        for (const act of pickWorksheetActivities(activities, t)) {
+        for (const job of worksheetJobs) {
           const cid = spawnPlaceholderDoc(frameId, 'worksheet');
           created.push(cid);
           try {
-            const res = await runStudioWorksheet(act, buildAgentContext('studio'), planId);
+            const res = await runStudioWorksheet(job, buildAgentContext('studio'), planId);
             fillPlaceholderDoc(cid, payloadText(res.payload), res.payload);
           } catch {
-            failPlaceholderDoc(cid, `‘${act}’ 활동지 생성에 실패했어요.`);
+            failPlaceholderDoc(cid, `‘${job}’ 활동지 생성에 실패했어요.`);
           }
         }
       })(),
-      // (추가) Planner 설계도 자산 — 이미지/활동지 새 카드 추가 + 영상 자산은 기존 활동 영상과 합쳐 채움.
+      // (추가) Planner 설계도 자산 — 이미지 새 카드 추가 + 영상 자산은 기존 활동 영상과 합쳐 채움.
       executePackageAssets(plan, { frameId, ctx, planId, theme: t, created, ytId, vFrameId, activities }),
     ]);
     // 동영상 서브프레임을 내용(뷰어 + 썸네일)에 맞춰 감싼다(프레임 안에 프레임이 깔끔히 닫히게).
