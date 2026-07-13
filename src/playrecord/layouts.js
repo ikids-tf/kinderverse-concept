@@ -1957,6 +1957,88 @@ const TEMPLATE_REGISTRY = {
 
 // 조합 id 문자열 → { build, photos } (없는 조합은 default 로 폴백).
 // 놀이주제망(topicweb)은 테마×가족 조합이 아닌 단일 템플릿 → 특수 처리.
+// ════════════ 미로 찾기 활동지 (알고리즘 완전 미로 = 항상 풀림) ════════════
+// AI 이미지는 풀리는 미로를 못 그린다 → recursive-backtracker로 완전 미로(모든 셀이 유일 경로로
+// 연결)를 만들어 벽을 사각형으로 렌더. 출발/도착은 주제 캐릭터. payload: { maze:true, header.title,
+// meta.theme, introduction.text, start:{label,src}, goal:{label,src} }. 주제 시드로 배치 고정(재현성).
+export function buildMazeDoc(payload) {
+  const d = payload || {};
+  const W = A4.W, H = A4.H;
+  const title = d.header?.title || "미로 찾기";
+  const intro = d.introduction?.text || "";
+  const m = maker();
+  const els = [{ id: "mz-bg", type: "shape", x: 0, y: 0, w: W, h: H, locked: true, style: { bg: "#ffffff", radius: 0 } }];
+
+  // ── 헤더(초록 톤) ──
+  const tag = d.meta?.tag || "미로찾기";
+  const tagW = Math.min(300, 44 + [...tag].length * 15);
+  els.push(m.shape(28, 24, tagW, 34, { bg: "#eef7f0", radius: 999, stroke: "#93c79f", strokeWidth: 2 }));
+  els.push(m.text(28, 24, tagW, 34, tag, { fontSize: 14, fontFamily: LABEL_FONT, color: "#5fa06e", align: "center", valign: "center" }));
+  els.push(m.text(28, 64, 520, 50, title, { fontSize: 34, fontFamily: HEAD_FONT, color: "#4a9a63", align: "left", valign: "center" }, { textRole: "title" }));
+  if (intro) els.push(m.text(30, 120, 560, 26, intro, { fontSize: 15, fontFamily: BODY_FONT, color: "#6a6a6a", align: "left", valign: "center" }));
+  els.push(m.text(590, 30, 60, 30, "이름:", { fontSize: 16, fontFamily: LABEL_FONT, color: "#5a5a5a", align: "left", valign: "center" }));
+  els.push(m.shape(642, 54, 124, 2, { bg: "#c9c0b4", radius: 0 }));
+
+  // ── 완전 미로 생성 (recursive backtracker) ──
+  const COLS = 5, ROWS = 6;
+  const ox = 60, oy = 178, mw = W - 120, mh = H - oy - 60;
+  const cw = mw / COLS, ch = mh / ROWS;
+  // 주제 문자열 시드 PRNG(xorshift) — 같은 주제면 같은 미로(재현성).
+  const seedStr = `${d.meta?.theme || title}-${COLS}x${ROWS}`;
+  let s = 2166136261 >>> 0;
+  for (let i = 0; i < seedStr.length; i++) { s ^= seedStr.charCodeAt(i); s = Math.imul(s, 16777619) >>> 0; }
+  const rng = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  const idx = (r, c) => r * COLS + c;
+  const wall = Array.from({ length: ROWS * COLS }, () => [true, true, true, true]); // [N,E,S,W]
+  const seen = new Array(ROWS * COLS).fill(false);
+  const DIRS = [[-1, 0, 0, 2], [0, 1, 1, 3], [1, 0, 2, 0], [0, -1, 3, 1]]; // dr,dc,wallIdx,oppIdx
+  const stack = [[0, 0]]; seen[idx(0, 0)] = true;
+  while (stack.length) {
+    const [r, c] = stack[stack.length - 1];
+    const nb = [];
+    for (const [dr, dc, wi, oi] of DIRS) {
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && !seen[idx(nr, nc)]) nb.push([nr, nc, wi, oi]);
+    }
+    if (!nb.length) { stack.pop(); continue; }
+    const [nr, nc, wi, oi] = nb[Math.floor(rng() * nb.length)];
+    wall[idx(r, c)][wi] = false;
+    wall[idx(nr, nc)][oi] = false;
+    seen[idx(nr, nc)] = true;
+    stack.push([nr, nc]);
+  }
+
+  // ── 출발/도착 셀 강조(벽보다 먼저 → 벽이 위에) ──
+  els.push(m.shape(Math.round(ox + 6), Math.round(oy + 6), Math.round(cw - 12), Math.round(ch - 12), { bg: "#eaf3fb", radius: 12 }));
+  els.push(m.shape(Math.round(ox + (COLS - 1) * cw + 6), Math.round(oy + (ROWS - 1) * ch + 6), Math.round(cw - 12), Math.round(ch - 12), { bg: "#fbeeee", radius: 12 }));
+
+  // ── 벽 렌더 (각 셀의 N·W 벽 + 외곽 S·E). 출발 상단·도착 하단은 입·출구로 개방. ──
+  const WT = 6, WC = "#5a5a5a";
+  const hWall = (x, y, len) => els.push(m.shape(Math.round(x), Math.round(y - WT / 2), Math.round(len), WT, { bg: WC, radius: WT / 2 }));
+  const vWall = (x, y, len) => els.push(m.shape(Math.round(x - WT / 2), Math.round(y), WT, Math.round(len), { bg: WC, radius: WT / 2 }));
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const x = ox + c * cw, y = oy + r * ch;
+      if (wall[idx(r, c)][0] && !(r === 0 && c === 0)) hWall(x, y, cw); // N (출발 상단 개방)
+      if (wall[idx(r, c)][3]) vWall(x, y, ch); // W
+    }
+  }
+  for (let c = 0; c < COLS; c++) if (c !== COLS - 1) hWall(ox + c * cw, oy + ROWS * ch, cw); // 하단(도착 아래 개방)
+  for (let r = 0; r < ROWS; r++) vWall(ox + COLS * cw, oy + r * ch, ch); // 우측
+
+  // ── 출발/도착 캐릭터(모서리 셀) ──
+  const isz = Math.round(Math.min(cw, ch) * 0.62);
+  const placeChar = (r, c, o, color) => {
+    const cx = ox + c * cw, cy = oy + r * ch;
+    if (o && o.src) els.push({ id: `mz-img-${r}-${c}`, type: "image", src: o.src, fit: "contain", x: Math.round(cx + (cw - isz) / 2), y: Math.round(cy + (ch - isz) / 2 - 8), w: isz, h: isz, style: { radius: 0 } });
+    els.push(m.text(cx, Math.round(cy + ch - 26), Math.round(cw), 20, (o && o.label) || "", { fontSize: 13, fontFamily: LABEL_FONT, color, align: "center", valign: "center" }));
+  };
+  placeChar(0, 0, d.start, "#5f92b0");
+  placeChar(ROWS - 1, COLS - 1, d.goal, "#cf7f7f");
+
+  return { output_type: "DesignDoc", title, frame: { w: W, h: H, bg: "#ffffff" }, elements: els };
+}
+
 function templateEntry(id) {
   if (id === "topicweb") return { build: buildTopicWebDoc, photos: 0 };
   if (id === "weeklyplan") return { build: buildWeeklyPlanDoc, photos: 0 };
@@ -1966,13 +2048,14 @@ function templateEntry(id) {
   if (id === "shadow-match") return { build: buildShadowMatchDoc, photos: 0 };
   if (id === "hangul-writing") return { build: buildHangulWritingDoc, photos: 0 };
   if (id === "headband") return { build: buildHeadbandDoc, photos: 0 };
+  if (id === "maze") return { build: buildMazeDoc, photos: 0 };
   const [theme, family] = String(id).split("-");
   const set = TEMPLATE_REGISTRY[theme] || TEMPLATE_REGISTRY.default;
   return set[family] || TEMPLATE_REGISTRY.default[family] || TEMPLATE_REGISTRY.default.card;
 }
 // 유효한 조합 id 인지
 export function isTemplateId(id) {
-  if (id === "topicweb" || id === "weeklyplan" || id === "monthlyplan" || id === "monthlyplan-summer" || id === "half-drawing" || id === "counting" || id === "shadow-match" || id === "hangul-writing" || id === "headband") return true;
+  if (id === "topicweb" || id === "weeklyplan" || id === "monthlyplan" || id === "monthlyplan-summer" || id === "half-drawing" || id === "counting" || id === "shadow-match" || id === "hangul-writing" || id === "headband" || id === "maze") return true;
   const [theme, family] = String(id).split("-");
   return !!(TEMPLATE_REGISTRY[theme] && TEMPLATE_REGISTRY[theme][family]);
 }
@@ -1997,6 +2080,7 @@ export function templateLabel(id) {
   if (id === "shadow-match") return "그림자를 찾아요";
   if (id === "hangul-writing") return "낱말을 알아요";
   if (id === "headband") return "역할놀이 머리띠";
+  if (id === "maze") return "미로 찾기";
   const [theme, family] = String(id).split("-");
   const t = TEMPLATE_THEMES.find((x) => x.key === theme);
   const f = TEMPLATE_FAMILIES.find((x) => x.key === family);
@@ -2016,6 +2100,7 @@ export function pickerTemplates(payload) {
   if (payload?.shadow_match) return [{ id: "shadow-match", theme: "shadow-match", family: "worksheet", label: "그림자를 찾아요" }];
   if (payload?.hangul_writing) return [{ id: "hangul-writing", theme: "hangul-writing", family: "worksheet", label: "낱말을 알아요" }];
   if (payload?.headband) return [{ id: "headband", theme: "headband", family: "worksheet", label: "역할놀이 머리띠" }];
+  if (payload?.maze) return [{ id: "maze", theme: "maze", family: "worksheet", label: "미로 찾기" }];
   const out = [];
   for (const theme of Object.keys(TEMPLATE_REGISTRY)) {
     if (theme === "default") continue;

@@ -170,12 +170,35 @@ function buildHeadbandPayload(props: WorksheetProps): Record<string, unknown> {
   };
 }
 
+/** '미로 찾기'(maze) — 알고리즘(완전 미로)으로 항상 풀리는 미로. 격자 생성은 layouts.buildMazeDoc이
+ *  담당하고, 여기선 주제 캐릭터(출발·도착) + 안내문만 넘긴다. 주제 에셋이 없어도 미로 자체는 유효. */
+function buildMazePayload(props: WorksheetProps): Record<string, unknown> {
+  const themeText = `${props.theme || ''} ${props.topic || ''} ${props.title || ''}`;
+  const picks = pickSubjects(themeText, 2, { symmetric: true });
+  const themeLabel = (props.theme || props.topic || '우리 주제').trim();
+  const start = picks[0] || { label: '', src: '' };
+  const goal = picks[1] || picks[0] || { label: '', src: '' };
+  const defIntro =
+    start.label && goal.label && start.label !== goal.label
+      ? `길을 따라 ${start.label}가 ${goal.label}에게 가 보세요.`
+      : '길을 따라 도착점까지 가 보세요.';
+  return {
+    maze: true,
+    header: { title: '미로 찾기' },
+    meta: { theme: themeLabel, tag: `${themeLabel}-미로찾기` },
+    introduction: { text: (props.instruction || defIntro).trim() },
+    start: { label: start.label || '출발', src: start.src || null },
+    goal: { label: goal.label || '도착', src: goal.src || null },
+  };
+}
+
 const TEMPLATE_PAYLOAD_BUILDERS: Record<string, TemplatePayloadBuilder> = {
   'half-drawing': buildHalfDrawingPayload,
   counting: buildCountingPayload,
   'shadow-match': buildShadowMatchPayload,
   'hangul-writing': buildHangulWritingPayload,
   headband: buildHeadbandPayload,
+  maze: buildMazePayload,
 };
 
 /** variant id + 활동지 props → DesignFrame 템플릿 payload (없으면 null).
