@@ -1751,7 +1751,15 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
     // 아이디어 리스트(선택형 문서) — 각 행을 클릭해 하나 고르면 프레임 하단 추천이 그 아이디어로 생성.
     const ideaItems =
       node.data?.role === 'idealist' && Array.isArray(node.data?.ideaItems)
-        ? (node.data.ideaItems as Array<{ id: string; label: string; desc?: string }>)
+        ? (node.data.ideaItems as Array<{
+            id: string;
+            label: string;
+            desc?: string;
+            area?: string;
+            intro?: string;
+            steps?: string[];
+            tips?: string[];
+          }>)
         : null;
     const isIdeaList = !!ideaItems;
     // 복수 선택 — 여러 아이디어를 골라 추천(놀이계획·마인드맵·활동 이미지)에 함께 넘긴다.
@@ -1932,6 +1940,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
             <div className="space-y-1">
               {ideaItems!.map((it, i) => {
                 const sel = selectedIdeaIds.includes(it.id);
+                const intro = (it.intro || it.desc || '').trim();
+                const steps = (it.steps ?? []).filter((s) => s && s.trim());
+                const tips = (it.tips ?? []).filter((t) => t && t.trim());
                 return (
                   <button
                     key={it.id}
@@ -1950,8 +1961,30 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                       {sel ? '✓' : i + 1}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="font-bold text-fg">{it.label}</span>
-                      {it.desc && <span className="mt-0.5 block text-xs leading-relaxed text-fg-2">{it.desc}</span>}
+                      <span className="flex flex-wrap items-center gap-t2">
+                        <span className="font-bold text-fg">{it.label}</span>
+                        {it.area && it.area.trim() && (
+                          <span className="rounded-pill bg-accent-soft px-t2 py-0.5 text-overline text-accent">{it.area.trim()}</span>
+                        )}
+                      </span>
+                      {intro && <span className="mt-0.5 block text-xs leading-relaxed text-fg-2">{intro}</span>}
+                      {steps.length > 0 && (
+                        <ol className="mt-t2 list-decimal space-y-0.5 pl-t4 text-xs leading-relaxed text-fg-1 marker:text-fg-muted">
+                          {steps.map((s, si) => (
+                            <li key={si}>{s.trim()}</li>
+                          ))}
+                        </ol>
+                      )}
+                      {tips.length > 0 && (
+                        <span className="mt-t2 block">
+                          <span className="text-overline text-fg-muted">놀이팁</span>
+                          <ul className="mt-0.5 list-disc space-y-0.5 pl-t4 text-xs leading-relaxed text-fg-2 marker:text-accent">
+                            {tips.map((t, ti) => (
+                              <li key={ti}>{t.trim()}</li>
+                            ))}
+                          </ul>
+                        </span>
+                      )}
                     </span>
                   </button>
                 );

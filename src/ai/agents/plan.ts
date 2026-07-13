@@ -11,8 +11,14 @@ const id = (p: string) => `${p}_${++seq}_${Date.now().toString(36)}`;
 
 export interface IdeaItem {
   id: string;
-  label: string;
-  desc: string;
+  label: string; // 놀이명 (짧고 구체적)
+  desc: string; // 놀이 소개(요약) — 경량 seed 호환용. 리치 카드에선 intro 와 동일.
+  // ── 놀이아이디어(PlayIdeaList) 리치 필드 — runPlayIdeaList 가 채운다. 경량
+  //    runPlanIdeas seed 는 아래를 비워두므로 모두 optional(하위 호환).
+  area?: string; // 배움영역 (누리/표준 영역 1개)
+  intro?: string; // 놀이 소개 (경험 중심 1~2문장)
+  steps?: string[]; // 놀이 방법 2~4단계
+  tips?: string[]; // 놀이팁 (발문·환경구성·관찰포인트·안전 중)
 }
 
 /** One mind-map activity branch — concrete enough for a teacher to run as-is. */
@@ -32,10 +38,12 @@ export async function runMindMapActivities(
   ctx?: string,
   count = 7,
   grounding?: string,
+  ageBand?: string,
 ): Promise<MindActivity[]> {
   const ground = grounding?.trim()
     ? `\n[참고 문서 — 아래 내용을 적극 반영해 활동을 뽑아라]\n${grounding.trim().slice(0, 1400)}\n`
     : '';
+  const ageRule = buildAgeCurriculumRule(resolveAge(ageBand));
   const res = await callGateway({
     task: 'plan',
     tier: 'mid',
@@ -47,6 +55,7 @@ export async function runMindMapActivities(
       {
         role: 'user',
         content: `주제: "${topic}"${ground}
+${ageRule}
 이 주제로 영아(0-1세) 또는 유아(만 3~5세)가 교실·바깥에서 바로 할 수 있는 '놀이 중심' 활동 ${count}개를 마인드맵 가지로 제안하라.
 서로 겹치지 않게 놀이 유형(탐색·조작·신체·역할·표현·관찰 등)과 누리 영역을 골고루 다양하게.
 교사가 이 카드 하나만 보고 바로 수업할 수 있을 만큼 구체적으로 쓴다. 단순 명사·영역명 나열 절대 금지.
@@ -80,13 +89,118 @@ JSON만 출력:
   }
 }
 
+/* ── 공통 프롬프트 빌더 (계획 유형 공용) ─────────────────────────────────
+   시스템 헌장(system) + 연령·교육과정 규칙 + 안전교육 규칙 + 출력 규칙을 한 곳에서 만든다.
+   유형별(놀이아이디어/마인드맵/일·주·월·프로젝트) 프롬프트가 이 빌더를 조합해 쓴다. */
+
+/** 느슨한 연령 입력(예: "만 4세", "0~2세", "혼합반")을 교육과정 밴드로 해석. */
+export type AgeCurriculumBand = '0-2' | '3-5' | 'mixed';
+export interface ResolvedAge {
+  band: AgeCurriculumBand;
+  label: string; // 표시용 라벨(원문 우선)
+  years?: string; // 원문 연령 문자열(있으면)
+}
+
+export function resolveAge(ageBand?: string): ResolvedAge {
+  const raw = (ageBand ?? '').trim();
+  const b = raw.replace(/\s/g, '');
+  if (/혼합|통합|영유아/.test(b)) return { band: 'mixed', label: raw || '혼합(영유아)반', years: raw || undefined };
+  if (/0-2|0~2|0–2|영아|만0|만1|만2|(^|[^0-9])[012]세/.test(b))
+    return { band: '0-2', label: raw || '0~2세', years: raw || undefined };
+  if (/(만)?[345]세|3-5|3~5|유아/.test(b)) return { band: '3-5', label: raw || '3~5세', years: raw || undefined };
+  return { band: '3-5', label: raw || '3~5세', years: raw || undefined }; // 연령 미상 → 누리과정(앱 기본 3-5) 기준
+}
+
 function system(ctx?: string): string {
-  const l0 = '너는 킨더버스 Tier1 계획 에이전트다. 유아 놀이계획을 만든다. 적합성은 공유 Pedagogy Foundation이 보장한다.';
+  const l0 = [
+    '너는 킨더버스 Tier1 계획 에이전트다.',
+    '유치원과 어린이집 교사가 실제 현장에서 사용할 수 있는 놀이 중심 교육계획을 생성한다.',
+    '',
+    '지원 기능: 놀이 아이디어 · 마인드맵 활동 · 일일 놀이계획 · 주간 놀이계획 · 월간 놀이계획 · 프로젝트 놀이계획',
+    '',
+    '[공통 생성 원칙]',
+    '1. 실제 유치원·어린이집에서 바로 사용할 수 있는 수준으로 작성한다.',
+    '2. 영유아가 놀이의 주체가 되도록 작성한다.',
+    '3. 교사는 지식 전달자가 아니라 관찰·발문·환경·자료·상호작용을 지원하는 역할이다.',
+    '4. 놀이의 결과보다 과정과 다양한 참여 방식을 중요하게 반영한다.',
+    '5. 입력된 연령·주제·기간·반 정보·상위 계획과 교사 컨텍스트를 우선 사용한다.',
+    '6. 입력에 없는 아동 행동·발화·알레르기·장애·행사·반 이름·날짜를 지어내지 않는다.',
+    '7. 실제 기관에서 운영 가능한 재료와 환경만 제안한다.',
+    '8. 위험하거나 연령에 적합하지 않은 활동은 제외한다.',
+    '9. 요청한 JSON 스키마만 반환한다.',
+    '10. 설명문·마크다운·코드블록·주석을 출력하지 않는다.',
+  ].join('\n');
   const l3 = ctx?.trim() ? `[테넌트/교사 컨텍스트 — 우리반]\n${ctx.trim()}\n아동명은 마스킹 상태. 사실을 지어내지 마라.` : '';
   return [l0, PEDAGOGY_FOUNDATION, l3].filter(Boolean).join('\n\n');
 }
 
-export async function runPlanIdeas(request: string, ctx?: string, count = 4): Promise<IdeaItem[]> {
+/** 연령·교육과정 규칙 — 유형별 프롬프트에 삽입해 연령 적합성을 강제한다. */
+export function buildAgeCurriculumRule(resolvedAge: ResolvedAge): string {
+  const infant = [
+    '- 2024 개정 표준보육과정을 기준으로 한다.',
+    '- 감각 탐색, 반복 행동, 일상 경험, 애착, 자발적 신체 움직임 중심으로 구성한다.',
+    '- 정해진 결과물이나 모든 영아에게 동일한 수행을 요구하지 않는다.',
+    '- 교사는 영아의 몸짓·표정·소리·행동을 관찰하고 기다리며 지원한다.',
+    '- 수면·식사·건강 상태와 개인차를 반영한다.',
+  ].join('\n');
+  const young = [
+    '- 2019 개정 누리과정을 기준으로 한다. 유아·놀이 중심.',
+    '- 흥미, 질문, 상상, 탐구, 표현, 협력, 문제 해결 중심으로 구성한다.',
+    '- 교사의 정답 제시와 일방적 설명을 최소화한다.',
+    '- 관찰, 개방형 질문, 재료·공간·또래 상호작용으로 놀이를 지원한다.',
+  ].join('\n');
+  if (resolvedAge.band === '0-2') return `[연령·교육과정 — 0~2세]\n${infant}`;
+  if (resolvedAge.band === '3-5') return `[연령·교육과정 — 3~5세]\n${young}`;
+  return [
+    '[연령·교육과정 — 혼합(영유아)반]',
+    '- 공통 주제는 유지하되, 연령에 따라 참여 방식·재료·기대 경험·교사 지원을 차등한다.',
+    '- 0~2세(2024 개정 표준보육과정)와 3~5세(2019 개정 누리과정)의 연계를 구분해 제시한다.',
+    '',
+    '〈0~2세〉',
+    infant,
+    '',
+    '〈3~5세〉',
+    young,
+  ].join('\n');
+}
+
+/** 안전교육 규칙 — 놀이 안전을 연령별로 반영한다. (내용 1차안 — 유형별 스펙 확정 시 조정) */
+export function buildSafetyEducationRule(resolvedAge: ResolvedAge): string {
+  const common = '- 놀이 안전, 도구·재료 사용 안전, 생활 안전을 주제·활동과 연결해 구체적으로 제시한다.';
+  if (resolvedAge.band === '0-2')
+    return [
+      '[안전교육 — 0~2세]',
+      common,
+      '- 삼킴·낙상·모서리·위생 위험을 우선 점검하고, 교사의 밀착 관찰과 안전한 환경 구성을 전제한다.',
+      '- 안전 수칙은 영아에게 규칙 학습이 아니라 교사의 환경·지원으로 반영한다.',
+    ].join('\n');
+  if (resolvedAge.band === '3-5')
+    return [
+      '[안전교육 — 3~5세]',
+      common,
+      '- 유아와 함께 놀이 약속을 정하고, 도구 바른 사용과 공간·순서 지키기를 놀이 속에서 익히도록 한다.',
+    ].join('\n');
+  return [
+    '[안전교육 — 혼합(영유아)반]',
+    common,
+    '- 0~2세는 교사 밀착 관찰·환경 안전, 3~5세는 유아와의 안전 약속으로 연령별로 차등 적용한다.',
+  ].join('\n');
+}
+
+/** 출력 규칙 — 모든 유형 공용. */
+export function buildOutputRule(): string {
+  return [
+    '[출력 규칙]',
+    '- 요청한 JSON 스키마만 반환한다. 설명문·마크다운·코드블록·주석을 출력하지 않는다.',
+    '- 입력에 없는 문자열 필드는 ""(빈 문자열), 배열 필드는 [](빈 배열)로 둔다.',
+    '- 상위 계획과 충돌하는 주제·소주제를 생성하지 않는다.',
+    '- 스키마의 필드를 삭제하거나 필드명을 바꾸지 않는다.',
+    '- 유효한 JSON만 반환한다.',
+  ].join('\n');
+}
+
+export async function runPlanIdeas(request: string, ctx?: string, count = 4, ageBand?: string): Promise<IdeaItem[]> {
+  const ageRule = buildAgeCurriculumRule(resolveAge(ageBand));
   const res = await callGateway({
     task: 'plan',
     tier: 'mid',
@@ -97,7 +211,7 @@ export async function runPlanIdeas(request: string, ctx?: string, count = 4): Pr
     messages: [
       {
         role: 'user',
-        content: `요청: "${request}"\n이 주제로 서로 겹치지 않는 유아 놀이 활동 아이디어 ${count}개를 제안하라. label은 활동 이름(10자 내외), desc는 놀이 방법·전개가 드러나는 1~2문장(50~80자)으로 구체적으로 쓰고 끝에 연계 누리 영역을 괄호로 표기. 단순 명사 나열 금지. JSON만:\n{ "items": [ { "label": string, "desc": string } ] }`,
+        content: `요청: "${request}"\n${ageRule}\n이 주제로 서로 겹치지 않는 유아 놀이 활동 아이디어 ${count}개를 제안하라. label은 활동 이름(10자 내외), desc는 놀이 방법·전개가 드러나는 1~2문장(50~80자)으로 구체적으로 쓰고 끝에 연계 누리 영역을 괄호로 표기. 단순 명사 나열 금지. JSON만:\n{ "items": [ { "label": string, "desc": string } ] }`,
       },
     ],
     meta: { kind: 'idea', title: request, selected: [] },
@@ -108,6 +222,79 @@ export async function runPlanIdeas(request: string, ctx?: string, count = 4): Pr
   try {
     const parsed = extractJson(res.text) as { items?: Array<{ label: string; desc?: string }> };
     return (parsed.items ?? []).map((it) => ({ id: id('idea'), label: it.label, desc: it.desc ?? '' }));
+  } catch {
+    return [];
+  }
+}
+
+/** 놀이아이디어(PlayIdeaList) — 교사가 바로 운영할 수 있는 '리치' 놀이 아이디어를 생성한다.
+    각 아이디어 = 놀이명·배움영역·놀이 소개·놀이 방법(2~4단계)·놀이팁. 놀이 유형을 겹치지 않게
+    다양하게, 연령별 교육과정에 맞춰 만든다(feature: play_idea). 결과는 idealist 카드/마크다운으로 렌더되고,
+    label(놀이명)·desc(소개)는 하위(계획·마인드맵) seed 로도 그대로 쓰인다. */
+export async function runPlayIdeaList(
+  request: string,
+  ctx?: string,
+  count = 6,
+  ageBand?: string,
+): Promise<IdeaItem[]> {
+  const ageRule = buildAgeCurriculumRule(resolveAge(ageBand));
+  const res = await callGateway({
+    task: 'plan',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: system(ctx),
+    messages: [
+      {
+        role: 'user',
+        content: `주제: "${request}"
+이 주제로 유아가 교실·바깥에서 바로 할 수 있는 '놀이 중심' 놀이 아이디어 ${count}개를 제안하라.
+${ageRule}
+
+[놀이 중심 원칙]
+- 결과물보다 과정, 교사 주도보다 유아 주도, 정답 찾기보다 탐색 중심으로 쓴다.
+- 놀이 유형을 겹치지 않게 다양하게: 신체놀이·감각탐색·역할놀이·언어놀이·미술표현·음악/동작·쌓기/구성·과학탐구·자연탐색·게임·협동놀이 등에서 골고루. 같은 유형 반복 금지.
+- 연령에 부적합한 지식 전달·설명 중심 활동, 안전 위험이 큰 놀이는 만들지 않는다.
+
+[각 아이디어 작성 규칙]
+- title: 놀이명 — 짧고 구체적으로(예: "얼음 보석 만들기", "겨울옷 가게 놀이").
+- area: 배움영역 1개 — 신체운동·건강 / 의사소통 / 사회관계 / 예술경험 / 자연탐구 중 하나.
+- intro: 놀이 소개 — 유아가 무엇을 경험하는지 경험 중심으로 1~2문장.
+- steps: 놀이 방법 2~4단계. 각 원소가 한 단계(유아가 주어). "놀이 방법" 같은 제목·번호는 넣지 말고 내용만.
+- tips: 놀이팁 1~3개 — 교사 발문(질문)·환경구성·관찰 포인트·안전사항 중에서.
+- 중복 놀이 금지.
+
+JSON만 출력:
+{ "items": [ { "title": string, "area": string, "intro": string, "steps": [string], "tips": [string] } ] }`,
+      },
+    ],
+    meta: { kind: 'idea', title: request, selected: [] },
+    // 아이디어당 방법·팁까지 담아 길다 — count 에 비례해 넉넉히(잘리면 JSON 파싱 실패).
+    maxTokens: Math.min(4000, Math.max(1800, 320 + count * 260)),
+  });
+  if (!res.ok || !res.text) return [];
+  try {
+    const parsed = extractJson(res.text) as {
+      items?: Array<{ title?: string; label?: string; area?: string; intro?: string; desc?: string; steps?: unknown; tips?: unknown }>;
+    };
+    const arr = (s: unknown): string[] =>
+      Array.isArray(s) ? s.map((x) => String(x).trim()).filter(Boolean) : [];
+    return (parsed.items ?? [])
+      .filter((it) => it.title || it.label)
+      .map((it) => {
+        const title = String(it.title ?? it.label ?? '').trim();
+        const intro = (it.intro ?? it.desc ?? '').trim();
+        return {
+          id: id('idea'),
+          label: title,
+          desc: intro,
+          area: (it.area ?? '').trim(),
+          intro,
+          steps: arr(it.steps),
+          tips: arr(it.tips),
+        };
+      });
   } catch {
     return [];
   }

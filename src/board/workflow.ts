@@ -269,6 +269,38 @@ export function planText(p: RegistryPayload): string {
   if (p.type === 'ClarifyPrompt') return p.props.question;
   return '계획안';
 }
+/** 놀이아이디어(PlayIdeaList) 리치 마크다운 — 각 아이디어를 놀이명(H3)·배움영역·놀이 소개·
+    놀이 방법(번호)·놀이팁(불릿)으로 정리(feature: play_idea 출력 형식). 내보내기·폴백 텍스트용.
+    선택형 인터랙션은 NodeView(idealist)가, 이 마크다운은 문서 렌더/저장이 담당한다. */
+export function playIdeaListMarkdown(
+  items: Array<{ label: string; desc?: string; area?: string; intro?: string; steps?: string[]; tips?: string[] }>,
+  title: string,
+): string {
+  const out: string[] = [`# 💡 ${title} ${items.length}가지`];
+  items.forEach((it) => {
+    out.push('');
+    out.push(`### ${it.label}`);
+    if (it.area && it.area.trim()) out.push(`**배움영역** ${it.area.trim()}`);
+    const intro = (it.intro || it.desc || '').trim();
+    if (intro) {
+      out.push('');
+      out.push(intro);
+    }
+    const steps = (it.steps ?? []).filter((s) => s && s.trim());
+    if (steps.length) {
+      out.push('');
+      steps.forEach((s, i) => out.push(`${i + 1}. ${s.trim()}`));
+    }
+    const tips = (it.tips ?? []).filter((t) => t && t.trim());
+    if (tips.length) {
+      out.push('');
+      out.push('**놀이팁**');
+      tips.forEach((t) => out.push(`- ${t.trim()}`));
+    }
+  });
+  return out.join('\n');
+}
+
 /** A full, professional 주간 놀이계획안 document (markdown) from a WeeklyPlanGrid:
     title, meta line, 주간 교육 목표, a 요일×영역 운영 grid table, 영역 연계, 운영
     유의점 — all derived from the generated plan (no fabricated content). Rendered
