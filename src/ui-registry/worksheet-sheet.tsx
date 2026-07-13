@@ -214,7 +214,7 @@ export function WorksheetSheet({
                 editable={editable}
                 onCommit={(v) => onEdit?.({ area: v })}
                 placeholder="영역"
-                className="block font-bold text-fg-2"
+                className="block whitespace-nowrap font-bold text-fg-2"
                 style={{ fontSize: `${HEADER_META_PCT}cqw` }}
               />
             </span>

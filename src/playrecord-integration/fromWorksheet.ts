@@ -100,7 +100,7 @@ function buildHalfDrawingPayload(props: WorksheetProps): Record<string, unknown>
   };
 }
 
-/** '수 세기'(counting, 난이도 상 4-5세) — 가로형, 3행(라벨·N마리 카운트박스·숫자 선택지) + 비교 질문. */
+/** '수 세기'(counting, 난이도 상 4-5세) — A4 세로, 3행(라벨·N개 카운트박스·숫자 선택지) + 비교 질문. */
 function buildCountingPayload(props: WorksheetProps): Record<string, unknown> {
   const themeText = `${props.theme || ''} ${props.topic || ''} ${props.title || ''}`;
   const picks = pickSubjects(themeText, 3); // 같은 화풍 3종

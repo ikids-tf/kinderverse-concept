@@ -1666,7 +1666,7 @@ export function buildHalfDrawingDoc(payload) {
 // payload: { counting:true, header.title, meta.theme, introduction.text, rows:[{label,src,count,options[]}], questions[] }.
 export function buildCountingDoc(payload) {
   const d = payload || {};
-  const W = 1123, H = 794;
+  const W = A4.W, H = A4.H; // 794 × 1123 (A4 세로) — 4개 활동지 템플릿 방향 통일
   const title = d.header?.title || "수 세기";
   const intro = d.introduction?.text || "";
   const rows = Array.isArray(d.rows) ? d.rows : [];
@@ -1674,64 +1674,64 @@ export function buildCountingDoc(payload) {
   const m = maker();
   const els = [{ id: "cnt-bg", type: "shape", x: 0, y: 0, w: W, h: H, locked: true, style: { bg: "#ffffff", radius: 0 } }];
 
-  // ── 헤더 ──
-  // 상단 태그 = "{주제}-{유형}활동지" (예: 여름 바다-수세기활동지). 텍스트 길이에 맞춰 알약 폭 조정.
+  // ── 헤더(세로: 태그·제목·안내는 좌측 세로 스택, 이름칸은 우상단) ──
   const tag = d.meta?.tag || "수세기활동지";
-  const tagW = Math.min(340, 44 + [...tag].length * 15);
-  els.push(m.shape(24, 18, tagW, 34, { bg: "#eaf3fb", radius: 999, stroke: "#7fbcd9", strokeWidth: 2 }));
-  els.push(m.text(24, 18, tagW, 34, tag, { fontSize: 14, fontFamily: LABEL_FONT, color: "#5f92b0", align: "center", valign: "center" }));
-  els.push(m.text(288, 12, 430, 48, title, { fontSize: 36, fontFamily: HEAD_FONT, color: "#3b7bbf", align: "left", valign: "center" }, { textRole: "title" }));
-  if (intro) els.push(m.text(290, 62, 540, 28, intro, { fontSize: 15, fontFamily: BODY_FONT, color: "#6a6a6a", align: "left", valign: "center" }));
-  els.push(m.text(906, 22, 60, 30, "이름:", { fontSize: 16, fontFamily: LABEL_FONT, color: "#5a5a5a", align: "left", valign: "center" }));
-  els.push(m.shape(958, 46, 150, 2, { bg: "#c9c0b4", radius: 0 }));
+  const tagW = Math.min(300, 44 + [...tag].length * 15);
+  els.push(m.shape(28, 24, tagW, 34, { bg: "#eaf3fb", radius: 999, stroke: "#7fbcd9", strokeWidth: 2 }));
+  els.push(m.text(28, 24, tagW, 34, tag, { fontSize: 14, fontFamily: LABEL_FONT, color: "#5f92b0", align: "center", valign: "center" }));
+  els.push(m.text(28, 64, 520, 50, title, { fontSize: 34, fontFamily: HEAD_FONT, color: "#3b7bbf", align: "left", valign: "center" }, { textRole: "title" }));
+  if (intro) els.push(m.text(30, 120, 560, 26, intro, { fontSize: 15, fontFamily: BODY_FONT, color: "#6a6a6a", align: "left", valign: "center" }));
+  els.push(m.text(590, 30, 60, 30, "이름:", { fontSize: 16, fontFamily: LABEL_FONT, color: "#5a5a5a", align: "left", valign: "center" }));
+  els.push(m.shape(642, 54, 124, 2, { bg: "#c9c0b4", radius: 0 }));
 
-  // ── 3행 ──
+  // ── 3행(세로: 라벨 카드 · 카운트 박스 · 숫자 선택지). 폭 794에 맞춰 카운트 박스를
+  //    좁히고(perRow 5) 박스↔숫자 줄잇기 공간(약 100px)을 확보한다. 세로 여유로 행을 크게. ──
   const PAL = [
     { bd: "#7fbcd9", soft: "#eef6fb", dot: "#5f92b0" },
     { bd: "#e0a0a0", soft: "#fbeeee", dot: "#cf7f7f" },
     { bd: "#93c79f", soft: "#eef7f0", dot: "#5fa06e" },
   ];
-  // 카운트 박스를 좁게(560) 잡아 박스↔숫자 사이에 '줄잇기' 공간을 넉넉히(약 200px) 둔다.
-  const rowTop = 132, rowH = 178, rowGap = 12, bx = 172, bw = 560;
-  const numX = 930; // 숫자 선택지 열(줄잇기 공간 뒤)
+  const rowTop = 172, rowH = 224, rowGap = 20, bx = 150, bw = 384;
+  const numX = 636; // 숫자 선택지 열(줄잇기 공간 뒤)
   rows.forEach((r, i) => {
     const y = rowTop + i * (rowH + rowGap);
     const pal = PAL[i % 3];
-    // 라벨 카드
-    els.push(m.shape(24, y, 132, rowH, { bg: pal.soft, radius: 14, stroke: pal.bd, strokeWidth: 3 }));
-    els.push(m.shape(38, y + 12, 104, 30, { bg: "#ffffff", radius: 999 }));
-    els.push(m.text(38, y + 12, 104, 30, r.label || "", { fontSize: 17, fontFamily: LABEL_FONT, color: pal.dot, align: "center", valign: "center" }));
-    if (r.src) els.push({ id: `cnt-lbl${i}`, type: "image", src: r.src, fit: "contain", x: 40, y: y + 48, w: 100, h: rowH - 60, style: { radius: 0 } });
-    // 카운트 박스 + N마리(세로 가운데 정렬 그리드)
+    // 라벨 카드(좌)
+    els.push(m.shape(28, y, 108, rowH, { bg: pal.soft, radius: 14, stroke: pal.bd, strokeWidth: 3 }));
+    els.push(m.shape(38, y + 12, 88, 30, { bg: "#ffffff", radius: 999 }));
+    els.push(m.text(38, y + 12, 88, 30, r.label || "", { fontSize: 16, fontFamily: LABEL_FONT, color: pal.dot, align: "center", valign: "center" }));
+    if (r.src) els.push({ id: `cnt-lbl${i}`, type: "image", src: r.src, fit: "contain", x: 34, y: y + 50, w: 96, h: rowH - 66, style: { radius: 0 } });
+    // 카운트 박스 + N개(세로 가운데 정렬 그리드)
     els.push(m.shape(bx, y, bw, rowH, { bg: "#ffffff", radius: 16, stroke: pal.bd, strokeWidth: 3 }));
-    const n = Math.max(0, r.count || 0), perRow = 7, cell = 62, cgap = 10;
+    const n = Math.max(0, r.count || 0), perRow = 5, cell = 58, cgap = 8;
     const gridRows = Math.max(1, Math.ceil(n / perRow));
     const startY = y + Math.round((rowH - (gridRows * cell + (gridRows - 1) * cgap)) / 2);
-    const stepX = (bw - 40 - cell) / (perRow - 1);
+    const stepX = (bw - 36 - cell) / (perRow - 1);
     for (let k = 0; k < n; k++) {
       const cc = k % perRow, cr = Math.floor(k / perRow);
-      const ix = bx + 20 + cc * stepX, iy = startY + cr * (cell + cgap);
+      const ix = bx + 18 + cc * stepX, iy = startY + cr * (cell + cgap);
       if (r.src) els.push({ id: `cnt${i}_${k}`, type: "image", src: r.src, fit: "contain", x: Math.round(ix), y: Math.round(iy), w: cell, h: cell, style: { radius: 0 } });
     }
     // 연결점(카운트 박스 오른쪽 중앙) — 여기서 숫자로 선을 잇는다.
     els.push(m.shape(bx + bw - 7, y + Math.round(rowH / 2) - 7, 14, 14, { bg: pal.dot, radius: 999 }));
-    // 숫자 선택지(줄잇기 공간 오른쪽 3개 + 점)
+    // 숫자 선택지(줄잇기 공간 오른쪽 3개 + 점, 행 중앙 정렬)
     const opts = Array.isArray(r.options) ? r.options : [];
+    const oStart = y + Math.round((rowH - (opts.length - 1) * 58) / 2) - 14;
     opts.forEach((val, j) => {
-      const oy = y + 24 + j * 52;
+      const oy = oStart + j * 58;
       els.push(m.shape(numX, oy + 2, 16, 16, { bg: pal.dot, radius: 999 }));
-      els.push(m.text(numX + 26, oy - 6, 60, 32, String(val), { fontSize: 26, fontFamily: HEAD_FONT, color: "#4a4a4a", align: "left", valign: "center" }));
+      els.push(m.text(numX + 26, oy - 6, 90, 32, String(val), { fontSize: 26, fontFamily: HEAD_FONT, color: "#4a4a4a", align: "left", valign: "center" }));
     });
   });
 
-  // ── 하단 '생각해봐요' ──
-  const by = rowTop + 3 * (rowH + rowGap) + 2;
-  if (by + 52 < H) {
-    els.push(m.shape(24, by, W - 48, H - by - 12, { bg: "#eef4f8", radius: 14, stroke: "#bcd6e6", strokeWidth: 2 }));
-    els.push(m.text(40, by + 8, 180, 26, "🔍 생각해봐요!", { fontSize: 15, fontFamily: LABEL_FONT, color: "#e08a3a", align: "left", valign: "center" }));
+  // ── 하단 '생각해봐요'(세로: 질문 1열로 쌓음) ──
+  const by = rowTop + 3 * (rowH + rowGap) + 6;
+  if (by + 60 < H) {
+    els.push(m.shape(28, by, W - 56, H - by - 24, { bg: "#eef4f8", radius: 14, stroke: "#bcd6e6", strokeWidth: 2 }));
+    els.push(m.text(44, by + 12, 200, 26, "🔍 생각해봐요!", { fontSize: 15, fontFamily: LABEL_FONT, color: "#e08a3a", align: "left", valign: "center" }));
     questions.slice(0, 3).forEach((q, j) => {
-      const qx = 40 + (j % 2) * 540, qy = by + 34 + Math.floor(j / 2) * 22;
-      els.push(m.text(qx, qy, 520, 20, `★ ${q}`, { fontSize: 13, fontFamily: BODY_FONT, color: "#5a5a5a", align: "left", valign: "center" }));
+      const qy = by + 44 + j * 26;
+      els.push(m.text(44, qy, W - 88, 22, `★ ${q}`, { fontSize: 13, fontFamily: BODY_FONT, color: "#5a5a5a", align: "left", valign: "center" }));
     });
   }
   return { output_type: "DesignDoc", title, frame: { w: W, h: H, bg: "#ffffff" }, elements: els };
