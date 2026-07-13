@@ -151,6 +151,9 @@ export interface WorksheetCardProps {
   needs_cut_layout?: boolean;
   cut_layout?: WorksheetCutLayout | null;
   visual_status?: 'pending' | 'filled';
+  /** 편집 디자인 템플릿 variant id(수 세기=counting 등). 있으면 이 활동지는 AI 이미지 대신
+   *  DesignFrame 편집기(편집디자인 카드)로 '생성 시점부터' 열린다. 단일 출처=worksheet-reference.template. */
+  template_variant?: string;
 }
 
 /* 이미지/도안 (agent.studio). AI 생성 라벨 필수 — 실제 아동 사진 아님(§9.5). */

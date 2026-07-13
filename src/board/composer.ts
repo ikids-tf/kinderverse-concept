@@ -54,8 +54,10 @@ import { buildAgentContext } from '@/ai/context';
 import { PAGE_ACTIONS } from '@/ai/actions';
 import { showToast } from '@/lib/toast';
 import { SUGGESTION_HIDE_BELOW, type RouterOutput, type RecordMode, type RouteTarget } from '@/ai/contract';
-import type { RegistryPayload } from '@/ui-registry/contracts';
+import type { RegistryPayload, WorksheetCardProps } from '@/ui-registry/contracts';
 import type { LessonKind } from '@/store/formatChoiceStore';
+import { buildWorksheetEditorPayload } from '@/playrecord-integration/fromWorksheet';
+import { stashEditorPayload, editorEmbedUrl } from '@/playrecord-integration/spawnEditorCard';
 
 /* Frame Composer (core page brain). A board prompt with nothing selected →
    classify intent (reuse runRouter) → pick a frame template → seed a frame →
@@ -1956,14 +1958,51 @@ function spawnPlaceholderDoc(frameId: string, role: string, onSpawn?: (ids: stri
   return cid;
 }
 
-/** 플레이스홀더에 생성 결과 채우기 — 위치는 그대로, 내용·payload만 갱신. */
+/** 플레이스홀더에 생성 결과 채우기 — 위치는 그대로, 내용·payload만 갱신.
+    단, 활동지(WorksheetCard) 중 편집 디자인 템플릿 유형(props.template_variant)은
+    이미지 시트 대신 '편집디자인 카드(iframe)'로 제자리 변환한다(생성 시점부터 편집디자인). */
 function fillPlaceholderDoc(cid: string, text: string, payload: RegistryPayload): void {
   const b = useBoardStore.getState();
   const n = b.nodes[cid];
   if (!n) return;
+  if (payload.type === 'WorksheetCard' && (payload.props as WorksheetCardProps).template_variant) {
+    if (fillWorksheetEditorCard(cid, payload.props as WorksheetCardProps)) return;
+  }
   const data = { ...(n.data ?? {}) };
   delete data.loadingDoc;
   b.updateNodeRaw(cid, { text, data: { ...data, payload } });
+}
+
+/** 활동지 placeholder → 편집디자인 카드로 제자리 변환. 성공하면 true.
+    payload 를 stash 하고 노드를 embed(iframe) 카드로 바꾼다(doc/role/payload 정리). */
+function fillWorksheetEditorCard(cid: string, props: WorksheetCardProps): boolean {
+  const variant = props.template_variant;
+  if (!variant) return false;
+  const editorPayload = buildWorksheetEditorPayload(variant, {
+    title: props.title,
+    theme: props.theme,
+    topic: props.topic,
+    instruction: props.instruction,
+    type: props.type,
+  });
+  if (!editorPayload) return false; // 빌더 미등록 → 일반 채움으로 폴백
+  const editId = stashEditorPayload(variant, editorPayload);
+  const b = useBoardStore.getState();
+  const n = b.nodes[cid];
+  if (!n) return false;
+  const data = { ...(n.data ?? {}) };
+  delete data.loadingDoc;
+  delete data.doc;
+  delete data.role;
+  delete data.payload;
+  b.updateNodeRaw(cid, {
+    w: 560,
+    h: 820,
+    autoH: false,
+    text: '편집디자인',
+    data: { ...data, embed: editorEmbedUrl(editId), title: '편집디자인' },
+  });
+  return true;
 }
 
 /** fillPlaceholderDoc의 에러 짝 — 위치·data 유지, loadingDoc만 해제하고 실패 메시지로 채운다. */

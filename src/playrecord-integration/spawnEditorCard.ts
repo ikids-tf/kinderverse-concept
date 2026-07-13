@@ -10,13 +10,23 @@ import { addPresetNodeCmd } from '@/board/commands';
 
 const EDIT_KEY = (id: string) => `kv-playedit-${id}`;
 
-export function spawnEditorCard(variant: string, payload: unknown): string {
+/** 편집기 임베드 URL(뷰어 엔트리 + 데이터 키). */
+export const editorEmbedUrl = (editId: string) => `/playedit.html?id=${editId}`;
+
+/** variant/payload 를 localStorage 에 stash 하고 편집기 데이터 id 를 돌려준다(카드 생성은 별도).
+ *  spawnEditorCard(새 카드) 와 '제자리 변환'(placeholder → 편집디자인 카드) 이 공유한다. */
+export function stashEditorPayload(variant: string, payload: unknown): string {
   const editId = newId('pe');
   try {
     localStorage.setItem(EDIT_KEY(editId), JSON.stringify({ variant, payload, docs: {}, page: 0 }));
   } catch {
     /* quota — data-URI 이미지가 많으면 실패할 수 있으나 카드는 열린다(빈 상태로 시작) */
   }
+  return editId;
+}
+
+export function spawnEditorCard(variant: string, payload: unknown): string {
+  const editId = stashEditorPayload(variant, payload);
   const c = viewportCenterBoardPoint();
   const nodeId = addPresetNodeCmd(
     'sticky',
@@ -27,7 +37,7 @@ export function spawnEditorCard(variant: string, payload: unknown): string {
       h: 820,
       autoH: false,
       text: '편집디자인',
-      data: { embed: `/playedit.html?id=${editId}`, title: '편집디자인' },
+      data: { embed: editorEmbedUrl(editId), title: '편집디자인' },
     },
     '편집디자인 카드 추가',
   );
