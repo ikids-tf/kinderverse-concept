@@ -14,8 +14,10 @@ import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren, frameContentSig
 import { alignFrameCmd } from '@/board/align';
 import { runComposerChip, expandMindMapBranch, planFromNode, monthlyPlanFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
 import { openMindmapInEditor, isMindmapDoc, openMindmapDocInEditor } from '@/playrecord-integration/fromMindmap';
-import { openPlanInEditor, openMonthlyInEditor, frameHasPlan } from '@/playrecord-integration/fromPlan';
-import { openRecordInEditor, frameHasRecord } from '@/playrecord-integration/fromRecord';
+import { openPlanInEditor, openMonthlyInEditor } from '@/playrecord-integration/fromPlan';
+import { openRecordInEditor } from '@/playrecord-integration/fromRecord';
+import { collectFrameEditableDocs } from '@/playrecord-integration/collectFrameDocs';
+import { usePlayEditorStore } from '@/playrecord-integration/store';
 import type { RouteTarget } from '@/ai/contract';
 import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
 import { WorksheetSheet } from '@/ui-registry/worksheet-sheet';
@@ -1049,32 +1051,25 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           </button>
           )}
           {/* 마인드맵(주제망) 편집디자인 버튼은 상단이 아니라 프레임 '하단 중앙'에 별도 CTA로 배치(아래 참고). */}
-          {/* 주간계획(WeeklyPlanGrid)을 담은 프레임 — verse 편집 캔버스(주안 weeklyplan)로 열기 */}
-          {!node.data?.mindmap && frameHasPlan(node.id) && (
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); openPlanInEditor(node.id); }}
-            title="이 주간계획을 편집 디자인(주안 캔버스)으로 열기"
-            className="inline-flex items-center gap-t2 whitespace-nowrap rounded-pill border border-border bg-surface px-t4 py-t2 text-sm font-medium text-fg-2 shadow-sm hover:border-accent hover:text-accent"
-            style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-          >
-            <Icon name="studio" size={16} className="shrink-0" />
-            {!narrow && '편집디자인'}
-          </button>
-          )}
-          {/* 놀이기록(PlayStoryCard)을 담은 프레임 — verse 편집 캔버스(놀이기록 카드형)로 열기 */}
-          {!node.data?.mindmap && frameHasRecord(node.id) && (
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); openRecordInEditor(node.id); }}
-            title="이 놀이기록을 편집 디자인(스티커·꾸미기 캔버스)으로 열기"
-            className="inline-flex items-center gap-t2 whitespace-nowrap rounded-pill border border-border bg-surface px-t4 py-t2 text-sm font-medium text-fg-2 shadow-sm hover:border-accent hover:text-accent"
-            style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-          >
-            <Icon name="studio" size={16} className="shrink-0" />
-            {!narrow && '편집디자인'}
-          </button>
-          )}
+          {/* 프레임(패키지 박스) 안의 편집디자인 변환 가능 문서를 모두 모아 한 번에 연다.
+              1건이면 '편집디자인', 여러 건이면 '전체 편집디자인' → 한 편집기에서 ◀ ▶ 로 문서를 넘기며 꾸민다. */}
+          {!node.data?.mindmap && (() => {
+            const docs = collectFrameEditableDocs(node.id);
+            if (docs.length === 0) return null;
+            const multi = docs.length > 1;
+            return (
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); usePlayEditorStore.getState().openDeck(docs); }}
+                title={multi ? `이 패키지의 문서 ${docs.length}개를 모두 편집 디자인(스티커·꾸미기 캔버스)으로 열기` : '이 문서를 편집 디자인(스티커·꾸미기 캔버스)으로 열기'}
+                className="inline-flex items-center gap-t2 whitespace-nowrap rounded-pill border border-border bg-surface px-t4 py-t2 text-sm font-medium text-fg-2 shadow-sm hover:border-accent hover:text-accent"
+                style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+              >
+                <Icon name="studio" size={16} className="shrink-0" />
+                {!narrow && (multi ? '전체 편집디자인' : '편집디자인')}
+              </button>
+            );
+          })()}
           <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
