@@ -253,24 +253,69 @@
   overflow-y: auto;
   font-size: 12px;
 }
-/* 편집디자인이 보드 iframe 카드로 임베드될 때(.pe-embed) — 카드 바깥엔 공간이 없어
-   우측 편집툴(.dpanel)이 카드 오른쪽 밖으로 잘려 "안 열리는" 것처럼 보였다. 임베드
-   컨텍스트에선 ① 캔버스(.dframe-wrap) 가용 폭을 우측 거터(--pe-gutter)만큼 줄여 캔버스를
-   왼쪽으로 밀고 ② 편집툴을 그 우측 거터 안(캔버스 위에 겹치지 않게)에 띄운다(모달은 그대로).
-   scale = wrap.clientWidth / frame.w 이므로 wrap 폭만 줄이면 A4가 왼쪽 영역에 맞춰 축소된다. */
-.pe-embed {
-  /* 패널 실측 = 176(내용) + 20(패딩) + 2(테두리) = 198. 여기에 우측 8 + 문서와의 간격 14를
-     더해 거터를 잡아야 A4 오른쪽 끝이 패널을 침범하지 않는다(기존 192는 6~14px 겹쳤음). */
-  --pe-gutter: 220px;
-}
+/* 편집디자인이 보드 iframe 카드로 임베드될 때(.pe-embed) — 캔버스(.dframe-wrap)는 패널
+   열림 여부와 무관하게 항상 100% 폭을 유지한다. scale = wrap.clientWidth / frame.w 이므로
+   폭을 고정하면 A4 스케일이 고정 → 요소 선택/꾸미기 갤러리를 열어도 문서 크기·비율이 그대로다.
+   (과거엔 패널이 문서와 겹치지 않게 우측 거터로 wrap을 220px 좁혔으나, 그 때문에 패널을 열 때마다
+   문서가 ~40% 급축소돼 가독성이 떨어졌다. 이제 패널은 문서 위에 반투명 오버레이로 띄운다.) */
 .pe-embed .dframe-wrap {
-  width: calc(100% - var(--pe-gutter));
+  width: 100%;
 }
+/* 편집툴/꾸미기 패널 — 문서 위에 겹쳐 뜨는 플로팅 레이어. 반투명 + blur 로 가려진 표 셀이
+   희미하게 비쳐 하드 블록처럼 안 보이게. 편집이 끝나면 ×/FAB 로 닫아 전체 문서를 원래 크기로 본다. */
 .pe-embed .dpanel {
   left: auto;
   right: 8px;
   top: 8px;
   max-height: calc(100% - 16px);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+/* 선택 요소가 문서 오른쪽 절반에 있으면(dpanel-left) 패널을 왼쪽으로 보내 선택한 리소스를
+   가리지 않게 한다. 집중 편집(.pe-focus)은 패널이 이미 문서 밖 오른쪽 여백이라 플립하지 않는다. */
+.pe-embed:not(.pe-focus) .dpanel.dpanel-left {
+  left: 8px;
+  right: auto;
+}
+/* 편집기 도구모음(.prdoc-bar — 템플릿 선택 + 페이지)은 기본이 position:absolute; top:-40px 로
+   문서 위쪽 40px 여백에 뜬다(독립 편집기엔 그 공간이 있음). 임베드에선 그 자리를 상단 드래그 바/
+   집중편집 헤더가 차지해 도구모음이 가려졌다. 임베드에선 문서 위 '정상 흐름'으로 내려 겹침을 없앤다:
+   위→아래로 ① 드래그 바/헤더 → ② 템플릿·페이지 도구모음 → ③ 문서 순. */
+.pe-embed .prdoc {
+  display: flex;
+  flex-direction: column;
+}
+.pe-embed .prdoc-bar {
+  position: static;
+  margin: 0 0 8px 0;
+}
+.pe-embed .prdoc-canvas {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+/* ── 집중 편집(.pe-focus) — ?edit=1 로 큰 오버레이에서 열릴 때. 문서를 화면 높이에 맞춰
+   왼쪽에 두고(가로폭은 높이 기준으로 캡해 A4 한 장이 세로로 다 보이게), 편집 패널은 그 오른쪽
+   빈 여백(= 문서 밖)에 불투명하게 앉힌다. 좁은 카드의 '문서 위 반투명 오버레이'와 대비.
+   .dframe-outer 는 전체 폭 유지(패널 앵커) + 캔버스(.dframe-wrap)만 높이 기준으로 캡해 왼쪽 배치.
+   width 를 vh 로 잡으면 scale=wrap.clientWidth/794 이 되어 A4 세로가 화면에 딱 맞는다. */
+.pe-focus .dframe-wrap {
+  width: min(64vh, 680px);
+  margin-left: 3vw;
+}
+.pe-focus .dpanel {
+  left: auto;
+  right: 4vw;
+  top: 12px;
+  max-height: calc(100% - 24px);
+  background: #fff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.pe-focus .dpanel-fab {
+  right: 4vw;
+  bottom: 24px;
 }
 /* '꾸미기 그림' 열기 버튼(요소 미선택 시 편집툴 기본 닫힘) — 패널과 같은 우측 자리에 작게. */
 .dpanel-fab {
@@ -295,10 +340,13 @@
 .dpanel-fab:hover {
   filter: brightness(1.05);
 }
+/* FAB — 패널 닫힘 시 A4가 카드를 꽉 채우므로, 문서 상단(제목) 위가 아니라 우하단 모서리에
+   작게 띄운다(내용을 덜 가림). 클릭하면 갤러리가 우측 거터에 열린다. */
 .pe-embed .dpanel-fab {
   left: auto;
-  right: 8px;
-  top: 8px;
+  right: 10px;
+  top: auto;
+  bottom: 10px;
 }
 .dpanel-head {
   display: flex;

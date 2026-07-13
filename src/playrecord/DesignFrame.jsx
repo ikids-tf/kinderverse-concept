@@ -129,6 +129,10 @@ export function DesignFrame({ data, selected, zoom = 1, onChange, photos, decoAs
 
   const rndScale = scale * (zoom || 1);
   const activeEl = selected ? elements.find((e) => e.id === activeId && !e.locked) : null;
+  // 편집 패널을 선택 요소 '반대편'에 띄운다 — 요소가 문서 오른쪽 절반에 있으면 패널을 왼쪽으로
+  // 보내 선택한 리소스를 가리지 않게(좁은 카드의 문서 위 오버레이에서만 좌우 플립, 집중 편집은
+  // 패널이 이미 문서 밖이라 CSS에서 무시).
+  const panelSide = activeEl && activeEl.x + (activeEl.w || 0) / 2 > frame.w / 2 ? 'left' : 'right';
 
   // 요소 복사/붙여넣기/복제 (편집 디자인 내부). 보드 단축키와 충돌 않게 stopPropagation.
   const outerRef = useRef(null);
@@ -165,7 +169,7 @@ export function DesignFrame({ data, selected, zoom = 1, onChange, photos, decoAs
   }, [activeId, editId, selected]);
 
   return (
-    <div className="dframe-outer" ref={outerRef} tabIndex={-1} onKeyDown={onFrameKey} style={{ outline: "none" }}>
+    <div className={`dframe-outer${activeId || showDeco ? " pe-panel-open" : ""}`} ref={outerRef} tabIndex={-1} onKeyDown={onFrameKey} style={{ outline: "none" }}>
       <div className="dframe-wrap" ref={wrapRef}>
         <div
           className="dframe"
@@ -210,6 +214,7 @@ export function DesignFrame({ data, selected, zoom = 1, onChange, photos, decoAs
       {activeEl && (
         <ControlPanel
           el={activeEl}
+          side={panelSide}
           photos={photos}
           decoAssets={decoAssets}
           onChange={(p) => updateEl(activeEl.id, p)}
@@ -268,7 +273,7 @@ function PhotoLightbox({ src, onClose }) {
 }
 
 // ── 우측 고정 컨트롤 패널 (선택된 요소 1개를 한 곳에서 편집) ──
-function ControlPanel({ el, onChange, onReorder, onRemove, onClose, photos, decoAssets, onEnlarge }) {
+function ControlPanel({ el, side = 'right', onChange, onReorder, onRemove, onClose, photos, decoAssets, onEnlarge }) {
   const s = el.style || {};
   const isText = el.type === "text";
   const isImage = el.type === "image" || el.type === "photo";
@@ -298,7 +303,7 @@ function ControlPanel({ el, onChange, onReorder, onRemove, onClose, photos, deco
 
   return (
     <div
-      className="dpanel"
+      className={"dpanel" + (side === 'left' ? " dpanel-left" : "")}
       onPointerDown={stop}
       onMouseDown={stop}
       onWheel={stop}
