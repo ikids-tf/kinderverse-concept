@@ -318,6 +318,19 @@ function ControlPanel({ el, side = 'right', onChange, onReorder, onRemove, onClo
         </button>
       </div>
 
+      {/* 레이어 순서 (z-order) — 자주 쓰므로 패널 상단에 둔다(갤러리 아래로 스크롤 불필요) */}
+      {onReorder && (
+        <div className="dpanel-sec">
+          <div className="dpanel-label">레이어 순서</div>
+          <div className="dpanel-btn-row">
+            <button className="dpanel-size" title="맨 앞으로" onClick={() => onReorder("front")}>⤒ 맨 앞</button>
+            <button className="dpanel-size" title="앞으로" onClick={() => onReorder("forward")}>↑ 앞</button>
+            <button className="dpanel-size" title="뒤로" onClick={() => onReorder("backward")}>↓ 뒤</button>
+            <button className="dpanel-size" title="맨 뒤로" onClick={() => onReorder("back")}>⤓ 맨 뒤</button>
+          </div>
+        </div>
+      )}
+
       {/* 투명도 */}
       <div className="dpanel-sec">
         <div className="dpanel-label">투명도</div>
@@ -647,19 +660,6 @@ function ControlPanel({ el, side = 'right', onChange, onReorder, onRemove, onClo
           onChange={(e) => onChange({ rotation: Number(e.target.value) })}
         />
       </div>
-
-      {/* 레이어 순서 (z-order) */}
-      {onReorder && (
-        <div className="dpanel-sec">
-          <div className="dpanel-label">레이어 순서</div>
-          <div className="dpanel-btn-row">
-            <button className="dpanel-size" title="맨 앞으로" onClick={() => onReorder("front")}>⤒ 맨 앞</button>
-            <button className="dpanel-size" title="앞으로" onClick={() => onReorder("forward")}>↑ 앞</button>
-            <button className="dpanel-size" title="뒤로" onClick={() => onReorder("backward")}>↓ 뒤</button>
-            <button className="dpanel-size" title="맨 뒤로" onClick={() => onReorder("back")}>⤓ 맨 뒤</button>
-          </div>
-        </div>
-      )}
 
       <div className="dpanel-btn-row" style={{ marginTop: "auto" }}>
         <button
