@@ -469,6 +469,26 @@ function ControlPanel({ el, side = 'right', onChange, onReorder, onRemove, onClo
               🔍 크게 보기
             </button>
           )}
+          {el.src && (
+            <button
+              className="dpanel-upload"
+              style={{ marginBottom: 8, background: el.silhouette ? "#474747" : "#fff", color: el.silhouette ? "#fff" : "#474747", borderColor: "#474747" }}
+              title="그림을 진회색 그림자(실루엣)로 바꿉니다 — 그림자 짝짓기용"
+              onClick={() => onChange({ silhouette: !el.silhouette })}
+            >
+              {el.silhouette ? "🌑 원래 색으로" : "🌑 그림자로 바꾸기"}
+            </button>
+          )}
+          {el.src && el.silhouette && (
+            <div className="dpanel-sec" style={{ marginBottom: 8 }}>
+              <div className="dpanel-label">그림자 색 (검정 ~ 연회색)</div>
+              <input
+                type="range" min="0" max="70"
+                value={Math.round((el.shadowLevel ?? 0.28) * 100)}
+                onChange={(e) => onChange({ shadowLevel: Number(e.target.value) / 100 })}
+              />
+            </div>
+          )}
           <div className="dpanel-label">사진 넣기</div>
           <label className="dpanel-upload" title="내 기기에서 사진 업로드">
             <input type="file" accept="image/*" hidden onChange={onUpload} />
@@ -802,7 +822,7 @@ function EditableEl({ el, scale, active, flatZ, editing, onSelect, onCycle, onEd
           src={el.src}
           alt=""
           draggable={false}
-          style={{ ...fill, boxSizing: "border-box", objectFit: el.fit || "contain", borderRadius: imgRadius, border: imgBorder }}
+          style={{ ...fill, boxSizing: "border-box", objectFit: el.fit || "contain", borderRadius: imgRadius, border: imgBorder, ...(el.silhouette ? { filter: `brightness(0) invert(${el.shadowLevel ?? 0.28})` } : null) }}
           onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
           onLoad={(e) => { e.currentTarget.style.visibility = "visible"; }}
         />
@@ -1016,7 +1036,7 @@ export function DesignEl({ el, frozen }) {
           src={el.src}
           alt=""
           draggable={false}
-          style={{ ...base, boxSizing: "border-box", objectFit: el.fit || "cover", borderRadius: radius, border, boxShadow: s.shadow, opacity: s.opacity ?? 1 }}
+          style={{ ...base, boxSizing: "border-box", objectFit: el.fit || "cover", borderRadius: radius, border, boxShadow: s.shadow, opacity: s.opacity ?? 1, ...(el.silhouette ? { filter: `brightness(0) invert(${el.shadowLevel ?? 0.28})` } : null) }}
           onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
           onLoad={(e) => { e.currentTarget.style.visibility = "visible"; }}
         />

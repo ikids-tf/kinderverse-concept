@@ -36,6 +36,11 @@ export interface TypeDef {
   master_prompt: string;
   /** 주제 매칭용 키워드(유형 추천 시 가산점). */
   keywords?: string[];
+  /** 편집 디자인 템플릿 variant id (놀이기록 DesignFrame 편집기로 열리는 유형). 있으면 이 유형은
+   *  ① 카드에 '편집디자인 만들기'가 뜨고 ② 유형 자동 추천 시 우선된다. 없으면 단일 AI 시트만.
+   *  ※ 새 유형 템플릿 추가 3단계: (1) 여기 template:'<variantId>' (2) layouts.js 빌더+등록
+   *     (3) playrecord-integration/fromWorksheet.ts 의 payload 빌더 레지스트리에 '<variantId>' 추가. */
+  template?: string;
 }
 
 /* ── 전체 시트 앵커: 활동지 "그림(활동) 영역" — 제목·안내는 앱이 텍스트 레이어로 덧입힌다 ── */
@@ -113,17 +118,6 @@ export const TYPES: Record<string, TypeDef> = {
       '활동 영역 중앙에 큰 미로 하나. 왼쪽 위 출발점에 {주제} 캐릭터, 오른쪽 아래 도착점에 목표 그림. 길은 넓고 또렷하게, 막다른 길 몇 개 포함.',
     keywords: ['미로', '길찾기', '길 찾', '탈출'],
   },
-  '색 혼합 실험': {
-    label: '색 혼합 실험',
-    recommended_style: 'watercolor',
-    recommended_age_band: '0-2',
-    needs_cut_layout: false,
-    title_template: '색을 섞어 봐요',
-    instruction: '두 색을 섞으면 무슨 색이 될까요? 색칠해 보세요.',
-    master_prompt:
-      '활동 영역에 "색 물방울 + 색 물방울 = 빈 원" 형태의 색 혼합 줄 3개를 세로로 배치(빈 원은 아이가 결과색을 칠함). {주제} 모티프로 가장자리를 장식.',
-    keywords: ['색', '물감', '섞', '혼합', '무지개'],
-  },
   '반쪽 완성하기': {
     label: '반쪽 완성하기',
     recommended_style: 'pastel',
@@ -134,6 +128,7 @@ export const TYPES: Record<string, TypeDef> = {
     master_prompt:
       '활동 영역 중앙에 세로 점선. 왼쪽 절반에 {주제} 그림이 그려져 있고(연한 격자 보조선 포함), 오른쪽 절반은 같은 격자만 있는 빈 칸이라 아이가 대칭으로 따라 그린다.',
     keywords: ['반쪽', '대칭', '완성', '따라 그리'],
+    template: 'half-drawing',
   },
   '점 잇기': {
     label: '점 잇기',
@@ -196,21 +191,11 @@ export const TYPES: Record<string, TypeDef> = {
     recommended_age_band: '0-2',
     needs_cut_layout: false,
     title_template: '그림자를 찾아요',
-    instruction: '그림과 알맞은 그림자를 선으로 이어 보세요.',
+    instruction: '같은 모양의 그림자를 찾아 선으로 이어 보아요.',
     master_prompt:
-      '활동 영역 왼쪽 열에 {주제} 컬러 그림 4개, 오른쪽 열에 순서를 섞은 검은 실루엣(그림자) 4개를 두고, 사이를 선으로 잇도록 점을 배치. 형태 대비를 또렷하게.',
+      '활동 영역 왼쪽 열에 {주제} 컬러 그림 5개, 오른쪽 열에 순서를 섞은 검은 실루엣(그림자) 5개를 두고, 사이를 선으로 잇도록 점을 배치. 형태 대비를 또렷하게.',
     keywords: ['그림자', '짝', '실루엣', '연결'],
-  },
-  '작은 책 만들기': {
-    label: '작은 책 만들기',
-    recommended_style: 'watercolor',
-    recommended_age_band: '3-5',
-    needs_cut_layout: true,
-    title_template: '{주제} 미니북',
-    instruction: '오리고 접어 작은 책을 만들어요.',
-    master_prompt:
-      '시트에 접고 오리는 미니북 펼침면을 배치: 4~8개의 칸 격자, 각 칸에 {주제} 장면 그림과 쪽 번호, 칸 경계에 점선 접는선/절취선 표시.',
-    keywords: ['작은 책', '미니북', '책 만들', '이야기'],
+    template: 'shadow-match',
   },
   색칠하기: {
     label: '색칠하기',
@@ -222,17 +207,6 @@ export const TYPES: Record<string, TypeDef> = {
     master_prompt:
       '활동 영역에 {주제} 큰 선화 그림 한두 개를 색칠할 수 있게 굵은 윤곽선·빈 내부로 배치. 가장자리에 오려서 액자처럼 쓰는 점선 테두리.',
     keywords: ['색칠', '컬러링', '칠하'],
-  },
-  '관찰 미션': {
-    label: '관찰 미션',
-    recommended_style: 'pastel',
-    recommended_age_band: '3-5',
-    needs_cut_layout: false,
-    title_template: '{주제}{을를} 관찰해요',
-    instruction: '자세히 보고 빈 칸을 채워 보세요.',
-    master_prompt:
-      '활동 영역에 {주제} 큰 관찰 그림 하나, 옆이나 아래에 "색 / 모양 / 개수" 같은 관찰 항목 칸 3~4개(아이가 적거나 표시).',
-    keywords: ['관찰', '미션', '살펴', '탐구'],
   },
   '숫자 따라쓰기': {
     label: '숫자 따라쓰기',
@@ -256,6 +230,7 @@ export const TYPES: Record<string, TypeDef> = {
       '활동 영역을 굵은 선의 3열×3줄(또는 2열×3줄) 네모 칸 격자로 나눈다. 각 칸 위쪽에 똑같은 {주제} 그림만 1~6개씩 칸마다 서로 다른 개수로 또렷하게(겹치지 않게) 배치하고, 칸 아래쪽 가운데에 수를 적을 작고 굵은 빈 네모를 하나 둔다. ' +
       '★엄수: (1) 빈 답 네모 안에 숫자를 미리 써 넣지 말 것(완전히 비움). (2) 모든 칸에는 오직 {주제} 그림만 — 숫자·글자·잎·바구니·버섯 등 다른 사물을 절대 섞지 말 것. 칸마다 개수만 다르게.',
     keywords: ['세기', '수세기', '몇', '개수', '셈', '수 세'],
+    template: 'counting',
   },
   '짝 맞추기': {
     label: '짝 맞추기',
@@ -267,18 +242,6 @@ export const TYPES: Record<string, TypeDef> = {
     master_prompt:
       '활동 영역을 좌우 두 열로 나눈다. 왼쪽 열에 {주제} 그림 4~5개를 세로로 고르게, 오른쪽 열에 그와 짝이 되는 그림(짝꿍·색·새끼·쓰임새 등) 4~5개를 순서를 섞어 세로로 배치한다. 각 그림의 안쪽 끝에 선을 이을 작은 동그란 점을 하나씩 둔다. 좌우 사이 가운데는 선을 그을 수 있게 넉넉히 비운다.',
     keywords: ['짝', '짝짓기', '짝 맞추', '어울리', '연결', '선 잇', '선잇', '같은 색'],
-  },
-  '오려 붙여 완성하기': {
-    label: '오려 붙여 완성하기',
-    recommended_style: 'round_character',
-    recommended_age_band: '3-5',
-    needs_cut_layout: true,
-    title_template: '{주제}{을를} 완성해요',
-    instruction: '아래 조각을 오려서 알맞은 자리에 붙여 완성해 보세요.',
-    master_prompt:
-      '위쪽 큰 영역에 {주제}의 미완성 본체 그림 하나를 둔다 — 붙일 자리(부위)는 연한 회색 윤곽선이나 빈 칸으로만 표시(채우지 말 것). ' +
-      '아래쪽 오리기 영역에는 그 빈 자리에 붙일 부위·조각들(예: 얼굴이면 눈·코·입·귀 / 동물이면 날개·꼬리·다리)을 점선 절취선 네모 칸 안에 하나씩 큼직하게 배치한다. 본체와 조각의 크기·방향이 맞아 붙이면 완성되게.',
-    keywords: ['오려', '오리', '붙여', '붙이', '완성', '조립', '부위', '얼굴 완성'],
   },
   '낱말 카드': {
     label: '낱말 카드',
@@ -292,33 +255,57 @@ export const TYPES: Record<string, TypeDef> = {
       '각 카드 안에 {주제}의 서로 다른 한 가지를 큼직하고 또렷하게 그리고, 카드 아래쪽에 이름을 적을 가로로 긴 빈 띠(이름표 자리, 글자는 비움)를 둔다. 카드마다 다른 대상으로.',
     keywords: ['낱말', '카드', '플래시', '단어', '이름', '어휘', '플래시카드'],
   },
+  '한글 쓰기': {
+    label: '한글 쓰기',
+    recommended_style: 'pastel',
+    recommended_age_band: '3-5',
+    needs_cut_layout: false,
+    title_template: '{주제} 낱말을 알아요',
+    instruction: '그림을 보고 낱말을 따라 써 보아요.',
+    master_prompt:
+      '활동 영역에 {주제} 그림 4개를 세로로 배치하고, 각 그림 옆에 그 낱말을 원고지(네모 칸)에 음절별로 연한 회색 안내글자로 두어 아이가 따라 쓰게 한다. 칸은 크고 또렷하게.',
+    keywords: ['한글', '글자', '낱말 쓰기', '따라 쓰기', '쓰기 연습', '글씨'],
+    template: 'hangul-writing',
+  },
+  '머리띠 만들기': {
+    label: '머리띠 만들기',
+    recommended_style: 'round_character',
+    recommended_age_band: '3-5',
+    needs_cut_layout: true,
+    title_template: '{주제} 머리띠',
+    instruction: '오려서 머리띠를 만들어 역할놀이를 해요.',
+    master_prompt:
+      '오리기 영역에 {주제} 캐릭터 머리띠를 3개 배치한다. 각 머리띠는 캐릭터 얼굴이 달린 넓은 앞띠와 양옆으로 이어 붙이는 긴 띠 조각으로 이뤄지고, 모두 점선 절취선 안에 둔다. 오려 머리에 두르면 역할놀이 머리띠가 된다.',
+    keywords: ['머리띠', '역할놀이', '역할', '가면', '신체', '몸으로'],
+    template: 'headband',
+  },
 };
 
 /* ── 유형 카테고리(영역) — 추천 UI 그룹·일관 적용용. 유형은 한 카테고리에 속한다(주 영역 기준). ── */
 export const CATEGORIES: Record<string, string[]> = {
   '수·셈': ['수 세기', '숫자 따라쓰기', '빙고·탐색'],
   '짝짓기·분류': ['분류하기', '짝 맞추기', '그림자 짝짓기'],
-  '변별·관찰': ['그림 찾기', '관찰 미션', '필요한 물건 고르기'],
-  '소근육·오리기': ['점 잇기', '미로 찾기', '오려 붙여 완성하기', '막대인형 만들기', '작은 책 만들기'],
-  '미술·표현': ['색칠하기', '색 혼합 실험', '반쪽 완성하기'],
-  '언어·낱말': ['낱말 카드'],
+  '변별·관찰': ['그림 찾기', '필요한 물건 고르기'],
+  '소근육·오리기': ['점 잇기', '미로 찾기', '오려 붙여 완성하기', '막대인형 만들기'],
+  '미술·표현': ['색칠하기','반쪽 완성하기'],
+  '언어·낱말': ['낱말 카드', '한글 쓰기'],
+  '신체·역할': ['머리띠 만들기'],
 };
 
 /* ── 연령대별 후보 유형 (md §1) ──────────────────────────────── */
 export const AGE_BAND_RULES: Record<AgeBand, string[]> = {
-  '0-2': ['색칠하기', '반쪽 완성하기', '점 잇기', '그림자 짝짓기', '숫자 따라쓰기', '막대인형 만들기', '색 혼합 실험', '낱말 카드'],
+  '0-2': ['색칠하기', '반쪽 완성하기', '점 잇기', '그림자 짝짓기', '숫자 따라쓰기', '막대인형 만들기', '낱말 카드'],
   '3-5': [
     '분류하기',
     '수 세기',
     '짝 맞추기',
-    '오려 붙여 완성하기',
     '미로 찾기',
     '그림 찾기',
     '빙고·탐색',
     '필요한 물건 고르기',
-    '작은 책 만들기',
-    '관찰 미션',
     '낱말 카드',
+    '한글 쓰기',
+    '머리띠 만들기',
     // 0-2 단순형도 3-5에서 사용 가능 (md §1)
     '색칠하기',
     '반쪽 완성하기',
@@ -326,7 +313,6 @@ export const AGE_BAND_RULES: Record<AgeBand, string[]> = {
     '그림자 짝짓기',
     '숫자 따라쓰기',
     '막대인형 만들기',
-    '색 혼합 실험',
   ],
 };
 
@@ -338,11 +324,9 @@ const TYPE_ALIASES: Record<string, string> = {
   빙고: '빙고·탐색',
   분류: '분류하기',
   점잇기: '점 잇기',
-  미니북: '작은 책 만들기',
   인형: '막대인형 만들기',
   그림자: '그림자 짝짓기',
   숨은그림: '그림 찾기',
-  관찰: '관찰 미션',
   // 교사 현장 표면형 보강(intent-lexicon과 동일 어휘) — "공룡 선잇기"처럼
   // 활동 유형 단어만으로도 올바른 유형이 추천되게 한다.
   // 일반 '짝 맞추기'(색↔과일·동물↔새끼 등 선 잇기)와 '그림자 짝짓기'(실루엣 전용)를 구분.
@@ -366,6 +350,14 @@ const TYPE_ALIASES: Record<string, string> = {
   단어카드: '낱말 카드',
   따라쓰기: '숫자 따라쓰기',
   '따라 쓰기': '숫자 따라쓰기',
+  한글쓰기: '한글 쓰기',
+  '한글 쓰기': '한글 쓰기',
+  글자쓰기: '한글 쓰기',
+  낱말쓰기: '한글 쓰기',
+  글씨쓰기: '한글 쓰기',
+  머리띠: '머리띠 만들기',
+  역할놀이: '머리띠 만들기',
+  역할극: '머리띠 만들기',
   '같은 그림': '그림 찾기',
   길찾기: '미로 찾기',
 };
@@ -485,13 +477,30 @@ export function parseWorksheetRequest(
 }
 
 /** 유형 추천: 연령 후보군 + 주제 키워드 가산. */
+/** 이 유형이 편집 디자인 템플릿(DesignFrame)을 가지는가. */
+export function hasWorksheetTemplate(type: string): boolean {
+  return !!TYPES[type]?.template;
+}
+/** 유형 → 편집 디자인 템플릿 variant id (없으면 undefined). */
+export function worksheetTemplateId(type: string): string | undefined {
+  return TYPES[type]?.template;
+}
+/** 템플릿을 가진 유형 목록. */
+export function typesWithTemplate(): string[] {
+  return Object.keys(TYPES).filter((t) => TYPES[t].template);
+}
+
+// 유형 자동 추천 — 키워드 가산 + '편집 디자인 템플릿 보유' 유형에 큰 가산점(위주로 생성).
+// 템플릿이 늘면 이 가산으로 자연히 후보가 넓어진다(사용자 요청: 나중에 생성 규칙 재정비).
+const TEMPLATE_BONUS = 100;
 function recommendType(age_band: AgeBand, topic: string): string {
   const candidates = AGE_BAND_RULES[age_band];
   let best = candidates[0];
-  let bestScore = -1;
+  let bestScore = -Infinity;
   for (const label of candidates) {
     const kws = TYPES[label]?.keywords ?? [];
-    const score = kws.reduce((acc, kw) => (topic.includes(kw) ? acc + 1 : acc), 0);
+    let score = kws.reduce((acc, kw) => (topic.includes(kw) ? acc + 1 : acc), 0);
+    if (TYPES[label]?.template) score += TEMPLATE_BONUS; // 템플릿 있는 유형 우선
     if (score > bestScore) { bestScore = score; best = label; }
   }
   return best;
@@ -552,9 +561,6 @@ function buildCutLayout(type: string, age_band: AgeBand): CutLayout {
   switch (type) {
     case '막대인형 만들기':
       pieces = ['인형 본체', '막대 손잡이'];
-      break;
-    case '작은 책 만들기':
-      pieces = ['표지', '본문 1', '본문 2', '뒷면'];
       break;
     case '색칠하기':
       pieces = ['색칠 그림', '액자 테두리'];

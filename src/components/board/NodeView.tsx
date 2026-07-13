@@ -16,6 +16,7 @@ import { runComposerChip, expandMindMapBranch, planFromNode, monthlyPlanFromNode
 import { openMindmapInEditor, isMindmapDoc, openMindmapDocInEditor } from '@/playrecord-integration/fromMindmap';
 import { openPlanInEditor, openMonthlyInEditor, frameHasPlan } from '@/playrecord-integration/fromPlan';
 import { openRecordInEditor, frameHasRecord } from '@/playrecord-integration/fromRecord';
+import { openWorksheetInEditor, worksheetVariantForNode } from '@/playrecord-integration/fromWorksheet';
 import type { RouteTarget } from '@/ai/contract';
 import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
 import { WorksheetSheet } from '@/ui-registry/worksheet-sheet';
@@ -300,7 +301,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
   // iframe src는 첫 렌더에 한 번만 고정 — 내용 변경은 메시지로(src를 바꾸면 reload).
   // 저장된 내용(viewerSrc, blob: 제외)이 있으면 ?src=로 복원해서 연다.
   const embedSrcRef = useRef<string | null>(null);
-  if (embedSrcRef.current === null) {
+  // embedStr이 있을 때만 고정한다 — placeholder(doc/빈 카드)로 먼저 마운트됐다가 embed로
+  // '제자리 변환'되는 경우(활동지→편집디자인 카드), 빈 문자열을 latch하면 iframe src가 비어 버린다.
+  if (embedSrcRef.current === null && embedStr) {
     const vs = typeof node.data?.viewerSrc === 'string' ? (node.data.viewerSrc as string) : '';
     if (isMagicViewer && vs) {
       embedSrcRef.current = `${embedStr}?src=${encodeURIComponent(vs)}`;
@@ -333,6 +336,11 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
           pushRedesign([node.id], embedDragRef.current.snap, '이동');
           embedDragRef.current = null;
         }
+        return;
+      }
+      // 뷰어 안 삭제 버튼 → 이 카드를 보드에서 삭제(한 번의 ⌘Z로 복원 가능).
+      if (d?.type === 'kv-embed-delete') {
+        deleteNodesCmd([node.id]);
         return;
       }
       // 뷰어 안 ⛶ → 풀스크린 오버레이 열기(3D 뷰어와 동일 경로). 동영상은 현재 src를
@@ -1251,6 +1259,20 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 src={(node.data?.thumb as string | undefined) || node.src}
                 alt={node.text ?? ''}
                 draggable={false}
+                // ★ 자동 맞춤 — 업로드·생성 등으로 이미지가 처음 로드되면 카드 높이를 이미지 비율에
+                //   맞춰 한 번(autoFitted) 조정한다. 카드 비율=이미지 비율이 되어 잘림이 생기지 않는다.
+                //   (이후 사용자가 직접 크기를 바꾸면 재로드가 없어 다시 맞추지 않는다.)
+                onLoad={(e) => {
+                  const im = e.currentTarget;
+                  if (!im.naturalWidth || !im.naturalHeight) return;
+                  const cur = useBoardStore.getState().nodes[node.id];
+                  if (!cur || cur.data?.autoFitted) return;
+                  const idealH = Math.round(cur.w * (im.naturalHeight / im.naturalWidth));
+                  useBoardStore.getState().updateNodeRaw(node.id, {
+                    ...(Math.abs(idealH - cur.h) > 2 ? { h: idealH, autoH: false } : {}),
+                    data: { ...(cur.data ?? {}), autoFitted: true },
+                  });
+                }}
                 // 누끼(컷아웃)·문서형(활동지·도안) 이미지는 전체 보이기(contain), 일반 사진은 채우기(cover).
                 className={`h-full w-full ${bgRemoved || docLikeImage ? 'object-contain' : 'object-cover'}`}
                 style={node.data?.flipX ? { transform: 'scaleX(-1)' } : undefined}
@@ -2192,6 +2214,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 let open: ((id: string) => void) | null = null;
                 if (t === 'PlayStoryCard') open = openRecordInEditor;
                 else if (t === 'WeeklyPlanGrid') open = node.data?.monthly ? openMonthlyInEditor : openPlanInEditor;
+                else if (t === 'WorksheetCard' && worksheetVariantForNode(node)) open = openWorksheetInEditor; // 편집 디자인 템플릿이 있는 활동지 유형만
                 else if (isMindmapDoc(node)) open = openMindmapDocInEditor; // 마크다운 마인드맵 문서 → 주제망 캔버스
                 if (!open) return null;
                 const openFn = open;

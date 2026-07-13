@@ -1603,6 +1603,294 @@ function savedStoryStickers(themeKey) {
 export function saveStoryStickers(themeKey, stickers) {
   try { localStorage.setItem(STORY_STK_KEY(themeKey), JSON.stringify(stickers)); return true; } catch (e) { return false; }
 }
+// ════════════ 반쪽 그림 그리기 활동지 (헤더 + 2×2 카드[이미지+라벨]) ════════════
+// Figma "놀이 활동지-반쪽그림" 레퍼런스. 이미지는 payload.photos(기존 주제 정적 에셋 경로)로 사전 채움.
+// 헤더 주황·카드 하늘색은 이 활동지 유형의 고정 콘텐츠 룩(Milray 미적용 — 슬라이드/게임과 동일 면제).
+// 놀이기록 편집기와 동일한 DesignFrame 렌더러로 열려 교사가 스티커·꾸미기로 편집 가능.
+export function buildHalfDrawingDoc(payload) {
+  const c = read(payload);
+  const m = maker();
+  const W = A4.W;
+  const theme = (c.meta.theme || "").trim();
+  const els = [m.bg({ bg: "#ffffff" })];
+
+  // ── 헤더(주황 밴드) ──
+  els.push(m.shape(0, 0, W, 168, { bg: "#f0a93e", radius: 0 }));
+  // 상단 태그 = "{주제}-{유형}활동지" (예: 여름 바다-반쪽그림활동지). 텍스트 길이에 맞춰 알약 폭 조정.
+  const tag = c.meta.tag || (theme ? `${theme}-반쪽그림활동지` : "반쪽그림활동지");
+  const tagW = Math.min(340, 44 + [...tag].length * 15);
+  els.push(m.shape(26, 18, tagW, 34, { bg: "#f6f0d9", radius: 999 }));
+  els.push(m.text(26, 18, tagW, 34, tag, { fontSize: 14, fontFamily: LABEL_FONT, color: "#8a6a3a", align: "center", valign: "center" }));
+  els.push(m.text(28, 62, 480, 46, c.title || "반쪽 그림 그리기", { fontSize: 29, fontFamily: HEAD_FONT, color: "#ffffff", align: "left", valign: "center" }, { textRole: "title" }));
+  if (has(c.intro)) els.push(m.text(30, 112, 452, 46, c.intro, { fontSize: 14, fontFamily: BODY_FONT, color: "#fffef2", align: "left", valign: "top" }));
+  // 이름칸 — '이 름' 글자는 박스 맨 위에, 그 아래는 아이가 직접 이름을 쓰는 빈 칸(밑줄).
+  els.push(m.shape(516, 20, 250, 128, { bg: "#ffffff", radius: 16, stroke: "#c49a5e", strokeWidth: 4, shadow: "0 2px 6px rgba(120,90,40,0.18)" }));
+  els.push(m.text(516, 30, 250, 28, "이 름", { fontSize: 20, fontFamily: HEAD_FONT, color: "#3a3a3a", align: "center", valign: "center" }));
+  els.push(m.shape(540, 112, 202, 2, { bg: "#ddd0bc", radius: 0 })); // 이름 쓰는 줄
+
+  // ── 2×2 카드 그리드(각 카드: 이미지 왼쪽 편중 + 상단 라벨 알약) ──
+  const M = 16, gap = 14, gridTop = 196, rowGap = 22, cardH = 432;
+  const cols = 2, cardW = Math.floor((W - 2 * M - gap) / cols);
+  const acts = c.activities || [];
+  for (let i = 0; i < 4; i++) {
+    const col = i % 2, row = Math.floor(i / 2);
+    const x = M + col * (cardW + gap);
+    const y = gridTop + row * (cardH + rowGap);
+    els.push(m.shape(x, y, cardW, cardH, { bg: "#ffffff", radius: 10, stroke: "#7fbcd9", strokeWidth: 3, shadow: "0 4px 12px rgba(60,90,110,0.10)" }));
+    // 이미지: 카드 중앙 정렬(중심이 접는선 = 카드 세로 중앙). 투명 PNG → image(fit contain).
+    const src = c.photos[i] || null;
+    const inX = x + 16, inY = y + 42, inW = cardW - 32, inH = cardH - 70;
+    const cx = x + Math.round(cardW / 2);
+    if (src) {
+      els.push({ id: `hd-img${i}`, type: "image", src, fit: "contain", x: inX, y: inY, w: inW, h: inH, style: { radius: 0 } });
+      // ★ '반쪽 그림' — 오른쪽 절반을 흰색으로 가려 생물의 반만 보이게(아이가 나머지 반을 그림).
+      //   편집 요소(z:1)가 잠긴 요소(z:0) 위에 그려지므로 마스크는 잠그지 않고 이미지 '뒤 배열'이 아닌
+      //   '뒤 순서'로 두어 위에 덮는다. 이미지를 선택하면 z-부스트되어 편집 중엔 전체가 보인다.
+      els.push({ id: `hd-mask${i}`, type: "shape", x: cx, y: y + 4, w: x + cardW - 4 - cx, h: cardH - 8, style: { bg: "#ffffff", radius: 0 } });
+      // 접는(대칭) 안내선 — 카드 세로 중앙 옅은 선.
+      els.push({ id: `hd-fold${i}`, type: "shape", x: cx - 1, y: y + 16, w: 2, h: cardH - 32, style: { bg: "#a9d4e8", radius: 0 } });
+    } else {
+      els.push(m.photo(inX, inY, inW, inH, null, { bg: "#f4f8fb", radius: 10 }));
+    }
+    // 라벨 알약(카드 상단 걸침)
+    const label = (acts[i] && acts[i].title) || "";
+    const lw = 96, lx = x + Math.round((cardW - lw) / 2);
+    els.push(m.shape(lx, y - 15, lw, 32, { bg: "#c3e4f2", radius: 999 }));
+    els.push(m.text(lx, y - 15, lw, 32, label, { fontSize: 16, fontFamily: LABEL_FONT, color: "#5f92b0", align: "center", valign: "center" }));
+  }
+  return doc(c.title || "반쪽 그림 그리기", "#ffffff", els);
+}
+
+// ════════════ 수 세기 활동지 (난이도 상 4-5세 · 가로형) ════════════
+// Figma "놀이 활동지-수세기-여름바다생물". 가로 A4(1123×794). 3행 = [라벨카드 | N마리 카운트박스 | 숫자 선택지].
+// payload: { counting:true, header.title, meta.theme, introduction.text, rows:[{label,src,count,options[]}], questions[] }.
+export function buildCountingDoc(payload) {
+  const d = payload || {};
+  const W = 1123, H = 794;
+  const title = d.header?.title || "수 세기";
+  const intro = d.introduction?.text || "";
+  const rows = Array.isArray(d.rows) ? d.rows : [];
+  const questions = Array.isArray(d.questions) ? d.questions : [];
+  const m = maker();
+  const els = [{ id: "cnt-bg", type: "shape", x: 0, y: 0, w: W, h: H, locked: true, style: { bg: "#ffffff", radius: 0 } }];
+
+  // ── 헤더 ──
+  // 상단 태그 = "{주제}-{유형}활동지" (예: 여름 바다-수세기활동지). 텍스트 길이에 맞춰 알약 폭 조정.
+  const tag = d.meta?.tag || "수세기활동지";
+  const tagW = Math.min(340, 44 + [...tag].length * 15);
+  els.push(m.shape(24, 18, tagW, 34, { bg: "#eaf3fb", radius: 999, stroke: "#7fbcd9", strokeWidth: 2 }));
+  els.push(m.text(24, 18, tagW, 34, tag, { fontSize: 14, fontFamily: LABEL_FONT, color: "#5f92b0", align: "center", valign: "center" }));
+  els.push(m.text(288, 12, 430, 48, title, { fontSize: 36, fontFamily: HEAD_FONT, color: "#3b7bbf", align: "left", valign: "center" }, { textRole: "title" }));
+  if (intro) els.push(m.text(290, 62, 540, 28, intro, { fontSize: 15, fontFamily: BODY_FONT, color: "#6a6a6a", align: "left", valign: "center" }));
+  els.push(m.text(906, 22, 60, 30, "이름:", { fontSize: 16, fontFamily: LABEL_FONT, color: "#5a5a5a", align: "left", valign: "center" }));
+  els.push(m.shape(958, 46, 150, 2, { bg: "#c9c0b4", radius: 0 }));
+
+  // ── 3행 ──
+  const PAL = [
+    { bd: "#7fbcd9", soft: "#eef6fb", dot: "#5f92b0" },
+    { bd: "#e0a0a0", soft: "#fbeeee", dot: "#cf7f7f" },
+    { bd: "#93c79f", soft: "#eef7f0", dot: "#5fa06e" },
+  ];
+  // 카운트 박스를 좁게(560) 잡아 박스↔숫자 사이에 '줄잇기' 공간을 넉넉히(약 200px) 둔다.
+  const rowTop = 132, rowH = 178, rowGap = 12, bx = 172, bw = 560;
+  const numX = 930; // 숫자 선택지 열(줄잇기 공간 뒤)
+  rows.forEach((r, i) => {
+    const y = rowTop + i * (rowH + rowGap);
+    const pal = PAL[i % 3];
+    // 라벨 카드
+    els.push(m.shape(24, y, 132, rowH, { bg: pal.soft, radius: 14, stroke: pal.bd, strokeWidth: 3 }));
+    els.push(m.shape(38, y + 12, 104, 30, { bg: "#ffffff", radius: 999 }));
+    els.push(m.text(38, y + 12, 104, 30, r.label || "", { fontSize: 17, fontFamily: LABEL_FONT, color: pal.dot, align: "center", valign: "center" }));
+    if (r.src) els.push({ id: `cnt-lbl${i}`, type: "image", src: r.src, fit: "contain", x: 40, y: y + 48, w: 100, h: rowH - 60, style: { radius: 0 } });
+    // 카운트 박스 + N마리(세로 가운데 정렬 그리드)
+    els.push(m.shape(bx, y, bw, rowH, { bg: "#ffffff", radius: 16, stroke: pal.bd, strokeWidth: 3 }));
+    const n = Math.max(0, r.count || 0), perRow = 7, cell = 62, cgap = 10;
+    const gridRows = Math.max(1, Math.ceil(n / perRow));
+    const startY = y + Math.round((rowH - (gridRows * cell + (gridRows - 1) * cgap)) / 2);
+    const stepX = (bw - 40 - cell) / (perRow - 1);
+    for (let k = 0; k < n; k++) {
+      const cc = k % perRow, cr = Math.floor(k / perRow);
+      const ix = bx + 20 + cc * stepX, iy = startY + cr * (cell + cgap);
+      if (r.src) els.push({ id: `cnt${i}_${k}`, type: "image", src: r.src, fit: "contain", x: Math.round(ix), y: Math.round(iy), w: cell, h: cell, style: { radius: 0 } });
+    }
+    // 연결점(카운트 박스 오른쪽 중앙) — 여기서 숫자로 선을 잇는다.
+    els.push(m.shape(bx + bw - 7, y + Math.round(rowH / 2) - 7, 14, 14, { bg: pal.dot, radius: 999 }));
+    // 숫자 선택지(줄잇기 공간 오른쪽 3개 + 점)
+    const opts = Array.isArray(r.options) ? r.options : [];
+    opts.forEach((val, j) => {
+      const oy = y + 24 + j * 52;
+      els.push(m.shape(numX, oy + 2, 16, 16, { bg: pal.dot, radius: 999 }));
+      els.push(m.text(numX + 26, oy - 6, 60, 32, String(val), { fontSize: 26, fontFamily: HEAD_FONT, color: "#4a4a4a", align: "left", valign: "center" }));
+    });
+  });
+
+  // ── 하단 '생각해봐요' ──
+  const by = rowTop + 3 * (rowH + rowGap) + 2;
+  if (by + 52 < H) {
+    els.push(m.shape(24, by, W - 48, H - by - 12, { bg: "#eef4f8", radius: 14, stroke: "#bcd6e6", strokeWidth: 2 }));
+    els.push(m.text(40, by + 8, 180, 26, "🔍 생각해봐요!", { fontSize: 15, fontFamily: LABEL_FONT, color: "#e08a3a", align: "left", valign: "center" }));
+    questions.slice(0, 3).forEach((q, j) => {
+      const qx = 40 + (j % 2) * 540, qy = by + 34 + Math.floor(j / 2) * 22;
+      els.push(m.text(qx, qy, 520, 20, `★ ${q}`, { fontSize: 13, fontFamily: BODY_FONT, color: "#5a5a5a", align: "left", valign: "center" }));
+    });
+  }
+  return { output_type: "DesignDoc", title, frame: { w: W, h: H, bg: "#ffffff" }, elements: els };
+}
+
+// ════════════ 그림자 짝짓기 활동지 (왼쪽 컬러 그림 ↔ 오른쪽 검은 그림자, 잇기) ════════════
+// 레퍼런스 "그림자 찾기 활동지"(초록 헤더·크림 배경). 오른쪽은 같은 이미지를 silhouette:true 로
+// 검은 실루엣 렌더 + 순서 셔플. 이미지는 payload.items(기존 주제 정적 에셋).
+export function buildShadowMatchDoc(payload) {
+  const d = payload || {};
+  const W = A4.W, H = A4.H;
+  const title = d.header?.title || "그림자를 찾아요";
+  const intro = d.introduction?.text || "";
+  const tag = d.meta?.tag || "그림자짝짓기 활동지";
+  const items = (Array.isArray(d.items) ? d.items : []).filter(Boolean);
+  const m = maker();
+  const els = [m.bg({ bg: "#fbf7e8" })];
+
+  // 헤더(초록 밴드)
+  els.push(m.shape(0, 0, W, 150, { bg: "#5a9e3d", radius: 0 }));
+  const tagW = Math.min(340, 44 + [...tag].length * 15);
+  els.push(m.shape(26, 18, tagW, 34, { bg: "#eef6e6", radius: 999 }));
+  els.push(m.text(26, 18, tagW, 34, tag, { fontSize: 14, fontFamily: LABEL_FONT, color: "#3f7a2b", align: "center", valign: "center" }));
+  els.push(m.text(28, 58, 480, 44, title, { fontSize: 30, fontFamily: HEAD_FONT, color: "#ffffff", align: "left", valign: "center" }, { textRole: "title" }));
+  if (intro) els.push(m.text(30, 104, 500, 30, intro, { fontSize: 14, fontFamily: BODY_FONT, color: "#eaf5e0", align: "left", valign: "center" }));
+  // 이름칸
+  els.push(m.shape(560, 20, 210, 110, { bg: "#ffffff", radius: 14, stroke: "#3f7a2b", strokeWidth: 3 }));
+  els.push(m.text(560, 30, 210, 26, "이 름", { fontSize: 18, fontFamily: HEAD_FONT, color: "#3a3a3a", align: "center", valign: "center" }));
+  els.push(m.shape(584, 104, 162, 2, { bg: "#cfe0c2", radius: 0 }));
+
+  // 항목: 왼쪽 컬러 그림 ↔ 오른쪽 그림자(셔플)
+  const n = Math.min(items.length, 5);
+  const top = 176, areaH = H - top - 24, rowH = Math.floor(areaH / Math.max(1, n));
+  const imgSz = Math.min(150, rowH - 24);
+  const leftX = 70, rightX = W - 70 - imgSz;
+  const leftDotX = leftX + imgSz + 18, rightDotX = rightX - 34;
+  const PERMS = { 1: [0], 2: [1, 0], 3: [2, 0, 1], 4: [2, 0, 3, 1], 5: [2, 4, 0, 3, 1] };
+  const perm = PERMS[n] || items.map((_, i) => i);
+  for (let i = 0; i < n; i++) {
+    const y = top + i * rowH, cy = y + Math.round((rowH - imgSz) / 2), dotY = y + Math.round(rowH / 2) - 8;
+    const L = items[i], R = items[perm[i]];
+    if (L?.src) els.push({ id: `sm-l${i}`, type: "image", src: L.src, fit: "contain", x: leftX, y: cy, w: imgSz, h: imgSz, style: { radius: 0 } });
+    els.push(m.shape(leftDotX, dotY, 16, 16, { bg: "#5a9e3d", radius: 999 }));
+    if (R?.src) els.push({ id: `sm-r${i}`, type: "image", src: R.src, fit: "contain", silhouette: true, x: rightX, y: cy, w: imgSz, h: imgSz, style: { radius: 0 } });
+    els.push(m.shape(rightDotX, dotY, 16, 16, { bg: "#5a9e3d", radius: 999 }));
+  }
+  return doc(title, "#fbf7e8", els);
+}
+
+// ════════════ 한글 쓰기 활동지 (그림 + 낱말 원고지 칸 따라쓰기) ════════════
+// 레퍼런스 "여름 낱말을 알아요"(초록 헤더·크림). 각 행: 그림 + 그 낱말을 음절별 네모 칸에 연한 회색
+// 안내글자로 두어 따라 쓴다. 낱말·그림은 payload.items(기존 주제 에셋 라벨/이미지).
+export function buildHangulWritingDoc(payload) {
+  const d = payload || {};
+  const W = A4.W, H = A4.H;
+  const title = d.header?.title || "낱말을 알아요";
+  const intro = d.introduction?.text || "";
+  const tag = d.meta?.tag || "한글쓰기 활동지";
+  const items = (Array.isArray(d.items) ? d.items : []).filter(Boolean).slice(0, 2); // 2낱말/장(크게)
+  const m = maker();
+  const els = [m.bg({ bg: "#fbf7e8" })];
+  // 초록 라운드 테두리 프레임(레퍼런스: 밴드 없이 크림 배경 + 초록 테두리)
+  els.push(m.shape(14, 14, W - 28, H - 28, { stroke: "#8fc36a", strokeWidth: 5, radius: 26 }));
+
+  // 태그(초록 외곽선 알약)
+  const tagW = Math.min(360, 40 + [...tag].length * 15);
+  els.push(m.shape(40, 32, tagW, 34, { bg: "#ffffff", radius: 999, stroke: "#8fc36a", strokeWidth: 2 }));
+  els.push(m.text(40, 32, tagW, 34, tag, { fontSize: 14, fontFamily: LABEL_FONT, color: "#4a8a34", align: "center", valign: "center" }));
+  // 제목(초록) + 해·수박 데코
+  els.push(m.emoji(52, 74, 46, "🌞", -6));
+  els.push(m.text(110, 74, 574, 56, title, { fontSize: 40, fontFamily: HEAD_FONT, color: "#4a8a34", align: "center", valign: "center" }, { textRole: "title" }));
+  els.push(m.emoji(690, 72, 44, "🍉", 8));
+  // 이름 · 날짜 한 줄
+  els.push(m.text(120, 150, 60, 28, "이름:", { fontSize: 17, fontFamily: LABEL_FONT, color: "#3a3a3a", align: "left", valign: "center" }));
+  els.push(m.shape(180, 176, 200, 2, { bg: "#3a3a3a", radius: 0 }));
+  els.push(m.text(430, 150, 60, 28, "날짜:", { fontSize: 17, fontFamily: LABEL_FONT, color: "#3a3a3a", align: "left", valign: "center" }));
+  els.push(m.shape(490, 176, 190, 2, { bg: "#3a3a3a", radius: 0 }));
+
+  // 낱말 2개 — 번호+문장 · 큰 그림(가운데 왼쪽) · 큰 초록 낱말(오른쪽) · 원고지 풀폭 5칸(앞 음절만 안내글자)
+  const n = items.length;
+  const top = 200, rowH = Math.floor((H - top - 34) / Math.max(1, n));
+  const BOXN = 5, bx0 = 60, box = Math.floor((W - 2 * bx0) / BOXN);
+  for (let i = 0; i < n; i++) {
+    const y = top + i * rowH, it = items[i];
+    const word = it?.label || "";
+    const chars = [...word];
+    const wfs = chars.length <= 2 ? 76 : chars.length === 3 ? 62 : 50; // 낱말 길이별 크기
+    els.push(m.text(56, y + 4, 640, 32, `${i + 1}. ${word}`, { fontSize: 23, fontFamily: LABEL_FONT, color: "#3a3a3a", align: "left", valign: "center" }));
+    if (it?.src) els.push({ id: `hw-img${i}`, type: "image", src: it.src, fit: "contain", x: 150, y: y + 44, w: 200, h: 200, style: { radius: 0 } });
+    els.push(m.text(400, y + 92, 360, 120, `'${word}'`, { fontSize: wfs, fontFamily: HEAD_FONT, color: "#2e6b2e", align: "center", valign: "center" }));
+    // 원고지 풀폭 5칸 + 십자 안내선(연한), 앞 음절만 연한 안내글자
+    const boxY = y + 262;
+    els.push(m.shape(bx0 - 3, boxY - 3, BOXN * box + 6, box + 6, { bg: "#ffffff", radius: 12, stroke: "#8fc36a", strokeWidth: 4 }));
+    for (let k = 0; k < BOXN; k++) {
+      const bx = bx0 + k * box;
+      if (k > 0) els.push(m.shape(bx, boxY + 6, 2, box - 12, { bg: "#cfe3bb", radius: 0 })); // 칸 구분선
+      els.push(m.shape(bx + Math.round(box / 2) - 1, boxY + 8, 2, box - 16, { bg: "#e3e6c8", radius: 0 })); // 세로 십자
+      els.push(m.shape(bx + 10, boxY + Math.round(box / 2) - 1, box - 20, 2, { bg: "#e3e6c8", radius: 0 })); // 가로 십자
+      if (chars[k]) els.push(m.text(bx, boxY, box, box, chars[k], { fontSize: 78, fontFamily: HEAD_FONT, color: "#cdcdcd", align: "center", valign: "center" }));
+    }
+  }
+  return doc(title, "#fbf7e8", els);
+}
+
+// ════════════ 역할놀이 머리띠 도안 (신체활동/역할놀이) ════════════
+// Figma "여름바다 머리띠 도안". 3캐릭터 × [캐릭터 그림 · 컬러 앞띠(라벨) · 오리는 옆띠 2개(끝 탭)].
+// 이미지는 payload.items(기존 주제 에셋). 오려서 머리에 두르는 머리띠를 만든다.
+export function buildHeadbandDoc(payload) {
+  const d = payload || {};
+  const W = A4.W, H = A4.H;
+  const tag = d.meta?.tag || "역할놀이 도안";
+  const intro = d.introduction?.text || "";
+  const items = (Array.isArray(d.items) ? d.items : []).filter(Boolean).slice(0, 3);
+  const m = maker();
+  const els = [m.bg({ bg: "#efe9dc" })];
+  els.push(m.shape(16, 16, W - 32, H - 32, { bg: "#f7f3e9", radius: 24 })); // 크림 패널
+
+  // 태그(외곽선 알약) + 우상단 점
+  const tagW = Math.min(380, 40 + [...tag].length * 15);
+  els.push(m.shape(40, 32, tagW, 40, { bg: "#ffffff", radius: 999, stroke: "#7a6a55", strokeWidth: 2 }));
+  els.push(m.text(40, 32, tagW, 40, tag, { fontSize: 15, fontFamily: LABEL_FONT, color: "#5a4a38", align: "center", valign: "center" }));
+  ["#f0785a", "#5cb3d6", "#e6c169"].forEach((c, i) => els.push(m.shape(W - 98 + i * 24, 46, 14, 14, { bg: c, radius: 999 })));
+  if (intro) els.push(m.text(40, 80, W - 80, 22, intro, { fontSize: 13, fontFamily: BODY_FONT, color: "#8a7a63", align: "left", valign: "center" }));
+
+  const PAL = [
+    { band: "#f0785a", label: "#c74f31" },
+    { band: "#5cb3d6", label: "#2e7a94" },
+    { band: "#e6c169", label: "#a67c2e" },
+  ];
+  const n = items.length;
+  const top = 116, rowH = Math.floor((H - top - 22) / Math.max(1, n));
+  const bandX = 40, bandW = W - 80;
+  for (let i = 0; i < n; i++) {
+    const y = top + i * rowH, it = items[i], pal = PAL[i % 3];
+    // 캐릭터(앞띠 위에 얹힘)
+    if (it?.src) els.push({ id: `hb-img${i}`, type: "image", src: it.src, fit: "contain", x: Math.round(W / 2 - 85), y: y + 6, w: 170, h: 150, style: { radius: 0 } });
+    // 앞띠(캐릭터 얼굴 띠) + 라벨 + 점
+    const by = y + 150;
+    els.push(m.shape(bandX, by, bandW, 74, { bg: pal.band, radius: 40, shadow: "0 8px 10px rgba(122,50,26,0.14)" }));
+    els.push(m.shape(bandX + 9, by + 9, bandW - 18, 56, { stroke: "rgba(255,255,255,0.6)", strokeWidth: 2, radius: 30 }));
+    els.push(m.shape(bandX + 16, by + 15, 110, 44, { bg: "rgba(255,255,255,0.92)", radius: 999 }));
+    els.push(m.text(bandX + 16, by + 15, 110, 44, it?.label || "", { fontSize: 22, fontFamily: LABEL_FONT, color: pal.label, align: "center", valign: "center" }));
+    [[-30, 26, 10], [-66, 44, 7], [-104, 30, 7]].forEach(([dx, dy, sz]) => els.push(m.shape(bandX + bandW + dx, by + dy, sz, sz, { bg: "rgba(255,255,255,0.55)", radius: 999 })));
+    // 오리는 옆띠 2개(끝에 풀칠 탭 + 자르는 선)
+    const sy = by + 88, sw = Math.floor((bandW - 20) / 2), sh = 56, cap = 34;
+    const strap = (sx, capSide) => {
+      els.push(m.shape(sx, sy, sw, sh, { bg: pal.band, radius: 12, shadow: "0 6px 9px rgba(122,50,26,0.10)" }));
+      els.push(m.shape(sx + 8, sy + 8, sw - 16, sh - 16, { stroke: "rgba(255,255,255,0.7)", strokeWidth: 2, radius: 8 }));
+      const capX = capSide === "left" ? sx : sx + sw - cap;
+      els.push(m.shape(capX, sy, cap, sh, { bg: "rgba(255,255,255,0.5)", radius: 12 }));
+      const cutX = capSide === "left" ? sx + cap : sx + sw - cap;
+      els.push(m.shape(cutX - 1, sy + 5, 2, sh - 10, { bg: "rgba(255,255,255,0.9)", radius: 0 }));
+    };
+    strap(bandX, "left");
+    strap(bandX + sw + 20, "right");
+  }
+  return doc("역할놀이 머리띠", "#efe9dc", els);
+}
+
 // payload → 주제 키 (찜 저장/조회용)
 export function themeKeyOf(payload) {
   const text = `${payload?.meta?.theme || ""} ${payload?.header?.title || ""}`;
@@ -1673,13 +1961,18 @@ function templateEntry(id) {
   if (id === "topicweb") return { build: buildTopicWebDoc, photos: 0 };
   if (id === "weeklyplan") return { build: buildWeeklyPlanDoc, photos: 0 };
   if (id === "monthlyplan" || id === "monthlyplan-summer") return { build: buildMonthlyPlanSummerDoc, photos: 0 };
+  if (id === "half-drawing") return { build: buildHalfDrawingDoc, photos: 4 };
+  if (id === "counting") return { build: buildCountingDoc, photos: 0 };
+  if (id === "shadow-match") return { build: buildShadowMatchDoc, photos: 0 };
+  if (id === "hangul-writing") return { build: buildHangulWritingDoc, photos: 0 };
+  if (id === "headband") return { build: buildHeadbandDoc, photos: 0 };
   const [theme, family] = String(id).split("-");
   const set = TEMPLATE_REGISTRY[theme] || TEMPLATE_REGISTRY.default;
   return set[family] || TEMPLATE_REGISTRY.default[family] || TEMPLATE_REGISTRY.default.card;
 }
 // 유효한 조합 id 인지
 export function isTemplateId(id) {
-  if (id === "topicweb" || id === "weeklyplan" || id === "monthlyplan" || id === "monthlyplan-summer") return true;
+  if (id === "topicweb" || id === "weeklyplan" || id === "monthlyplan" || id === "monthlyplan-summer" || id === "half-drawing" || id === "counting" || id === "shadow-match" || id === "hangul-writing" || id === "headband") return true;
   const [theme, family] = String(id).split("-");
   return !!(TEMPLATE_REGISTRY[theme] && TEMPLATE_REGISTRY[theme][family]);
 }
@@ -1699,6 +1992,11 @@ export function templateLabel(id) {
   if (id === "topicweb") return "놀이주제망";
   if (id === "weeklyplan") return "주안 여름";
   if (id === "monthlyplan" || id === "monthlyplan-summer") return "월간 여름바다";
+  if (id === "half-drawing") return "반쪽 그림 그리기";
+  if (id === "counting") return "바다 친구들 수세기";
+  if (id === "shadow-match") return "그림자를 찾아요";
+  if (id === "hangul-writing") return "낱말을 알아요";
+  if (id === "headband") return "역할놀이 머리띠";
   const [theme, family] = String(id).split("-");
   const t = TEMPLATE_THEMES.find((x) => x.key === theme);
   const f = TEMPLATE_FAMILIES.find((x) => x.key === family);
@@ -1713,6 +2011,11 @@ export function pickerTemplates(payload) {
   if (payload?.topic_web) return [{ id: "topicweb", theme: "topicweb", family: "web", label: "놀이주제망" }];
   if (payload?.daily_flow) return [{ id: "weeklyplan", theme: "weeklyplan", family: "week", label: "주안 여름" }];
   if (payload?.weekly_flow) return [{ id: "monthlyplan-summer", theme: "monthlyplan", family: "month", label: "월간 여름바다" }];
+  if (payload?.half_drawing) return [{ id: "half-drawing", theme: "half-drawing", family: "worksheet", label: "반쪽 그림 그리기" }];
+  if (payload?.counting) return [{ id: "counting", theme: "counting", family: "worksheet", label: "바다 친구들 수세기" }];
+  if (payload?.shadow_match) return [{ id: "shadow-match", theme: "shadow-match", family: "worksheet", label: "그림자를 찾아요" }];
+  if (payload?.hangul_writing) return [{ id: "hangul-writing", theme: "hangul-writing", family: "worksheet", label: "낱말을 알아요" }];
+  if (payload?.headband) return [{ id: "headband", theme: "headband", family: "worksheet", label: "역할놀이 머리띠" }];
   const out = [];
   for (const theme of Object.keys(TEMPLATE_REGISTRY)) {
     if (theme === "default") continue;

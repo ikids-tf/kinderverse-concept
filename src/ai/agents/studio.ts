@@ -6,6 +6,9 @@ import { validateRegistryPayload, type RegistryPayload, type StudioItem } from '
 import {
   parseWorksheetRequest,
   recommendWorksheet,
+  buildTitle,
+  assembleImagePrompt,
+  worksheetTemplateId,
   type AgeYears,
   type StyleCode,
   type WorksheetMode,
@@ -243,8 +246,9 @@ export async function runStudioWorksheet(
 - 이 연령(${ageLabel}) 난이도 기준: ${ageYears ? AGE_DIFFICULTY_GUIDE[ageYears] : '연령에 맞춰 조절'} 무근거 난이도 상향 금지.
 - objective는 '기대 경험'으로: "~하며 ~을 경험한다 / ~에 관심을 가진다" 1문장.
 - materials는 활동지 외 실제 필요한 것만(색연필·가위·풀 등 2~4가지).
+- subject는 이 활동지 제목·그림에 쓸 핵심 소재를 2~8자 명사로만(놀이 서술 문장 금지, 조사·동사 없이). 예: "낙엽" / "바다 생물" / "가을 열매".
 JSON만 출력:
-{ "type": "WorksheetCard", "props": { "title": string, "age_band": "${reco.age_band}", "curriculum": "standard"|"nuri", "objective": string, "materials": string[], "steps": string[], "domains": string[] } }`;
+{ "type": "WorksheetCard", "props": { "title": string, "subject": string, "age_band": "${reco.age_band}", "curriculum": "standard"|"nuri", "objective": string, "materials": string[], "steps": string[], "domains": string[] } }`;
 
   const first = await callGateway({
     task: 'studio',
@@ -263,8 +267,10 @@ JSON만 출력:
   }
 
   let result;
+  let rawJson: unknown;
   try {
-    result = validateRegistryPayload(extractJson(first.text));
+    rawJson = extractJson(first.text);
+    result = validateRegistryPayload(rawJson);
   } catch {
     result = { ok: false as const, errors: ['unparseable'] };
   }
@@ -272,36 +278,59 @@ JSON만 출력:
     return { payload: clarify('활동지를 만들 정보가 부족해요.'), mocked: first.mocked };
   }
 
-  // 3) studio가 image_prompt로 활동지 "그림 영역"을 렌더(글자 없음, 세로형).
-  //    제목·안내는 앱이 텍스트 레이어로 덧입힌다. A4에 맞게 세로 비율(3:4) 요청.
-  const visual = await callGateway({
-    task: 'image',
-    provider: 'auto',
-    messages: [],
-    meta: { prompt: reco.image_prompt, caption: `${reco.topic} ${reco.type}`, aspectRatio: '3:4' },
-  });
+  // LLM이 준 짧은 subject(핵심 명사)로 제목·image_prompt를 재조립한다 — request가 긴 놀이서술
+  //  문장이면 reco.topic(=파싱 결과)이 길어 제목이 문장 통째로 나오기 때문(parseWorksheetRequest
+  //  단축 로직은 한글에서 사실상 무력). subject 는 검증 스키마에 없어 raw parsed 에서 직접 읽는다.
+  //  부적합(길거나 서술형)하면 기존 reco.topic 으로 폴백 → 오프라인 mock·모든 호출부 안전.
+  const rawSubject =
+    typeof (rawJson as { props?: { subject?: unknown } })?.props?.subject === 'string'
+      ? (rawJson as { props: { subject: string } }).props.subject.trim()
+      : '';
+  const subjectOk = rawSubject.length >= 1 && rawSubject.length <= 10 && !/[.!?。]|놀이|하며|하고|해요/.test(rawSubject);
+  const effTopic = subjectOk ? rawSubject : reco.topic;
+  const title = buildTitle(reco.type, effTopic);
+  const imagePrompt = assembleImagePrompt(reco.type, effTopic, reco.style);
 
-  // 4) 추천 메타 + 시각물 병합 → 확장 WorksheetCard.
+  // 3) 추천 메타 병합(이미지 유무와 무관한 공통 필드) → 확장 WorksheetCard.
   //    제목은 레퍼런스 제목(이미지에 그려진 제목)과 일치시킨다.
   const props = result.value.props;
-  props.title = reco.title;
+  props.title = title;
   props.age_band = reco.age_band;
   props.age_years = reco.age_years;
-  props.theme = theme;
+  props.theme = opts?.theme?.trim() || effTopic;
   props.area = reco.area;
-  props.topic = reco.topic;
+  props.topic = effTopic;
   props.instruction = reco.instruction;
   props.type = reco.type;
   props.style = reco.style;
   props.style_label = reco.style_label;
   props.selection = reco.selection;
   props.difficulty = reco.difficulty;
-  props.image_prompt = reco.image_prompt;
-  props.image_url = visual.image;
+  props.image_prompt = imagePrompt;
   props.needs_cut_layout = reco.needs_cut_layout;
   props.cut_layout = reco.cut_layout;
-  props.visual_status = visual.image ? 'filled' : 'pending';
   if (linkPlanId) props.link_plan_id = linkPlanId;
+
+  // 4a) 편집 디자인 템플릿 보유 유형(수 세기·반쪽 완성·그림자 짝짓기·한글 쓰기)은
+  //     AI 이미지 생성을 건너뛰고 template_variant 마커만 실어 반환한다 —
+  //     composer.fillPlaceholderDoc 가 이 마커를 보고 '생성 시점부터' 편집디자인 카드로
+  //     제자리 변환한다(주제 리소스는 fromWorksheet 빌더가 topic/theme 로 매칭). 비용·속도도 개선.
+  const variantId = worksheetTemplateId(reco.type);
+  if (variantId) {
+    props.template_variant = variantId;
+    return { payload: result.value, mocked: first.mocked };
+  }
+
+  // 4b) 그 외 유형 → 활동지 "그림 영역"을 AI 이미지로 렌더(글자 없음, 세로형).
+  //     제목·안내는 앱이 텍스트 레이어로 덧입힌다. A4에 맞게 세로 비율(3:4) 요청.
+  const visual = await callGateway({
+    task: 'image',
+    provider: 'auto',
+    messages: [],
+    meta: { prompt: imagePrompt, caption: `${effTopic} ${reco.type}`, aspectRatio: '3:4' },
+  });
+  props.image_url = visual.image;
+  props.visual_status = visual.image ? 'filled' : 'pending';
 
   return { payload: result.value, mocked: first.mocked || !!visual.mocked };
 }
