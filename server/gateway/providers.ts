@@ -32,6 +32,12 @@ export const DEFAULT_GEMINI_MODELS: Record<Tier, string> = {
   high: 'gemini-2.5-pro',
 };
 
+export const DEFAULT_OPENAI_MODELS: Record<Tier, string> = {
+  low: 'gpt-4o-mini', // 저가·고속
+  mid: 'gpt-4o-mini',
+  high: 'gpt-4o',
+};
+
 /* ---- Anthropic Messages API (direct fetch) ---- */
 
 export async function anthropicComplete(opts: ProviderCallOpts): Promise<ProviderCallResult> {
@@ -64,6 +70,47 @@ export async function anthropicComplete(opts: ProviderCallOpts): Promise<Provide
     .map((b) => b.text as string)
     .join('');
   return { text, usage: data.usage };
+}
+
+/* ---- OpenAI Chat Completions API (direct fetch) — 폴백 프로바이더 ---- */
+
+export async function openaiComplete(opts: ProviderCallOpts): Promise<ProviderCallResult> {
+  const messages = [
+    ...(opts.system ? [{ role: 'system', content: opts.system }] : []),
+    ...opts.messages.map((m) => ({ role: m.role, content: m.content })),
+  ];
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${opts.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      messages,
+      max_tokens: opts.maxTokens ?? 1024,
+      // JSON 모드 — 프롬프트에 "JSON" 단어 필요(우리 프롬프트는 "JSON만 출력" 포함).
+      ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`openai ${res.status}: ${detail.slice(0, 300)}`);
+  }
+
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  };
+  const text = data.choices?.[0]?.message?.content ?? '';
+  return {
+    text,
+    usage: {
+      input_tokens: data.usage?.prompt_tokens,
+      output_tokens: data.usage?.completion_tokens,
+    },
+  };
 }
 
 /* ---- Gemini generateContent (direct fetch) ---- */

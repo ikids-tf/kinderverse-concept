@@ -70,4 +70,27 @@ export const STARTERS: Starter[] = [
       home_connection: '',
     },
   },
+  {
+    key: 'monthly_plan',
+    label: '놀이계획 월안',
+    variant: 'monthlyplan-summer',
+    payload: {
+      // weekly_flow(주차별) 존재 → pickerTemplates 가 '월간 여름바다' 템플릿 선택. readMonthly 형태.
+      basic_info: { theme: '', class_name: '', period: '', age_band: '', month: '' },
+      rationale: { summary: '' },
+      teacher_expectations: [{ goal: '기대 1' }, { goal: '기대 2' }],
+      curriculum_links: [],
+      weekly_flow: [
+        { week: '1주차', sub_theme: '소주제 1', play_ideas: ['놀이 1', '놀이 2'] },
+        { week: '2주차', sub_theme: '소주제 2', play_ideas: ['놀이 1'] },
+        { week: '3주차', sub_theme: '소주제 3', play_ideas: ['놀이 1'] },
+        { week: '4주차', sub_theme: '소주제 4', play_ideas: ['놀이 1'] },
+      ],
+      outdoor_and_physical_play: [],
+      safety_education: '',
+      character_education: '',
+      events: [],
+      home_connection: '',
+    },
+  },
 ];

@@ -12,7 +12,7 @@
 
 import type { ServerResponse } from 'node:http';
 import type { GatewayConfig } from './handler.js';
-import { geminiComplete, DEFAULT_ANTHROPIC_MODELS, DEFAULT_GEMINI_MODELS } from './providers.js';
+import { geminiComplete, openaiComplete, DEFAULT_ANTHROPIC_MODELS, DEFAULT_GEMINI_MODELS, DEFAULT_OPENAI_MODELS } from './providers.js';
 
 export interface ChatStreamBody {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
@@ -67,7 +67,7 @@ export async function streamChatResponse(
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   const system = typeof body?.system === 'string' ? body.system : undefined;
 
-  // ---- Anthropic: real streaming, passed through verbatim. ----
+  // ---- Anthropic: real streaming, passed through verbatim. 실패(예: 401) 시 폴백으로 흐름. ----
   if (config.anthropicKey) {
     const model = config.models?.['anthropic.mid'] || DEFAULT_ANTHROPIC_MODELS.mid;
     try {
@@ -80,42 +80,43 @@ export async function streamChatResponse(
         },
         body: JSON.stringify({ model, max_tokens: 2048, stream: true, system, messages }),
       });
-      if (!upstream.ok || !upstream.body) {
-        const detail = await upstream.text().catch(() => '');
-        res.write(sseDelta(`⚠️ Anthropic ${upstream.status}: ${detail.slice(0, 160)}`));
-        res.write('data: [DONE]\n\n');
+      if (upstream.ok && upstream.body) {
+        const reader = upstream.body.getReader();
+        const dec = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(dec.decode(value, { stream: true }));
+        }
+        res.write('\n');
         res.end();
         return;
       }
-      const reader = upstream.body.getReader();
-      const dec = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(dec.decode(value, { stream: true }));
-      }
-      res.write('\n');
-      res.end();
-      return;
-    } catch (e) {
-      res.write(sseDelta(`⚠️ ${e instanceof Error ? e.message : String(e)}`));
-      res.write('data: [DONE]\n\n');
-      res.end();
-      return;
+      // !ok(예: 401) → 에러로 끝내지 않고 gemini/openai 폴백으로.
+    } catch {
+      // 네트워크 실패 → 폴백으로.
     }
   }
 
-  // ---- Gemini: one completion, then typewrite it out. ----
+  // ---- Gemini: one completion, then typewrite. 실패 시 openai 폴백으로. ----
   if (config.geminiKey) {
     const model = config.models?.['gemini.mid'] || DEFAULT_GEMINI_MODELS.mid;
     try {
-      const { text } = await geminiComplete({
-        apiKey: config.geminiKey,
-        model,
-        system,
-        messages,
-        maxTokens: 2048,
-      });
+      const { text } = await geminiComplete({ apiKey: config.geminiKey, model, system, messages, maxTokens: 2048 });
+      await typewrite(res, text || '응답을 생성하지 못했어요. 다시 시도해 주세요.');
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    } catch {
+      // 폴백(openai)으로.
+    }
+  }
+
+  // ---- OpenAI: 폴백 — one completion, then typewrite. ----
+  if (config.openaiKey) {
+    const model = config.models?.['openai.mid'] || DEFAULT_OPENAI_MODELS.mid;
+    try {
+      const { text } = await openaiComplete({ apiKey: config.openaiKey, model, system, messages, maxTokens: 2048 });
       await typewrite(res, text || '응답을 생성하지 못했어요. 다시 시도해 주세요.');
     } catch (e) {
       res.write(sseDelta(`⚠️ ${e instanceof Error ? e.message : String(e)}`));

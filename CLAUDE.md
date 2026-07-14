@@ -10,7 +10,7 @@
 ## 1. 기술 스택 (고정)
 - Frontend: **React 18 + Vite + Tailwind + Zustand**
 - Backend/DB: **Supabase** (Postgres + pgvector)
-- AI: **얇은 프로바이더 게이트웨이** — Anthropic + Gemini 기본. 이미지/영상/OCR은 플러그인. **LangChain/CrewAI 등 프레임워크 금지(직접 API 호출).**
+- AI: **얇은 프로바이더 게이트웨이** — Anthropic + Gemini 기본, **타 모델 실패/부재 시 OpenAI(GPT)로 폴백**(게이트웨이 프로바이더 간 캐스케이드). 이미지/영상/OCR은 플러그인. **LangChain/CrewAI 등 프레임워크 금지(직접 API 호출).**
 - 사진 분류: 기개발 분류 API **실시간** 연동
 - 배치: GitHub Actions (distill/인덱싱 등 비실시간만)
 
