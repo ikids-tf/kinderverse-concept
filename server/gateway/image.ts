@@ -31,6 +31,9 @@ export function placeholderImage(caption: string): string {
 
 interface ImageOpts {
   geminiKey?: string;
+  /** OpenAI(gpt-image) — Gemini 실패/부재 시 이미지 생성 폴백. */
+  openaiKey?: string;
+  openaiImageModel?: string;
   model?: string;
   prompt: string;
   caption: string;
@@ -41,20 +44,14 @@ interface ImageOpts {
 /* Default Gemini image-generation model — used when GEMINI_API_KEY is set but no
    KV_GEMINI_IMAGE_MODEL override is provided. Override in .env if the id changes. */
 const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image';
+const DEFAULT_OPENAI_IMAGE_MODEL = 'gpt-image-1';
 
-/** Returns { image: dataURI, real, detail? }. Falls back to a placeholder, with
-    `detail` describing why (for diagnostics; non-sensitive). */
-export async function generateImage(
-  opts: ImageOpts,
-): Promise<{ image: string; real: boolean; detail?: string }> {
-  const model = opts.model || DEFAULT_IMAGE_MODEL;
-  if (!opts.geminiKey) {
-    return { image: placeholderImage(opts.caption), real: false, detail: 'no GEMINI_API_KEY' };
-  }
+/** Gemini 이미지 1회 시도. 성공 시 real:true. */
+async function geminiImage(opts: ImageOpts, model: string): Promise<{ image?: string; real: boolean; detail?: string }> {
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
       model,
-    )}:generateContent?key=${encodeURIComponent(opts.geminiKey)}`;
+    )}:generateContent?key=${encodeURIComponent(opts.geminiKey!)}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -62,34 +59,71 @@ export async function generateImage(
         contents: [{ role: 'user', parts: [{ text: opts.prompt }] }],
         generationConfig: {
           responseModalities: ['IMAGE', 'TEXT'],
-          // imageConfig.aspectRatio는 Gemini 이미지 모델이 지원하면 적용된다(미지원 시 무시).
           ...(opts.aspectRatio ? { imageConfig: { aspectRatio: opts.aspectRatio } } : {}),
         },
       }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      return {
-        image: placeholderImage(opts.caption),
-        real: false,
-        detail: `gemini ${model} HTTP ${res.status}: ${body.slice(0, 200)}`,
-      };
+      return { real: false, detail: `gemini ${model} HTTP ${res.status}: ${body.slice(0, 160)}` };
     }
     const data = (await res.json()) as {
       candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType: string; data: string } }> } }>;
     };
     const part = data.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
-    if (part?.inlineData) {
-      return { image: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`, real: true };
-    }
-    return { image: placeholderImage(opts.caption), real: false, detail: `${model}: no inlineData in response` };
+    if (part?.inlineData) return { image: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`, real: true };
+    return { real: false, detail: `${model}: no inlineData in response` };
   } catch (e) {
-    return {
-      image: placeholderImage(opts.caption),
-      real: false,
-      detail: e instanceof Error ? e.message : String(e),
-    };
+    return { real: false, detail: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/** OpenAI 이미지(gpt-image-1) 1회 시도 — b64_json 반환. */
+async function openaiImage(opts: ImageOpts): Promise<{ image?: string; real: boolean; detail?: string }> {
+  const model = opts.openaiImageModel || DEFAULT_OPENAI_IMAGE_MODEL;
+  try {
+    const res = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${opts.openaiKey!}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model, prompt: opts.prompt, size: '1024x1024', n: 1 }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return { real: false, detail: `openai ${model} HTTP ${res.status}: ${body.slice(0, 160)}` };
+    }
+    const data = (await res.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+    const b64 = data.data?.[0]?.b64_json;
+    if (b64) return { image: `data:image/png;base64,${b64}`, real: true };
+    const u = data.data?.[0]?.url;
+    if (u) return { image: u, real: true };
+    return { real: false, detail: `${model}: no image in response` };
+  } catch (e) {
+    return { real: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** 텍스트→이미지 생성. Gemini 우선, 실패/부재 시 OpenAI(gpt-image) 폴백, 둘 다 안 되면 placeholder.
+    `detail` 은 진단용(비민감). */
+export async function generateImage(
+  opts: ImageOpts,
+): Promise<{ image: string; real: boolean; detail?: string }> {
+  const model = opts.model || DEFAULT_IMAGE_MODEL;
+  let detail = '';
+  if (opts.geminiKey) {
+    const g = await geminiImage(opts, model);
+    if (g.real && g.image) return { image: g.image, real: true };
+    detail = g.detail || detail;
+  }
+  if (opts.openaiKey) {
+    const o = await openaiImage(opts);
+    if (o.real && o.image) return { image: o.image, real: true };
+    detail = o.detail || detail;
+  }
+  return {
+    image: placeholderImage(opts.caption),
+    real: false,
+    detail: detail || 'no image provider (set GEMINI_API_KEY or OPENAI_API_KEY)',
+  };
 }
 
 /* ---------- Image editing (이미지+프롬프트 → 이미지: 인페인팅·변형) ---------- */

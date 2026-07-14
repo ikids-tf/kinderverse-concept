@@ -13,9 +13,11 @@ import type { RecordInput } from '../../src/ai/prompt-record.js';
 import {
   anthropicComplete,
   geminiComplete,
+  openaiComplete,
   geminiSearch,
   DEFAULT_ANTHROPIC_MODELS,
   DEFAULT_GEMINI_MODELS,
+  DEFAULT_OPENAI_MODELS,
   type ProviderCallResult,
 } from './providers.js';
 import {
@@ -31,6 +33,8 @@ import { synthSpeech } from './tts.js';
 export interface GatewayConfig {
   anthropicKey?: string;
   geminiKey?: string;
+  /** OpenAI(GPT) — 폴백 프로바이더(다른 모델 부재/실패 시). */
+  openaiKey?: string;
   /** Gemini image model, e.g. gemini-2.0-flash-preview-image-generation. */
   imageModel?: string;
   /** Gemini Veo video model, e.g. veo-3.0-generate-001 (전용 영상 엔드포인트에서 사용). */
@@ -52,17 +56,31 @@ function defaultTier(task: string): Tier {
 function resolveModel(config: GatewayConfig, provider: Provider, tier: Tier): string {
   const override = config.models?.[`${provider}.${tier}`];
   if (override) return override;
-  return provider === 'anthropic' ? DEFAULT_ANTHROPIC_MODELS[tier] : DEFAULT_GEMINI_MODELS[tier];
+  if (provider === 'anthropic') return DEFAULT_ANTHROPIC_MODELS[tier];
+  if (provider === 'openai') return DEFAULT_OPENAI_MODELS[tier];
+  return DEFAULT_GEMINI_MODELS[tier];
 }
 
-function pickProvider(req: GatewayRequest, config: GatewayConfig): Provider | null {
+/** 시도할 프로바이더를 순서대로 — 키 있는 것만. 원하는(wanted) 프로바이더 먼저, 그 다음
+    헌장 순서(anthropic→gemini)로, 마지막에 OpenAI 폴백. 한 프로바이더가 실패하면 다음으로
+    캐스케이드(무효 anthropic 키가 있어도 gemini/openai 로 넘어감). */
+function providerOrder(req: GatewayRequest, config: GatewayConfig): Provider[] {
+  const has: Record<Provider, boolean> = {
+    anthropic: !!config.anthropicKey,
+    gemini: !!config.geminiKey,
+    openai: !!config.openaiKey,
+  };
   const wanted = req.provider ?? 'auto';
-  const hasA = !!config.anthropicKey;
-  const hasG = !!config.geminiKey;
-  if (wanted === 'anthropic') return hasA ? 'anthropic' : hasG ? 'gemini' : null;
-  if (wanted === 'gemini') return hasG ? 'gemini' : hasA ? 'anthropic' : null;
-  // auto — prefer Anthropic (charter default), then Gemini.
-  return hasA ? 'anthropic' : hasG ? 'gemini' : null;
+  const order: Provider[] = [];
+  const push = (p: Provider) => {
+    if (has[p] && !order.includes(p)) order.push(p);
+  };
+  if (wanted !== 'auto') push(wanted);
+  // auto 및 폴백 순서: 헌장 기본(anthropic→gemini) 다음 OpenAI.
+  push('anthropic');
+  push('gemini');
+  push('openai');
+  return order;
 }
 
 export async function handleGatewayRequest(
@@ -96,6 +114,8 @@ export async function handleGatewayRequest(
     }
     const { image, real, detail } = await generateImage({
       geminiKey: config.geminiKey,
+      openaiKey: config.openaiKey,
+      openaiImageModel: config.models?.['openai.image'],
       model: config.imageModel,
       prompt: meta.prompt ?? meta.caption ?? '유아 활동 개념 일러스트',
       caption: meta.caption ?? '활동',
@@ -160,10 +180,10 @@ export async function handleGatewayRequest(
     }
   }
 
-  const provider = pickProvider(req, config);
+  const providers = providerOrder(req, config);
 
   // ---- Mock fallback: no provider key configured. ----
-  if (!provider) {
+  if (providers.length === 0) {
     if (req.task === 'router' && req.meta) {
       const out = mockRouterOutput(req.meta as RouterInput);
       return { ok: true, text: JSON.stringify(out), mocked: true, tier: defaultTier(req.task) };
@@ -188,10 +208,8 @@ export async function handleGatewayRequest(
         tier: defaultTier(req.task),
       };
     }
-    return { ok: false, error: 'no AI provider configured (set ANTHROPIC_API_KEY or GEMINI_API_KEY)' };
+    return { ok: false, error: 'no AI provider configured (set OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY)' };
   }
-
-  const apiKey = provider === 'anthropic' ? config.anthropicKey! : config.geminiKey!;
 
   // ---- Tier list: requested tier first, then cascade fallback. ----
   const primary: Tier = req.tier && req.tier !== 'auto' ? req.tier : defaultTier(req.task);
@@ -199,33 +217,37 @@ export async function handleGatewayRequest(
     (t, i, a) => a.indexOf(t) === i,
   );
 
+  // 프로바이더 간 캐스케이드 — 한 프로바이더의 모든 tier 실패 시 다음 프로바이더(→ OpenAI 폴백)로.
   let lastError = '';
-  for (const tier of tiers) {
-    const model = resolveModel(config, provider, tier);
-    try {
-      const opts = {
-        apiKey,
-        model,
-        system: req.system,
-        messages: req.messages,
-        json: req.responseFormat === 'json',
-        maxTokens: req.maxTokens,
-      };
-      const result: ProviderCallResult =
-        provider === 'anthropic' ? await anthropicComplete(opts) : await geminiComplete(opts);
-      return {
-        ok: true,
-        text: result.text,
-        provider,
-        model,
-        tier,
-        usage: result.usage,
-      };
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-      // cascade to next tier (PRD §7.2.3)
+  let lastProvider: Provider | undefined;
+  for (const provider of providers) {
+    const apiKey =
+      provider === 'openai' ? config.openaiKey! : provider === 'anthropic' ? config.anthropicKey! : config.geminiKey!;
+    for (const tier of tiers) {
+      const model = resolveModel(config, provider, tier);
+      try {
+        const opts = {
+          apiKey,
+          model,
+          system: req.system,
+          messages: req.messages,
+          json: req.responseFormat === 'json',
+          maxTokens: req.maxTokens,
+        };
+        const result: ProviderCallResult =
+          provider === 'openai'
+            ? await openaiComplete(opts)
+            : provider === 'anthropic'
+              ? await anthropicComplete(opts)
+              : await geminiComplete(opts);
+        return { ok: true, text: result.text, provider, model, tier, usage: result.usage };
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : String(e);
+        lastProvider = provider;
+        // cascade: next tier, then next provider (PRD §7.2.3 + OpenAI 폴백)
+      }
     }
   }
 
-  return { ok: false, error: lastError || 'all provider tiers failed', provider };
+  return { ok: false, error: lastError || 'all provider tiers failed', provider: lastProvider };
 }

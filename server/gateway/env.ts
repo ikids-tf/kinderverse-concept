@@ -7,6 +7,7 @@ export function gatewayConfigFromEnv(): GatewayConfig {
   return {
     anthropicKey: e.ANTHROPIC_API_KEY,
     geminiKey: e.GEMINI_API_KEY,
+    openaiKey: e.OPENAI_API_KEY,
     imageModel: e.KV_GEMINI_IMAGE_MODEL,
     videoModel: e.KV_GEMINI_VIDEO_MODEL,
     clovaId: e.CLOVA_VOICE_CLIENT_ID,
@@ -20,6 +21,10 @@ export function gatewayConfigFromEnv(): GatewayConfig {
       ...(e.KV_GEMINI_MODEL_LOW ? { 'gemini.low': e.KV_GEMINI_MODEL_LOW } : {}),
       ...(e.KV_GEMINI_MODEL_MID ? { 'gemini.mid': e.KV_GEMINI_MODEL_MID } : {}),
       ...(e.KV_GEMINI_MODEL_HIGH ? { 'gemini.high': e.KV_GEMINI_MODEL_HIGH } : {}),
+      ...(e.KV_OPENAI_MODEL_LOW ? { 'openai.low': e.KV_OPENAI_MODEL_LOW } : {}),
+      ...(e.KV_OPENAI_MODEL_MID ? { 'openai.mid': e.KV_OPENAI_MODEL_MID } : {}),
+      ...(e.KV_OPENAI_MODEL_HIGH ? { 'openai.high': e.KV_OPENAI_MODEL_HIGH } : {}),
+      ...(e.KV_OPENAI_IMAGE_MODEL ? { 'openai.image': e.KV_OPENAI_IMAGE_MODEL } : {}),
     },
   };
 }

@@ -49,6 +49,7 @@ export function devGateway(): Plugin {
       config = {
         anthropicKey: env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY,
         geminiKey: env.GEMINI_API_KEY || process.env.GEMINI_API_KEY,
+        openaiKey: env.OPENAI_API_KEY || process.env.OPENAI_API_KEY,
         imageModel: env.KV_GEMINI_IMAGE_MODEL || process.env.KV_GEMINI_IMAGE_MODEL,
         videoModel: env.KV_GEMINI_VIDEO_MODEL || process.env.KV_GEMINI_VIDEO_MODEL,
         clovaId: env.CLOVA_VOICE_CLIENT_ID || process.env.CLOVA_VOICE_CLIENT_ID,
@@ -62,6 +63,10 @@ export function devGateway(): Plugin {
           ...(env.KV_GEMINI_MODEL_LOW ? { 'gemini.low': env.KV_GEMINI_MODEL_LOW } : {}),
           ...(env.KV_GEMINI_MODEL_MID ? { 'gemini.mid': env.KV_GEMINI_MODEL_MID } : {}),
           ...(env.KV_GEMINI_MODEL_HIGH ? { 'gemini.high': env.KV_GEMINI_MODEL_HIGH } : {}),
+          ...(env.KV_OPENAI_MODEL_LOW ? { 'openai.low': env.KV_OPENAI_MODEL_LOW } : {}),
+          ...(env.KV_OPENAI_MODEL_MID ? { 'openai.mid': env.KV_OPENAI_MODEL_MID } : {}),
+          ...(env.KV_OPENAI_MODEL_HIGH ? { 'openai.high': env.KV_OPENAI_MODEL_HIGH } : {}),
+          ...(env.KV_OPENAI_IMAGE_MODEL ? { 'openai.image': env.KV_OPENAI_IMAGE_MODEL } : {}),
         },
       };
     },
