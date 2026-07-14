@@ -1622,6 +1622,132 @@ export function blankPage(payload) {
   return doc("새 페이지", th.pageBg, [m.bg({ bg: th.pageBg })]);
 }
 
+// ════════════════════════════ 가정통신문(letter) ════════════════════════════
+// LetterPreview(가정통신문·안내/공지·문장) → A4 편지형 문서.
+//   구성: 계절 워시 배경 + 종류 배지·제목 밴드 + 흰 편지지 카드(인사말·정보 콜아웃·본문) +
+//         우하단 서명(날짜/발신처) + 주제 스티커(여백·모서리, 텍스트 회피).
+//   본문(body)은 평문(줄바꿈, "· " 항목 리스트) — 블록 흐름 + 폰트 자동맞춤으로 잘림 없이 노출.
+const LETTER_KIND_BADGE = { letter: "가정통신문", notice: "안내 · 공지", text: "우리반 이야기" };
+
+// 끝에서부터 날짜·발신처(원장/드림/올림) 패턴이면 서명으로 분리(최대 3줄).
+function splitLetterSignature(body) {
+  const lines = String(body || "").split(/\n/);
+  const sig = [];
+  const sigRe = /(\d{2,4}\s*[.년]|\d{1,2}\s*월|유치원|어린이집|원장|드림|올림|배상)/;
+  while (lines.length && sig.length < 3) {
+    const last = (lines[lines.length - 1] || "").trim();
+    if (last === "") { lines.pop(); continue; }
+    if (sigRe.test(last)) { sig.unshift(lines.pop().trim()); continue; }
+    break;
+  }
+  return { rest: lines.join("\n").trim(), signature: sig };
+}
+
+// body(평문) → 블록 배열: 연속 "· " 라인 = 정보 콜아웃(list), 그 외 = 문단(para).
+function letterBlocks(body) {
+  const lines = String(body || "").split(/\n/).map((s) => s.trim());
+  const blocks = [];
+  let para = [];
+  let list = [];
+  const flushPara = () => { if (para.length) { blocks.push({ kind: "para", text: para.join(" ") }); para = []; } };
+  const flushList = () => { if (list.length) { blocks.push({ kind: "list", items: list.slice() }); list = []; } };
+  for (const ln of lines) {
+    if (!ln) { flushList(); flushPara(); continue; }
+    const item = ln.match(/^[·•\-*▪◦]\s*(.+)$/);
+    if (item) { flushPara(); list.push(item[1].trim()); }
+    else { flushList(); para.push(ln); }
+  }
+  flushList(); flushPara();
+  return blocks;
+}
+
+const LETTER_LH = 1.35; // DesignFrame 텍스트 렌더 line-height 와 일치(높이 추정 정확도).
+// 한 줄 글자 수(보수적으로 조금 적게 잡아 과소추정→겹침을 방지).
+const letterCpl = (w, fs) => Math.max(8, Math.floor(w / (fs * 1.05)));
+const letterLines = (text, cpl) =>
+  String(text || "").split("\n").reduce((a, p) => a + Math.max(1, Math.ceil((p.length || 1) / cpl)), 0);
+
+// 블록들의 총 높이 추정(폰트 자동맞춤 판단용) — build 와 동일 규칙.
+function measureLetter(blocks, w, fs) {
+  let h = 0;
+  const gap = Math.round(fs * 0.95);
+  for (const b of blocks) {
+    if (b.kind === "para") {
+      h += letterLines(b.text, letterCpl(w, fs)) * fs * LETTER_LH + 6 + gap;
+    } else {
+      const ifs = fs - 1, icpl = letterCpl(w - 46, ifs);
+      const itemsH = b.items.reduce((a, it) => a + letterLines(it, icpl) * ifs * 1.42 + 8, 0);
+      h += (22 + itemsH) + gap;
+    }
+  }
+  return h;
+}
+
+export function buildLetterDoc(payload) {
+  const d = payload || {};
+  const kind = d.kind === "notice" ? "notice" : d.kind === "text" ? "text" : "letter";
+  const title = (d?.header?.title || d?.title || "가정통신문").trim();
+  const audience = (d?.audience || "").trim();
+  const th = themeFor(`${d?.meta?.theme || ""} ${title} ${d?.body || ""}`);
+  const { rest, signature } = splitLetterSignature(d?.body || "");
+  const blocks = letterBlocks(rest);
+
+  const m = maker();
+  const els = [m.bg({ bg: th.pageBg })];
+  const W = A4.W, M = 64;
+
+  // 헤더 — 종류 배지 + 제목 + (대상)
+  els.push(m.shape(W / 2 - 100, 44, 200, 34, { bg: th.badgeBg, radius: 999 }));
+  els.push(m.text(W / 2 - 100, 44, 200, 34, LETTER_KIND_BADGE[kind], { fontSize: 16, fontFamily: LABEL_FONT, color: "#fff", align: "center", valign: "center" }));
+  els.push(m.text(M, 90, W - 2 * M, 68, title, { fontSize: 42, fontFamily: TITLE_FONT, color: th.title, align: "center", valign: "center" }, { textRole: "title" }));
+  if (audience) els.push(m.text(M, 164, W - 2 * M, 24, audience, { fontSize: 15, fontFamily: LABEL_FONT, color: th.badgeBg, align: "center", valign: "center" }));
+
+  // 편지지 카드
+  const cardX = M - 18, cardY = 198, cardW = W - 2 * (M - 18), cardBottom = A4.H - 92;
+  els.push(m.shape(cardX, cardY, cardW, cardBottom - cardY, { bg: "#fffdf9", radius: 22, stroke: "#efe6d5", strokeWidth: 1.5, shadow: "0 12px 34px rgba(60,50,40,0.10)" }));
+
+  const padX = 40, innerX = cardX + padX, innerW = cardW - 2 * padX;
+  const bodyStart = cardY + 40;
+  const sigH = signature.length ? signature.length * 26 + 18 : 0;
+  const avail = (cardBottom - 40) - bodyStart - sigH;
+
+  // 폰트 자동맞춤 — 넘치면 0.5씩 줄여 카드 안에 담기.
+  let fs = 16.5;
+  while (fs > 11 && measureLetter(blocks, innerW, fs) > avail) fs -= 0.5;
+
+  // 블록 배치
+  let y = bodyStart;
+  const gap = Math.round(fs * 0.95);
+  for (const b of blocks) {
+    if (b.kind === "para") {
+      const h = letterLines(b.text, letterCpl(innerW, fs)) * fs * LETTER_LH + 6;
+      els.push(m.text(innerX, y, innerW, h, b.text, { fontSize: fs, fontFamily: BODY_FONT, color: "#4a4038", align: "left", valign: "top" }));
+      y += h + gap;
+    } else {
+      const ifs = fs - 1, icpl = letterCpl(innerW - 46, ifs), ilh = 1.42;
+      const itemHs = b.items.map((it) => letterLines(it, icpl) * ifs * ilh + 8);
+      const boxH = 22 + itemHs.reduce((a, c) => a + c, 0);
+      els.push(m.shape(innerX, y, innerW, boxH, { bg: th.learnBg, radius: 14, stroke: th.accent, strokeWidth: 1.2 }));
+      let iy = y + 11;
+      b.items.forEach((it, i) => {
+        els.push(m.text(innerX + 16, iy, 14, itemHs[i], "•", { fontSize: ifs + 1, fontFamily: BODY_FONT, color: th.accent, align: "left", valign: "top" }));
+        els.push(m.text(innerX + 34, iy, innerW - 50, itemHs[i], it, { fontSize: ifs, fontFamily: BODY_FONT, color: "#4a4038", align: "left", valign: "top" }));
+        iy += itemHs[i];
+      });
+      y += boxH + gap;
+    }
+  }
+
+  // 서명(날짜/발신처) — 우하단 정렬
+  if (signature.length) {
+    els.push(m.text(innerX, cardBottom - sigH - 22, innerW, sigH, signature.join("\n"), { fontSize: Math.min(16, fs), fontFamily: LABEL_FONT, color: "#5a5046", align: "right", valign: "bottom" }));
+  }
+
+  // 주제 스티커 — 여백·모서리(텍스트 회피). 종류가 '문장(text)'이면 더 절제.
+  els.push(...scatterStickers(m, th, kind === "text" ? 4 : 6, d?.meta?.theme || title, occupiedRects(els)));
+  return doc(title, th.pageBg, els);
+}
+
 // 템플릿 선택 2축 — 가족(카드/스토리) × 주제(겨울/여름/기본). 조합 id = `${theme}-${family}`.
 // 모든 조합을 UI에서 고를 수 있고, 새 기록은 주제에 맞는 조합이 기본 선택된다.
 export const TEMPLATE_FAMILIES = [
@@ -1667,13 +1793,14 @@ function templateEntry(id) {
   if (id === "topicweb") return { build: buildTopicWebDoc, photos: 0 };
   if (id === "weeklyplan") return { build: buildWeeklyPlanDoc, photos: 0 };
   if (id === "monthlyplan" || id === "monthlyplan-summer") return { build: buildMonthlyPlanSummerDoc, photos: 0 };
+  if (id === "letter") return { build: buildLetterDoc, photos: 0 };
   const [theme, family] = String(id).split("-");
   const set = TEMPLATE_REGISTRY[theme] || TEMPLATE_REGISTRY.default;
   return set[family] || TEMPLATE_REGISTRY.default[family] || TEMPLATE_REGISTRY.default.card;
 }
 // 유효한 조합 id 인지
 export function isTemplateId(id) {
-  if (id === "topicweb" || id === "weeklyplan" || id === "monthlyplan" || id === "monthlyplan-summer") return true;
+  if (id === "topicweb" || id === "weeklyplan" || id === "monthlyplan" || id === "monthlyplan-summer" || id === "letter") return true;
   const [theme, family] = String(id).split("-");
   return !!(TEMPLATE_REGISTRY[theme] && TEMPLATE_REGISTRY[theme][family]);
 }
@@ -1693,6 +1820,7 @@ export function templateLabel(id) {
   if (id === "topicweb") return "놀이주제망";
   if (id === "weeklyplan") return "주안 여름";
   if (id === "monthlyplan" || id === "monthlyplan-summer") return "월간 여름바다";
+  if (id === "letter") return "가정통신문";
   const [theme, family] = String(id).split("-");
   const t = TEMPLATE_THEMES.find((x) => x.key === theme);
   const f = TEMPLATE_FAMILIES.find((x) => x.key === family);
@@ -1704,6 +1832,7 @@ export function templateLabel(id) {
 // 계절 템플릿이 없는 기록(봄 등)은 기본(default)도 함께 제공한다.
 export function pickerTemplates(payload) {
   // 놀이주제망·주간계획안 기록 → 각 단일 템플릿만 노출(놀이기록 카드/스토리 템플릿과 섞이지 않게).
+  if (payload?.letter) return [{ id: "letter", theme: "letter", family: "letter", label: "가정통신문" }];
   if (payload?.topic_web) return [{ id: "topicweb", theme: "topicweb", family: "web", label: "놀이주제망" }];
   if (payload?.daily_flow) return [{ id: "weeklyplan", theme: "weeklyplan", family: "week", label: "주안 여름" }];
   if (payload?.weekly_flow) return [{ id: "monthlyplan-summer", theme: "monthlyplan", family: "month", label: "월간 여름바다" }];

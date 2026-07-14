@@ -16,6 +16,7 @@ import { runComposerChip, expandMindMapBranch, planFromNode, monthlyPlanFromNode
 import { openMindmapInEditor, isMindmapDoc, openMindmapDocInEditor } from '@/playrecord-integration/fromMindmap';
 import { openPlanInEditor, openMonthlyInEditor, frameHasPlan } from '@/playrecord-integration/fromPlan';
 import { openRecordInEditor, frameHasRecord } from '@/playrecord-integration/fromRecord';
+import { openLetterInEditor, isLetterDoc } from '@/playrecord-integration/fromLetter';
 import type { RouteTarget } from '@/ai/contract';
 import type { RegistryPayload, WorksheetCardProps, WorksheetLayer } from '@/ui-registry/contracts';
 import { WorksheetSheet } from '@/ui-registry/worksheet-sheet';
@@ -2189,6 +2190,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 if (t === 'PlayStoryCard') open = openRecordInEditor;
                 else if (t === 'WeeklyPlanGrid') open = node.data?.monthly ? openMonthlyInEditor : openPlanInEditor;
                 else if (isMindmapDoc(node)) open = openMindmapDocInEditor; // 마크다운 마인드맵 문서 → 주제망 캔버스
+                else if (isLetterDoc(node)) open = openLetterInEditor; // 가정통신문(LetterPreview)·소식지(newsletter) → 편지형 캔버스
                 if (!open) return null;
                 const openFn = open;
                 return (
