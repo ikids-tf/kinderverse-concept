@@ -12,8 +12,8 @@ import { runWorkflowStep, spawnWebViewer, type RunnerData, type StepKind } from 
 import { consumeGameCreate } from '@/board/gameHandoff';
 import { saveFrameToFolder, saveDocToFolder, fitFrameToChildren, frameContentSig } from '@/board/frames';
 import { alignFrameCmd } from '@/board/align';
-import { runComposerChip, expandMindMapBranch, planFromNode, monthlyPlanFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
-import { openMindmapInEditor, isMindmapDoc, openMindmapDocInEditor } from '@/playrecord-integration/fromMindmap';
+import { runComposerChip, expandMindMapBranch, planFromNode, monthlyPlanFromNode, dailyPlanFromNode, worksheetFromNode, composeFromPrompt, regenerateLibraryCards, type ComposerChip } from '@/board/composer';
+import { openMindmapInEditor, isMindmapDoc, openMindmapDocInEditor, openTopicWebInEditor } from '@/playrecord-integration/fromMindmap';
 import { openPlanInEditor, openMonthlyInEditor, frameHasPlan } from '@/playrecord-integration/fromPlan';
 import { openRecordInEditor, frameHasRecord } from '@/playrecord-integration/fromRecord';
 import { openWorksheetInEditor, worksheetVariantForNode } from '@/playrecord-integration/fromWorksheet';
@@ -2083,6 +2083,13 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
               <Icon name="plan" size={15} />
             </button>
             <button
+              onClick={(e) => { e.stopPropagation(); void dailyPlanFromNode(node.id); }}
+              title="이 활동으로 일일계획안 만들기"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-fg-2 transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
+            >
+              <Icon name="memo" size={15} />
+            </button>
+            <button
               onClick={(e) => { e.stopPropagation(); void worksheetFromNode(node.id); }}
               title="이 활동으로 활동지 만들기"
               className="flex h-7 w-7 items-center justify-center rounded-full text-fg-2 transition-colors duration-150 ease-soft hover:bg-accent hover:text-on-accent"
@@ -2246,6 +2253,9 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 const t = (node.data?.payload as { type?: string } | undefined)?.type;
                 let open: ((id: string) => void) | null = null;
                 if (t === 'PlayStoryCard') open = openRecordInEditor;
+                else if (t === 'TopicWeb') open = openTopicWebInEditor;
+                else if (t === 'MonthlyPlan') open = openMonthlyInEditor;
+                else if (t === 'WeeklyPlan') open = openPlanInEditor;
                 else if (t === 'WeeklyPlanGrid') open = node.data?.monthly ? openMonthlyInEditor : openPlanInEditor;
                 else if (t === 'WorksheetCard' && worksheetVariantForNode(node)) open = openWorksheetInEditor; // 편집 디자인 템플릿이 있는 활동지 유형만
                 else if (isMindmapDoc(node)) open = openMindmapDocInEditor; // 마크다운 마인드맵 문서 → 주제망 캔버스

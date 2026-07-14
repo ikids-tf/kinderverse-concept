@@ -43,6 +43,41 @@ export function openMindmapInEditor(frameId: string): void {
   spawnEditorCard('topicweb', mindmapFrameToPayload(frameId));
 }
 
+interface TopicWebNodePayload {
+  type?: string;
+  props?: {
+    main_topic?: string;
+    theme?: string;
+    subtopics?: Array<{ subtopic?: string; play_ideas?: string[] }>;
+    children_expected_questions?: string[];
+  };
+}
+
+/** TopicWeb 카드(payload type 'TopicWeb') → verse topicweb payload 로 변환. */
+export function topicWebNodeToPayload(node: BoardNode) {
+  const p = (node.data?.payload as TopicWebNodePayload | undefined)?.props ?? {};
+  const main_topic = (p.main_topic || (node.data?.title as string | undefined) || '놀이주제망').trim();
+  const subtopics = (p.subtopics ?? [])
+    .map((s) => ({
+      subtopic: (s.subtopic ?? '').trim(),
+      play_ideas: (s.play_ideas ?? []).map((x) => String(x).trim()).filter(Boolean),
+    }))
+    .filter((s) => s.subtopic);
+  return {
+    header: { title: main_topic },
+    meta: { theme: (p.theme || main_topic).trim() },
+    topic_web: { main_topic, subtopics },
+    children_expected_questions: (p.children_expected_questions ?? []).map((x) => String(x).trim()).filter(Boolean),
+  };
+}
+
+/** TopicWeb 카드를 verse 편집기(주제망 = topicweb)로 연다. */
+export function openTopicWebInEditor(nodeId: string): void {
+  const node = useBoardStore.getState().nodes[nodeId];
+  if (!node) return;
+  spawnEditorCard('topicweb', topicWebNodeToPayload(node));
+}
+
 // ───────────────────────── 마크다운 마인드맵 문서(kv-doc-md) → topic_web ─────────────────────────
 // openDocOnBoard 로 생긴 마크다운 문서 카드(payload 없음, role 'plan')가 '마인드맵'이면
 // H1=대주제, H2 섹션=소주제(불릿=놀이 아이디어), '궁금·질문' 섹션=탐구 질문으로 파싱한다.

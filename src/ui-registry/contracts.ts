@@ -33,6 +33,10 @@ export type RegistryType =
   | 'RecordDraftCard'
   | 'PlayStoryCard'
   | 'ClarifyPrompt'
+  | 'TopicWeb'
+  | 'MonthlyPlan'
+  | 'WeeklyPlan'
+  | 'DailyPlan'
   | 'WeeklyPlanGrid'
   | 'WorksheetCard'
   | 'StudioGallery'
@@ -94,6 +98,237 @@ export interface WeeklyPlanGridProps {
   curriculum: Curriculum;
   days: PlanDay[];
   notes?: string;
+}
+
+/* 놀이중심 주제망 (agent.plan · feature: topic_web) — 대주제→소주제→놀이아이디어 2단계 +
+   환경구성 + 유아 예상질문. 하위(놀이아이디어·월/주/일안·프로젝트) seed 이자 verse topic_web
+   변환 소스. 필드명은 verse/downstream 계약(topic_web·play_ideas·environment_setup·
+   children_expected_questions)과 1:1로 맞춘다. */
+export interface TopicWebSubtopic {
+  subtopic: string; // 탐색·관심 영역 (활동명이 아님)
+  play_ideas: string[]; // 짧은 놀이명들
+}
+export interface TopicWebProps {
+  id?: string;
+  main_topic: string;
+  age_band: AgeBand;
+  age_years?: AgeYears;
+  theme?: string;
+  life_theme?: string;
+  season?: string;
+  project_mode?: boolean;
+  subtopics: TopicWebSubtopic[];
+  environment_setup: string[];
+  children_expected_questions: string[];
+}
+
+/* 월간 놀이계획 (agent.plan · feature: monthly_plan) — 실제 현장 월안 서식. 기본정보 +
+   놀이선정근거(이유·교사기대·교육과정연계) + 주차별 예상놀이흐름 + 바깥놀이 + 안전/인성교육 +
+   행사 + 가정연계. 주안·일안의 상위 컨텍스트. 필드명은 영문 통일(스펙의 한글 키를 영문으로). */
+export interface MonthlyCurriculumLink {
+  area: string; // 신체운동·건강 / 의사소통 / 사회관계 / 예술경험 / 자연탐구
+  category: string; // 범주
+  content: string; // 내용
+}
+export interface MonthlyWeekFlow {
+  week: string; // "1주차"
+  sub_theme: string; // 소주제
+  play_ideas: string[]; // 놀이아이디어(놀이명만)
+}
+export interface MonthlyOutdoorPlay {
+  week: string;
+  activity: string; // 활동명
+}
+export interface MonthlyEvent {
+  name: string; // 행사명
+  connection: string; // 연계내용
+}
+export interface MonthlyPlanProps {
+  id?: string;
+  age_band: AgeBand;
+  age_years?: AgeYears;
+  curriculum: Curriculum;
+  basic_info: {
+    class_name: string; // 반이름
+    theme: string; // 놀이주제
+    period: string; // 놀이기간(예: "2026년 6월")
+  };
+  rationale: {
+    reason: string; // 놀이선정이유
+    teacher_expectations: string[]; // 교사의기대(2~5)
+    curriculum_links: MonthlyCurriculumLink[]; // 교육과정연계(5영역)
+  };
+  weekly_flow: MonthlyWeekFlow[]; // 예상놀이흐름(4~5주)
+  outdoor_play: MonthlyOutdoorPlay[]; // 바깥놀이및신체활동
+  safety_education: string; // 안전교육
+  character_education: string; // 인성교육
+  events: MonthlyEvent[]; // 행사(없으면 [])
+  home_connection: string; // 가정연계활동
+}
+
+/* 주간 놀이계획 (agent.plan · feature: weekly_plan) — 월안의 한 주차를 월~금 운영 흐름으로.
+   요일별 flow_stage(관심·탐색→탐구→표현→협력→공유) + 놀이아이디어(경험·영역) + 바깥놀이 +
+   안전/인성교육 + 행사 + 가정연계. 일안의 상위 컨텍스트. 기본 계획 생성 경로 전용(내부 합성·
+   프로젝트는 계속 WeeklyPlanGrid). */
+export interface WeeklyTeacherExpectation {
+  goal: string;
+  focus: string; // 탐색|표현|협력|문제해결|의사소통
+}
+export interface WeeklyCurriculumLink {
+  area: string;
+  content: string;
+  expected_experience: string;
+}
+export interface WeeklyPlayIdea {
+  title: string;
+  core_experience: string;
+  learning_area: string[];
+}
+export interface WeeklyDayFlow {
+  day: string; // 월/화/수/목/금
+  date?: string;
+  flow_stage: string; // 관심 및 탐색 / 탐구 및 경험 / 표현 / 협력 / 공유 및 확장
+  play_ideas: WeeklyPlayIdea[];
+}
+export interface WeeklyOutdoorPlay {
+  day: string;
+  activity_name: string;
+  method?: string;
+  safety_point?: string;
+}
+export interface WeeklySafetyEducation {
+  weekly_safety_focus: string;
+  teacher_guidance: string;
+}
+export interface WeeklyCharacterEducation {
+  core_value: string;
+  practice_context: string;
+}
+export interface WeeklyEvent {
+  name: string;
+  date?: string;
+  connection: string;
+}
+export interface WeeklyHomeConnection {
+  home_play: string;
+  conversation_topic: string;
+  observation_point: string;
+}
+export interface WeeklyPlanProps {
+  id?: string;
+  age_band: AgeBand;
+  age_years?: AgeYears;
+  curriculum: Curriculum;
+  basic_info: {
+    theme: string;
+    sub_theme: string;
+    week_number?: number;
+    period: string; // 기간 라벨(예: "2026.07.06 ~ 07.10")
+  };
+  rationale: {
+    summary: string;
+    meaning_of_this_week: string;
+    connection_from_previous_play: string;
+    expansion_to_next_play: string;
+  };
+  teacher_expectations: WeeklyTeacherExpectation[];
+  curriculum_links: WeeklyCurriculumLink[];
+  daily_flow: WeeklyDayFlow[];
+  outdoor_and_physical_play: WeeklyOutdoorPlay[];
+  safety_education: WeeklySafetyEducation;
+  character_education: WeeklyCharacterEducation;
+  events: WeeklyEvent[];
+  home_connection: WeeklyHomeConnection;
+}
+
+/* 일일 놀이계획 (agent.plan · feature: daily_plan) — 교사가 바로 운영하는 실행 단위 계획.
+   도입→전개(활동 2~4개: 놀이명·목표·방법·발문·예상반응·지원전략)→마무리→평가→확장 + 준비물
+   (교사/유아)·환경(실내/외)·우천대체·안전·가정연계. 주안의 특정 요일을 상세화. 교사기대·교육과정
+   연계는 주안 타입 재사용(구조 동일). */
+export interface DailyMaterials {
+  teacher_materials: string[];
+  children_materials: string[];
+}
+export interface DailyEnvironmentSetup {
+  indoor_environment: { space_setup: string; material_arrangement: string };
+  outdoor_environment: { play_environment: string };
+}
+export interface DailyConversation {
+  teacher_questions: string[];
+  expected_child_responses: string[];
+}
+export interface DailyIntroduction {
+  interest_trigger: string;
+  conversation: DailyConversation;
+}
+export interface DailySupportStrategy {
+  language_support: string;
+  play_expansion: string;
+  individual_support: string;
+}
+export interface DailyDevelopmentActivity {
+  activity_name: string;
+  activity_goal: string;
+  activity_method: string[];
+  teacher_questions: string[];
+  expected_child_responses: string[];
+  support_strategy: DailySupportStrategy;
+}
+export interface DailyClosing {
+  experience_sharing: string;
+  reflection_questions: string[];
+  connection_to_next_play: string;
+}
+export interface DailyOutdoorPlay {
+  activity_name: string;
+  method: string;
+  safety_guidance: string;
+}
+export interface DailyRainyAlternative {
+  indoor_alternative_play: string;
+  materials: string[];
+  operation_method: string;
+}
+export interface DailySafetyNotes {
+  play_safety: string;
+  environment_safety: string;
+  health_safety: string;
+}
+export interface DailyAssessment {
+  observation_points: string[];
+  teacher_check_questions: string[];
+}
+export interface DailyExtensionActivities {
+  classroom_extension: string;
+  project_extension: string;
+  art_extension: string;
+  role_play_extension: string;
+}
+export interface DailyHomeConnection {
+  try_at_home: string;
+  parent_question: string;
+  recommended_picture_book: string;
+  follow_up_play: string;
+}
+export interface DailyPlanProps {
+  id?: string;
+  age_band: AgeBand;
+  age_years?: AgeYears;
+  curriculum: Curriculum;
+  basic_info: { theme: string; sub_theme: string; date: string; day: string };
+  teacher_expectations: WeeklyTeacherExpectation[];
+  curriculum_links: WeeklyCurriculumLink[];
+  materials: DailyMaterials;
+  environment_setup: DailyEnvironmentSetup;
+  introduction: DailyIntroduction;
+  development_activities: DailyDevelopmentActivity[];
+  closing: DailyClosing;
+  outdoor_and_physical_play: DailyOutdoorPlay;
+  rainy_day_alternative: DailyRainyAlternative;
+  safety_notes: DailySafetyNotes;
+  assessment: DailyAssessment;
+  extension_activities: DailyExtensionActivities;
+  home_connection: DailyHomeConnection;
 }
 
 /* 활동지/워크시트 (agent.studio) — A4·인쇄·다운로드, 연결 계획 표시.
@@ -202,6 +437,10 @@ export type RegistryPayload =
   | { type: 'RecordDraftCard'; props: RecordDraftCardProps }
   | { type: 'PlayStoryCard'; props: PlayStoryCardProps }
   | { type: 'ClarifyPrompt'; props: ClarifyPromptProps }
+  | { type: 'TopicWeb'; props: TopicWebProps }
+  | { type: 'MonthlyPlan'; props: MonthlyPlanProps }
+  | { type: 'WeeklyPlan'; props: WeeklyPlanProps }
+  | { type: 'DailyPlan'; props: DailyPlanProps }
   | { type: 'WeeklyPlanGrid'; props: WeeklyPlanGridProps }
   | { type: 'WorksheetCard'; props: WorksheetCardProps }
   | { type: 'StudioGallery'; props: StudioGalleryProps }
@@ -311,6 +550,272 @@ export function validateRegistryPayload(raw: unknown): RegistryValidation {
       value: {
         type: 'ClarifyPrompt',
         props: { question, options: isStringArray(p.options) ? p.options : undefined },
+      },
+    };
+  }
+
+  if (type === 'TopicWeb') {
+    const age_band = asAgeBand(p.age_band);
+    const subtopics: TopicWebSubtopic[] = Array.isArray(p.subtopics)
+      ? (p.subtopics as unknown[])
+          .filter((s): s is Record<string, unknown> => typeof s === 'object' && s !== null)
+          .map((s) => ({
+            subtopic: String(s.subtopic ?? ''),
+            play_ideas: isStringArray(s.play_ideas) ? s.play_ideas.filter((x) => x.trim()) : [],
+          }))
+          .filter((s) => s.subtopic.trim())
+      : [];
+    if (subtopics.length === 0) return { ok: false, errors: ['subtopics must be non-empty'] };
+    return {
+      ok: true,
+      errors: [],
+      value: {
+        type: 'TopicWeb',
+        props: {
+          id: typeof p.id === 'string' ? p.id : undefined,
+          main_topic: String(p.main_topic ?? '놀이 주제망'),
+          age_band,
+          age_years: AGE_OPTIONS.some((o) => o.value === p.age_years) ? (p.age_years as AgeYears) : undefined,
+          theme: typeof p.theme === 'string' ? p.theme : undefined,
+          life_theme: typeof p.life_theme === 'string' ? p.life_theme : undefined,
+          season: typeof p.season === 'string' ? p.season : undefined,
+          project_mode: typeof p.project_mode === 'boolean' ? p.project_mode : undefined,
+          subtopics,
+          environment_setup: isStringArray(p.environment_setup) ? p.environment_setup.filter((x) => x.trim()) : [],
+          children_expected_questions: isStringArray(p.children_expected_questions)
+            ? p.children_expected_questions.filter((x) => x.trim())
+            : [],
+        },
+      },
+    };
+  }
+
+  if (type === 'MonthlyPlan') {
+    const age_band = asAgeBand(p.age_band);
+    const bi = (p.basic_info ?? {}) as Record<string, unknown>;
+    const rat = (p.rationale ?? {}) as Record<string, unknown>;
+    const asObjArr = (v: unknown): Record<string, unknown>[] =>
+      Array.isArray(v) ? (v as unknown[]).filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null) : [];
+    const weekly_flow: MonthlyWeekFlow[] = asObjArr(p.weekly_flow)
+      .map((w) => ({
+        week: String(w.week ?? ''),
+        sub_theme: String(w.sub_theme ?? ''),
+        play_ideas: isStringArray(w.play_ideas) ? w.play_ideas.filter((x) => x.trim()) : [],
+      }))
+      .filter((w) => w.sub_theme.trim() || w.play_ideas.length);
+    if (weekly_flow.length === 0) return { ok: false, errors: ['weekly_flow must be non-empty'] };
+    const curriculum_links: MonthlyCurriculumLink[] = asObjArr(rat.curriculum_links).map((c) => ({
+      area: String(c.area ?? ''),
+      category: String(c.category ?? ''),
+      content: String(c.content ?? ''),
+    }));
+    const outdoor_play: MonthlyOutdoorPlay[] = asObjArr(p.outdoor_play)
+      .map((o) => ({ week: String(o.week ?? ''), activity: String(o.activity ?? o.activity_name ?? '') }))
+      .filter((o) => o.activity.trim());
+    const events: MonthlyEvent[] = asObjArr(p.events)
+      .map((e) => ({ name: String(e.name ?? ''), connection: String(e.connection ?? '') }))
+      .filter((e) => e.name.trim());
+    return {
+      ok: true,
+      errors: [],
+      value: {
+        type: 'MonthlyPlan',
+        props: {
+          id: typeof p.id === 'string' ? p.id : undefined,
+          age_band,
+          age_years: AGE_OPTIONS.some((o) => o.value === p.age_years) ? (p.age_years as AgeYears) : undefined,
+          curriculum: asCurriculum(p.curriculum, age_band),
+          basic_info: {
+            class_name: String(bi.class_name ?? ''),
+            theme: String(bi.theme ?? ''),
+            period: String(bi.period ?? ''),
+          },
+          rationale: {
+            reason: String(rat.reason ?? ''),
+            teacher_expectations: isStringArray(rat.teacher_expectations) ? rat.teacher_expectations.filter((x) => x.trim()) : [],
+            curriculum_links,
+          },
+          weekly_flow,
+          outdoor_play,
+          safety_education: typeof p.safety_education === 'string' ? p.safety_education : '',
+          character_education: typeof p.character_education === 'string' ? p.character_education : '',
+          events,
+          home_connection: typeof p.home_connection === 'string' ? p.home_connection : '',
+        },
+      },
+    };
+  }
+
+  if (type === 'WeeklyPlan') {
+    const age_band = asAgeBand(p.age_band);
+    const bi = (p.basic_info ?? {}) as Record<string, unknown>;
+    const rat = (p.rationale ?? {}) as Record<string, unknown>;
+    const se = (p.safety_education ?? {}) as Record<string, unknown>;
+    const ce = (p.character_education ?? {}) as Record<string, unknown>;
+    const hc = (p.home_connection ?? {}) as Record<string, unknown>;
+    const objArr = (v: unknown): Record<string, unknown>[] =>
+      Array.isArray(v) ? (v as unknown[]).filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null) : [];
+    const daily_flow: WeeklyDayFlow[] = objArr(p.daily_flow)
+      .map((d) => ({
+        day: String(d.day ?? ''),
+        date: typeof d.date === 'string' ? d.date : undefined,
+        flow_stage: String(d.flow_stage ?? ''),
+        play_ideas: objArr(d.play_ideas)
+          .map((pi) => ({
+            title: String(pi.title ?? ''),
+            core_experience: String(pi.core_experience ?? ''),
+            learning_area: isStringArray(pi.learning_area) ? pi.learning_area.filter((x) => x.trim()) : [],
+          }))
+          .filter((pi) => pi.title.trim()),
+      }))
+      .filter((d) => d.day.trim());
+    if (daily_flow.length === 0) return { ok: false, errors: ['daily_flow must be non-empty'] };
+    return {
+      ok: true,
+      errors: [],
+      value: {
+        type: 'WeeklyPlan',
+        props: {
+          id: typeof p.id === 'string' ? p.id : undefined,
+          age_band,
+          age_years: AGE_OPTIONS.some((o) => o.value === p.age_years) ? (p.age_years as AgeYears) : undefined,
+          curriculum: asCurriculum(p.curriculum, age_band),
+          basic_info: {
+            theme: String(bi.theme ?? ''),
+            sub_theme: String(bi.sub_theme ?? ''),
+            week_number: typeof bi.week_number === 'number' ? bi.week_number : undefined,
+            period: typeof bi.period === 'string' ? bi.period : String((bi.period as Record<string, unknown>)?.label ?? ''),
+          },
+          rationale: {
+            summary: String(rat.summary ?? ''),
+            meaning_of_this_week: String(rat.meaning_of_this_week ?? ''),
+            connection_from_previous_play: String(rat.connection_from_previous_play ?? ''),
+            expansion_to_next_play: String(rat.expansion_to_next_play ?? ''),
+          },
+          teacher_expectations: objArr(p.teacher_expectations)
+            .map((t) => ({ goal: String(t.goal ?? ''), focus: String(t.focus ?? '') }))
+            .filter((t) => t.goal.trim()),
+          curriculum_links: objArr(p.curriculum_links)
+            .map((c) => ({ area: String(c.area ?? ''), content: String(c.content ?? ''), expected_experience: String(c.expected_experience ?? '') }))
+            .filter((c) => c.area.trim()),
+          daily_flow,
+          outdoor_and_physical_play: objArr(p.outdoor_and_physical_play)
+            .map((o) => ({
+              day: String(o.day ?? ''),
+              activity_name: String(o.activity_name ?? ''),
+              method: typeof o.method === 'string' ? o.method : undefined,
+              safety_point: typeof o.safety_point === 'string' ? o.safety_point : undefined,
+            }))
+            .filter((o) => o.activity_name.trim()),
+          safety_education: {
+            weekly_safety_focus: String(se.weekly_safety_focus ?? ''),
+            teacher_guidance: String(se.teacher_guidance ?? ''),
+          },
+          character_education: {
+            core_value: String(ce.core_value ?? ''),
+            practice_context: String(ce.practice_context ?? ''),
+          },
+          events: objArr(p.events)
+            .map((e) => ({ name: String(e.name ?? ''), date: typeof e.date === 'string' ? e.date : undefined, connection: String(e.connection ?? '') }))
+            .filter((e) => e.name.trim()),
+          home_connection: {
+            home_play: String(hc.home_play ?? ''),
+            conversation_topic: String(hc.conversation_topic ?? ''),
+            observation_point: String(hc.observation_point ?? ''),
+          },
+        },
+      },
+    };
+  }
+
+  if (type === 'DailyPlan') {
+    const age_band = asAgeBand(p.age_band);
+    const S = (v: unknown): string => (typeof v === 'string' ? v : '');
+    const A = (v: unknown): string[] => (isStringArray(v) ? v.filter((x) => x.trim()) : []);
+    const O = (v: unknown): Record<string, unknown> => (typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {});
+    const objArr = (v: unknown): Record<string, unknown>[] =>
+      Array.isArray(v) ? (v as unknown[]).filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null) : [];
+    const bi = O(p.basic_info);
+    const mat = O(p.materials);
+    const env = O(p.environment_setup);
+    const indoor = O(env.indoor_environment);
+    const outdoor = O(env.outdoor_environment);
+    const intro = O(p.introduction);
+    const introConv = O(intro.conversation);
+    const closing = O(p.closing);
+    const oap = O(p.outdoor_and_physical_play);
+    const rainy = O(p.rainy_day_alternative);
+    const safety = O(p.safety_notes);
+    const assess = O(p.assessment);
+    const ext = O(p.extension_activities);
+    const hc = O(p.home_connection);
+    const development_activities: DailyDevelopmentActivity[] = objArr(p.development_activities)
+      .map((d) => {
+        const sup = O(d.support_strategy);
+        return {
+          activity_name: S(d.activity_name),
+          activity_goal: S(d.activity_goal),
+          activity_method: A(d.activity_method),
+          teacher_questions: A(d.teacher_questions),
+          expected_child_responses: A(d.expected_child_responses),
+          support_strategy: {
+            language_support: S(sup.language_support),
+            play_expansion: S(sup.play_expansion),
+            individual_support: S(sup.individual_support),
+          },
+        };
+      })
+      .filter((d) => d.activity_name.trim());
+    if (development_activities.length === 0) return { ok: false, errors: ['development_activities must be non-empty'] };
+    return {
+      ok: true,
+      errors: [],
+      value: {
+        type: 'DailyPlan',
+        props: {
+          id: typeof p.id === 'string' ? p.id : undefined,
+          age_band,
+          age_years: AGE_OPTIONS.some((o) => o.value === p.age_years) ? (p.age_years as AgeYears) : undefined,
+          curriculum: asCurriculum(p.curriculum, age_band),
+          basic_info: { theme: S(bi.theme), sub_theme: S(bi.sub_theme), date: S(bi.date), day: S(bi.day) },
+          teacher_expectations: objArr(p.teacher_expectations)
+            .map((t) => ({ goal: S(t.goal), focus: S(t.focus) }))
+            .filter((t) => t.goal.trim()),
+          curriculum_links: objArr(p.curriculum_links)
+            .map((c) => ({ area: S(c.area), content: S(c.content), expected_experience: S(c.expected_experience) }))
+            .filter((c) => c.area.trim()),
+          materials: { teacher_materials: A(mat.teacher_materials), children_materials: A(mat.children_materials) },
+          environment_setup: {
+            indoor_environment: { space_setup: S(indoor.space_setup), material_arrangement: S(indoor.material_arrangement) },
+            outdoor_environment: { play_environment: S(outdoor.play_environment) },
+          },
+          introduction: {
+            interest_trigger: S(intro.interest_trigger),
+            conversation: { teacher_questions: A(introConv.teacher_questions), expected_child_responses: A(introConv.expected_child_responses) },
+          },
+          development_activities,
+          closing: {
+            experience_sharing: S(closing.experience_sharing),
+            reflection_questions: A(closing.reflection_questions),
+            connection_to_next_play: S(closing.connection_to_next_play),
+          },
+          outdoor_and_physical_play: { activity_name: S(oap.activity_name), method: S(oap.method), safety_guidance: S(oap.safety_guidance) },
+          rainy_day_alternative: { indoor_alternative_play: S(rainy.indoor_alternative_play), materials: A(rainy.materials), operation_method: S(rainy.operation_method) },
+          safety_notes: { play_safety: S(safety.play_safety), environment_safety: S(safety.environment_safety), health_safety: S(safety.health_safety) },
+          assessment: { observation_points: A(assess.observation_points), teacher_check_questions: A(assess.teacher_check_questions) },
+          extension_activities: {
+            classroom_extension: S(ext.classroom_extension),
+            project_extension: S(ext.project_extension),
+            art_extension: S(ext.art_extension),
+            role_play_extension: S(ext.role_play_extension),
+          },
+          home_connection: {
+            try_at_home: S(hc.try_at_home),
+            parent_question: S(hc.parent_question),
+            recommended_picture_book: S(hc.recommended_picture_book),
+            follow_up_play: S(hc.follow_up_play),
+          },
+        },
       },
     };
   }

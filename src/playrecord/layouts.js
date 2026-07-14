@@ -1217,10 +1217,103 @@ export function buildWeeklyPlanDoc(payload) {
   stk("seaweed.png", 973, bnY - 15, 93, 104, "wkbn2", "cute seaweed");
   stk("seaweed.png", 1047.97, bnY - 12, 93, 104, "wkbn3", "cute seaweed");
 
-  // 표 구조(테두리·분리선·셀 배경·배경 도형)만 locked(레이아웃 고정) →
-  // 텍스트·스티커는 이동·리사이즈·회전·편집·재생성 자유(다른 템플릿과 동일한 편집성).
+  // 표 구조(테두리·분리선·셀 배경·배경 도형 = shape)만 locked(레이아웃 고정) →
+  // 텍스트·이미지(스티커)는 이동·리사이즈·회전·편집·재생성 자유(다른 템플릿과 동일한 편집성).
   els.forEach((e) => { if (e.type === "shape") e.locked = true; });
   return doc("놀이중심 주간계획안", WK_BG, els);
+}
+
+// ════════════════════════════ 주안 일지형 (주간 놀이계획 및 실행안) ════════════════════════════
+// 요일별 표: 일자(+이미지) | 예상 놀이 및 활동(+바깥놀이) | 실행 평가 및 지원(교사 기록란) +
+//   교사 기대·교육과정 연계·안전/인성/가정연계. A4 794×1123. readWeekly(payload) 재사용.
+// 이미지 슬롯 = type:'image' + src 없음(→ 플레이스홀더 + '재생성' 버튼) + subject=주제/활동 키워드
+//   → 재생성 시 regenerateBySubject 가 해당 키워드에 맞는 클레이 아이콘을 호출.
+// 편집 자유: 텍스트·이미지 편집 가능, 구조(shape)만 잠금(주안 편집 요구사항과 동일).
+export function buildWeeklyPlanJournalDoc(payload) {
+  const c = readWeekly(payload);
+  const m = maker();
+  const CREAM = "#f7f2e6", INK = "#41414a", GRAY = "#8a8375", LINE = "#e3d9c4", NAVY = "#40548c";
+  const els = [m.bg({ bg: CREAM })];
+  // 키워드 이미지 슬롯(빈 src → 플레이스홀더 + 재생성). subject = 주제/활동 키워드.
+  const img = (x, y, w, h, subject, rot = 0) =>
+    els.push({ id: `jimg${Math.round(x)}_${Math.round(y)}`, type: "image", src: null, fit: "contain", sticker: true, subject: (subject && String(subject).trim()) || c.theme, x, y, w, h, rotation: rot, style: { radius: 8 } });
+  const pill = (x, y, w, h, bg, tx, label, fs) => {
+    els.push(m.shape(x, y, w, h, { bg, radius: Math.round(h / 2) }));
+    els.push(m.text(x, y, w, h, label, { fontSize: fs || 12, fontFamily: LABEL_FONT, color: tx, align: "center", valign: "center" }));
+  };
+  const box = (x, y, w, h, bg, stroke) => els.push(m.shape(x, y, w, h, { bg, radius: 14, stroke: stroke || "#e6ddc9", strokeWidth: 1.5 }));
+
+  // ── 헤더 ──
+  img(28, 12, 92, 72, c.theme, -4);
+  img(674, 12, 92, 72, c.theme, 4);
+  els.push(m.text(0, 26, 794, 44, "주간 놀이계획 및 실행안", { fontSize: 33, fontFamily: HEAD_FONT, color: NAVY, align: "center", valign: "center" }, { textRole: "title" }));
+  pill(323, 76, 148, 27, "#8cbf7c", "#ffffff", has(c.className) ? c.className : "우리반", 14);
+
+  // ── Row A: 예상 놀이주제 / 놀이기간 ──
+  box(24, 118, 372, 66, "#ffffff");
+  pill(38, 132, 96, 26, "#d9b061", "#ffffff", "예상 놀이주제", 12);
+  els.push(m.text(146, 122, 150, 30, has(c.theme) ? c.theme : "놀이주제", { fontSize: 19, fontFamily: LABEL_FONT, color: INK, align: "left", valign: "center" }, { textRole: "title" }));
+  els.push(m.text(146, 152, 176, 20, "소주제: " + (c.sub || ""), { fontSize: 12, fontFamily: BODY_FONT, color: GRAY, align: "left", valign: "center" }));
+  img(326, 121, 62, 62, c.theme);
+  box(404, 118, 366, 66, "#ffffff");
+  pill(418, 132, 84, 26, "#6ba4d6", "#ffffff", "놀이기간", 12);
+  els.push(m.text(510, 122, 184, 44, has(c.period) ? c.period : "", { fontSize: 17, fontFamily: LABEL_FONT, color: INK, align: "left", valign: "center" }));
+  img(700, 121, 62, 62, c.theme);
+
+  // ── Row B: 교사의 기대 / 교육과정 연계 ──
+  box(24, 194, 372, 158, "#fdf7e6", "#e9d9a6");
+  els.push(m.text(40, 206, 240, 22, "교사의 기대 (목표)", { fontSize: 15, fontFamily: LABEL_FONT, color: "#a98a3a", align: "left", valign: "center" }, { textRole: "title" }));
+  els.push(m.text(40, 232, 316, 108, has(c.goal.replace(/\d+\.\s*/g, "").trim()) ? c.goal : "", { fontSize: fitFontSize(c.goal || " ", 316, 108, 13, 9), fontFamily: BODY_FONT, color: INK, align: "left", valign: "top" }));
+  box(404, 194, 366, 158, "#f6efdd", "#e6d9bd");
+  els.push(m.text(420, 206, 240, 22, "교육과정 연계", { fontSize: 15, fontFamily: LABEL_FONT, color: "#8a7a4a", align: "left", valign: "center" }, { textRole: "title" }));
+  els.push(m.text(420, 232, 336, 108, has(c.curri) ? c.curri : "", { fontSize: fitFontSize(c.curri || " ", 336, 108, 13, 9), fontFamily: BODY_FONT, color: INK, align: "left", valign: "top" }));
+
+  // ── 표 (일자 | 예상 놀이 및 활동 | 실행 평가 및 지원) ──
+  const TX = 24, TW = 746, C1 = 110, C2 = 370, C3 = TW - C1 - C2;
+  const x1 = TX, x2 = TX + C1, x3 = TX + C1 + C2;
+  const HY = 362, HH = 34, RY = HY + HH, RH = 96, N = 5, TBOT = RY + RH * N;
+  els.push(m.shape(x1, HY, C1, HH, { bg: "#d9cceb", radius: 0 }));
+  els.push(m.shape(x2, HY, C2, HH, { bg: "#f3ccd8", radius: 0 }));
+  els.push(m.shape(x3, HY, C3, HH, { bg: "#c4dcf0", radius: 0 }));
+  els.push(m.text(x1, HY, C1, HH, "일자", { fontSize: 15, fontFamily: LABEL_FONT, color: "#5b4a86", align: "center", valign: "center" }, { textRole: "title" }));
+  els.push(m.text(x2, HY, C2, HH, "예상 놀이 및 활동", { fontSize: 15, fontFamily: LABEL_FONT, color: "#a85277", align: "center", valign: "center" }, { textRole: "title" }));
+  els.push(m.text(x3, HY, C3, HH, "실행 평가 및 지원", { fontSize: 15, fontFamily: LABEL_FONT, color: "#3f6fa0", align: "center", valign: "center" }, { textRole: "title" }));
+  // 실행 평가 및 지원 열 — 표 전체 높이 1칸(교사 기록란, 편집 가능).
+  els.push(m.text(x3 + 14, RY + 14, C3 - 28, RH * N - 28, "※ 자발적으로 나타난 놀이, 확장된 놀이, 유아의 발화 내용 등 놀이 상황의 관찰 및 교사의 지원 내용을 작성하세요.", { fontSize: 12, fontFamily: BODY_FONT, color: GRAY, align: "left", valign: "top" }));
+  const jdays = c.days && c.days.length ? c.days : WK_DAYS_DEF;
+  for (let i = 0; i < N; i++) {
+    const day = jdays[i] || WK_DAYS_DEF[i] || {};
+    const rowY = RY + i * RH;
+    if (i > 0) els.push(m.shape(x1, rowY, TW, 1, { bg: LINE, radius: 0 }));
+    // 일자
+    els.push(m.text(x1, rowY + 10, C1, 22, has(day.d) ? day.d : (WK_DAYS_DEF[i] ? WK_DAYS_DEF[i].d : ""), { fontSize: 18, fontFamily: LABEL_FONT, color: INK, align: "center", valign: "center" }, { textRole: "title" }));
+    els.push(m.text(x1, rowY + 32, C1, 16, has(day.sub) ? day.sub : "", { fontSize: 12, fontFamily: BODY_FONT, color: GRAY, align: "center", valign: "center" }));
+    img(x1 + (C1 - 62) / 2, rowY + 48, 62, 44, (day.ideas && day.ideas[0]) ? day.ideas[0] : c.theme);
+    // 예상 놀이 및 활동
+    const ideas = day.ideas && day.ideas.length ? day.ideas : (WK_DAYS_DEF[i] ? WK_DAYS_DEF[i].ideas : []);
+    els.push(m.text(x2 + 12, rowY + 8, C2 - 24, 50, ideas.map((t) => "• " + t).join("\n"), { fontSize: 13, fontFamily: BODY_FONT, color: INK, align: "left", valign: "top" }));
+    pill(x2 + 12, rowY + RH - 30, 60, 22, "#bfe0ad", "#3e6b2f", "바깥놀이", 11);
+    const od = c.outdoor && c.outdoor[i] ? String(c.outdoor[i]).split(" - ")[0] : "자연 관찰하기";
+    els.push(m.text(x2 + 80, rowY + RH - 30, C2 - 92, 22, "• " + od, { fontSize: 12, fontFamily: BODY_FONT, color: INK, align: "left", valign: "center" }));
+  }
+  // 세로 분리선 + 표 테두리
+  els.push(m.shape(x2, HY, 1, TBOT - HY, { bg: LINE, radius: 0 }));
+  els.push(m.shape(x3, HY, 1, TBOT - HY, { bg: LINE, radius: 0 }));
+  els.push(m.shape(TX, HY, TW, TBOT - HY, { bg: "transparent", radius: 8, stroke: "#d9cceb", strokeWidth: 1.5 }));
+
+  // ── 안전 교육 / 인성 교육 / 가정연계활동 ──
+  let sy = TBOT + 12;
+  [["안전 교육", c.safety], ["인성 교육", c.char], ["가정연계활동", c.home]].forEach((row) => {
+    pill(TX, sy + 8, 92, 24, "#e7ddc9", "#7a6f57", row[0], 12);
+    els.push(m.text(TX + 104, sy + 4, TW - 104, 44, row[1] || "", { fontSize: fitFontSize(row[1] || " ", TW - 104, 44, 12.5, 9), fontFamily: BODY_FONT, color: INK, align: "left", valign: "center" }));
+    sy += 54;
+  });
+  // ── 푸터 ──
+  els.push(m.text(TX, 1092, TW, 22, "놀이 흥미와 요구, 상황에 따라 변경될 수 있으며, 함께 만들어가는 놀이중심 교육과정을 지원합니다.", { fontSize: 11, fontFamily: BODY_FONT, color: GRAY, align: "center", valign: "center" }));
+
+  // 구조(shape)만 잠금 — 텍스트·이미지는 편집 가능.
+  els.forEach((e) => { if (e.type === "shape") e.locked = true; });
+  return doc("주간 놀이계획 및 실행안", CREAM, els);
 }
 
 function readMonthly(payload) {
@@ -2042,6 +2135,7 @@ export function buildMazeDoc(payload) {
 function templateEntry(id) {
   if (id === "topicweb") return { build: buildTopicWebDoc, photos: 0 };
   if (id === "weeklyplan") return { build: buildWeeklyPlanDoc, photos: 0 };
+  if (id === "weeklyplan-journal") return { build: buildWeeklyPlanJournalDoc, photos: 0 };
   if (id === "monthlyplan" || id === "monthlyplan-summer") return { build: buildMonthlyPlanSummerDoc, photos: 0 };
   if (id === "half-drawing") return { build: buildHalfDrawingDoc, photos: 4 };
   if (id === "counting") return { build: buildCountingDoc, photos: 0 };
@@ -2055,7 +2149,7 @@ function templateEntry(id) {
 }
 // 유효한 조합 id 인지
 export function isTemplateId(id) {
-  if (id === "topicweb" || id === "weeklyplan" || id === "monthlyplan" || id === "monthlyplan-summer" || id === "half-drawing" || id === "counting" || id === "shadow-match" || id === "hangul-writing" || id === "headband" || id === "maze") return true;
+  if (id === "topicweb" || id === "weeklyplan" || id === "weeklyplan-journal" || id === "monthlyplan" || id === "monthlyplan-summer" || id === "half-drawing" || id === "counting" || id === "shadow-match" || id === "hangul-writing" || id === "headband" || id === "maze") return true;
   const [theme, family] = String(id).split("-");
   return !!(TEMPLATE_REGISTRY[theme] && TEMPLATE_REGISTRY[theme][family]);
 }
@@ -2074,6 +2168,7 @@ export function buildVariant(id, payload) {
 export function templateLabel(id) {
   if (id === "topicweb") return "놀이주제망";
   if (id === "weeklyplan") return "주안 여름";
+  if (id === "weeklyplan-journal") return "주안 일지형";
   if (id === "monthlyplan" || id === "monthlyplan-summer") return "월간 여름바다";
   if (id === "half-drawing") return "반쪽 그림 그리기";
   if (id === "counting") return "바다 친구들 수세기";
@@ -2093,7 +2188,10 @@ export function templateLabel(id) {
 export function pickerTemplates(payload) {
   // 놀이주제망·주간계획안 기록 → 각 단일 템플릿만 노출(놀이기록 카드/스토리 템플릿과 섞이지 않게).
   if (payload?.topic_web) return [{ id: "topicweb", theme: "topicweb", family: "web", label: "놀이주제망" }];
-  if (payload?.daily_flow) return [{ id: "weeklyplan", theme: "weeklyplan", family: "week", label: "주안 여름" }];
+  if (payload?.daily_flow) return [
+    { id: "weeklyplan", theme: "weeklyplan", family: "week", label: "주안 여름" },
+    { id: "weeklyplan-journal", theme: "weeklyplan", family: "week", label: "주안 일지형" },
+  ];
   if (payload?.weekly_flow) return [{ id: "monthlyplan-summer", theme: "monthlyplan", family: "month", label: "월간 여름바다" }];
   if (payload?.half_drawing) return [{ id: "half-drawing", theme: "half-drawing", family: "worksheet", label: "반쪽 그림 그리기" }];
   if (payload?.counting) return [{ id: "counting", theme: "counting", family: "worksheet", label: "바다 친구들 수세기" }];

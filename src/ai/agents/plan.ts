@@ -306,6 +306,292 @@ export interface PlanResult {
   warning?: string;
 }
 
+/** 놀이중심 주제망(topic_web) — 대주제→소주제(탐색영역)→놀이아이디어(놀이명) 2단계 +
+    환경구성 + 유아 예상질문. TopicWeb 페이로드로 반환해 보드 카드/마크다운으로 렌더하고,
+    하위(놀이아이디어·월/주/일안)·verse topic_web 의 seed 로 쓰인다(feature: topic_web). */
+export async function runTopicWeb(
+  request: string,
+  ctx?: string,
+  opts?: { ageBand?: string; subtopicCount?: number; ideaCountPerSubtopic?: number; projectMode?: boolean },
+): Promise<PlanResult> {
+  const ageRule = buildAgeCurriculumRule(resolveAge(opts?.ageBand));
+  const subN = opts?.subtopicCount ?? 5;
+  const ideaN = opts?.ideaCountPerSubtopic ?? 4;
+  const proj = opts?.projectMode ? '\n- 프로젝트 모드: 소주제·놀이가 하나의 탐구 프로젝트로 이어지도록 구성한다.' : '';
+  const user = `주제: "${request}"
+이 주제로 유아의 흥미와 놀이 흐름이 드러나는 '놀이중심 주제망(topic_web)'을 작성하라. 단순 개념 나열이 아니라, 이후 놀이아이디어·월/주/일안·프로젝트로 확장 가능한 기반 데이터가 되게 한다.
+${ageRule}
+
+[구성 규칙]
+- main_topic: 대주제(입력 주제).
+- subtopics: 소주제 ${subN}개. '활동명'이 아니라 유아의 경험과 연결된 '탐색·관심 영역'으로 짧고 명확하게(예: 겨울놀이 → "겨울 날씨", "눈과 얼음", "겨울 옷차림"). 주차/활동 번호 금지, 중복 금지.
+- 각 subtopic.play_ideas: 놀이아이디어 ${ideaN}개. 실제 교실에서 실행 가능한 '짧은 놀이명'만(설명 없이). 놀이 유형(신체·감각탐색·역할·언어·미술·음악동작·쌓기구성·과학탐구·자연탐색·협동)이 겹치지 않게. 흐름은 관심→탐색→표현→확장→공유를 반영. 교사 주도보다 유아 주도가 드러나게.
+- environment_setup: 교실 환경 구성 4~6개. 탐색 자료·역할놀이 소품·그림책/언어 자료·게시판·유아 작품 전시·관찰/기록 공간·안전 자료를 고려해 교사가 실제 적용할 수 있게 한 문장씩.
+- children_expected_questions: 유아의 예상 질문 4~6개. 왜/어떻게/무엇일까/무엇이 다를까 유형으로, 유아의 말투에 가깝게 자연스럽게.${proj}
+
+${buildOutputRule()}
+
+JSON만 출력:
+{ "type": "TopicWeb", "props": { "main_topic": string, "age_band": "0-2"|"3-5", "theme": string, "season": string, "project_mode": boolean, "subtopics": [ { "subtopic": string, "play_ideas": [string] } ], "environment_setup": [string], "children_expected_questions": [string] } }`;
+
+  const res = await callGateway({
+    task: 'plan',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: system(ctx),
+    messages: [{ role: 'user', content: user }],
+    meta: { kind: 'plan', title: request, selected: [] },
+    maxTokens: Math.min(4000, Math.max(2200, 700 + subN * ideaN * 55)),
+  });
+  if (!res.ok || !res.text) {
+    return { payload: clarify('주제망 생성에 실패했어요.'), warning: res.error, mocked: res.mocked };
+  }
+  let result;
+  try {
+    result = validateRegistryPayload(extractJson(res.text));
+  } catch {
+    result = { ok: false as const, errors: ['unparseable'] };
+  }
+  if (!result.ok || !result.value) {
+    return { payload: clarify('주제망을 만들 정보가 부족해요. 주제·연령을 알려주세요.'), mocked: res.mocked };
+  }
+  if (result.value.type === 'TopicWeb') {
+    const pr = result.value.props;
+    if (!pr.id) pr.id = id('topicweb');
+    if (!pr.theme) pr.theme = request;
+    if (opts?.projectMode && pr.project_mode === undefined) pr.project_mode = true;
+  }
+  return { payload: result.value, mocked: res.mocked };
+}
+
+/** 월간 놀이계획(월안) — 실제 현장 월안 서식(기본정보·놀이선정근거·주차별 예상놀이흐름·바깥놀이·
+    안전/인성교육·행사·가정연계). MonthlyPlan 페이로드로 반환. 주안·일안의 상위 컨텍스트가 된다
+    (feature: monthly_plan). */
+export async function runMonthlyPlan(
+  request: string,
+  ctx?: string,
+  opts?: { ageBand?: string; className?: string; period?: string; weekCount?: number; seed?: string[]; events?: string[] },
+): Promise<PlanResult> {
+  const resolved = resolveAge(opts?.ageBand);
+  const weekN = opts?.weekCount ?? 5;
+  const seedLine = opts?.seed?.length ? `\n참고(상위 놀이·주제): ${opts.seed.join(' / ')}` : '';
+  const givenClass = opts?.className?.trim() ? `\n반이름(주어진 값): "${opts.className.trim()}"` : '';
+  const givenPeriod = opts?.period?.trim() ? `\n놀이기간(주어진 값): "${opts.period.trim()}"` : '';
+  const givenEvents = opts?.events?.length ? `\n이 달 행사(주어진 값): ${opts.events.join(', ')}` : '';
+  const user = `놀이주제: "${request}"${seedLine}${givenClass}${givenPeriod}${givenEvents}
+실제 유치원·어린이집에서 쓰는 수준의 '월간 놀이계획(월안)'을 작성하라. 한 주제를 한 달간 주차별로 점점 확장하며 논다.
+${buildAgeCurriculumRule(resolved)}
+
+[기본정보(basic_info)]
+- class_name: 반이름(주어진 값이 있으면 그대로, 없으면 ""). 지어내지 말 것.
+- theme: 놀이주제(입력 주제).
+- period: 놀이기간(주어진 값이 있으면 그대로, 없으면 ""). 예: "2026년 6월".
+
+[놀이선정근거(rationale)]
+- reason(놀이선정이유): 유아 흥미·발달 특성·계절/환경·놀이 가치·교육과정 연계를 반영해 2~3문장. 단순 주제 설명 금지.
+- teacher_expectations(교사의 기대): 2~5개. 활동 설명이 아니라 유아의 배움·성장 관점으로(탐구·의사소통·사회성·표현·신체 중). 예: "주변의 다양한 색을 탐색하며 사물의 특성을 비교하고 탐구하는 태도를 기른다".
+- curriculum_links(교육과정연계): 반드시 5영역(신체운동·건강 / 의사소통 / 사회관계 / 예술경험 / 자연탐구)을 모두 포함, 각 { area, category(범주), content(내용) }. 실제 교육과정에 존재하는 범주·내용만(임의 생성 금지). 생성한 놀이·교사기대를 분석해 작성.
+
+[예상놀이흐름(weekly_flow)] — ${weekN}주(4~5주)
+- 각 주: { week: "N주차", sub_theme: 소주제, play_ideas: [놀이명 4~6개] }.
+- 소주제: 주차별 중복 금지, 놀이주제와 연결, 유아 흥미가 확장되게.
+- play_ideas: 실제 교실에서 쓰는 구체적 '놀이명'만(설명·영역 표기·번호·추상명("활동1","놀이A") 금지).
+
+[바깥놀이및신체활동(outdoor_play)] — 주차별 1개 이상, { week, activity }. 바깥놀이·신체놀이·대근육활동 중심, 실내 놀이와 중복 최소화.
+[안전교육(safety_education)] — 놀이 안전·도구 사용 안전·생활 안전을 주제와 연결해 한 단락.
+[인성교육(character_education)] — 배려·존중·협력·책임 중 하나 이상을 놀이와 연결해 한 단락.
+[행사(events)] — 있으면 [{ name(행사명), connection(연계내용) }], 없으면 [].
+[가정연계활동(home_connection)] — 가정 놀이 제안·부모 대화 주제·그림책 연계를 담아 한 단락.
+
+${buildSafetyEducationRule(resolved)}
+
+${buildOutputRule()}
+
+JSON만 출력:
+{ "type": "MonthlyPlan", "props": { "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "basic_info": { "class_name": string, "theme": string, "period": string }, "rationale": { "reason": string, "teacher_expectations": [string], "curriculum_links": [ { "area": string, "category": string, "content": string } ] }, "weekly_flow": [ { "week": string, "sub_theme": string, "play_ideas": [string] } ], "outdoor_play": [ { "week": string, "activity": string } ], "safety_education": string, "character_education": string, "events": [ { "name": string, "connection": string } ], "home_connection": string } }`;
+
+  const res = await callGateway({
+    task: 'plan',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: system(ctx),
+    messages: [{ role: 'user', content: user }],
+    meta: { kind: 'plan', title: request, selected: opts?.seed ?? [] },
+    maxTokens: 3800,
+  });
+  if (!res.ok || !res.text) {
+    return { payload: clarify('월간계획 생성에 실패했어요.'), warning: res.error, mocked: res.mocked };
+  }
+  let result;
+  try {
+    result = validateRegistryPayload(extractJson(res.text));
+  } catch {
+    result = { ok: false as const, errors: ['unparseable'] };
+  }
+  if (!result.ok || !result.value) {
+    return { payload: clarify('월간계획을 만들 정보가 부족해요. 주제·연령을 알려주세요.'), mocked: res.mocked };
+  }
+  if (result.value.type === 'MonthlyPlan') {
+    const pr = result.value.props;
+    if (!pr.id) pr.id = id('monthly');
+    if (!pr.basic_info.theme.trim()) pr.basic_info.theme = request;
+    if (opts?.className && !pr.basic_info.class_name.trim()) pr.basic_info.class_name = opts.className.trim();
+    if (opts?.period && !pr.basic_info.period.trim()) pr.basic_info.period = opts.period.trim();
+  }
+  return { payload: result.value, mocked: res.mocked };
+}
+
+/** 주간 놀이계획(주안) — 월~금 운영 흐름. 요일별 flow_stage(관심·탐색→탐구→표현→협력→공유) +
+    놀이아이디어(경험·영역) + 바깥놀이 + 안전/인성교육 + 행사 + 가정연계. WeeklyPlan 페이로드로
+    반환. 기본 계획 생성 경로 전용(프로젝트·패키지·레인은 계속 runPlan/WeeklyPlanGrid). */
+export async function runWeeklyPlan(
+  request: string,
+  ctx?: string,
+  opts?: { ageBand?: string; subTheme?: string; weekNumber?: number; period?: string; seed?: string[]; monthlyContext?: string },
+): Promise<PlanResult> {
+  const resolved = resolveAge(opts?.ageBand);
+  const seedLine = opts?.seed?.length ? `\n참고(상위 놀이·주제): ${opts.seed.join(' / ')}` : '';
+  const monthLine = opts?.monthlyContext?.trim()
+    ? `\n[상위 월안 맥락 — 이 주의 소주제·놀이 흐름을 상속]\n${opts.monthlyContext.trim().slice(0, 1200)}`
+    : '';
+  const subLine = opts?.subTheme?.trim() ? `\n소주제(주어진 값): "${opts.subTheme.trim()}"` : '';
+  const periodLine = opts?.period?.trim() ? `\n놀이기간(주어진 값): "${opts.period.trim()}"` : '';
+  const weekLine = opts?.weekNumber ? `\n몇째 주: ${opts.weekNumber}주차` : '';
+  const user = `놀이주제: "${request}"${subLine}${weekLine}${periodLine}${seedLine}${monthLine}
+실제 유치원·어린이집에서 쓰는 수준의 '주간 놀이계획(주안)'을 월~금 운영 흐름으로 작성하라.
+${buildAgeCurriculumRule(resolved)}
+
+[요일 흐름] daily_flow 는 월·화·수·목·금 5일. flow_stage 를 순서대로 — 월: "관심 및 탐색", 화: "탐구 및 경험", 수: "표현", 목: "협력", 금: "공유 및 확장".
+- 각 요일 play_ideas 1~3개. 각 { title(놀이명), core_experience(핵심 경험 1문장, 유아가 주어), learning_area([영역 1~2개]) }. 유아·놀이 중심(교사 주도 서술 금지).
+[놀이선정근거(rationale)] { summary(한 주 요약), meaning_of_this_week(이 주의 의미), connection_from_previous_play(지난 놀이와 연결), expansion_to_next_play(다음 놀이로 확장) } 각 1문장.
+[교사의 기대(teacher_expectations)] 2~4개, 각 { goal(유아 배움·성장 관점 1문장), focus(탐색|표현|협력|문제해결|의사소통 중 하나) }.
+[교육과정연계(curriculum_links)] 관련 영역들, 각 { area(신체운동·건강/의사소통/사회관계/예술경험/자연탐구), content(교육과정 내용), expected_experience(기대 경험) }. 임의 생성 금지.
+[바깥놀이및신체활동(outdoor_and_physical_play)] 요일별 1개 이상, 각 { day, activity_name, method, safety_point }.
+[안전교육(safety_education)] { weekly_safety_focus(이 주 안전 초점), teacher_guidance(교사 지원) }.
+[인성교육(character_education)] { core_value(배려/존중/협력/책임 중 하나), practice_context(놀이 속 실천 맥락) }.
+[행사(events)] 있으면 [{ name, date, connection }], 없으면 [].
+[가정연계활동(home_connection)] { home_play(가정 놀이), conversation_topic(대화 주제), observation_point(관찰 포인트) }.
+
+${buildSafetyEducationRule(resolved)}
+
+${buildOutputRule()}
+
+JSON만 출력:
+{ "type": "WeeklyPlan", "props": { "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "basic_info": { "theme": string, "sub_theme": string, "week_number": number, "period": string }, "rationale": { "summary": string, "meaning_of_this_week": string, "connection_from_previous_play": string, "expansion_to_next_play": string }, "teacher_expectations": [ { "goal": string, "focus": string } ], "curriculum_links": [ { "area": string, "content": string, "expected_experience": string } ], "daily_flow": [ { "day": string, "date": string, "flow_stage": string, "play_ideas": [ { "title": string, "core_experience": string, "learning_area": [string] } ] } ], "outdoor_and_physical_play": [ { "day": string, "activity_name": string, "method": string, "safety_point": string } ], "safety_education": { "weekly_safety_focus": string, "teacher_guidance": string }, "character_education": { "core_value": string, "practice_context": string }, "events": [ { "name": string, "date": string, "connection": string } ], "home_connection": { "home_play": string, "conversation_topic": string, "observation_point": string } } }`;
+
+  const res = await callGateway({
+    task: 'plan',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: system(ctx),
+    messages: [{ role: 'user', content: user }],
+    meta: { kind: 'plan', title: request, selected: opts?.seed ?? [] },
+    maxTokens: 4000,
+  });
+  if (!res.ok || !res.text) {
+    return { payload: clarify('주간계획 생성에 실패했어요.'), warning: res.error, mocked: res.mocked };
+  }
+  let result;
+  try {
+    result = validateRegistryPayload(extractJson(res.text));
+  } catch {
+    result = { ok: false as const, errors: ['unparseable'] };
+  }
+  if (!result.ok || !result.value) {
+    return { payload: clarify('주간계획을 만들 정보가 부족해요. 주제·연령을 알려주세요.'), mocked: res.mocked };
+  }
+  if (result.value.type === 'WeeklyPlan') {
+    const pr = result.value.props;
+    if (!pr.id) pr.id = id('plan');
+    if (!pr.basic_info.theme.trim()) pr.basic_info.theme = request;
+    if (opts?.subTheme && !pr.basic_info.sub_theme.trim()) pr.basic_info.sub_theme = opts.subTheme.trim();
+    if (opts?.period && !pr.basic_info.period.trim()) pr.basic_info.period = opts.period.trim();
+  }
+  return { payload: result.value, mocked: res.mocked };
+}
+
+/** 일일 놀이계획(일안) — 교사가 바로 운영하는 실행 단위 계획. 도입→전개(활동 2~4개)→마무리→
+    평가→확장 + 준비물·환경·우천대체·안전·가정연계. DailyPlan 페이로드로 반환. 주안의 특정 요일을
+    상세화한다(feature: daily_plan). */
+export async function runDailyPlan(
+  request: string,
+  ctx?: string,
+  opts?: { ageBand?: string; subTheme?: string; date?: string; day?: string; seed?: string[]; weeklyContext?: string },
+): Promise<PlanResult> {
+  const resolved = resolveAge(opts?.ageBand);
+  const seedLine = opts?.seed?.length ? `\n오늘 다룰 놀이(상위 주안에서 선택): ${opts.seed.join(' / ')}` : '';
+  const weekLine = opts?.weeklyContext?.trim()
+    ? `\n[상위 주안 맥락 — 이 요일 놀이·흐름을 상속]\n${opts.weeklyContext.trim().slice(0, 1200)}`
+    : '';
+  const subLine = opts?.subTheme?.trim() ? `\n소주제(주어진 값): "${opts.subTheme.trim()}"` : '';
+  const dateLine = opts?.date?.trim() ? `\n날짜(주어진 값): "${opts.date.trim()}"` : '';
+  const dayLine = opts?.day?.trim() ? `\n요일(주어진 값): "${opts.day.trim()}"` : '';
+  const user = `놀이주제: "${request}"${subLine}${dateLine}${dayLine}${seedLine}${weekLine}
+교사가 오늘 교실에서 바로 운영할 수 있는 수준의 '일일 놀이계획(일안)'을 상세히 작성하라.
+${buildAgeCurriculumRule(resolved)}
+
+[구성 — 반드시 도입 → 전개 → 마무리 흐름]
+- teacher_expectations: 2~3개, 각 { goal(유아 배움 관점 1문장), focus(탐색|표현|협력|문제해결|의사소통 중) }.
+- curriculum_links: 관련 영역, 각 { area, content(교육과정 내용), expected_experience }. 임의 생성 금지.
+- materials: { teacher_materials[], children_materials[] } 로 구분.
+- environment_setup: { indoor_environment: { space_setup, material_arrangement }, outdoor_environment: { play_environment } }.
+- introduction(도입): { interest_trigger(흥미 유발), conversation: { teacher_questions[](개방형 발문 2~3), expected_child_responses[] } }.
+- development_activities(전개): 2~4개. 각 { activity_name(놀이명), activity_goal, activity_method[](2~4단계, 유아 주어), teacher_questions[], expected_child_responses[], support_strategy: { language_support, play_expansion, individual_support } }.
+- closing(마무리): { experience_sharing(경험 나누기), reflection_questions[], connection_to_next_play(다음 놀이로 연결) }.
+- outdoor_and_physical_play: { activity_name, method, safety_guidance }.
+- rainy_day_alternative(우천 대체): { indoor_alternative_play, materials[], operation_method }.
+- safety_notes: { play_safety, environment_safety, health_safety }.
+- assessment(평가): { observation_points[](관찰 포인트 2~3), teacher_check_questions[] }.
+- extension_activities(확장): { classroom_extension, project_extension, art_extension, role_play_extension }.
+- home_connection(가정연계): { try_at_home, parent_question, recommended_picture_book, follow_up_play }.
+
+${buildSafetyEducationRule(resolved)}
+
+${buildOutputRule()}
+
+JSON만 출력:
+{ "type": "DailyPlan", "props": { "age_band": "0-2"|"3-5", "curriculum": "standard"|"nuri", "basic_info": { "theme": string, "sub_theme": string, "date": string, "day": string }, "teacher_expectations": [ { "goal": string, "focus": string } ], "curriculum_links": [ { "area": string, "content": string, "expected_experience": string } ], "materials": { "teacher_materials": [string], "children_materials": [string] }, "environment_setup": { "indoor_environment": { "space_setup": string, "material_arrangement": string }, "outdoor_environment": { "play_environment": string } }, "introduction": { "interest_trigger": string, "conversation": { "teacher_questions": [string], "expected_child_responses": [string] } }, "development_activities": [ { "activity_name": string, "activity_goal": string, "activity_method": [string], "teacher_questions": [string], "expected_child_responses": [string], "support_strategy": { "language_support": string, "play_expansion": string, "individual_support": string } } ], "closing": { "experience_sharing": string, "reflection_questions": [string], "connection_to_next_play": string }, "outdoor_and_physical_play": { "activity_name": string, "method": string, "safety_guidance": string }, "rainy_day_alternative": { "indoor_alternative_play": string, "materials": [string], "operation_method": string }, "safety_notes": { "play_safety": string, "environment_safety": string, "health_safety": string }, "assessment": { "observation_points": [string], "teacher_check_questions": [string] }, "extension_activities": { "classroom_extension": string, "project_extension": string, "art_extension": string, "role_play_extension": string }, "home_connection": { "try_at_home": string, "parent_question": string, "recommended_picture_book": string, "follow_up_play": string } } }`;
+
+  const res = await callGateway({
+    task: 'plan',
+    tier: 'mid',
+    provider: 'auto',
+    responseFormat: 'json',
+    fallback: ['high'],
+    system: system(ctx),
+    messages: [{ role: 'user', content: user }],
+    meta: { kind: 'plan', title: request, selected: opts?.seed ?? [] },
+    maxTokens: 4000,
+  });
+  if (!res.ok || !res.text) {
+    return { payload: clarify('일일계획 생성에 실패했어요.'), warning: res.error, mocked: res.mocked };
+  }
+  let result;
+  try {
+    result = validateRegistryPayload(extractJson(res.text));
+  } catch {
+    result = { ok: false as const, errors: ['unparseable'] };
+  }
+  if (!result.ok || !result.value) {
+    return { payload: clarify('일일계획을 만들 정보가 부족해요. 주제·연령을 알려주세요.'), mocked: res.mocked };
+  }
+  if (result.value.type === 'DailyPlan') {
+    const pr = result.value.props;
+    if (!pr.id) pr.id = id('daily');
+    if (!pr.basic_info.theme.trim()) pr.basic_info.theme = request;
+    if (opts?.subTheme && !pr.basic_info.sub_theme.trim()) pr.basic_info.sub_theme = opts.subTheme.trim();
+    if (opts?.date && !pr.basic_info.date.trim()) pr.basic_info.date = opts.date.trim();
+    if (opts?.day && !pr.basic_info.day.trim()) pr.basic_info.day = opts.day.trim();
+  }
+  return { payload: result.value, mocked: res.mocked };
+}
+
 export async function runPlan(
   request: string,
   selected: string[],

@@ -166,8 +166,11 @@ export function bundleFromFrame(frameId: string): Bundle | null {
   };
   collect(frameId);
 
-  const planItem = items.find((it) => it.payload?.type === 'WeeklyPlanGrid');
-  const planId = planItem?.payload?.type === 'WeeklyPlanGrid' ? planItem.payload.props.id : undefined;
+  const planItem = items.find((it) => it.payload?.type === 'WeeklyPlanGrid' || it.payload?.type === 'WeeklyPlan');
+  const planId =
+    planItem?.payload?.type === 'WeeklyPlanGrid' || planItem?.payload?.type === 'WeeklyPlan'
+      ? planItem.payload.props.id
+      : undefined;
   const hasWorksheetLink = items.some(
     (it) => it.payload?.type === 'WorksheetCard' && !!it.payload.props.link_plan_id,
   );

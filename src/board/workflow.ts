@@ -157,7 +157,7 @@ export function spawnHeaderCard(frameId: string, text: string): string {
     proportion; height grows with content (autoH). Rendered as a document.
     Portrait (480) by default; the 주간 놀이계획 passes landscape (PLAN_DOC_W). */
 export const DOC_WIDTH = 480; // A4 portrait page width at board scale (≈210:297)
-export const PLAN_DOC_W = 680; // 주간 놀이계획 = A4 landscape (가로) — fits the weekly grid
+export const PLAN_DOC_W = 780; // 놀이계획 문서(주안·월안·일안) — 리치 구조라 폭을 넉넉히(내용 대비 카드가 작지 않게)
 export function spawnDocCard(frameId: string, text: string, role?: string, width = DOC_WIDTH): string {
   const pos = placeInFrame(frameId, width, 240);
   const id = newId('sticky');
@@ -301,11 +301,337 @@ export function playIdeaListMarkdown(
   return out.join('\n');
 }
 
+/** 놀이중심 주제망(TopicWeb) 마크다운 — 대주제 헤더 + 소주제별 놀이아이디어 + 환경구성 +
+    유아 예상질문(feature: topic_web 출력 형식). 보드 doc 카드 본문/내보내기용. */
+export function topicWebMarkdown(p: import('@/ui-registry/contracts').TopicWebProps): string {
+  const meta = [ageLabel(p), p.season?.trim(), p.project_mode ? '프로젝트' : '']
+    .filter((s) => s && String(s).trim())
+    .join(' · ');
+  const out: string[] = [`# 🕸️ ${p.main_topic} 놀이주제망`];
+  if (meta) out.push(`**대상** ${meta}`);
+  out.push('');
+  out.push('## 소주제와 놀이');
+  p.subtopics.forEach((s) => {
+    out.push('');
+    out.push(`### ${s.subtopic}`);
+    const ideas = (s.play_ideas ?? []).filter((x) => x && x.trim());
+    if (ideas.length) ideas.forEach((x) => out.push(`- ${x.trim()}`));
+    else out.push('- —');
+  });
+  const env = (p.environment_setup ?? []).filter((x) => x && x.trim());
+  if (env.length) {
+    out.push('');
+    out.push('---');
+    out.push('## 환경 구성');
+    env.forEach((x) => out.push(`- ${x.trim()}`));
+  }
+  const qs = (p.children_expected_questions ?? []).filter((x) => x && x.trim());
+  if (qs.length) {
+    out.push('');
+    out.push('## 유아의 예상 질문');
+    qs.forEach((x) => out.push(`- ${x.trim()}`));
+  }
+  return out.join('\n');
+}
+
+/** 월간 놀이계획(MonthlyPlan) 마크다운 — 기본정보 + 놀이선정근거(이유·교사기대·교육과정연계 표) +
+    주차별 예상놀이흐름 + 바깥놀이 + 안전/인성교육 + 행사 + 가정연계(feature: monthly_plan). */
+export function monthlyPlanMarkdown(p: import('@/ui-registry/contracts').MonthlyPlanProps): string {
+  const cell = (s?: string) => (s && s.trim() ? s.replace(/\|/g, '/').replace(/\n+/g, ' ').trim() : '—');
+  const meta = [
+    ageLabel(p),
+    p.basic_info.class_name?.trim() ? `반 ${p.basic_info.class_name.trim()}` : '',
+    p.basic_info.period?.trim() ? `기간 ${p.basic_info.period.trim()}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const out: string[] = [`# 📅 ${p.basic_info.theme || '월간 놀이계획'} 월간 놀이계획`];
+  if (meta) out.push(`**대상** ${meta}`);
+
+  if (p.rationale.reason?.trim()) {
+    out.push('');
+    out.push('## 놀이 선정 근거');
+    out.push(p.rationale.reason.trim());
+  }
+  if (p.rationale.teacher_expectations.length) {
+    out.push('');
+    out.push('### 교사의 기대');
+    p.rationale.teacher_expectations.forEach((e) => out.push(`- ${e.trim()}`));
+  }
+  if (p.rationale.curriculum_links.length) {
+    out.push('');
+    out.push('### 교육과정 연계');
+    out.push('| 영역 | 범주 | 내용 |');
+    out.push('| --- | --- | --- |');
+    p.rationale.curriculum_links.forEach((c) => out.push(`| ${cell(c.area)} | ${cell(c.category)} | ${cell(c.content)} |`));
+  }
+
+  out.push('');
+  out.push('---');
+  out.push('## 예상 놀이 흐름');
+  p.weekly_flow.forEach((w) => {
+    out.push('');
+    out.push(`### ${[w.week, w.sub_theme].filter((s) => s && s.trim()).join(' · ')}`);
+    const ideas = (w.play_ideas ?? []).filter((x) => x && x.trim());
+    if (ideas.length) ideas.forEach((x) => out.push(`- ${x.trim()}`));
+    else out.push('- —');
+  });
+
+  if (p.outdoor_play.length) {
+    out.push('');
+    out.push('## 바깥놀이 및 신체활동');
+    p.outdoor_play.forEach((o) => out.push(`- **${cell(o.week)}** ${cell(o.activity)}`));
+  }
+  if (p.safety_education?.trim()) {
+    out.push('');
+    out.push('## 안전교육');
+    out.push(p.safety_education.trim());
+  }
+  if (p.character_education?.trim()) {
+    out.push('');
+    out.push('## 인성교육');
+    out.push(p.character_education.trim());
+  }
+  if (p.events.length) {
+    out.push('');
+    out.push('## 행사');
+    p.events.forEach((e) => out.push(`- **${cell(e.name)}** ${cell(e.connection)}`));
+  }
+  if (p.home_connection?.trim()) {
+    out.push('');
+    out.push('## 가정연계활동');
+    out.push(p.home_connection.trim());
+  }
+  return out.join('\n');
+}
+
+/** 주간 놀이계획(WeeklyPlan) 마크다운 — 기본정보 + 놀이선정근거 + 요일별 흐름(flow_stage) +
+    교육과정연계 + 바깥놀이 + 안전/인성교육 + 행사 + 가정연계(feature: weekly_plan). */
+export function weeklyPlanMarkdown(p: import('@/ui-registry/contracts').WeeklyPlanProps): string {
+  const cell = (s?: string) => (s && s.trim() ? s.replace(/\|/g, '/').replace(/\n+/g, ' ').trim() : '—');
+  const bi = p.basic_info;
+  const meta = [
+    ageLabel(p),
+    bi.sub_theme?.trim() ? `소주제 ${bi.sub_theme.trim()}` : '',
+    bi.week_number ? `${bi.week_number}주차` : '',
+    bi.period?.trim() ? `기간 ${bi.period.trim()}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const out: string[] = [`# 📋 ${bi.theme || '주간 놀이계획'} 주간 놀이계획`];
+  if (meta) out.push(`**대상** ${meta}`);
+
+  const r = p.rationale;
+  if (r.summary?.trim() || r.meaning_of_this_week?.trim()) {
+    out.push('');
+    out.push('## 놀이 선정 근거');
+    if (r.summary?.trim()) out.push(r.summary.trim());
+    if (r.meaning_of_this_week?.trim()) out.push(`- 이 주의 의미: ${r.meaning_of_this_week.trim()}`);
+    if (r.connection_from_previous_play?.trim()) out.push(`- 지난 놀이와 연결: ${r.connection_from_previous_play.trim()}`);
+    if (r.expansion_to_next_play?.trim()) out.push(`- 다음 놀이로 확장: ${r.expansion_to_next_play.trim()}`);
+  }
+  if (p.teacher_expectations.length) {
+    out.push('');
+    out.push('### 교사의 기대');
+    p.teacher_expectations.forEach((t) => out.push(`- ${t.goal.trim()}${t.focus?.trim() ? ` _(${t.focus.trim()})_` : ''}`));
+  }
+
+  out.push('');
+  out.push('---');
+  out.push('## 요일별 놀이 흐름');
+  p.daily_flow.forEach((d) => {
+    out.push('');
+    out.push(`### ${[d.day, d.flow_stage].filter((s) => s && s.trim()).join(' · ')}`);
+    const ideas = d.play_ideas ?? [];
+    if (ideas.length) {
+      ideas.forEach((pi) => {
+        const area = (pi.learning_area ?? []).filter((x) => x && x.trim()).join('·');
+        out.push(`- **${pi.title.trim()}** ${pi.core_experience.trim()}${area ? ` _(${area})_` : ''}`);
+      });
+    } else out.push('- —');
+  });
+
+  if (p.curriculum_links.length) {
+    out.push('');
+    out.push('### 교육과정 연계');
+    out.push('| 영역 | 내용 | 기대 경험 |');
+    out.push('| --- | --- | --- |');
+    p.curriculum_links.forEach((c) => out.push(`| ${cell(c.area)} | ${cell(c.content)} | ${cell(c.expected_experience)} |`));
+  }
+  if (p.outdoor_and_physical_play.length) {
+    out.push('');
+    out.push('## 바깥놀이 및 신체활동');
+    p.outdoor_and_physical_play.forEach((o) =>
+      out.push(`- **${cell(o.day)}** ${cell(o.activity_name)}${o.method?.trim() ? ` — ${o.method.trim()}` : ''}${o.safety_point?.trim() ? ` (안전: ${o.safety_point.trim()})` : ''}`),
+    );
+  }
+  if (p.safety_education.weekly_safety_focus?.trim() || p.safety_education.teacher_guidance?.trim()) {
+    out.push('');
+    out.push('## 안전교육');
+    out.push([p.safety_education.weekly_safety_focus?.trim() ? `**${p.safety_education.weekly_safety_focus.trim()}**` : '', p.safety_education.teacher_guidance?.trim()].filter(Boolean).join(' — '));
+  }
+  if (p.character_education.core_value?.trim() || p.character_education.practice_context?.trim()) {
+    out.push('');
+    out.push('## 인성교육');
+    out.push([p.character_education.core_value?.trim() ? `**${p.character_education.core_value.trim()}**` : '', p.character_education.practice_context?.trim()].filter(Boolean).join(' — '));
+  }
+  if (p.events.length) {
+    out.push('');
+    out.push('## 행사');
+    p.events.forEach((e) => out.push(`- **${cell(e.name)}**${e.date?.trim() ? ` (${e.date.trim()})` : ''} ${cell(e.connection)}`));
+  }
+  const hc = p.home_connection;
+  if (hc.home_play?.trim() || hc.conversation_topic?.trim() || hc.observation_point?.trim()) {
+    out.push('');
+    out.push('## 가정연계활동');
+    if (hc.home_play?.trim()) out.push(`- 가정 놀이: ${hc.home_play.trim()}`);
+    if (hc.conversation_topic?.trim()) out.push(`- 대화 주제: ${hc.conversation_topic.trim()}`);
+    if (hc.observation_point?.trim()) out.push(`- 관찰 포인트: ${hc.observation_point.trim()}`);
+  }
+  return out.join('\n');
+}
+
+/** 일일 놀이계획(DailyPlan) 마크다운 — 기본정보 + 교사기대/연계 + 준비물·환경 + 도입→전개→마무리 +
+    바깥놀이·우천대체·안전·평가·확장·가정연계(feature: daily_plan). */
+export function dailyPlanMarkdown(p: import('@/ui-registry/contracts').DailyPlanProps): string {
+  const cell = (s?: string) => (s && s.trim() ? s.replace(/\|/g, '/').replace(/\n+/g, ' ').trim() : '—');
+  const j = (a?: string[]) => (a ?? []).filter((x) => x && x.trim()).map((x) => x.trim());
+  const bi = p.basic_info;
+  const meta = [ageLabel(p), bi.sub_theme?.trim() ? `소주제 ${bi.sub_theme.trim()}` : '', bi.date?.trim() ? `${bi.date.trim()}${bi.day?.trim() ? ` (${bi.day.trim()})` : ''}` : '']
+    .filter(Boolean)
+    .join(' · ');
+  const out: string[] = [`# 🗓️ ${bi.theme || '일일 놀이계획'} 일일 놀이계획`];
+  if (meta) out.push(`**대상** ${meta}`);
+
+  if (p.teacher_expectations.length) {
+    out.push('');
+    out.push('### 교사의 기대');
+    p.teacher_expectations.forEach((t) => out.push(`- ${t.goal.trim()}${t.focus?.trim() ? ` _(${t.focus.trim()})_` : ''}`));
+  }
+  if (p.curriculum_links.length) {
+    out.push('');
+    out.push('### 교육과정 연계');
+    out.push('| 영역 | 내용 | 기대 경험 |');
+    out.push('| --- | --- | --- |');
+    p.curriculum_links.forEach((c) => out.push(`| ${cell(c.area)} | ${cell(c.content)} | ${cell(c.expected_experience)} |`));
+  }
+
+  const tm = j(p.materials.teacher_materials);
+  const cm = j(p.materials.children_materials);
+  if (tm.length || cm.length) {
+    out.push('');
+    out.push('## 준비물');
+    if (tm.length) out.push(`- 교사: ${tm.join(', ')}`);
+    if (cm.length) out.push(`- 유아: ${cm.join(', ')}`);
+  }
+  const ind = p.environment_setup.indoor_environment;
+  const outd = p.environment_setup.outdoor_environment;
+  if (ind.space_setup?.trim() || ind.material_arrangement?.trim() || outd.play_environment?.trim()) {
+    out.push('');
+    out.push('## 환경 구성');
+    const indoorBits = [ind.space_setup?.trim(), ind.material_arrangement?.trim()].filter(Boolean).join(' / ');
+    if (indoorBits) out.push(`- 실내: ${indoorBits}`);
+    if (outd.play_environment?.trim()) out.push(`- 실외: ${outd.play_environment.trim()}`);
+  }
+
+  out.push('');
+  out.push('---');
+  out.push('## 도입');
+  if (p.introduction.interest_trigger?.trim()) out.push(p.introduction.interest_trigger.trim());
+  const iq = j(p.introduction.conversation.teacher_questions);
+  const ir = j(p.introduction.conversation.expected_child_responses);
+  if (iq.length) out.push(`- 발문: ${iq.join(' / ')}`);
+  if (ir.length) out.push(`- 예상 반응: ${ir.join(' / ')}`);
+
+  out.push('');
+  out.push('## 전개');
+  p.development_activities.forEach((d) => {
+    out.push('');
+    out.push(`### ${d.activity_name.trim()}`);
+    if (d.activity_goal?.trim()) out.push(`_목표_ ${d.activity_goal.trim()}`);
+    j(d.activity_method).forEach((m, i) => out.push(`${i + 1}. ${m}`));
+    const tq = j(d.teacher_questions);
+    const cr = j(d.expected_child_responses);
+    if (tq.length) out.push(`- 발문: ${tq.join(' / ')}`);
+    if (cr.length) out.push(`- 예상 반응: ${cr.join(' / ')}`);
+    const sup = d.support_strategy;
+    const supBits = [
+      sup.language_support?.trim() ? `언어 ${sup.language_support.trim()}` : '',
+      sup.play_expansion?.trim() ? `확장 ${sup.play_expansion.trim()}` : '',
+      sup.individual_support?.trim() ? `개별 ${sup.individual_support.trim()}` : '',
+    ].filter(Boolean);
+    if (supBits.length) out.push(`- 지원: ${supBits.join(' · ')}`);
+  });
+
+  out.push('');
+  out.push('## 마무리');
+  if (p.closing.experience_sharing?.trim()) out.push(p.closing.experience_sharing.trim());
+  const rq = j(p.closing.reflection_questions);
+  if (rq.length) out.push(`- 회상 질문: ${rq.join(' / ')}`);
+  if (p.closing.connection_to_next_play?.trim()) out.push(`- 다음 놀이 연결: ${p.closing.connection_to_next_play.trim()}`);
+
+  const oap = p.outdoor_and_physical_play;
+  if (oap.activity_name?.trim()) {
+    out.push('');
+    out.push('## 바깥놀이 및 신체활동');
+    out.push(`**${oap.activity_name.trim()}**${oap.method?.trim() ? ` — ${oap.method.trim()}` : ''}${oap.safety_guidance?.trim() ? ` (안전: ${oap.safety_guidance.trim()})` : ''}`);
+  }
+  const rainy = p.rainy_day_alternative;
+  if (rainy.indoor_alternative_play?.trim()) {
+    out.push('');
+    out.push('## 우천 시 대체활동');
+    const rm = j(rainy.materials);
+    out.push(`**${rainy.indoor_alternative_play.trim()}**${rm.length ? ` — 준비물: ${rm.join(', ')}` : ''}${rainy.operation_method?.trim() ? ` / ${rainy.operation_method.trim()}` : ''}`);
+  }
+  const sn = p.safety_notes;
+  if (sn.play_safety?.trim() || sn.environment_safety?.trim() || sn.health_safety?.trim()) {
+    out.push('');
+    out.push('## 안전 및 유의사항');
+    if (sn.play_safety?.trim()) out.push(`- 놀이: ${sn.play_safety.trim()}`);
+    if (sn.environment_safety?.trim()) out.push(`- 환경: ${sn.environment_safety.trim()}`);
+    if (sn.health_safety?.trim()) out.push(`- 건강: ${sn.health_safety.trim()}`);
+  }
+  const op = j(p.assessment.observation_points);
+  const cq = j(p.assessment.teacher_check_questions);
+  if (op.length || cq.length) {
+    out.push('');
+    out.push('## 평가');
+    if (op.length) out.push(`- 관찰 포인트: ${op.join(' / ')}`);
+    if (cq.length) out.push(`- 확인 질문: ${cq.join(' / ')}`);
+  }
+  const ex = p.extension_activities;
+  const exBits = [
+    ex.classroom_extension?.trim() ? `- 교실: ${ex.classroom_extension.trim()}` : '',
+    ex.project_extension?.trim() ? `- 프로젝트: ${ex.project_extension.trim()}` : '',
+    ex.art_extension?.trim() ? `- 미술: ${ex.art_extension.trim()}` : '',
+    ex.role_play_extension?.trim() ? `- 역할: ${ex.role_play_extension.trim()}` : '',
+  ].filter(Boolean);
+  if (exBits.length) {
+    out.push('');
+    out.push('## 확장 활동');
+    exBits.forEach((b) => out.push(b));
+  }
+  const hc = p.home_connection;
+  const hcBits = [
+    hc.try_at_home?.trim() ? `- 가정에서: ${hc.try_at_home.trim()}` : '',
+    hc.parent_question?.trim() ? `- 부모 질문: ${hc.parent_question.trim()}` : '',
+    hc.recommended_picture_book?.trim() ? `- 추천 그림책: ${hc.recommended_picture_book.trim()}` : '',
+    hc.follow_up_play?.trim() ? `- 이어지는 놀이: ${hc.follow_up_play.trim()}` : '',
+  ].filter(Boolean);
+  if (hcBits.length) {
+    out.push('');
+    out.push('## 가정연계');
+    hcBits.forEach((b) => out.push(b));
+  }
+  return out.join('\n');
+}
+
 /** A full, professional 주간 놀이계획안 document (markdown) from a WeeklyPlanGrid:
     title, meta line, 주간 교육 목표, a 요일×영역 운영 grid table, 영역 연계, 운영
     유의점 — all derived from the generated plan (no fabricated content). Rendered
     as an A4 document card (react-markdown + GFM table). */
 export function planDocMarkdown(p: RegistryPayload): string {
+  if (p.type === 'WeeklyPlan') return weeklyPlanMarkdown(p.props); // 기본 경로 새 구조(주안)
   if (p.type !== 'WeeklyPlanGrid') return planText(p);
   const pr = p.props;
   const band = ageLabel(pr);
@@ -870,11 +1196,23 @@ async function ytTeacherQuery(content: string): Promise<string> {
     없으면 문서 마크다운 표('놀이 활동' 열)를 파싱한다. */
 function planActivities(node: BoardNode): { day?: string; activity: string }[] {
   const p = node.data?.payload as
-    | { type?: string; props?: { days?: { day?: string; activity?: string }[] } }
+    | {
+        type?: string;
+        props?: {
+          days?: { day?: string; activity?: string }[];
+          daily_flow?: { day?: string; play_ideas?: { title?: string }[] }[];
+        };
+      }
     | undefined;
   if (p?.type === 'WeeklyPlanGrid' && Array.isArray(p.props?.days)) {
     return p.props.days
       .map((d) => ({ day: d.day, activity: (d.activity ?? '').trim() }))
+      .filter((d) => d.activity);
+  }
+  // 새 구조(주안 WeeklyPlan) — daily_flow[].play_ideas[].title 를 요일별 활동으로.
+  if (p?.type === 'WeeklyPlan' && Array.isArray(p.props?.daily_flow)) {
+    return p.props.daily_flow
+      .flatMap((d) => (d.play_ideas ?? []).map((pi) => ({ day: d.day, activity: (pi.title ?? '').trim() })))
       .filter((d) => d.activity);
   }
   const out: { day?: string; activity: string }[] = [];

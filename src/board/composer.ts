@@ -16,6 +16,9 @@ import {
   planText,
   planDocMarkdown,
   playIdeaListMarkdown,
+  topicWebMarkdown,
+  monthlyPlanMarkdown,
+  dailyPlanMarkdown,
   projectDocMarkdown,
   worksheetText,
   topicFor,
@@ -43,7 +46,7 @@ import { ruleBasedVariant, asLayoutVariant, ruleBasedSpec } from './design-spec'
 import { runDesignDirector } from '@/ai/agents/design';
 import { pickTemplate, type FrameTemplate, type FrameRegion, type FillAgent } from './templates';
 import { runRouter } from '@/ai/agents/router';
-import { runPlanIdeas, runPlayIdeaList, runPlan, runMindMapActivities, type MindActivity, type IdeaItem } from '@/ai/agents/plan';
+import { runPlanIdeas, runPlayIdeaList, runTopicWeb, runMonthlyPlan, runWeeklyPlan, runDailyPlan, runPlan, runMindMapActivities, type MindActivity, type IdeaItem } from '@/ai/agents/plan';
 import { runStudioImages, runStudioWorksheet, planStudioImages, renderStudioImage, KV_ART_STYLE, KV_CUTOUT_STYLE } from '@/ai/agents/studio';
 import { findAsset, saveAsset } from './assets';
 import { runRecord } from '@/ai/agents/record';
@@ -492,7 +495,8 @@ async function composePlanDocStream(
   try {
     const ctx = buildAgentContext('plan');
     const req = draft.trim() ? `${text}\n\n[방금 작성한 초안 — 내용을 유지하며 구조화할 것]\n${draft.slice(0, 4000)}` : text;
-    const res = await runPlan(req, [], ctx, isProject ? { project: true } : undefined);
+    // 프로젝트는 기존 runPlan(단계별 심화), 일반 놀이계획은 새 구조(주안 WeeklyPlan).
+    const res = isProject ? await runPlan(req, [], ctx, { project: true }) : await runWeeklyPlan(req, ctx);
     useBoardStore.getState().updateNodeRaw(docId, { text: isProject ? projectDocMarkdown(res.payload) : planDocMarkdown(res.payload) });
     stashPayload(docId, res.payload);
   } catch {
@@ -984,9 +988,9 @@ export async function generateIdeaList(topic: string): Promise<void> {
   b.addNodeRaw({
     id: frameId,
     type: 'frame',
-    x: Math.round(vc.x - 300),
+    x: Math.round(vc.x - 350),
     y: Math.round(vc.y - 230),
-    w: 600,
+    w: 700,
     h: 460,
     data: { title: `${t} 아이디어`, composer: true, loading: true, working: true, loadingLabel: '💡 놀이 아이디어를 모으고 있어요…', sourcePrompt: topic },
   });
@@ -997,7 +1001,7 @@ export async function generateIdeaList(topic: string): Promise<void> {
       ? playIdeaListMarkdown(ideas, `${t} 놀이 아이디어`)
       : `# 💡 ${t} 놀이 아이디어\n\n아이디어 생성에 실패했어요. 다시 시도해 주세요.`;
     // role 'idealist' → NodeView가 선택형 행으로 렌더(각 아이디어 클릭 선택). text는 내보내기·폴백용.
-    const cardId = spawnDocCard(frameId, md, 'idealist', 560);
+    const cardId = spawnDocCard(frameId, md, 'idealist', 660);
     if (ideas.length) {
       const cur = useBoardStore.getState().nodes[cardId];
       useBoardStore.getState().updateNodeRaw(cardId, {
@@ -1007,6 +1011,44 @@ export async function generateIdeaList(topic: string): Promise<void> {
     }
     slideFrameToEmpty(frameId);
     recordSpawnedNodes([frameId], '아이디어 리스트');
+  } finally {
+    const cur = useBoardStore.getState().nodes[frameId];
+    if (cur) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(cur.data ?? {}), loading: false, working: false } });
+    useBoardStore.getState().endGen();
+  }
+}
+
+/** 놀이중심 주제망(topic_web) — 대주제→소주제→놀이아이디어 2단계 + 환경구성 + 예상질문을
+    담은 구조화 카드 하나를 프레임에 만든다. 기존 '마인드맵'(공간형 radial)과 별개의 산출물.
+    포맷 선택 오버레이의 '놀이중심 주제망' 선택 시 호출(board/prompt.runFormatChoice). */
+export async function generateTopicWeb(topic: string): Promise<void> {
+  const b = useBoardStore.getState();
+  b.beginGen();
+  const t = (topic || '놀이').trim();
+  const vc = viewportCenterBoardPoint();
+  const frameId = newId('frame');
+  b.addNodeRaw({
+    id: frameId,
+    type: 'frame',
+    x: Math.round(vc.x - 390),
+    y: Math.round(vc.y - 260),
+    w: 780,
+    h: 520,
+    data: { title: `${t} 주제망`, composer: true, loading: true, working: true, loadingLabel: '🕸️ 놀이주제망을 짜고 있어요…', sourcePrompt: topic },
+  });
+  b.focusNode(frameId);
+  try {
+    const res = await runTopicWeb(t, buildAgentContext('plan')).catch(() => null);
+    const payload = res?.payload;
+    if (payload && payload.type === 'TopicWeb') {
+      const cardId = spawnDocCard(frameId, topicWebMarkdown(payload.props), 'topicweb', 740);
+      const cur = useBoardStore.getState().nodes[cardId];
+      if (cur) useBoardStore.getState().updateNodeRaw(cardId, { data: { ...(cur.data ?? {}), payload } });
+    } else {
+      spawnDocCard(frameId, `# 🕸️ ${t} 놀이주제망\n\n주제망 생성에 실패했어요. 다시 시도해 주세요.`, 'topicweb', 740);
+    }
+    slideFrameToEmpty(frameId);
+    recordSpawnedNodes([frameId], '놀이주제망');
   } finally {
     const cur = useBoardStore.getState().nodes[frameId];
     if (cur) useBoardStore.getState().updateNodeRaw(frameId, { data: { ...(cur.data ?? {}), loading: false, working: false } });
@@ -1675,7 +1717,8 @@ export async function planFromNode(nodeId: string): Promise<void> {
   useBoardStore.getState().setGenerating('📋 계획안을 만들고 있어요…');
 
   try {
-    const res = await runPlan(activity, seed, buildAgentContext('plan'));
+    // 기본 계획 생성 경로 → 새 구조(주안 WeeklyPlan). planDocMarkdown 이 WeeklyPlan 을 위임 렌더.
+    const res = await runWeeklyPlan(activity, buildAgentContext('plan'), { seed });
     fillPlaceholderDoc(id, planDocMarkdown(res.payload), res.payload);
   } catch {
     failPlaceholderDoc(id, `‘${activity}’ 계획안 생성에 실패했어요.`);
@@ -1849,10 +1892,11 @@ export async function monthlyPlanFromNode(nodeId: string): Promise<void> {
   useBoardStore.getState().setGenerating('📅 월간계획안을 만들고 있어요…');
 
   try {
-    const res = await runPlan(activity, seed, buildAgentContext('plan'), { monthly: true });
+    const res = await runMonthlyPlan(activity, buildAgentContext('plan'), { seed });
+    const text = res.payload.type === 'MonthlyPlan' ? monthlyPlanMarkdown(res.payload.props) : planText(res.payload);
     const cur = useBoardStore.getState().nodes[id];
     b.updateNodeRaw(id, {
-      text: planDocMarkdown(res.payload),
+      text,
       data: { ...(cur?.data ?? {}), doc: true, role: 'plan', monthly: true, payload: res.payload, loadingDoc: false },
     });
   } catch {
@@ -1866,6 +1910,54 @@ export async function monthlyPlanFromNode(nodeId: string): Promise<void> {
     fitFrameToChildren(frameId);
   }
   recordSpawnedNodes([id], '월간계획안 만들기');
+}
+
+/** 활동/주안 노드 → '일일 놀이계획안(일안)' 문서 생성. 도입→전개→마무리+평가+확장까지 실행 단위로.
+    주안 카드에서 만들면 그 주제·놀이를 상위 맥락(weeklyContext)으로 상속한다. */
+export async function dailyPlanFromNode(nodeId: string): Promise<void> {
+  const b = useBoardStore.getState();
+  const node = b.nodes[nodeId];
+  if (!node) return;
+  const frameId = node.data?.frameId as string | undefined;
+  const act = node.data?.activity as MindActivity | undefined;
+  const activity = act?.label || (node.text ?? '').split('\n')[0].replace(/^#+\s*/, '').trim() || '활동';
+  const seed = [activity, act?.method, act?.area].filter((s): s is string => !!s && !!s.trim());
+  // 주안(WeeklyPlan) 카드에서 만들면 그 문서를 상위 맥락으로.
+  const pl = node.data?.payload as { type?: string } | undefined;
+  const weeklyContext = pl?.type === 'WeeklyPlan' ? (node.text ?? '').slice(0, 1200) : undefined;
+
+  const id = newId('sticky');
+  b.addNodeRaw({
+    id, type: 'sticky',
+    x: Math.round(node.x + node.w + 48), y: Math.round(node.y), w: PLAN_DOC_W, h: 260, autoH: true,
+    text: '🗓️ 일일 놀이계획안을 만들고 있어요…', color: 'paper',
+    data: { doc: true, role: 'plan', loadingDoc: true, ...(frameId ? { frameId } : {}) },
+  });
+  if (frameId && useBoardStore.getState().nodes[frameId]?.data?.mindmap) {
+    linkMindMap(nodeId, id);
+  }
+  useBoardStore.getState().setSelection([id]);
+  useBoardStore.getState().setGenerating('🗓️ 일일 놀이계획안을 만들고 있어요…');
+
+  try {
+    const res = await runDailyPlan(activity, buildAgentContext('plan'), { seed, weeklyContext });
+    const text = res.payload.type === 'DailyPlan' ? dailyPlanMarkdown(res.payload.props) : planText(res.payload);
+    const cur = useBoardStore.getState().nodes[id];
+    b.updateNodeRaw(id, {
+      text,
+      data: { ...(cur?.data ?? {}), doc: true, role: 'plan', payload: res.payload, loadingDoc: false },
+    });
+  } catch {
+    const cur = useBoardStore.getState().nodes[id];
+    b.updateNodeRaw(id, { text: `‘${activity}’ 일일 놀이계획안 생성에 실패했어요.`, data: { ...(cur?.data ?? {}), loadingDoc: false } });
+  } finally {
+    useBoardStore.getState().setGenerating(null);
+  }
+  if (frameId) {
+    await new Promise((r) => setTimeout(r, 260));
+    fitFrameToChildren(frameId);
+  }
+  recordSpawnedNodes([id], '일일 계획안 만들기');
 }
 
 /* ---------------- classification ---------------- */
@@ -2474,7 +2566,7 @@ function planIdOf(frameId: string): string | undefined {
   for (const n of Object.values(b.nodes)) {
     if (n.data?.frameId === frameId) {
       const p = n.data?.payload as RegistryPayload | undefined;
-      if (p?.type === 'WeeklyPlanGrid') return p.props.id;
+      if (p?.type === 'WeeklyPlanGrid' || p?.type === 'WeeklyPlan') return p.props.id;
     }
   }
   return undefined;

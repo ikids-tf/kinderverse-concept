@@ -1,6 +1,10 @@
 import { RecordDraftCard } from './RecordDraftCard';
 import { PlayStoryCard } from './PlayStoryCard';
 import { ClarifyPromptCard } from './ClarifyPromptCard';
+import { TopicWeb } from './TopicWeb';
+import { MonthlyPlan } from './MonthlyPlan';
+import { WeeklyPlan } from './WeeklyPlan';
+import { DailyPlan } from './DailyPlan';
 import { WeeklyPlanGrid } from './WeeklyPlanGrid';
 import { WorksheetCard } from './WorksheetCard';
 import { StudioGallery } from './StudioGallery';
@@ -30,6 +34,14 @@ export function RegistryRenderer({
       return <PlayStoryCard props={payload.props} state={state} />;
     case 'ClarifyPrompt':
       return <ClarifyPromptCard props={payload.props} onOption={onClarifyOption} />;
+    case 'TopicWeb':
+      return <TopicWeb props={payload.props} state={state} />;
+    case 'MonthlyPlan':
+      return <MonthlyPlan props={payload.props} state={state} />;
+    case 'WeeklyPlan':
+      return <WeeklyPlan props={payload.props} state={state} />;
+    case 'DailyPlan':
+      return <DailyPlan props={payload.props} state={state} />;
     case 'WeeklyPlanGrid':
       return <WeeklyPlanGrid props={payload.props} state={state} />;
     case 'WorksheetCard':

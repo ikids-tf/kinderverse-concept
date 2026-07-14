@@ -10,7 +10,7 @@ import { urlToAssetRef, makeImageElement, makeTextElement, withElementAdded } fr
 import { ASSET_KINDS, type AssetKind } from '@/shared/assetKind';
 import { parseEmptyPrimitiveRequest } from './primitives';
 import { addPrimitivesRowCmd, addPresetNodeCmd, deleteNodesCmd } from './commands';
-import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior, generateIdeaList, buildPlayPackage } from './composer';
+import { composeFromPrompt, composeCutoutFromPrompt, decorateDocCard, redesignFrame, worksheetFromNode, planFromNode, consultBehavior, generateIdeaList, generateTopicWeb, buildPlayPackage } from './composer';
 import { useFormatChoiceStore, type FormatMode, type FormatChoice, type LessonKind } from '@/store/formatChoiceStore';
 import { usePromptChoiceStore, type ReqIntent, type SelKind } from '@/store/promptChoiceStore';
 import { useUIStore } from '@/store/uiStore';
@@ -108,6 +108,9 @@ export function runFormatChoice(choice: FormatChoice, topic: string, kind: Lesso
       break;
     case 'mindmap':
       void composeFromPrompt(`${t} 마인드맵`, 'mindmap');
+      break;
+    case 'topic-web':
+      void generateTopicWeb(t);
       break;
     case 'plan-doc':
       // 프로젝트면 프로젝트 계획 문서로(단계별 심화), 아니면 일반 주간 놀이계획.
