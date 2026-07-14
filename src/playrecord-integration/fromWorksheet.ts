@@ -170,25 +170,29 @@ function buildHeadbandPayload(props: WorksheetProps): Record<string, unknown> {
   };
 }
 
-/** '미로 찾기'(maze) — 알고리즘(완전 미로)으로 항상 풀리는 미로. 격자 생성은 layouts.buildMazeDoc이
- *  담당하고, 여기선 주제 캐릭터(출발·도착) + 안내문만 넘긴다. 주제 에셋이 없어도 미로 자체는 유효. */
+/** '우주 미로 여행'(maze) — 알고리즘(완전 미로)으로 항상 풀리는 미로. 격자·별·행성은 layouts.buildMazeDoc이
+ *  담당하고, 여기선 출발(로켓🚀)·도착(달🌙) 이모지 + 안내문만 넘긴다. 정적 에셋 불필요(이모지 렌더). */
 function buildMazePayload(props: WorksheetProps): Record<string, unknown> {
-  const themeText = `${props.theme || ''} ${props.topic || ''} ${props.title || ''}`;
-  const picks = pickSubjects(themeText, 2, { symmetric: true });
-  const themeLabel = (props.theme || props.topic || '우리 주제').trim();
-  const start = picks[0] || { label: '', src: '' };
-  const goal = picks[1] || picks[0] || { label: '', src: '' };
-  const defIntro =
-    start.label && goal.label && start.label !== goal.label
-      ? `길을 따라 ${start.label}가 ${goal.label}에게 가 보세요.`
-      : '길을 따라 도착점까지 가 보세요.';
   return {
     maze: true,
-    header: { title: '미로 찾기' },
-    meta: { theme: themeLabel, tag: `${themeLabel}-미로찾기` },
-    introduction: { text: (props.instruction || defIntro).trim() },
-    start: { label: start.label || '출발', src: start.src || null },
-    goal: { label: goal.label || '도착', src: goal.src || null },
+    header: { title: '우주 미로 여행' },
+    meta: { theme: '우주', tag: '우주 미로' },
+    introduction: { text: (props.instruction || '로켓이 달에 도착할 수 있도록 길을 찾아 주세요!').trim() },
+    start: { label: '출발', emoji: '🚀' },
+    goal: { label: '도착', emoji: '🌙' },
+  };
+}
+
+/** '이름표'(name-tag) — 오려서 이름 쓰고 다는 이름표 3개(캐릭터 색 상단 + 이름칸). */
+function buildNameTagPayload(props: WorksheetProps): Record<string, unknown> {
+  const themeText = `${props.theme || ''} ${props.topic || ''} ${props.title || ''}`;
+  const picks = pickSubjects(themeText, 3);
+  const themeLabel = (props.theme || props.topic || '우리 주제').trim();
+  return {
+    name_tag: true,
+    meta: { theme: themeLabel, tag: `${themeLabel}-이름표 도안` },
+    introduction: { text: (props.instruction || '오려서 이름을 쓰고 달아 보아요').trim() },
+    items: picks.map((s) => ({ label: s.label, src: s.src })),
   };
 }
 
@@ -198,6 +202,7 @@ const TEMPLATE_PAYLOAD_BUILDERS: Record<string, TemplatePayloadBuilder> = {
   'shadow-match': buildShadowMatchPayload,
   'hangul-writing': buildHangulWritingPayload,
   headband: buildHeadbandPayload,
+  'name-tag': buildNameTagPayload,
   maze: buildMazePayload,
 };
 

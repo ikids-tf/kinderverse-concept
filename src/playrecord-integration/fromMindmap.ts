@@ -12,23 +12,42 @@ interface MindActivity {
 }
 
 export function mindmapFrameToPayload(frameId: string) {
-  const nodes = useBoardStore.getState().nodes;
+  const state = useBoardStore.getState();
+  const nodes = state.nodes;
+  const links = state.links;
   const all = Object.values(nodes) as BoardNode[];
   const center = all.find((n) => n.data?.role === 'mm-center' && n.data?.frameId === frameId);
   const branches = all.filter((n) => n.data?.role === 'mm-branch' && n.data?.frameId === frameId);
+  const branchIds = new Set(branches.map((b) => b.id));
   const frameTitle = (nodes[frameId]?.data?.title as string | undefined) ?? '';
   const main_topic = (center?.text || frameTitle || '놀이주제망').trim();
 
-  const subtopics = branches.map((b) => {
-    const a = (b.data?.activity as MindActivity | undefined) ?? {};
-    const label = (a.label || (b.text || '').split('\n')[0] || '활동').trim();
-    const ideas = [
-      a.method,
-      a.materials ? `준비물: ${a.materials}` : '',
-      a.area ? `연계: ${a.area}` : '',
-    ].filter(Boolean) as string[];
-    return { subtopic: label, play_ideas: ideas.length ? ideas : [label] };
-  });
+  const nodeLabel = (n?: BoardNode) => {
+    const a = (n?.data?.activity as MindActivity | undefined) ?? {};
+    return (a.label || (n?.text || '').split('\n')[0] || '').trim();
+  };
+  const childBranchIds = (id: string) => links.filter((l) => l.from === id).map((l) => l.to).filter((t) => branchIds.has(t));
+
+  // 3계층: center → 소주제(top mm-branch) → 놀이아이디어(그 자식 mm-branch).
+  const topIds = center ? childBranchIds(center.id) : [];
+  let subtopics: Array<{ subtopic: string; play_ideas: string[] }>;
+  if (topIds.length) {
+    subtopics = topIds
+      .map((sid) => {
+        const label = nodeLabel(nodes[sid]);
+        const ideas = childBranchIds(sid).map((id) => nodeLabel(nodes[id])).filter(Boolean);
+        return { subtopic: label, play_ideas: ideas.length ? ideas : [label] };
+      })
+      .filter((s) => s.subtopic);
+  } else {
+    // 폴백(구형 평면 마인드맵): 활동 branch = 소주제, 상세(전개/준비물/영역) = 놀이아이디어.
+    subtopics = branches.map((b) => {
+      const a = (b.data?.activity as MindActivity | undefined) ?? {};
+      const label = (a.label || (b.text || '').split('\n')[0] || '활동').trim();
+      const ideas = [a.method, a.materials ? `준비물: ${a.materials}` : '', a.area ? `연계: ${a.area}` : ''].filter(Boolean) as string[];
+      return { subtopic: label, play_ideas: ideas.length ? ideas : [label] };
+    });
+  }
 
   return {
     header: { title: main_topic },

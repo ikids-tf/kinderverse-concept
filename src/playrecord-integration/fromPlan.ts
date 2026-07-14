@@ -173,3 +173,22 @@ export function openMonthlyInEditor(frameOrNodeId: string): void {
   if (!node) return;
   spawnEditorCard('monthlyplan-summer', monthlyNodeToPayload(node));
 }
+
+interface DailyPlanNodePayload { type?: string; props?: Record<string, unknown> }
+
+/** 일일계획(DailyPlan) 노드 → 일지형(daily-journal) 편집 payload. 생성 props 를 그대로 펴서 넘기고,
+    daily_schedule 마커로 템플릿 픽커가 일지형을 고르게 한다. buildDailyPlanJournalDoc/readDaily 가 매핑. */
+export function dailyNodeToPayload(node: BoardNode) {
+  const raw = node.data?.payload as DailyPlanNodePayload | undefined;
+  return { daily_schedule: true, ...(raw?.props ?? {}) };
+}
+
+/** 일일계획 노드를 verse 편집기(일일 일지형)로 연다. DailyPlan 은 findPlanNode 대상이 아니므로 직접 조회. */
+export function openDailyInEditor(frameOrNodeId: string): void {
+  const nodes = useBoardStore.getState().nodes;
+  const isDaily = (n?: BoardNode) => (n?.data?.payload as DailyPlanNodePayload | undefined)?.type === 'DailyPlan';
+  let node: BoardNode | undefined = nodes[frameOrNodeId];
+  if (!isDaily(node)) node = Object.values(nodes).find((n) => n.data?.frameId === frameOrNodeId && isDaily(n));
+  if (!node) return;
+  spawnEditorCard('daily-journal', dailyNodeToPayload(node));
+}

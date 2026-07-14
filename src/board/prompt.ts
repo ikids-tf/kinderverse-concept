@@ -24,6 +24,7 @@ import {
   normalizePlayTheme,
   WORKSHEET_RE,
   PLAN_RE,
+  MINDMAP_RE,
   VIDEO_RE,
   DESIGN_CMD_RE,
   DECORATE_RE,
@@ -90,13 +91,20 @@ function fmtTopic(text: string): string {
 }
 // 프로젝트 수업 — 하나의 주제를 1주~한 달 깊이 탐구. 계획 문서가 일반 주간계획과 다르다.
 const FMT_PROJECT_RE = /프로젝트\s*수업|프로젝트\s*활동|프로젝트(?!\s*수업)/;
-/** 아이디어/놀이계획·수업 요청이면 모드를 돌려준다(포맷 선택 오버레이 트리거). 아니면 null. */
+// 특정 계획 하위유형(일/주/월) — 팝업 없이 바로 그 유형 문서로 라우팅한다(composeFromPrompt→detectPlanKind).
+// 일반 '놀이계획/계획안'(하위유형 없음)만 포맷 선택 팝업. (사용자 지시: 유형 명시 요청은 직접 생성.)
+const SPECIFIC_PLAN_RE = /일안|주안|월안|일간|주간|월간|일일\s*(놀이\s*)?계획|주간\s*(놀이\s*)?계획|월간\s*(놀이\s*)?계획|연간/;
+// 아이디어(놀이 아이디어 리스트) — 팝업 없이 바로 생성. 단 '아이디어 맵/주제망/생각그물'은 mindmap 경로.
+const IDEA_DIRECT_RE = /아이디어|놀이\s*거리/;
+/** 일반 '놀이계획'(하위유형 없음) 요청이면 포맷 선택 오버레이 모드를 돌려준다. 특정 유형(일/주/월안·아이디어)은
+    직접 라우팅하므로 null(가로채지 않음). */
 function detectFormatChoice(text: string): { mode: FormatMode; topic: string; kind: LessonKind } | null {
   if (!FMT_GEN_RE.test(text)) return null;
   if (FMT_SPECIFIC_RE.test(text)) return null; // 구체적 산출물(활동지·이미지·슬라이드 등)은 전용 경로로
+  if (SPECIFIC_PLAN_RE.test(text)) return null; // 일/주/월안 명시 → 직접 생성(팝업 X)
+  if (FMT_IDEA_RE.test(text)) return null;       // 아이디어·생각그물·브레인스토밍 → 직접(아이디어 분기/mindmap)
   const kind: LessonKind = FMT_PROJECT_RE.test(text) ? 'project' : 'play';
-  if (FMT_PLAN_RE.test(text)) return { mode: 'plan', topic: fmtTopic(text), kind };
-  if (FMT_IDEA_RE.test(text)) return { mode: 'idea', topic: fmtTopic(text), kind };
+  if (FMT_PLAN_RE.test(text)) return { mode: 'plan', topic: fmtTopic(text), kind }; // 일반 놀이계획만 팝업
   return null;
 }
 /** 포맷 선택 오버레이에서 고른 형식으로 생성한다(FormatChoiceOverlay → 여기). */
@@ -112,10 +120,16 @@ export function runFormatChoice(choice: FormatChoice, topic: string, kind: Lesso
     case 'topic-web':
       void generateTopicWeb(t);
       break;
-    case 'plan-doc':
-      // 프로젝트면 프로젝트 계획 문서로(단계별 심화), 아니면 일반 주간 놀이계획.
-      void composeFromPrompt(kind === 'project' ? `${t} 프로젝트 수업 계획` : `${t} 놀이계획`, 'plan');
+    case 'plan-doc': {
+      // 원문(pending.raw)에서 계획 유형(일안/주안/월안)을 판별해 그 키워드를 요청에 보존 → composePlanDocStream 이 라우팅.
+      const raw = useFormatChoiceStore.getState().pending?.raw || topic || '';
+      const req = kind === 'project' ? `${t} 프로젝트 수업 계획`
+        : /월간|월안/.test(raw) ? `${t} 월간 놀이계획`
+        : /일간|일안|일일/.test(raw) ? `${t} 일일 놀이계획`
+        : `${t} 주간 놀이계획`;
+      void composeFromPrompt(req, 'plan');
       break;
+    }
     case 'package':
       void buildPlayPackage(t, kind);
       break;
@@ -508,7 +522,14 @@ export function handleBoardPrompt(text: string): boolean {
     }
     // 인터랙티브 게임 — "○○ 게임/퀴즈 만들어줘" → 보드에 인터랙티브 노드를 만들고 구성(디렉터).
     // 활동지/계획/도안 컴포저(아래 composeFromPrompt)로 새지 않도록 그 앞에서 가로챈다.
-    // 아이디어/놀이계획 요청 → 바로 생성하지 않고 포맷 선택 오버레이(리스트·마인드맵·계획·패키지)를 띄운다.
+    // 아이디어 요청 → 놀이아이디어 리스트로 바로 생성(팝업 없이). 단 '아이디어 맵/주제망/생각그물'은
+    // 제외 → 아래 composeFromPrompt 가 mindmap 으로 라우팅. (사용자 지시: 유형 명시 요청은 직접 생성.)
+    if (FMT_GEN_RE.test(text) && !FMT_SPECIFIC_RE.test(text) && IDEA_DIRECT_RE.test(text) && !MINDMAP_RE.test(text)) {
+      void generateIdeaList(fmtTopic(text));
+      return true;
+    }
+    // 일반 '놀이계획/계획안'(하위유형 없음)만 포맷 선택 오버레이(리스트·마인드맵·계획·패키지)를 띄운다.
+    // 일안·주안·월안·주제망은 여기서 가로채지 않고 아래 composeFromPrompt 로 직접 라우팅한다.
     // (게임 분기보다 먼저 — "물놀이 놀이 계획"의 둘째 '놀이'가 게임 키워드로 오인돼 게임이 만들어지지 않게.)
     const fmt = detectFormatChoice(text);
     if (fmt) {

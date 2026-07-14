@@ -6,7 +6,7 @@ import { Download, ImagePlus, Bookmark, BookmarkCheck } from "lucide-react";
 import { DesignFrame, DesignEl } from "./DesignFrame.jsx";
 import { pickerTemplates, templateLabel, isTemplateId, defaultTemplateId, buildVariant, buildVariantPages, blankPage, makePhotoSlot, LAYOUT_VERSION, saveStoryStickers, themeKeyOf } from "./layouts";
 import { resolveSticker, payloadDecoAssets, galleryCutoutsForTheme } from "./stickerAssets";
-import { regenerateBySubject } from "./assetLibrary";
+import { regenerateBySubject, getAssetSmart } from "./assetLibrary";
 
 function TemplateThumb({ doc, width = 116 }) {
   const A4W = 794, A4H = 1123;
@@ -74,6 +74,27 @@ export default function PlayRecordEditor({ value, selected, zoom = 1, onChange, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variant]);
 
+  // 일일 일지형 마이그레이션:
+  //   ① 구버전(1페이지 tall = frame.h>A4 1장) 카드 → A4 2페이지 구조로 재빌드(페이지 네비 활성 + 이미지 정적표시).
+  //   ② 텍스트 박스 위치 고정(pinned) 백필. (needs 가드로 1회만 갱신 → 무한루프 없음.)
+  useEffect(() => {
+    if (variant !== "daily-journal") return;
+    const pages = docs["daily-journal"];
+    if (!pages) return;
+    // ① 구조 마이그레이션: 단일 tall 페이지면 2페이지로 재빌드(구 테스트 카드 대상).
+    if (pages.length === 1 && (pages[0]?.frame?.h || 0) > 1200) {
+      onUpdateData(item.id, { docs: { ...docs, ["daily-journal"]: buildVariantPages("daily-journal", data.payload) }, page: 0 });
+      return;
+    }
+    // ② pinned 백필
+    const needs = pages.some((pg) => (pg.elements || []).some((e) => e.type === "text" && !e.pinned));
+    if (!needs) return;
+    onUpdateData(item.id, {
+      docs: { ...docs, ["daily-journal"]: pages.map((pg) => ({ ...pg, elements: pg.elements.map((e) => (e.type === "text" ? { ...e, pinned: true } : e)) })) },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant, docs]);
+
   // 주제 스티커(이모지 폴백)를 기존 에셋 재사용 또는 생성으로 이미지 교체.
   // dataRef 로 최신 docs 에 머지해 사용자 편집을 덮어쓰지 않는다. resolvingRef 로 중복 호출 방지.
   const dataRef = useRef(data);
@@ -82,8 +103,10 @@ export default function PlayRecordEditor({ value, selected, zoom = 1, onChange, 
   useEffect(() => {
     if (!pages) return;
     const pageEls = pages[page]?.elements || [];
+    // ① stickerAsset(주제 데코) 슬롯 ② subject 키워드 이미지 슬롯(일지형 아이콘 등) — 둘 다 빈 src 를 채운다.
     const targets = pageEls.filter(
-      (e) => e.stickerAsset && !e.src && !resolvingRef.current.has(e.id)
+      (e) => !e.src && !resolvingRef.current.has(e.id) &&
+        (e.stickerAsset || (e.type === "image" && e.subject && String(e.subject).trim()))
     );
     if (!targets.length) return;
     targets.forEach((e) => resolvingRef.current.add(e.id));
@@ -92,7 +115,10 @@ export default function PlayRecordEditor({ value, selected, zoom = 1, onChange, 
       const resolved = await Promise.all(
         targets.map(async (el) => {
           try {
-            return [el.id, await resolveSticker(el.stickerAsset)];
+            if (el.stickerAsset) return [el.id, await resolveSticker(el.stickerAsset)];
+            // subject 슬롯 — 주제/활동 키워드로 클레이 아이콘 생성(캐시: 같은 subject 재사용).
+            const r = await getAssetSmart(`jslot:${el.subject}`, el.subject, [el.subject]);
+            return [el.id, r && r.src ? { src: r.src, cutout: true } : null];
           } catch {
             return [el.id, null];
           }
@@ -174,7 +200,8 @@ export default function PlayRecordEditor({ value, selected, zoom = 1, onChange, 
     if (!node) return;
     const fr = pages?.[page]?.frame || { w: 794, h: 1123 };
     const fileName = `${(data.title || "놀이기록").replace(/[\\/:*?"<>|]/g, "_")}-${variant}-${page + 1}.png`;
-    const opt = { width: fr.w, height: fr.h, pixelRatio: 2, cacheBust: false, style: { transform: "scale(1)", transformOrigin: "top left", margin: "0" } };
+    // A4 경계 안내선(.a4-guide)은 편집 보조선 → PNG 저장에서 제외.
+    const opt = { width: fr.w, height: fr.h, pixelRatio: 2, cacheBust: false, filter: (node) => !(node.classList && node.classList.contains("a4-guide")), style: { transform: "scale(1)", transformOrigin: "top left", margin: "0" } };
     let dataUrl;
     try { dataUrl = await toPng(node, { ...opt, skipFonts: false }); }
     catch (e) { dataUrl = await toPng(node, { ...opt, skipFonts: true }); }

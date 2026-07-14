@@ -1103,7 +1103,8 @@ const WK_DECOS = [
 function readWeekly(payload) {
   const d = payload || {};
   const b = d.basic_info || {};
-  const period = b.period?.label || [b.period?.start_date, b.period?.end_date].filter(Boolean).join(" ~ ");
+  const period = typeof b.period === "string" ? b.period
+    : (b.period?.label || [b.period?.start_date, b.period?.end_date].filter(Boolean).join(" ~ "));
   // play_ideas 는 문자열 또는 {title,...} 객체 → 제목 문자열로 정규화
   const ideaText = (p) => (typeof p === "string" ? p : (p?.title || p?.name || ""));
   const days = arr(d.daily_flow).map((x) => ({ d: x?.day || "", sub: x?.date || x?.flow_stage || "", ideas: arr(x?.play_ideas).map(ideaText).filter(Boolean) }));
@@ -1229,91 +1230,522 @@ export function buildWeeklyPlanDoc(payload) {
 // 이미지 슬롯 = type:'image' + src 없음(→ 플레이스홀더 + '재생성' 버튼) + subject=주제/활동 키워드
 //   → 재생성 시 regenerateBySubject 가 해당 키워드에 맞는 클레이 아이콘을 호출.
 // 편집 자유: 텍스트·이미지 편집 가능, 구조(shape)만 잠금(주안 편집 요구사항과 동일).
+// Figma 레퍼런스 '놀이계획-주안 일지형'(node 143:605) 픽셀 일치 재현.
+//   레퍼런스 페이지 1000×1414 → A4 794×1123 (×0.794). 모든 좌표는 J(figmaPageCoord)로 매핑(감사 가능).
+//   색·박스·텍스트·이미지 슬롯 위치를 레퍼런스에서 직접 추출(픽셀 샘플링).
+const JS = 794 / 1000;                    // 0.794 — 레퍼런스 페이지→A4 스케일
+const J = (v) => Math.round(v * JS);
+const JR = (i) => 569.19 + i * 104.41;    // 표 요일행 i 의 페이지 y(상단)
 export function buildWeeklyPlanJournalDoc(payload) {
   const c = readWeekly(payload);
   const m = maker();
-  const CREAM = "#f7f2e6", INK = "#41414a", GRAY = "#8a8375", LINE = "#e3d9c4", NAVY = "#40548c";
-  const els = [m.bg({ bg: CREAM })];
-  // 키워드 이미지 슬롯(빈 src → 플레이스홀더 + 재생성). subject = 주제/활동 키워드.
+  // 레퍼런스 추출 팔레트
+  const PAGE = "#fcf8ec", INK = "#3a3a35", GRAY = "#8a8375", LINE = "#e3d9c4", NAVY = "#26436f";
+  const els = [m.bg({ bg: PAGE })];
+  // 콘텐츠 이미지 슬롯(빈 src → 플레이스홀더 + 재생성). subject = 주제/활동 키워드.
   const img = (x, y, w, h, subject, rot = 0) =>
     els.push({ id: `jimg${Math.round(x)}_${Math.round(y)}`, type: "image", src: null, fit: "contain", sticker: true, subject: (subject && String(subject).trim()) || c.theme, x, y, w, h, rotation: rot, style: { radius: 8 } });
+  // 코너 장식(고정 에셋, 편집 가능) — 레퍼런스: 해님·갈매기·게·소라
+  const stk = (src, x, y, w, h, subj, rot = 0) =>
+    els.push({ id: `jdec${Math.round(x)}_${Math.round(y)}`, type: "image", src: `/generated-assets/topicweb-record/${src}`, fit: "contain", sticker: true, subject: subj, x, y, w, h, rotation: rot, style: { radius: 0 } });
   const pill = (x, y, w, h, bg, tx, label, fs) => {
     els.push(m.shape(x, y, w, h, { bg, radius: Math.round(h / 2) }));
     els.push(m.text(x, y, w, h, label, { fontSize: fs || 12, fontFamily: LABEL_FONT, color: tx, align: "center", valign: "center" }));
   };
-  const box = (x, y, w, h, bg, stroke) => els.push(m.shape(x, y, w, h, { bg, radius: 14, stroke: stroke || "#e6ddc9", strokeWidth: 1.5 }));
+  const box = (x, y, w, h, bg, stroke) => els.push(m.shape(x, y, w, h, { bg, radius: J(18), stroke: stroke || "#ece2cc", strokeWidth: 1.5 }));
 
-  // ── 헤더 ──
-  img(28, 12, 92, 72, c.theme, -4);
-  img(674, 12, 92, 72, c.theme, 4);
-  els.push(m.text(0, 26, 794, 44, "주간 놀이계획 및 실행안", { fontSize: 33, fontFamily: HEAD_FONT, color: NAVY, align: "center", valign: "center" }, { textRole: "title" }));
-  pill(323, 76, 148, 27, "#8cbf7c", "#ffffff", has(c.className) ? c.className : "우리반", 14);
+  // ── 코너 장식(해님·갈매기·게·소라) ──
+  stk("sunset.png", J(18), J(14), J(110), J(90), "a warm sunrise over the sea", -3);
+  stk("seagull.png", J(855), J(11), J(135), J(107), "a cute white seagull", 3);
+  stk("crab.png", J(21), 1033, J(120), J(111), "a cute red crab", -2);
+  stk("conch.png", J(870), 1031, J(120), J(111), "a cute seashell conch", 2);
+
+  // ── 헤더: 제목 + 반 배지 ──
+  els.push(m.text(0, J(30), 794, J(56), "주간 놀이계획 및 실행안", { fontSize: 32, fontFamily: HEAD_FONT, color: NAVY, align: "center", valign: "center" }, { textRole: "title" }));
+  pill(J(395), J(95), J(211), J(42), "#8fbf6f", "#ffffff", has(c.className) ? c.className : "우리반", 15);
 
   // ── Row A: 예상 놀이주제 / 놀이기간 ──
-  box(24, 118, 372, 66, "#ffffff");
-  pill(38, 132, 96, 26, "#d9b061", "#ffffff", "예상 놀이주제", 12);
-  els.push(m.text(146, 122, 150, 30, has(c.theme) ? c.theme : "놀이주제", { fontSize: 19, fontFamily: LABEL_FONT, color: INK, align: "left", valign: "center" }, { textRole: "title" }));
-  els.push(m.text(146, 152, 176, 20, "소주제: " + (c.sub || ""), { fontSize: 12, fontFamily: BODY_FONT, color: GRAY, align: "left", valign: "center" }));
-  img(326, 121, 62, 62, c.theme);
-  box(404, 118, 366, 66, "#ffffff");
-  pill(418, 132, 84, 26, "#6ba4d6", "#ffffff", "놀이기간", 12);
-  els.push(m.text(510, 122, 184, 44, has(c.period) ? c.period : "", { fontSize: 17, fontFamily: LABEL_FONT, color: INK, align: "left", valign: "center" }));
-  img(700, 121, 62, 62, c.theme);
+  box(J(30), J(151), J(554), J(112), "#ffffff");
+  pill(J(52), J(185), J(149), J(44), "#c99a55", "#ffffff", "예상 놀이주제", 13);
+  els.push(m.text(J(219), J(165), J(230), J(40), has(c.theme) ? c.theme : "놀이주제", { fontSize: 20, fontFamily: LABEL_FONT, color: "#cf4b3e", align: "left", valign: "center" }, { textRole: "title" }));
+  els.push(m.text(J(219), J(207), J(230), J(24), "소주제: " + (c.sub || ""), { fontSize: 12, fontFamily: BODY_FONT, color: GRAY, align: "left", valign: "center" }));
+  img(J(482), J(167), J(80), J(80), c.theme);
+  box(J(600), J(151), J(370), J(112), "#ffffff");
+  pill(J(622), J(185), J(108), J(44), "#7fb2b8", "#ffffff", "놀이기간", 13);
+  els.push(m.text(J(748), J(165), J(120), J(64), has(c.period) ? c.period : "", { fontSize: 16, fontFamily: LABEL_FONT, color: INK, align: "left", valign: "center" }));
+  img(J(868), J(167), J(80), J(80), "a wall calendar", 0);
 
-  // ── Row B: 교사의 기대 / 교육과정 연계 ──
-  box(24, 194, 372, 158, "#fdf7e6", "#e9d9a6");
-  els.push(m.text(40, 206, 240, 22, "교사의 기대 (목표)", { fontSize: 15, fontFamily: LABEL_FONT, color: "#a98a3a", align: "left", valign: "center" }, { textRole: "title" }));
-  els.push(m.text(40, 232, 316, 108, has(c.goal.replace(/\d+\.\s*/g, "").trim()) ? c.goal : "", { fontSize: fitFontSize(c.goal || " ", 316, 108, 13, 9), fontFamily: BODY_FONT, color: INK, align: "left", valign: "top" }));
-  box(404, 194, 366, 158, "#f6efdd", "#e6d9bd");
-  els.push(m.text(420, 206, 240, 22, "교육과정 연계", { fontSize: 15, fontFamily: LABEL_FONT, color: "#8a7a4a", align: "left", valign: "center" }, { textRole: "title" }));
-  els.push(m.text(420, 232, 336, 108, has(c.curri) ? c.curri : "", { fontSize: fitFontSize(c.curri || " ", 336, 108, 13, 9), fontFamily: BODY_FONT, color: INK, align: "left", valign: "top" }));
+  // ── Row B: 교사의 기대(목표) / 교육과정 연계 ──
+  box(J(30), J(277), J(462), J(224), "#fcf6e3", "#eaddb0");
+  els.push(m.text(J(59), J(291), J(200), J(24), "교사의 기대 (목표)", { fontSize: 14, fontFamily: LABEL_FONT, color: "#b35b1f", align: "left", valign: "center" }, { textRole: "title" }));
+  img(J(66), J(356), J(78), J(78), "a shiny gold medal");
+  els.push(m.text(J(174), J(293), J(298), J(196), has(c.goal.replace(/\d+\.\s*/g, "").trim()) ? c.goal : "", { fontSize: fitFontSize(c.goal || " ", J(298), J(196), 13, 9), fontFamily: BODY_FONT, color: INK, align: "left", valign: "top" }));
+  box(J(508), J(277), J(462), J(224), "#f0ead8", "#e4d7bb");
+  els.push(m.text(J(549), J(291), J(200), J(24), "교육과정 연계", { fontSize: 14, fontFamily: LABEL_FONT, color: "#c9731f", align: "left", valign: "center" }, { textRole: "title" }));
+  img(J(544), J(356), J(78), J(78), "a shiny star");
+  els.push(m.text(J(652), J(305), J(300), J(172), has(c.curri) ? c.curri : "", { fontSize: fitFontSize(c.curri || " ", J(300), J(172), 13, 9), fontFamily: BODY_FONT, color: INK, align: "left", valign: "top" }));
 
-  // ── 표 (일자 | 예상 놀이 및 활동 | 실행 평가 및 지원) ──
-  const TX = 24, TW = 746, C1 = 110, C2 = 370, C3 = TW - C1 - C2;
-  const x1 = TX, x2 = TX + C1, x3 = TX + C1 + C2;
-  const HY = 362, HH = 34, RY = HY + HH, RH = 96, N = 5, TBOT = RY + RH * N;
-  els.push(m.shape(x1, HY, C1, HH, { bg: "#d9cceb", radius: 0 }));
-  els.push(m.shape(x2, HY, C2, HH, { bg: "#f3ccd8", radius: 0 }));
-  els.push(m.shape(x3, HY, C3, HH, { bg: "#c4dcf0", radius: 0 }));
-  els.push(m.text(x1, HY, C1, HH, "일자", { fontSize: 15, fontFamily: LABEL_FONT, color: "#5b4a86", align: "center", valign: "center" }, { textRole: "title" }));
-  els.push(m.text(x2, HY, C2, HH, "예상 놀이 및 활동", { fontSize: 15, fontFamily: LABEL_FONT, color: "#a85277", align: "center", valign: "center" }, { textRole: "title" }));
-  els.push(m.text(x3, HY, C3, HH, "실행 평가 및 지원", { fontSize: 15, fontFamily: LABEL_FONT, color: "#3f6fa0", align: "center", valign: "center" }, { textRole: "title" }));
-  // 실행 평가 및 지원 열 — 표 전체 높이 1칸(교사 기록란, 편집 가능).
-  els.push(m.text(x3 + 14, RY + 14, C3 - 28, RH * N - 28, "※ 자발적으로 나타난 놀이, 확장된 놀이, 유아의 발화 내용 등 놀이 상황의 관찰 및 교사의 지원 내용을 작성하세요.", { fontSize: 12, fontFamily: BODY_FONT, color: GRAY, align: "left", valign: "top" }));
+  // ── 표(일자 | 예상 놀이 및 활동 | 실행 평가 및 지원) — 레퍼런스 페이지 좌표 ──
+  const x1 = J(32), x2 = J(242), x3 = J(641), xR = J(968);   // 열 경계 (일자210/놀이399/지원327)
+  const C1 = x2 - x1, C2 = x3 - x2, C3 = xR - x3;
+  const HY = J(517), HB = J(569);                            // 헤더 상/하단
+  const HH = HB - HY;
+  const dayBot = J(1091), tblBot = J(1300);                  // 요일행 하단 / 표 전체 하단
+  // 헤더 셀 배경
+  els.push(m.shape(x1, HY, C1, HH, { bg: "#ece7f6", radius: 0 }));
+  els.push(m.shape(x2, HY, C2, HH, { bg: "#fceaea", radius: 0 }));
+  els.push(m.shape(x3, HY, C3, HH, { bg: "#e3eef8", radius: 0 }));
+  els.push(m.text(x1, HY, C1, HH, "일자", { fontSize: 15, fontFamily: LABEL_FONT, color: "#5a4a8a", align: "center", valign: "center" }, { textRole: "title" }));
+  els.push(m.text(x2, HY, C2, HH, "예상 놀이 및 활동", { fontSize: 15, fontFamily: LABEL_FONT, color: "#b03e3e", align: "center", valign: "center" }, { textRole: "title" }));
+  els.push(m.text(x3, HY, C3, HH, "실행 평가 및 지원", { fontSize: 15, fontFamily: LABEL_FONT, color: "#2a5c94", align: "center", valign: "center" }, { textRole: "title" }));
+  // 실행 평가 및 지원 = 요일행 전체 높이 1칸(교사 기록란, 편집 가능)
+  els.push(m.text(J(660), J(590), J(287), dayBot - J(590) - J(12), "※ 자발적으로 나타난 놀이, 확장된 놀이, 유아의 발화 내용 등 놀이 상황의 관찰 및 교사의 지원 내용을 작성하세요.", { fontSize: 12, fontFamily: BODY_FONT, color: GRAY, align: "left", valign: "top" }));
+
   const jdays = c.days && c.days.length ? c.days : WK_DAYS_DEF;
+  const N = 5;
   for (let i = 0; i < N; i++) {
     const day = jdays[i] || WK_DAYS_DEF[i] || {};
-    const rowY = RY + i * RH;
-    if (i > 0) els.push(m.shape(x1, rowY, TW, 1, { bg: LINE, radius: 0 }));
-    // 일자
-    els.push(m.text(x1, rowY + 10, C1, 22, has(day.d) ? day.d : (WK_DAYS_DEF[i] ? WK_DAYS_DEF[i].d : ""), { fontSize: 18, fontFamily: LABEL_FONT, color: INK, align: "center", valign: "center" }, { textRole: "title" }));
-    els.push(m.text(x1, rowY + 32, C1, 16, has(day.sub) ? day.sub : "", { fontSize: 12, fontFamily: BODY_FONT, color: GRAY, align: "center", valign: "center" }));
-    img(x1 + (C1 - 62) / 2, rowY + 48, 62, 44, (day.ideas && day.ideas[0]) ? day.ideas[0] : c.theme);
+    const rTop = J(JR(i)), rBot = J(JR(i + 1));
+    if (i > 0) els.push(m.shape(x1, rTop, x3 - x1, 1, { bg: LINE, radius: 0 })); // 요일 구분선(지원열 제외)
+    // 일자(요일 + 날짜 2줄) + 아이콘 슬롯
+    const dd = has(day.d) ? day.d : (WK_DAYS_DEF[i] ? WK_DAYS_DEF[i].d : "");
+    const sub = has(day.sub) ? day.sub : "";
+    els.push(m.text(J(78), rTop + J(25), J(66), J(54), sub ? `${dd}\n(${sub})` : dd, { fontSize: 17, fontFamily: LABEL_FONT, color: "#6f5aa0", align: "center", valign: "center" }, { textRole: "title" }));
+    img(J(147), rTop + J(28), J(48), J(48), (day.ideas && day.ideas[0]) ? day.ideas[0] : c.theme);
     // 예상 놀이 및 활동
     const ideas = day.ideas && day.ideas.length ? day.ideas : (WK_DAYS_DEF[i] ? WK_DAYS_DEF[i].ideas : []);
-    els.push(m.text(x2 + 12, rowY + 8, C2 - 24, 50, ideas.map((t) => "• " + t).join("\n"), { fontSize: 13, fontFamily: BODY_FONT, color: INK, align: "left", valign: "top" }));
-    pill(x2 + 12, rowY + RH - 30, 60, 22, "#bfe0ad", "#3e6b2f", "바깥놀이", 11);
+    els.push(m.text(J(257), rTop + J(6), J(370), J(52), ideas.map((t) => "• " + t).join("\n"), { fontSize: 13, fontFamily: BODY_FONT, color: INK, align: "left", valign: "top" }));
+    // 바깥놀이 pill + 활동
+    pill(J(267), rTop + J(67), J(64), J(27), "#bfe0ad", "#3e6b2f", "바깥놀이", 11);
     const od = c.outdoor && c.outdoor[i] ? String(c.outdoor[i]).split(" - ")[0] : "자연 관찰하기";
-    els.push(m.text(x2 + 80, rowY + RH - 30, C2 - 92, 22, "• " + od, { fontSize: 12, fontFamily: BODY_FONT, color: INK, align: "left", valign: "center" }));
+    els.push(m.text(J(342), rTop + J(67), J(268), J(27), "• " + od, { fontSize: 12, fontFamily: BODY_FONT, color: INK, align: "left", valign: "center" }));
   }
-  // 세로 분리선 + 표 테두리
-  els.push(m.shape(x2, HY, 1, TBOT - HY, { bg: LINE, radius: 0 }));
-  els.push(m.shape(x3, HY, 1, TBOT - HY, { bg: LINE, radius: 0 }));
-  els.push(m.shape(TX, HY, TW, TBOT - HY, { bg: "transparent", radius: 8, stroke: "#d9cceb", strokeWidth: 1.5 }));
+  // 세로 분리선(헤더~요일행 하단) + 표 테두리
+  els.push(m.shape(x2, HY, 1, dayBot - HY, { bg: LINE, radius: 0 }));
+  els.push(m.shape(x3, HY, 1, dayBot - HY, { bg: LINE, radius: 0 }));
+  els.push(m.shape(x1, HB, x3 - x1, 1, { bg: LINE, radius: 0 }));   // 헤더 하단선
 
-  // ── 안전 교육 / 인성 교육 / 가정연계활동 ──
-  let sy = TBOT + 12;
-  [["안전 교육", c.safety], ["인성 교육", c.char], ["가정연계활동", c.home]].forEach((row) => {
-    pill(TX, sy + 8, 92, 24, "#e7ddc9", "#7a6f57", row[0], 12);
-    els.push(m.text(TX + 104, sy + 4, TW - 104, 44, row[1] || "", { fontSize: fitFontSize(row[1] || " ", TW - 104, 44, 12.5, 9), fontFamily: BODY_FONT, color: INK, align: "left", valign: "center" }));
-    sy += 54;
+  // ── 안전 교육 / 인성 교육 / 가정연계활동 (표 하단 3행, 전폭) ──
+  const secRows = [
+    { top: J(1090), bot: J(1166), label: "안전 교육", val: c.safety, subj: "a life ring" },
+    { top: J(1166), bot: J(1227), label: "인성 교육", val: c.char, subj: "a red heart" },
+    { top: J(1227), bot: tblBot, label: "가정연계활동", val: c.home, subj: "a cute house" },
+  ];
+  secRows.forEach((r) => {
+    els.push(m.shape(x1, r.top, x3 - x1 + C3, 1, { bg: LINE, radius: 0 }));   // 행 상단선(전폭)
+    const h = r.bot - r.top;
+    els.push(m.text(J(46), r.top, J(120), h, r.label, { fontSize: 13, fontFamily: LABEL_FONT, color: "#4a4436", align: "left", valign: "center" }, { textRole: "title" }));
+    img(J(155), r.top + (h - J(40)) / 2, J(40), J(40), r.subj);
+    els.push(m.text(J(259), r.top, xR - J(259) - J(14), h, r.val || "", { fontSize: fitFontSize(r.val || " ", xR - J(259) - J(14), h - 8, 12.5, 9), fontFamily: BODY_FONT, color: INK, align: "left", valign: "center" }));
   });
-  // ── 푸터 ──
-  els.push(m.text(TX, 1092, TW, 22, "놀이 흥미와 요구, 상황에 따라 변경될 수 있으며, 함께 만들어가는 놀이중심 교육과정을 지원합니다.", { fontSize: 11, fontFamily: BODY_FONT, color: GRAY, align: "center", valign: "center" }));
+  els.push(m.shape(J(242), J(1090), 1, tblBot - J(1090), { bg: LINE, radius: 0 }));    // 하단 라벨/본문 세로선
+  // 표 외곽 테두리
+  els.push(m.shape(x1, HY, xR - x1, tblBot - HY, { bg: "transparent", radius: J(10), stroke: "#e6d9c4", strokeWidth: 1.5 }));
+
+  // ── 푸터 배너 ──
+  els.push(m.shape(J(160), J(1316), J(680), J(78), { bg: "#f3ecd6", radius: J(16) }));
+  els.push(m.text(J(184), J(1316), J(632), J(78), "놀이 흥미와 요구, 상황에 따라 변경될 수 있으며, 함께 만들어가는 놀이중심 교육과정을 지원합니다.", { fontSize: 12, fontFamily: BODY_FONT, color: "#807b6b", align: "center", valign: "center" }));
 
   // 구조(shape)만 잠금 — 텍스트·이미지는 편집 가능.
   els.forEach((e) => { if (e.type === "shape") e.locked = true; });
-  return doc("주간 놀이계획 및 실행안", CREAM, els);
+  return doc("주간 놀이계획 및 실행안", PAGE, els);
+}
+
+// 일안(DailyPlan) 생성 출력값 → 일지형 슬롯 문자열 매핑.
+//   생성 출력에 있는 필드만 채운다(빈 값이면 빌더가 고정 디폴트로 대체). 등원·점심·낮잠·오후간식·오후실내·위생점검
+//   같은 '일과 루틴' 슬롯은 생성 출력에 없으므로 빌더에서 항상 고정 디폴트를 유지한다. (모두 편집 가능)
+function readDaily(payload) {
+  const d = payload || {};
+  const b = d.basic_info || {};
+  const num = (a) => arr(a).filter(has).map((s, i) => `${i + 1}. ${s}`).join("\n");
+  const dot = (a) => arr(a).filter(has).map((s) => "• " + s).join("\n");
+  const period = has(b.date) ? `${b.date}${has(b.day) ? ` (${b.day})` : ""}` : (b.period || "");
+  const goal = num(arr(d.teacher_expectations).map((e) => e?.goal).filter(has));
+  const mats = d.materials || {};
+  const matLine = [...arr(mats.teacher_materials), ...arr(mats.children_materials)].filter(has).join(", ");
+  const env = d.environment_setup || {};
+  const envLine = [env.indoor_environment?.space_setup, env.indoor_environment?.material_arrangement, env.outdoor_environment?.play_environment].filter(has).join(" ");
+  const prep = [has(matLine) ? `준비물: ${matLine}` : "", has(envLine) ? `환경구성: ${envLine}` : ""].filter(Boolean).join("\n");
+  const intro = d.introduction || {};
+  const introText = dot([intro.interest_trigger, ...arr(intro.conversation?.teacher_questions)].filter(has));
+  // 전개활동 — 활동별 분리(아이디어형 3컬럼용) + 평탄화(일지형 1칸용).
+  const devActs = arr(d.development_activities).map((a) => ({
+    name: has(a?.activity_name) ? String(a.activity_name).trim() : "",
+    steps: num(arr(a?.activity_method).filter(has)),
+    questions: dot(arr(a?.teacher_questions).filter(has)),
+  })).filter((a) => a.name || a.steps);
+  const dev = devActs.map((a) => [a.name ? `• ${a.name}` : "", a.steps.replace(/^/gm, "  ")].filter(Boolean).join("\n")).join("\n");
+  const curri = arr(d.curriculum_links).map((cl) => [cl?.area, cl?.content].filter(has).join(" > ")).filter(has).join("\n");
+  const cl = d.closing || {};
+  const closing = dot([cl.experience_sharing, ...arr(cl.reflection_questions), cl.connection_to_next_play].filter(has));
+  const od = d.outdoor_and_physical_play || {}, rd = d.rainy_day_alternative || {};
+  const outdoor = [has(od.activity_name) ? `• 실외 놀이 - ${od.activity_name}` : "", od.method, has(rd.indoor_alternative_play) ? `• 우천 대체 - ${rd.indoor_alternative_play}` : ""].filter(has).join("\n");
+  const ext = d.extension_activities || {};
+  const extension = dot([ext.classroom_extension, ext.project_extension, ext.art_extension, ext.role_play_extension].filter(has));
+  const sn = d.safety_notes || {};
+  const safety = dot([sn.play_safety, sn.environment_safety, sn.health_safety].filter(has));
+  const asmt = d.assessment || {};
+  const assessment = num([...arr(asmt.observation_points), ...arr(asmt.teacher_check_questions)].filter(has));
+  const hc = d.home_connection || {};
+  const home = dot([hc.try_at_home, hc.parent_question, has(hc.recommended_picture_book) ? `추천 그림책: ${hc.recommended_picture_book}` : "", hc.follow_up_play].filter(has));
+  return {
+    theme: b.theme || d.theme || "",
+    className: b.class_name || (has(b.age_band) ? `만 ${b.age_band}` : ""),
+    period, goal, curri, prep, intro: introText, dev, devActs, closing, outdoor, extension, safety, assessment, home,
+  };
+}
+
+// ════════════════════════════ 일일 놀이계획 일지형 (2 A4 연속 · Figma 144:772) ════════════════════════════
+// A4 2장(794×2246) 단일 캔버스. 1페이지=헤더/현원출석/정보/주제·기대·준비물/오전 일과표, 2페이지=오후 일과표/위생·확장·안전·평가/일일기록.
+// 시간 일과표 행은 srow() 헬퍼로 반복 생성(라벨셀=아이콘+활동명+시간 / 계획실행 / 평가). 아이콘=subject 슬롯(자동생성).
+// 편집기가 frame.h>1123 이면 A4 경계 안내선을 그린다(DesignFrame). 텍스트·이미지 편집 가능, 구조(shape)만 잠금.
+// 일일 일지형 콘텐츠 아이콘 기본 에셋(즉시 표시용) — 슬롯마다 순환 배정. subject 는 유지되어 '재생성'으로 주제 맞춤 교체 가능.
+const DAILY_ICONS = ["waterdrop.png", "turtle.png", "seahorse.png", "octopus.png", "beachball.png", "tube.png", "icecream.png", "conch.png", "bubbles.png", "palm.png", "lighthouse.png", "sandcastle.png", "seagull.png", "crab.png", "starfish.png", "parasol.png", "wave.png", "watergun.png"];
+
+// 일일 일지형 — A4 2페이지(각 794×1123)를 배열로 반환 → 편집기 페이지 네비(‹ 1/2 ›)로 넘긴다.
+//   이미지 슬롯은 정적 클레이 에셋으로 즉시 표시(빈 플레이스홀더 X). subject 유지 → '재생성'으로 교체 가능.
+//   텍스트는 pinned(위치 고정, 내용 편집 O), shape 는 locked. 일안 생성값은 readDaily 로 매핑(없으면 고정 디폴트).
+export function buildDailyPlanJournalPages(payload) {
+  const d = payload || {};
+  const b = d.basic_info || {};
+  const cd = readDaily(d);
+  const theme = b.theme || d.theme || "";
+  const PAGE = "#fcfbf4", INK = "#3a3a35", GRAY = "#8a8375", LINE = "#e2dac6";
+  const TITLE = "#6f52a8", PINK = "#c56b96", GREEN = "#cfe6ac";
+
+  // 페이지 1장(A4)을 만드는 팩토리 — 헬퍼가 그 페이지의 els 에 push. done() 이 잠금·고정 후 doc 반환.
+  const mkPage = () => {
+    const m = maker();
+    const els = [];
+    let iconN = 0;
+    const img = (x, y, w, h, subject, rot = 0) =>
+      els.push({ id: `dimg${Math.round(x)}_${Math.round(y)}`, type: "image", src: `/generated-assets/topicweb-record/${DAILY_ICONS[iconN++ % DAILY_ICONS.length]}`, fit: "contain", sticker: true, subject: (subject && String(subject).trim()) || theme || "놀이", x, y, w, h, rotation: rot, style: { radius: 6 } });
+    const stk = (src, x, y, w, h, subj, rot = 0) =>
+      els.push({ id: `ddec${Math.round(x)}_${Math.round(y)}`, type: "image", src: `/generated-assets/topicweb-record/${src}`, fit: "contain", sticker: true, subject: subj, x, y, w, h, rotation: rot, style: { radius: 0 } });
+    const T = (x, y, w, h, text, fs, ff, color, align = "left", valign = "center", role) =>
+      els.push(m.text(x, y, w, h, text, { fontSize: fs, fontFamily: ff, color, align, valign }, role ? { textRole: role } : {}));
+    const cell = (x, y, w, h, bg, stroke) => els.push(m.shape(x, y, w, h, { bg, radius: 0, ...(stroke ? { stroke, strokeWidth: 1 } : {}) }));
+    const hline = (x, y, w) => els.push(m.shape(x, y, w, 1, { bg: LINE, radius: 0 }));
+    const vline = (x, y, h) => els.push(m.shape(x, y, 1, h, { bg: LINE, radius: 0 }));
+    const srow = (cols, top, h, bg, iconSubj, name, time, plan, noEval) => {
+      const [c1, c2, c3, cR] = cols;
+      const cw = c2 - c1, planR = noEval ? cR : c3;
+      cell(c1, top, cw, h, bg);
+      hline(c1, top, cR - c1);
+      const iH = J(46), nH = J(40), tH = time ? J(18) : 0, gap = J(5);
+      const gH = iH + gap + nH + (time ? gap + tH : 0);
+      let gy = top + Math.max(J(6), (h - gH) / 2);
+      img(c1 + (cw - iH) / 2, gy, iH, iH, iconSubj); gy += iH + gap;
+      T(c1 + J(6), gy, cw - J(12), nH, name, 12, LABEL_FONT, "#4a4436", "center", "center", "title"); gy += nH;
+      if (time) { gy += gap; T(c1, gy, cw, tH, time, 11, BODY_FONT, GRAY, "center", "center"); }
+      T(c2 + J(12), top + J(8), planR - c2 - J(24), h - J(16), plan, fitFontSize(plan, planR - c2 - J(24), h - J(16), 12.5, 9), BODY_FONT, INK, "left", "top");
+      vline(c2, top, h);
+      if (!noEval) vline(c3, top, h);
+    };
+    const banner = (yTop, decos) => {
+      els.push(m.shape(J(0), yTop, A4.W, J(84), { bg: GREEN, radius: 0 }));
+      decos.forEach((dc) => stk(dc[0], J(dc[1]), yTop + J(dc[2]), J(dc[3]), J(dc[4]), dc[5]));
+    };
+    const done = (title) => {
+      els.forEach((e) => { if (e.type === "shape") e.locked = true; else if (e.type === "text") e.pinned = true; });
+      return { output_type: "DesignDoc", title, frame: { w: A4.W, h: A4.H, bg: PAGE }, elements: els };
+    };
+    return { img, stk, T, cell, hline, vline, srow, banner, done };
+  };
+
+  // ═══════════ 페이지 1 ═══════════
+  const p1 = mkPage();
+  {
+    const { img, stk, T, cell, srow, banner } = p1;
+    stk("sunset.png", J(437), J(2), J(110), J(88), "a warm sunrise over the sea", 0);
+    stk("starfish.png", J(109), J(7), J(150), J(122), "a cute smiling starfish", -3);
+    T(J(250), J(22), J(380), J(52), "일일 놀이계획 및 일지", 30, HEAD_FONT, TITLE, "left", "center", "title");
+    T(J(628), J(38), J(150), J(30), "(일지 형식)", 15, LABEL_FONT, PINK, "left", "center");
+    T(J(280), J(84), J(440), J(28), "아이의 하루를 섬세하게 기록하고, 함께 성장하는 시간 ♥", 12, BODY_FONT, "#a98ac0", "center", "center");
+    // 현원 / 출석 / 결석
+    const hx = J(700), hy = J(131), cwd = J(88);
+    ["현원", "출석", "결석"].forEach((t, i) => {
+      cell(hx + cwd * i, hy, cwd, J(29), "#f1ecdd", "#e2dac6");
+      T(hx + cwd * i, hy, cwd, J(29), t, 12, LABEL_FONT, "#6a6152", "center", "center", "title");
+      cell(hx + cwd * i, hy + J(29), cwd, J(58), "#ffffff", "#e2dac6");
+    });
+    // 정보행: 놀이기간 / 날씨 / 반이름
+    const iy = J(232), ih = J(47);
+    const seg = [
+      ["놀이기간", 36, 156, has(cd.period) ? cd.period : "2026년 2월 16일 (월)", 156, 365, "#ece7f4"],
+      ["날씨", 365, 447, has(b.weather) ? b.weather : "맑음 / 미세먼지 좋음", 447, 655, "#fcf6e3"],
+      ["반이름", 655, 755, has(cd.className) ? cd.className : "키즈반 (만 3세)", 755, 966, "#e0eef4"],
+    ];
+    // (배경 카드 없음 — frame.bg 가 곧 페이지)
+    cell(J(34), iy, J(932), ih, "#ffffff", "#e2dac6");
+    seg.forEach(([lb, lx, lr, val, vx, vr, bg]) => {
+      cell(J(lx), iy, J(lr - lx), ih, bg);
+      T(J(lx), iy, J(lr - lx), ih, lb, 12, LABEL_FONT, "#6a6152", "center", "center", "title");
+      T(J(vx) + J(10), iy, J(vr - vx) - J(16), ih, val, 13, BODY_FONT, INK, "left", "center");
+    });
+    // 놀이주제 / 교사기대 / 준비물 블록
+    const bx1 = J(34), bx2 = J(234), bxR = J(966);
+    cell(bx1, J(291), bxR - bx1, J(200), "#ffffff", "#e2dac6");
+    const brow = (top, h, bg, iconSubj, name, val) => {
+      cell(bx1, top, bx2 - bx1, h, bg);
+      p1.hline(bx1, top, bxR - bx1);
+      img(bx1 + J(30), top + (h - J(42)) / 2, J(42), J(42), iconSubj);
+      T(bx1 + J(78), top, bx2 - bx1 - J(84), h, name, 13, LABEL_FONT, "#4a4436", "left", "center", "title");
+      T(bx2 + J(16), top, bxR - bx2 - J(28), h, val, 13, BODY_FONT, INK, "left", "center");
+      p1.vline(bx2, top, h);
+    };
+    brow(J(293), J(61), "#fcf0f4", "a fun idea lightbulb", "놀이 주제", has(theme) ? theme : "뛰뛰! 빵빵 자동차");
+    brow(J(354), J(68), "#fcf6e3", "a gold medal", "교사의 기대 (목표)", has(cd.goal) ? cd.goal : "1. 자동차의 구성에 관심을 갖고 탐색한다.\n2. 여러 가지 길 위로 자동차를 굴리며 놀이한다.");
+    brow(J(422), J(68), "#eaf3f7", "a box of supplies", "준비물 및 환경구성", has(cd.prep) ? cd.prep : "준비물: 다양한 자동차 장난감, 색종이, 가위, 풀, 자동차 그림책\n환경구성: 아이들이 안전하게 놀 수 있도록 넓은 실내 공간을 마련해요.");
+    // 오전 일과표
+    const cols = [J(34), J(244), J(762), J(962)];
+    const TT = 502.97;
+    cell(cols[0], J(TT + 2), cols[1] - cols[0], J(46), "#ece7f6");
+    cell(cols[1], J(TT + 2), cols[2] - cols[1], J(46), "#fcf0f4");
+    cell(cols[2], J(TT + 2), cols[3] - cols[2], J(46), "#e8f3e6");
+    T(cols[0], J(TT + 2), cols[1] - cols[0], J(46), "시간 및 활동명", 14, LABEL_FONT, "#5a4a8a", "center", "center", "title");
+    T(cols[1], J(TT + 2), cols[2] - cols[1], J(46), "계획 및 실행", 14, LABEL_FONT, "#b03e3e", "center", "center", "title");
+    T(cols[2], J(TT + 2), cols[3] - cols[2], J(46), "평가", 14, LABEL_FONT, "#3a7a52", "center", "center", "title");
+    const P1 = [
+      [48, 199.73, "#e0eef4", "a school building with a door", "등원 및 오전간식", "8:30 ~ 9:20", "• 등원\n - 교사는 영아의 기분과 건강상태를 살핀다.\n - 알림장, 투약의뢰서 및 전달사항의 유무를 확인한다.\n - 선생님, 친구에게 반갑게 인사한다.\n• 오전간식\n - 동일한 순서대로 교사와 함께 손을 씻고 간식을 먹는다.\n - 알러지가 있는 원아의 경우 대체식을 제공한다."],
+      [247.73, 70.59, "#fcf0f4", "a speech bubble", "전이 및 도입 활동", "", has(cd.intro) ? cd.intro : "• 자동차의 종류에 대해 이야기를 나누기 위해 그림 자료를 보여줘요.\n• 좋아하는 자동차에 대한 기대감을 나누기 위해 질문해요."],
+      [318.33, 219.38, "#fcf6e3", "a red toy car", "오전 실내놀이 및 활동", "9:20 ~ 10:30", has(cd.dev) ? cd.dev : "• 붕붕 자동차 노래 부르기\n1. 노래의 가사와 리듬을 충분히 감상한 후 교사와 함께 부른다.\n2. 노래 가사에 맞춰 손뼉을 치거나 몸을 흔드는 등 창의적인 움직임으로 노래 표현하기\n• 자동차 길 만들기 놀이\n1. 블록과 테이프로 여러 가지 길을 만들어 보기\n2. 만든 길 위로 자동차를 굴리며 빠르기와 방향을 탐색하기"],
+      [537.7, 70.59, "#ece7f6", "a checklist clipboard", "전이 및 마무리 활동", "", has(cd.closing) ? cd.closing : "• 아이들이 오늘 놀이에서 배운 것들을 다시 정리해요.\n• 가장 재미있었던 자동차 놀이를 이야기해요."],
+      [608.3, 198.73, "#eef6ec", "a playground slide", "실외놀이 및 대체활동", "10:30 ~ 11:10", has(cd.outdoor) ? cd.outdoor : "• 실외 놀이 - 바깥 자동차 놀이\n신나는 노래를 들으며 친구들과 자동차 즐기기 놀이를 해요\n• 실내 대체 활동\n• 실내에서 즐기는 자동차 이야기 꾸미기"],
+    ];
+    P1.forEach((r) => srow(cols, J(TT + r[0]), J(r[1]), r[2], r[3], r[4], r[5], r[6]));
+    els1BorderFix(p1, cols, J(TT), J(809));
+    banner(J(1324), [["crab.png", 60, 4, 90, 80, "a cute red crab"], ["turtle.png", 440, 6, 100, 78, "a cute sea turtle"], ["seahorse.png", 850, 4, 90, 80, "a cute seahorse"]]);
+  }
+  const page1 = p1.done("일일 놀이계획 및 일지");
+
+  // ═══════════ 페이지 2 ═══════════
+  const p2 = mkPage();
+  {
+    const { img, stk, T, cell, srow, banner } = p2;
+    stk("wave.png", J(22), J(14), J(110), J(85), "a cute ocean wave", 0);
+    stk("octopus.png", J(868), J(14), J(110), J(85), "a cute friendly sea animal", 0);
+    T(J(289), J(22), J(350), J(52), "일일 놀이계획 및 일지", 30, HEAD_FONT, TITLE, "left", "center", "title");
+    T(J(629), J(38), J(120), J(30), "(영아용)", 15, LABEL_FONT, PINK, "left", "center");
+    T(J(278), J(80), J(444), J(28), "♥ 아이의 하루를 섬세하게 기록하고, 함께 성장하는 시간 ♥", 12, BODY_FONT, "#a98ac0", "center", "center");
+    // 오후 일과표
+    const c1 = J(34), c2 = J(264), c3 = J(772), cR = J(962);
+    const cols = [c1, c2, c3, cR];
+    const TT = 136;
+    const P2 = [
+      [2, 141.94, "#eef6ec", "a lunch plate with food", "점심식사 및 실내놀이", "11:10 ~ 13:00", "• 점심식사\n• 식사 전에 손을 깨끗이 씻는다.\n• 제공된 음식에 대해 이야기 나누며 골고루 먹는다."],
+      [143.94, 141.95, "#fcf6e3", "a sleeping crescent moon", "낮잠 및 휴식", "13:00 ~ 15:30", "• 낮잠 및 휴식\n• 블라인드를 내리고 조명을 조절한다.\n• 조용한 음악을 들으면서 휴식을 취한다.\n• 낮잠에서 일찍 깬 원아들은 언어영역에서 휴식을 취한다."],
+      [285.89, 141.95, "#fcf0f4", "a cookie snack", "오후 간식", "15:30 ~ 16:00", "• 낮잠에서 정리\n• 개인이불 정리하기\n• 오후간식\n• 교사와 함께 손을 깨끗이 씻고 간식을 먹는다."],
+      [427.84, 141.95, "#ece7f6", "colorful toy blocks", "오후 실내놀이", "16:00 ~ 17:00", "• 실내 자유놀이\n• 오전에 진행되었던 자유놀이 연계 및 확장하여 놀이하기\n• 신체놀이 및 게임"],
+      [569.8, 141.95, "#e0eef4", "a house with a heart", "하원 및 가정과의 연계", "17:00 ~ 17:30", has(cd.home) ? cd.home : "• 연장반 이동 및 하원\n• 자유롭게 놀이 후 부모님이 오시는 대로 개별 하원 지도를 한다.\n• 원에서의 하루 기분 및 상태에 대해 부모님께 전해 드린다."],
+    ];
+    P2.forEach((r) => srow(cols, J(TT + r[0]), J(r[1]), r[2], r[3], r[4], r[5], r[6], false));
+    const F = [
+      [711.75, 66.59, "#e8f3e6", "a cleaning broom", "위생점검", "교실청소(스팀랑킹질), 책상 및 교구장 닦기, 세면대 및 화장실 청소, 소독기 관리 ( O )\n환기 및 소독 ( O ), 놀이장 세척 ( O ), 개별침구 및 양치도구 ( O )"],
+      [778.34, 91.39, "#fcdce8", "a music note", "확장 활동", has(cd.extension) ? cd.extension : "• 자동차 동요를 듣고 다양한 악기(탬버린, 캐스터네츠 등)를 활용하여 음악과 리듬을 탐색하고 노래 부르기\n• 가족들과 함께 타 본 자동차 경험에 대해 이야기 나누고 그림이나 글로 표현하여 부모님과 공유하기"],
+      [869.73, 91.39, "#fcf0f4", "a warning safety sign", "안전 및 유의사항", has(cd.safety) ? cd.safety : "• 작은 자동차 부품이나 소품을 입에 넣거나 삼키지 않도록 지도한다.\n• 놀이 시 사용하는 교구가 유아가 걸려 넘어지거나 끼일 위험이 없는지 미리 확인하고, 활동 중에도 아이들이 안전하게 움직일 수 있도록 지도한다."],
+      [961.13, 65.59, "#eef6ec", "a report card with a star", "평 가", has(cd.assessment) ? cd.assessment : "1. 자동차 놀이 경험을 친구들에게 문장으로 말하고, 친구의 이야기에 귀 기울이며 대화에 참여했는가?\n2. 친구와 함께 놀이하며 차례를 지키고 협력하는 태도를 보였는가?"],
+    ];
+    F.forEach((r) => srow(cols, J(TT + r[0]), J(r[1]), r[2], r[3], r[4], "", r[5], true));
+    els1BorderFix(p2, cols, J(TT), J(1028.72));
+    // 일일 기록 및 지원 계획
+    const rc1 = J(34), rc2 = J(288), rcR = J(966), rtop = J(1176.72), rh = J(141.28);
+    cell(rc1, rtop, rcR - rc1, rh, "#ffffff", "#e2dac6");
+    cell(rc1, rtop, rc2 - rc1, rh, "#fcf6e3");
+    T(rc1, rtop + J(14), rc2 - rc1, J(48), "일일 기록 및\n지원 계획", 14, LABEL_FONT, "#4a4436", "center", "center", "title");
+    img(rc1 + (rc2 - rc1 - J(50)) / 2, rtop + J(74), J(50), J(50), "a pencil writing");
+    p2.vline(rc2, rtop, rh);
+    [27, 55, 82, 109].forEach((ly) => p2.hline(rc2 + J(21), rtop + J(ly), rcR - rc2 - J(42)));
+    banner(J(1330), [["sandcastle.png", 70, 4, 85, 72, "a cute sandcastle"], ["parasol.png", 845, 4, 85, 72, "a cute beach parasol"]]);
+  }
+  const page2 = p2.done("일일 놀이계획 및 일지 (영아용)");
+
+  return [page1, page2];
+}
+
+// 일과표 외곽 테두리(투명 배경 + 테두리)를 표 위에 얹는다.
+function els1BorderFix(p, cols, top, h) {
+  p.cell(cols[0], top, cols[3] - cols[0], h, "transparent", "#dcd3bf");
+}
+
+// 단일 doc(썸네일·buildVariant 용) — 페이지 1 반환.
+export function buildDailyPlanJournalDoc(payload) {
+  return buildDailyPlanJournalPages(payload)[0];
+}
+
+// ════════════════════════════ 일안 아이디어형 (2 A4 · Figma 154:1290) ════════════════════════════
+// Figma 1024×2037.67 단일 tall → A4 2페이지 분리(스케일 794/1024). 페이지 네비 ‹1/2›.
+//   페이지1=헤더+정보표(주제·기간·기대·교육과정·준비물)+미술작품 6카드+예상놀이/사전활동.
+//   페이지2=전개활동 3컬럼+마무리+바깥놀이+놀이속배움요소 8배지.
+//   이미지 슬롯은 정적 클레이 에셋으로 즉시 표시(subject 유지→재생성/사진교체). 텍스트 pinned, shape locked.
+//   일안 생성값은 readDaily 로 매핑(놀이주제/기간/기대/교육과정/준비물/도입/전개3/마무리/바깥놀이), 없으면 고정 디폴트.
+// 표 안 활동(놀이아이디어) 이미지 — Figma 154:1290 레퍼런스의 실제 아동 작품 이미지 사용.
+const IDEA_ART = [
+  { label: "파도 그리기", img: "art-wave.png" },
+  { label: "바다 콜라주", img: "art-collage.png" },
+  { label: "색종이 배 만들기", img: "art-boat.png" },
+  { label: "조개 찍기", img: "art-shell.png" },
+  { label: "손도장 물고기", img: "art-handprint.png" },
+  { label: "바닷가 풍경 그리기", img: "art-scenery.png" },
+];
+const IDEA_BADGES = ["창의력", "탐구력", "의사소통", "신체운동", "협력", "예술경험", "자연탐구", "안전"];
+export function buildDailyIdeaPages(payload) {
+  const d = payload || {};
+  const b = d.basic_info || {};
+  const cd = readDaily(d);
+  const theme = b.theme || d.theme || "";
+  const S = 794 / 1024;
+  const K = (v) => Math.round(v * S);
+  const PAGE = "#d8e6ef", PANEL = "#fbf8f0", NAVY = "#2456a8", VALUE = "#2f6bb3", PINK = "#de6678";
+  const BADGE = "#7db8dd", YESANG = "#a5cfe8", BORDER = "#9fc4de", LINE = "#cddfee", BODY = "#3a4656", GRAY = "#8a8375";
+
+  const mkPage = () => {
+    const m = maker();
+    const els = [];
+    let iconN = 0;
+    const img = (x, y, w, h, subject, opts = {}) =>
+      els.push({ id: `iimg${Math.round(x)}_${Math.round(y)}`, type: "image", src: `/generated-assets/topicweb-record/${DAILY_ICONS[iconN++ % DAILY_ICONS.length]}`, fit: opts.fit || "contain", sticker: true, subject: (subject && String(subject).trim()) || theme || "놀이", x, y, w, h, rotation: 0, style: { radius: opts.radius ?? 6, ...(opts.stroke ? { stroke: opts.stroke, strokeWidth: 2 } : {}) } });
+    const T = (x, y, w, h, text, fs, ff, color, align = "left", valign = "center", role) =>
+      els.push(m.text(x, y, w, h, text, { fontSize: fs, fontFamily: ff, color, align, valign }, role ? { textRole: role } : {}));
+    const box = (x, y, w, h, bg, stroke, radius) => els.push(m.shape(x, y, w, h, { bg, radius: radius ?? K(14), ...(stroke ? { stroke, strokeWidth: 1.5 } : {}) }));
+    const cell = (x, y, w, h, bg) => els.push(m.shape(x, y, w, h, { bg, radius: 0 }));
+    const hline = (x, y, w, c) => els.push(m.shape(x, y, w, Math.max(1, K(1)), { bg: c || LINE, radius: 0 }));
+    const vline = (x, y, h, c) => els.push(m.shape(x, y, Math.max(1, K(1)), h, { bg: c || LINE, radius: 0 }));
+    // 활동(놀이아이디어) 카드 — 레퍼런스 아동 작품 이미지 + 하단 흰 라벨 태그.
+    // src 지정 시 그 이미지를 표시(레퍼런스 그대로). sticker+subject 유지로 교사가 재생성 가능.
+    const artCard = (x, y, w, h, label, src) => {
+      els.push({ id: `iart${Math.round(x)}_${Math.round(y)}`, type: "image", src, fit: "cover", sticker: true, subject: `children art: ${label}`, x, y, w, h, rotation: 0, style: { radius: K(10), stroke: "#ffffff", strokeWidth: 2 } });
+      const tw = Math.min(w - K(20), K(6) + label.length * K(13));
+      box(x + K(12), y + h - K(30), tw, K(26), "#ffffff", BORDER, K(8));
+      T(x + K(12), y + h - K(30), tw, K(26), label, 11, LABEL_FONT, NAVY, "center", "center", "title");
+    };
+    const done = (title) => {
+      els.forEach((e) => { if (e.type === "shape") e.locked = true; else if (e.type === "text") e.pinned = true; });
+      return { output_type: "DesignDoc", title, frame: { w: A4.W, h: A4.H, bg: PAGE }, elements: els };
+    };
+    return { img, T, box, cell, hline, vline, artCard, done };
+  };
+
+  // ═══════════ 페이지 1 ═══════════
+  const p1 = mkPage();
+  {
+    const { img, T, box, cell, hline, vline, artCard } = p1;
+    // 헤더 장식 + 제목
+    img(K(0), K(4), K(260), K(206), "a child on a sailboat looking through a telescope", { radius: 0 });
+    img(K(758), K(40), K(100), K(100), "a cheerful sun", { radius: 0 });
+    img(K(874), K(72), K(120), K(112), "a cute whale spouting water", { radius: 0 });
+    T(K(314), K(42), K(420), K(56), "놀이중심 일일계획안", 30, HEAD_FONT, NAVY, "left", "center", "title");
+    box(K(306), K(128), K(434), K(51), BADGE, null, K(14));
+    T(K(306), K(128), K(434), K(51), has(b.sub_theme) ? b.sub_theme : (has(theme) ? theme : "시원한 물 길과 파도 모험 떠나기"), 15, LABEL_FONT, "#ffffff", "center", "center", "title");
+    T(K(690), K(206), K(320), K(26), has(cd.className) ? cd.className : "2026 무지개 (만 5세)", 13, LABEL_FONT, PINK, "right", "center");
+
+    // 정보표 (좌: 라벨/값 5행, 우: 미술작품 6카드)
+    const TX = K(22), TY = K(235), lc = K(158), lr = K(497), rc = K(497), rR = K(1002);
+    box(TX, TY, rR - TX, K(811), PANEL, BORDER, K(12));
+    // 좌측 라벨/값 행 헬퍼
+    const irow = (top, h, icon, label, val, big) => {
+      img(TX + K(10), top + (h - K(38)) / 2, K(36), K(36), icon);
+      T(TX + K(48), top, lc - TX - K(52), h, label, 13, LABEL_FONT, NAVY, "left", "center", "title");
+      T(lc + K(15), top + (big ? K(14) : 0), rc - lc - K(30), big ? h - K(28) : h, val, big ? fitFontSize(val, rc - lc - K(30), h - K(28), 12.5, 9) : 14, BODY_FONT, big ? BODY : VALUE, "left", big ? "top" : "center");
+      vline(lc, top, h);
+    };
+    irow(TY + K(2), K(57), "a seashell", "놀이 주제", has(theme) ? theme : "시원한 물 길과 파도 모험 떠나기", false);
+    hline(TX, TY + K(59), lr - TX);
+    irow(TY + K(59), K(55), "a starfish", "놀이기간", has(cd.period) ? cd.period : "7/14", false);
+    hline(TX, TY + K(114), lr - TX);
+    irow(TY + K(114), K(197), "a seahorse", "교사의 기대\n(목표)", has(cd.goal) ? cd.goal : "• 자연물을 연결해 물의 흐름을 조절하며 창의·신체 활동에 자발적으로 참여한다.\n• 바다 그림책을 통해 바닷가의 경험을 이해하고 언어적 표현을 확장한다.\n• 도구를 활용해 파도의 움직임을 탐색하며 신체 동작으로 표현한다.", true);
+    hline(TX, TY + K(311), lr - TX);
+    irow(TY + K(311), K(219), "a coral", "교육과정 연계", has(cd.curri) ? cd.curri : "신체운동·건강 > 신체활동 즐기기 > 신체활동에 자발적으로 참여한다.\n의사소통 > 책과 이야기 즐기기 > 책에 관심을 가지고 상상하기를 즐긴다.\n예술경험 > 예술적으로 표현하기 > 다양한 도구를 활용하여 움직임과 음악으로 자유롭게 표현한다.", true);
+    hline(TX, TY + K(530), lr - TX);
+    irow(TY + K(530), K(281), "a sand bucket", "준비물 및\n환경구성", has(cd.prep) ? cd.prep : "준비물: 다양한 길이와 모양의 파이프, 통들, 나무 조각, 색 천, 방울 막대, 바다 소리 음악, 종이, 색연필, 바다 그림 도안\n환경구성: 파도 소리 음악을 감상하며 상상할 수 있는 공간과, 파이프·물통으로 물 길을 만들 야외 또는 넓은 실내 공간을 준비합니다.", true);
+    vline(rc, TY, K(811), BORDER);
+    // 우측 미술작품 6카드 (2×3)
+    const ax = rc + K(13), ay = TY + K(14), aw = K(233), ah = K(253), gx = K(12), gy = K(10);
+    IDEA_ART.forEach((a, i) => {
+      const cx = ax + (i % 2) * (aw + gx), cy = ay + Math.floor(i / 2) * (ah + gy);
+      artCard(cx, cy, aw, ah, a.label, `/generated-assets/daily-idea-art/${a.img}`);
+    });
+
+    // 예상 놀이 구분선 + 배지
+    const dy = K(1086);
+    hline(K(22), dy, K(405), BORDER);
+    box(K(439), K(1066), K(146), K(40), YESANG, null, K(12));
+    T(K(439), K(1066), K(146), K(40), "예상 놀이", 14, LABEL_FONT, "#1f4e7a", "center", "center", "title");
+    hline(K(597), dy, K(405), BORDER);
+
+    // 사전활동(도입)
+    const sy = K(1120), sh = K(119);
+    box(K(22), sy, K(980), sh, PANEL, BORDER, K(12));
+    img(K(59), sy + K(6), K(40), K(44), "a water drop");
+    T(K(22), sy + K(55), K(150), K(46), "사전활동\n(도입)", 13, LABEL_FONT, NAVY, "center", "center", "title");
+    vline(K(158), sy, sh, LINE);
+    T(K(172), sy + K(10), K(690), sh - K(20), has(cd.intro) ? cd.intro : "1. 시원한 파도 소리가 담긴 음악을 감상하며 여름 바다에 등장한 물길 움직임을 자유롭게 상상하기\n2. \"물길 따라 가면, 물도 차가운 보물 상자\" 그림을 보며 오늘 물길 놀이에 흥미와 순서를 예측해 보기", fitFontSize(cd.intro || " ", K(690), sh - K(20), 12.5, 9), BODY_FONT, BODY, "left", "top");
+    img(K(879), sy + K(12), K(92), K(80), "a girl child playing", { fit: "cover", radius: K(8) });
+  }
+  const page1 = p1.done("놀이중심 일일계획안");
+
+  // ═══════════ 페이지 2 ═══════════
+  const p2 = mkPage();
+  {
+    const { img, T, box, vline } = p2;
+    const G = 1239;
+    const y2 = (v) => K(v - G);
+    // 전개 활동(본활동) — 3컬럼
+    const jy = y2(1239), jh = K(396);
+    box(K(22), jy, K(980), jh, PANEL, BORDER, K(12));
+    img(K(40), jy + K(120), K(78), K(84), "a sailboat");
+    T(K(22), jy + K(122), K(150), K(50), "전개 활동\n(본활동)", 13, LABEL_FONT, NAVY, "center", "center", "title");
+    vline(K(158), jy, jh, LINE);
+    const acts = (cd.devActs && cd.devActs.length) ? cd.devActs : null;
+    const defCols = [
+      { name: "시원한 물 길 만들기", steps: "1. 다양한 길이와 모양의 파이프, 통들을 활용하여 물이 낮은 곳으로 흐를 수 있도록 연결하여 길을 설계하고 만들기\n2. 파이프의 각도를 수정하거나 장애물을 배치하며 물의 이동경로와 흐름을 직접 관찰하고 신나게 뛰어보기", questions: "• 물의 흐름을 더 빠르게 만들려면 파이프를 어떻게 연결하면 좋을까요?\n• 우리가 만든 물 길의 마지막 도착지는 어디로 향하면 재미있을까요?" },
+      { name: "신난 소리 그림책", steps: "1. 바닷속 물결이 출렁이는 그림책을 친구들과 함께 읽으며 주인공이 겪는 시원한 모험의 과정을 탐색하고 의미 새겨보기\n2. 책의 소리와 바닷길 소리로 이야기를 창작하며 친구들과 주고받아 자기만의 시나리오를 구성하여 발표하기", questions: "• 그림책 속 주인공이 시원한 물 길을 발견했다면 그 안에서 어떤 일이 벌어질까요?\n• 친구들이 상상한 바다 이야기에 또 다른 주인공을 초대한다면 누구를 부르고 싶나요?" },
+      { name: "파도 소리 춤추기", steps: "1. 푸른색 천과 방울 막대를 사용하여 넘실거리는 파도의 모양과 소리를 몸으로 표현하며 자유로운 동작 만들기\n2. 음악에 빠르게/천천히 맞추며 친구들과 함께 거대한 바다의 움직임을 하나의 예술 퍼포먼스로 완성하기", questions: "• 파도가 아주 높게 치는 모습은 몸의 어떤 부분을 사용하면 표현할 수 있을까요?\n• 푸른 천과 방울을 흔드는 소리가 마치 어떤 바다의 소리처럼 느껴지나요?" },
+    ];
+    const colX = [K(172), K(443), K(714)], colW = K(250);
+    [0, 1, 2].forEach((i) => {
+      const a = acts && acts[i] ? { name: acts[i].name, steps: acts[i].steps, questions: acts[i].questions } : defCols[i];
+      T(colX[i], jy + K(16), colW, K(22), a.name || defCols[i].name, 13, LABEL_FONT, "#1e7a5a", "left", "center", "title");
+      T(colX[i], jy + K(48), colW, K(200), has(a.steps) ? a.steps : defCols[i].steps, fitFontSize(a.steps || defCols[i].steps, colW, K(200), 11.5, 8.5), BODY_FONT, BODY, "left", "top");
+      T(colX[i], jy + K(258), colW, K(120), has(a.questions) ? a.questions : defCols[i].questions, fitFontSize(a.questions || defCols[i].questions, colW, K(120), 11, 8.5), BODY_FONT, VALUE, "left", "top");
+    });
+
+    // 마무리 활동
+    const my = y2(1635), mh = K(144);
+    box(K(22), my, K(980), mh, PANEL, BORDER, K(12));
+    img(K(14), my + K(52), K(36), K(34), "a pearl shell");
+    T(K(22), my + K(56), K(150), K(30), "마무리 활동", 13, LABEL_FONT, NAVY, "center", "center", "title");
+    vline(K(158), my, mh, LINE);
+    T(K(172), my + K(16), K(624), mh - K(30), has(cd.closing) ? cd.closing : "1. 물 길 만들기, 바다 상상하기, 파도 춤추기 놀이를 하며 발견한 물의 특징과 가장 즐거웠던 순간을 그림과 말로 친구들에게 공유하기\n2. 오늘 함께 즐긴 시원한 물길 놀이를 기록하여 \"바다 안에서의 물길 놀이\" 기념 메달 만들기", fitFontSize(cd.closing || " ", K(624), mh - K(30), 12.5, 9), BODY_FONT, BODY, "left", "top");
+    img(K(825), my + K(33), K(150), K(76), "children handprint art", { fit: "cover", radius: K(8) });
+
+    // 바깥놀이/신체활동
+    const oy = y2(1780), oh = K(143);
+    box(K(22), oy, K(980), oh, PANEL, BORDER, K(12));
+    img(K(57), oy + K(21), K(44), K(40), "a crab");
+    T(K(22), oy + K(72), K(150), K(46), "바깥놀이/\n신체활동", 13, LABEL_FONT, NAVY, "center", "center", "title");
+    vline(K(158), oy, oh, LINE);
+    T(K(172), oy + K(16), K(560), K(22), "시원한 물 길 탐험하기", 13, LABEL_FONT, "#1e7a5a", "left", "center", "title");
+    T(K(172), oy + K(46), K(558), oh - K(56), has(cd.outdoor) ? cd.outdoor : "다양한 길이와 형태의 파이프를 연결하여 물이 흐르는 길을 만들고, 물의 흐름을 조절하여 신나는 신체 활동을 즐기며, 친구들과 협력하여 물이 나아가는 방향을 탐색하고, 시원한 물줄기가 땅에 닿도록 뛰어놀며 상쾌함을 느껴요.", fitFontSize(cd.outdoor || " ", K(558), oh - K(56), 12.5, 9), BODY_FONT, BODY, "left", "top");
+    img(K(756), oy + K(15), K(218), K(112), "children outdoor water play", { fit: "cover", radius: K(8) });
+
+    // 놀이 속 배움 요소 (8배지)
+    const gy2 = y2(1939);
+    box(K(22), gy2, K(98), K(74), "#eaf2f0", BORDER, K(12));
+    T(K(22), gy2, K(98), K(74), "놀이 속\n배움 요소", 12, LABEL_FONT, NAVY, "center", "center", "title");
+    const bx = [138, 242, 348, 468, 589, 679, 798, 919];
+    IDEA_BADGES.forEach((name, i) => {
+      img(K(bx[i]), gy2 + K(14), K(40), K(46), name);
+      T(K(bx[i] + 46), gy2 + K(14), K(64), K(46), name, 12, LABEL_FONT, BODY, "left", "center");
+    });
+  }
+  const page2 = p2.done("놀이중심 일일계획안 (놀이·배움)");
+
+  return [page1, page2];
+}
+
+export function buildDailyIdeaDoc(payload) {
+  return buildDailyIdeaPages(payload)[0];
 }
 
 function readMonthly(payload) {
@@ -1494,6 +1926,391 @@ export function buildMonthlyPlanSummerDoc(payload) {
   els.push(m.text(sX(430), sY(1560), sD(330), sD(40), "놀이 흥미와 요구, 상황에 따라 변경될 수 있으며, 함께 만들어가는 놀이중심 교육과정으로 운영합니다.", { fontSize: sD(15), fontFamily: MS_JUA, color: "#4a6b86", align: "center", valign: "center" }));
 
   return doc("놀이중심 월간계획안", MS_BG, els);
+}
+
+// ════════════════════════════ 월안 색깔탐험 (단일 A4 · Figma 63:180) ════════════════════════════
+// Figma 1240×1760 → A4 794×1123(스케일 794/1240). 헤더+정보박스(주제/선정이유/기대/교육과정)+
+//   예상놀이흐름 5주차 카드+바깥놀이 5칼럼+안전/인성/행사/가정+푸터. 파스텔 크림·핑크·블루 테마.
+//   이미지 슬롯은 정적 클레이 에셋으로 즉시 표시(subject 유지). 텍스트 pinned, shape locked.
+//   월안 생성값은 readMonthly 로 매핑(주제·선정이유·기대·교육과정·주차·바깥놀이·안전·인성·행사·가정), 없으면 색깔탐험 디폴트.
+const MC_WEEKS_DEF = [
+  { sub: "친구와 함께\n색깔 무지개 🌈", ideas: ["우정의 무지개 만들기", "무지개 징검다리 건너기", "모르는 색! 빛의 보석함", "색채 연구소 수료식", "물감 섞기 색배합 실험"] },
+  { sub: "색깔 물약\n실험 🧪", ideas: ["색깔 물약 만들기", "색깔 풍선 댄스", "색깔 이름 지어주기", "빛의 반사와 그림자", "감정을 담은 색깔 토크"] },
+  { sub: "색깔로 떠나는\n상상 여행 🎈", ideas: ["색깔 구슬 꿰기", "보석함 보물찾기", "색깔 카드 분류 게임", "동화 ‘색깔 도둑’ 읽기", "어둠 속 야광 놀이"] },
+  { sub: "나만의\n색깔 사전 📖", ideas: ["나만의 색깔 사전 제작", "색깔 팽이 돌리기", "색깔 샌드위치 만들기", "점묘화로 채우는 풍경", "알록달록 색상표 관찰"] },
+  { sub: "자연 속\n색깔 찾기 🌿", ideas: ["자연의 색깔 채집", "색깔 요정의 하루"] },
+];
+const MC_OUTDOOR_DEF = [
+  ["🌈", "알록달록 무지개 길 건너기\n내 손으로 무지개 나무 만들기"],
+  ["🎈", "색깔 물약 통통통\n신나는 색깔 풍선 춤"],
+  ["💎", "색깔 보물찾기 대작전\n반짝이는 보석함 그림자 놀이"],
+  ["🌀", "나만의 색깔 팽이 돌리기\n알록달록 샌드위치 쌓기"],
+  ["🌿", "자연 속 색깔 옷 입기\n색깔 요정의 숲속 탐험"],
+];
+export function buildMonthlyColorDoc(payload) {
+  const c = readMonthly(payload);
+  const m = maker();
+  const S = 794 / 1240;
+  const J = (v) => Math.round(v * S);
+  const PAGE = "#fdf3f7", TITLE = "#3b3486", JUNE = "#8b7fd4", INK = "#374151", GRAY = "#6b7280";
+  const IB_BORDER = "#c9dcf0", LABEL_BG = "#eef5ff", LABEL_TX = "#2b4bb4";
+  const PINK = "#f472b6", PINK_D = "#be185d", WEEK_BG = "#fce7f3", WEEK_BD = "#f7cbe1";
+  const YESANG = "#f9a8d4", BLUE = "#7dd3fc", BLUE_D = "#0b5f88";
+  const els = [];
+  els.push(m.shape(0, 0, A4.W, A4.H, { bg: PAGE, radius: 0 }));
+  els.push(m.shape(J(22), J(22), J(1196), J(1076), { bg: "transparent", radius: J(20), stroke: "#e4c9f4", strokeWidth: 1.5 }));
+  let iconN = 0;
+  const img = (x, y, w, h, subject) =>
+    els.push({ id: `mcimg${Math.round(x)}_${Math.round(y)}`, type: "image", src: `/generated-assets/topicweb-record/${DAILY_ICONS[iconN++ % DAILY_ICONS.length]}`, fit: "contain", sticker: true, subject: subject || c.theme || "색깔", x, y, w, h, rotation: 0, style: { radius: 0 } });
+  const T = (x, y, w, h, text, fs, color, align = "left", valign = "center", role, ff) =>
+    els.push(m.text(x, y, w, h, text, { fontSize: fs, fontFamily: ff || LABEL_FONT, color, align, valign }, role ? { textRole: role } : {}));
+  const box = (x, y, w, h, bg, stroke, radius) => els.push(m.shape(x, y, w, h, { bg, radius: radius ?? J(14), ...(stroke ? { stroke, strokeWidth: 1.5 } : {}) }));
+  const pill = (x, y, w, h, bg, tx, label, fs) => { box(x, y, w, h, bg, null, Math.round(h / 2)); T(x, y, w, h, label, fs, tx, "center", "center", "title"); };
+  const has2 = (s) => s != null && String(s).trim() !== "";
+
+  // ── 헤더 ──
+  img(J(59), J(57), J(150), J(156), "an artist color palette with brushes");
+  img(J(900), J(20), J(270), J(180), "a paintbrush painting a rainbow");
+  T(0, J(60), A4.W, J(30), has2(c.month) && has2(c.theme) ? `${c.month} · ${c.theme}` : "JUNE · 색깔 탐험", 15, JUNE, "center", "center", "title");
+  T(0, J(96), A4.W, J(84), "놀이중심 월간계획안", 34, TITLE, "center", "center", "title", TITLE_FONT);
+  pill(J(505), J(198), J(228), J(45), "#fde68a", "#92400e", has2(c.className) || has2(c.period) ? [c.className, c.period].filter(has2).join(" · ") : "보리 (5세) · 6/1 ~ 6/30", 14);
+
+  // ── 정보박스 (예상 놀이주제 / 놀이 선정 이유 / 교사의 기대 / 교육과정 연계) ──
+  const ibx = J(64), ibW = J(1112), lblR = ibx + J(200), valX = ibx + J(220);
+  box(ibx, J(263), ibW, J(354), "#ffffff", IB_BORDER, J(14));
+  const irow = (top, h, label, val, isList) => {
+    els.push(m.shape(ibx, top, J(200), h, { bg: LABEL_BG, radius: 0, locked: true }));
+    T(ibx + J(14), top, J(200) - J(20), h, label, 13, LABEL_TX, "left", "center", "title");
+    els.push(m.shape(lblR, top, Math.max(1, J(1)), h, { bg: IB_BORDER, radius: 0 }));
+    T(valX + J(6), top + (isList ? J(6) : 0), ibx + ibW - valX - J(24), isList ? h - J(12) : h, val, isList ? fitFontSize(val, ibx + ibW - valX - J(24), h - J(12), 13, 10) : 14, INK, "left", isList ? "top" : "center");
+    els.push(m.shape(ibx, top + h, ibW, Math.max(1, J(1)), { bg: IB_BORDER, radius: 0 }));
+  };
+  irow(J(265), J(59), "📋 예상 놀이주제", has2(c.theme) ? `${c.theme} 🌈` : "색깔 탐험 🌈", false);
+  irow(J(324), J(76), "💡 놀이 선정 이유", has2(c.reason) ? c.reason : "유아의 발달 특성상 색깔에 대한 인지 능력 발달과 예술경험·자연탐구 영역의 연계 활동을 통해 탐구 능력과 창의성 함양에 적합하며, 또래와의 협력 및 정서 교류를 증진할 수 있습니다.", true);
+  irow(J(400), J(108), "🎯 교사의 기대\n(활동 목표)", c.goals.length ? c.goals.map((g, i) => `${i + 1}. ${g}`).join("\n") : "1. 유아들은 다양한 색을 혼합하여 나타나는 색의 변화 과정을 관찰하고 새로운 색에 대한 탐구 경험을 가진다.\n2. 유아들은 다양한 미술 재료와 도구를 활용하여 색을 주제로 창의적인 표현 활동을 즐긴다.\n3. 유아들은 물체의 색깔과 특성을 탐색하고 분류하는 과정을 통해 인지적 탐구를 확장한다.", true);
+  irow(J(508), J(109), "🧭 교육과정 연계", has2(c.curri) ? c.curri : "자연탐구 > 생활 속에서 탐구하기 > 물체의 특성과 변화를 여러 가지 방법으로 탐색한다.\n예술경험 > 창의적으로 표현하기 > 다양한 미술 재료와 도구로 자신의 생각과 느낌을 표현한다.\n자연탐구 > 생활 속에서 탐구하기 > 일상에서 모은 자료를 기준에 따라 분류한다.", true);
+
+  // ── 예상 놀이 흐름 배지 + 5주차 카드 ──
+  pill(J(515), J(636), J(209), J(50), YESANG, "#831843", "🎨 예상 놀이 흐름", 15);
+  const wx = [64, 288, 513, 738, 963], wW = J(212), wH = J(270);
+  wx.forEach((fx, i) => {
+    const x = J(fx), y = J(707);
+    const w = c.weeks[i], def = MC_WEEKS_DEF[i];
+    const sub = w && has2(w.sub) ? w.sub : (def ? def.sub : "");
+    const ideas = w && w.ideas && w.ideas.length ? w.ideas : (def ? def.ideas : []);
+    box(x, y, wW, wH, WEEK_BG, WEEK_BD, J(16));
+    pill(x + J(76), y + J(16), J(60), J(28), PINK, "#ffffff", `${i + 1}주차`, 12);
+    T(x, y + J(52), wW, J(46), sub, 14, PINK_D, "center", "center", "title");
+    T(x + J(16), y + J(108), wW - J(30), wH - J(120), ideas.map((t) => "• " + t).join("\n"), fitFontSize(ideas.map((t) => "• " + t).join("\n"), wW - J(30), wH - J(120), 12, 9), INK, "left", "top");
+  });
+
+  // ── 바깥놀이 및 신체활동 배지 + 5칼럼 ──
+  pill(J(485), J(997), J(269), J(50), BLUE, BLUE_D, "🤸 바깥놀이 및 신체활동", 15);
+  box(J(64), J(1067), J(1112), J(138), "#eef7fd", "#bfe3f6", J(14));
+  const colW = J(1112 / 5);
+  for (let i = 0; i < 5; i++) {
+    const cx = J(64) + colW * i;
+    const od = has2(c.outdoor[i]) ? [MC_OUTDOOR_DEF[i][0], String(c.outdoor[i]).replace(/\s+-\s+/g, "\n")] : MC_OUTDOOR_DEF[i];
+    T(cx, J(1085), colW, J(34), od[0], 22, INK, "center", "center");
+    T(cx + J(8), J(1122), colW - J(16), J(70), od[1], 11.5, INK, "center", "top");
+  }
+
+  // ── 안전/인성/행사/가정 ──
+  const bbx = J(64), bbW = J(1112), bLblR = bbx + J(180), bValX = bbx + J(200);
+  box(bbx, J(1225), bbW, J(294), "#ffffff", "#fbe4b0", J(14));
+  const brow = (top, h, label, val) => {
+    els.push(m.shape(bbx, top, J(180), h, { bg: "#fffaf0", radius: 0, locked: true }));
+    T(bbx + J(14), top, J(180) - J(18), h, label, 13, "#4a4436", "left", "center", "title");
+    els.push(m.shape(bLblR, top, Math.max(1, J(1)), h, { bg: "#fbe4b0", radius: 0 }));
+    T(bValX + J(6), top, bbx + bbW - bValX - J(24), h, val, fitFontSize(val || " ", bbx + bbW - bValX - J(24), h - 8, 13, 10), INK, "left", "center");
+    els.push(m.shape(bbx, top + h, bbW, Math.max(1, J(1)), { bg: "#fbe4b0", radius: 0 }));
+  };
+  brow(J(1227), J(76), "🛡️ 안전 교육", has2(c.safety) ? c.safety : "알록달록 물감을 사용할 때는 손이나 옷에 묻지 않도록 조심해요. 바닥에 흘린 물감은 바로 닦아 미끄러지지 않게 해요. 가위질을 할 때는 친구를 향하지 않고 안전하게 사용해요.");
+  brow(J(1303), J(76), "💗 인성 교육", has2(c.char) ? c.char : "무지개 만들기를 할 때 친구와 서로 도와주며 협동심을 길러요. 색깔 카드 분류 놀이에서 자기 차례를 기다리고 규칙을 지키며 질서를 배워요. 친구가 만든 색깔을 존중하고 칭찬하며 사이좋게 지내요.");
+  brow(J(1379), J(59), "🎉 행사", has2(c.event) ? c.event : "-");
+  brow(J(1438), J(74), "🏠 가정연계활동", has2(c.home) ? c.home : "다양한 색깔 재료로 나만의 색깔 옷을 입고 패션쇼 진행하기. 가정에서 유아가 좋아하는 색깔을 정하고 그 색깔과 관련된 사물·경험에 대해 이야기 나누기.");
+
+  // ── 푸터 ──
+  T(0, J(1656), A4.W, J(40), "놀이 흥미와 요구, 상황에 따라 변경될 수 있으며, 함께 만들어가는 놀이중심 교육과정으로 운영합니다.", 12, GRAY, "center", "center", null, BODY_FONT);
+
+  els.forEach((e) => { if (e.type === "shape") e.locked = true; else if (e.type === "text") e.pinned = true; });
+  return doc("놀이중심 월간계획안 (색깔탐험)", PAGE, els);
+}
+
+// ════════════════════════════ 가정통신문 · 요리체험 (단일 A4 · Figma 155:197) ════════════════════════════
+// Figma 1000×1496 → A4 794×1123(높이맞춤 스케일 1123/1496, 좌우중앙 OFFX 22). 핑크 크림 통신문.
+//   헤더 장식(별·하트) + 제목 + 인사 3문단 + 안내표(일시/장소/준비물/참고사항/문의처) + 원이름 푸터 + 팥빙수 일러스트.
+//   이미지 슬롯(팥빙수)=정적 에셋 표시. 이모지 장식·라벨 즉시표시. 텍스트 pinned, shape locked.
+export function buildNewsletterCookingDoc(payload) {
+  const d = payload || {};
+  const nl = d.newsletter || d;
+  const m = maker();
+  const S = 1123 / 1496.18;
+  const J = (v) => Math.round(v * S);
+  const X = (v) => 22 + J(v);
+  const Y = (v) => J(v);
+  const OUTER = "#f7cdd8", CARD = "#fffbf7", BORDER = "#f0aec2", TITLE = "#ec6a9c";
+  const GREET = "#5a5152", HDR = "#f5a8c4", LABEL = "#e0669a", VALUE = "#57504f", ROW_ALT = "#fdeef4";
+  const has2 = (s) => s != null && String(s).trim() !== "";
+  const els = [];
+  els.push(m.shape(0, 0, A4.W, A4.H, { bg: OUTER, radius: 0 }));                                     // 외곽 핑크
+  els.push(m.shape(X(38), Y(38), J(924), J(1420), { bg: CARD, radius: J(24), stroke: BORDER, strokeWidth: 2 }));  // 크림 카드(핑크 점선)
+  const img = (x, y, w, h, subject) =>
+    els.push({ id: `nlimg${Math.round(x)}_${Math.round(y)}`, type: "image", src: `/generated-assets/topicweb-record/icecream.png`, fit: "contain", sticker: true, subject: subject || "a bowl of shaved ice patbingsu dessert", x, y, w, h, rotation: 0, style: { radius: 0 } });
+  const T = (x, y, w, h, text, fs, color, align = "left", valign = "center", role, ff) =>
+    els.push(m.text(x, y, w, h, text, { fontSize: fs, fontFamily: ff || BODY_FONT, color, align, valign }, role ? { textRole: role } : {}));
+  // 주제 음식 스티커 슬롯(정적 플레이스홀더 + subject 로 주제 클레이 스티커 해석/재생성).
+  const stk = (x, y, sz, subject, ph) => els.push({
+    id: `nlfstk${Math.round(x)}_${Math.round(y)}`, type: "image", src: ph || null,
+    fit: "contain", sticker: true, subject, x, y, w: sz, h: sz, rotation: 0, style: { radius: 0 },
+  });
+
+  // ── 헤더 장식 + 제목 ──
+  T(X(94), Y(90), J(812), J(32), "･ﾟ･ ♡ ･ﾟ･", 16, "#f3b6c6", "center", "center");
+  T(0, Y(128), A4.W, J(88), has2(nl.title) ? nl.title : "팥빙수 만들기 안내", 34, TITLE, "center", "center", "title", TITLE_FONT);
+  stk(X(286), Y(122), J(58), "a cute red strawberry");
+  stk(X(92), Y(180), J(54), "a cute slice of watermelon");
+  stk(X(706), Y(122), J(58), "a cute pink cupcake with a cherry");
+  stk(X(742), Y(196), J(50), "a cute bunch of purple grapes");
+
+  // ── 인사 3문단 ──
+  const greet = arr(nl.paragraphs).filter(has2);
+  const gDef = [
+    "학부모님, 안녕하십니까?\n저희 OO어린이집에서는 무더운 여름을 맞아 팥빙수 만들기 요리활동을 진행할 계획입니다.",
+    "요리활동은 재료를 준비하는 과정을 통해 소근육을 발달시킬 수 있으며, 정해진 요리 과정을 진행함으로써 집중력을 기를 수 있습니다. 아이들은 요리활동을 통해 나도 할 수 있다는 자신감과 성취감을 느끼게 될 것입니다.",
+    "즐거운 실습 시간이 될 수 있도록 각 가정에서는 아래의 준비물을 챙겨 원으로 보내주시기 바랍니다.",
+  ];
+  T(X(94), Y(277), J(812), J(140), greet[0] || gDef[0], 14, GREET, "left", "top");
+  T(X(94), Y(429), J(812), J(140), greet[1] || gDef[1], 14, GREET, "left", "top");
+  T(X(94), Y(582), J(812), J(90), greet[2] || gDef[2], 14, GREET, "left", "top");
+
+  // ── 안내표 ──
+  const tx = X(94), tw = J(812), lblW = J(240);
+  els.push(m.shape(tx, Y(708), tw, J(524), { bg: "#ffffff", radius: J(16), stroke: BORDER, strokeWidth: 1.5 }));
+  els.push(m.shape(tx, Y(708), tw, J(56), { bg: HDR, radius: 0 }));   // 헤더 바(상단 라운드는 카드가 덮음)
+  els.push(m.shape(tx, Y(708) + J(28), tw, J(28), { bg: HDR, radius: 0 }));
+  T(tx, Y(708), tw, J(56), "♥ " + (has2(nl.tableTitle) ? nl.tableTitle : "팥빙수 만들기 안내 및 준비물") + " ♥", 15, "#ffffff", "center", "center", "title");
+  const rows = [
+    ["📅", "일　시", has2(nl.date) ? nl.date : "2026년 8월 00일", 87],
+    ["📍", "장　소", has2(nl.place) ? nl.place : "각 반 교실", 87],
+    ["👕", "준비물", has2(nl.materials) ? nl.materials : "앞치마, 머리수건", 85],
+    ["📋", "참고사항", has2(nl.note) ? nl.note : "만들기 재료는 원에서 준비합니다.\n추후 팥빙수 만들기는 간식 시간에 진행될 예정입니다.", 114],
+    ["📞", "문의처", has2(nl.contact) ? nl.contact : "000-000-0000　OO반 OOO선생님\n000-000-0000　OO반 OOO선생님", 115],
+  ];
+  let ry = 780;
+  rows.forEach((r, i) => {
+    const rh = J(r[3]);
+    const top = Y(ry);
+    if (i % 2 === 1) els.push(m.shape(tx + J(240), top, tw - J(240), rh, { bg: ROW_ALT, radius: 0 }));
+    T(tx + J(24), top, lblW - J(30), rh, `${r[0]}  ${r[1]}`, 14, LABEL, "left", "center", "title");
+    els.push(m.shape(tx + lblW, top, Math.max(1, J(1)), rh, { bg: "#f6d3e0", radius: 0 }));
+    T(tx + lblW + J(32), top, tw - lblW - J(50), rh, r[2], 13.5, VALUE, "left", "center");
+    if (i < rows.length - 1) els.push(m.shape(tx + J(20), top + rh, tw - J(40), Math.max(1, J(1)), { bg: "#f6d3e0", radius: 0 }));
+    ry += r[3];
+  });
+
+  // ── 팥빙수 일러스트 + 원이름 푸터 ──
+  img(X(668), Y(1195), J(226), J(217), "a bowl of shaved ice patbingsu with red beans");
+  els.push(m.shape(X(329), Y(1313), J(341), J(60), { bg: CARD, radius: J(30), stroke: BORDER, strokeWidth: 2 }));
+  T(X(329), Y(1313), J(341), J(60), "✿ " + (has2(nl.orgName) ? nl.orgName : "꿈나무어린이집"), 16, LABEL, "center", "center", "title");
+  stk(X(52), Y(1296), J(58), "a cute pink flower", "/assets/deco/flower.png");
+
+  els.forEach((e) => { if (e.type === "shape") e.locked = true; else if (e.type === "text") e.pinned = true; });
+  return doc("가정통신문 · 요리체험", OUTER, els);
+}
+
+// ════════════ 가정통신문 · 행사안내 (어린이날/휴원 안내) · Figma 160:73 ════════════
+// 웜 크림 카드 A4(Figma 1000×1414 → 794×1123, 스케일 0.794). 헤더(풍선·해님·나비·가랜드+제목) +
+// 인사말 + 휴원 안내(3열 날짜) + 행사 안내(3행 복장/내용/유의) + 푸터. 장식은 이모지(정적 에셋 불필요).
+// payload: { newsletter:{ kind:'event', title?, greeting?, holidays:[{emoji,date,name}],
+//   holidayNote?, eventIntro?, eventRows:[{emoji,label,value}], closing?, date? } }
+export function buildNewsletterEventDoc(payload) {
+  const d = payload || {};
+  const nl = d.newsletter || d;
+  const m = maker();
+  const S = 794 / 1000;
+  const J = (v) => Math.round(v * S);
+  const has2 = (s) => s != null && String(s).trim() !== "";
+  const PAGE = "#fdf7e7", PANEL = "#fcecc9", PBORDER = "#f3d99f", PILL = "#f2994a";
+  const T_CORAL = "#ee7b33", T_BROWN = "#6f4e34", GREET = "#7c6a54", SUB = "#e58a3c", VALUE = "#6b5c48", DIV = "#ecd7ac";
+  const els = [];
+  const T = (x, y, w, h, text, fs, color, align = "left", valign = "center", role, ff) =>
+    els.push(m.text(x, y, w, h, text, { fontSize: fs, fontFamily: ff || BODY_FONT, color, align, valign }, role ? { textRole: role } : {}));
+  // 주제 스티커 슬롯 — 정적 플레이스홀더(있으면 즉시 표시) + subject(에디터가 주제 클레이 스티커로 해석/재생성).
+  // placeholder 없으면 src:null → 로드 시 subject 로 자동 생성(과금 env). sticker:true 로 재생성 대상 표시.
+  const stk = (x, y, sz, subject, placeholder) => els.push({
+    id: `nlstk${Math.round(x)}_${Math.round(y)}`, type: "image", src: placeholder || null,
+    fit: "contain", sticker: true, subject, x, y, w: sz, h: sz, rotation: 0, style: { radius: 0 },
+  });
+
+  els.push(m.shape(0, 0, A4.W, A4.H, { bg: PAGE, radius: 0 }));   // 웜 크림 카드(전면)
+
+  // ── 헤더 장식 + 제목 ──
+  stk(J(4), J(46), J(150), "a couple of cute colorful party balloons");
+  stk(J(792), J(28), J(150), "a cute colorful butterfly", "/assets/deco/dragonfly.png");
+  T(J(305), J(46), J(390), J(40), "· ｡ ✦ ｡ · ✧ · ｡ ✦ ｡ ·", 15, "#f0b34a", "center", "center");   // 가랜드
+  stk(J(172), J(116), J(120), "a cheerful smiling sun character", "/assets/deco/sun.png");
+  stk(J(718), J(118), J(108), "a cute pink flower", "/assets/deco/flower.png");
+  T(J(298), J(140), J(100), J(64), "5월", 33, T_CORAL, "right", "center", "title", TITLE_FONT);
+  T(J(412), J(140), J(290), J(64), "가정통신문", 33, T_BROWN, "left", "center", "title", TITLE_FONT);
+
+  // ── 인사말 ──
+  const gDef = "학부모님, 안녕하십니까?\n어느덧 꽃내음과 싱그러운 초록빛이 가득한 5월, 가정의 달이 찾아왔습니다. 사랑하는 우리 아이들과 함께 매일매일 웃음꽃이 피어나는 따뜻한 한 달 보내시기를 바랍니다.\n이번 달에는 아이들이 가장 기다리는 어린이날을 맞이하여 원에서 특별한 행사를 준비하고 있습니다. 또한, 공휴일로 인한 휴원 일정이 있으니 아래의 안내 사항을 확인하시어 가정 내 양육 계획에 참고해 주시기를 부탁드립니다.";
+  T(J(126), J(238), J(749), J(197), has2(nl.greeting) ? nl.greeting : gDef, 13, GREET, "center", "top");
+
+  // ── 휴원 안내 ──
+  els.push(m.shape(J(60), J(465), J(880), J(280), { bg: PANEL, radius: J(22), stroke: PBORDER, strokeWidth: 1.5 }));
+  stk(J(18), J(396), J(120), "colorful squeezed art paint tubes with paint blobs");
+  stk(J(872), J(430), J(120), "cute rolls of washi masking tape", "/generated-assets/deco-tape-1.png");
+  els.push(m.shape(J(390), J(445), J(219), J(56), { bg: PILL, radius: 999 }));
+  T(J(390), J(445), J(219), J(56), "휴원 안내", 17, "#ffffff", "center", "center", "title");
+  const holidays = arr(nl.holidays).length ? arr(nl.holidays) : [
+    { subject: "a cute cluster of yellow flowers", ph: "/assets/deco/flower.png", date: "5월 1일", name: "노동절" },
+    { subject: "a cute smiling gold star", date: "5월 5일", name: "어린이날" },
+    { subject: "a pretty pink lotus flower", date: "5월 25일", name: "부처님 오신날" },
+  ];
+  const hcx = [J(215), J(500), J(785)];
+  holidays.slice(0, 3).forEach((h, i) => {
+    const cx = hcx[i];
+    stk(cx - J(45), J(512), J(90), h.subject || "a cute clay sticker", h.ph);
+    T(cx - J(90), J(618), J(180), J(28), h.date || "", 17, T_BROWN, "center", "center", "title", TITLE_FONT);
+    T(cx - J(90), J(652), J(180), J(30), h.name || "", 14, SUB, "center", "center");
+  });
+  T(J(103), J(703), J(730), J(28), "🌸  " + (has2(nl.holidayNote) ? nl.holidayNote : "휴원일 중 우리 아이들이 가정에서 추억을 만들며, 행복한 시간 보내시기를 바랍니다."), 12.5, VALUE, "center", "center");
+
+  // ── 행사 안내 ──
+  els.push(m.shape(J(60), J(775), J(880), J(434), { bg: PANEL, radius: J(22), stroke: PBORDER, strokeWidth: 1.5 }));
+  els.push(m.shape(J(389), J(755), J(221), J(56), { bg: PILL, radius: 999 }));
+  T(J(389), J(755), J(221), J(56), "행사 안내", 17, "#ffffff", "center", "center", "title");
+  const eIntro = "어린이날을 축하하며, 원에서 친구들과 함께 신나게 뛰어놀 수 있는 즐거운 파티를 진행할 예정입니다. 우리 아이들이 하루 동안 주인공이 되어 잊지 못할 행복한 추억을 만들 수 있도록 알차게 준비하겠습니다.";
+  T(J(151), J(825), J(579), J(91), has2(nl.eventIntro) ? nl.eventIntro : eIntro, 13, GREET, "center", "top");
+  const eRows = arr(nl.eventRows).length ? arr(nl.eventRows) : [
+    { subject: "cute kids clothes, a t-shirt and sneakers", label: "복장", value: "활동하기 편하고 예쁜 옷, 걷기 편한 신발" },
+    { subject: "a wrapped birthday gift box with a ribbon", label: "행사 내용", value: "반별 특별 놀이, 맛있는 간식 파티, 어린이날 선물 증정 등" },
+    { subject: "a cute caution warning sign", label: "유의 사항", value: "당일은 행사 진행으로 인해 평소 일과와 다르게 운영될 수 있습니다." },
+  ];
+  const rowTop = [932, 1020, 1108];
+  eRows.slice(0, 3).forEach((r, i) => {
+    const yt = rowTop[i];
+    stk(J(90), J(yt), J(84), r.subject || "a cute clay sticker", r.ph);
+    T(J(182), J(yt + 22), J(130), J(45), r.label || "", 15, T_BROWN, "left", "center", "title", TITLE_FONT);
+    T(J(312), J(yt + 22), J(560), J(45), r.value || "", 13, VALUE, "left", "center");
+    if (i < 2) els.push(m.shape(J(122), J(yt + 72), J(724), Math.max(1, J(2)), { bg: DIV, radius: 999 }));
+  });
+
+  // ── 푸터(장식 + 인사 + 날짜) ──
+  stk(J(179), J(1228), J(104), "a cute tulip flower", "/assets/deco/flower.png");
+  els.push(m.shape(J(294), J(1291), J(120), Math.max(1, J(2)), { bg: DIV, radius: 999 }));
+  stk(J(426), J(1240), J(104), "colorful children handprints in paint");
+  els.push(m.shape(J(560), J(1291), J(120), Math.max(1, J(2)), { bg: DIV, radius: 999 }));
+  stk(J(692), J(1228), J(108), "a colorful cleaning sponge");
+  stk(J(4), J(1182), J(120), "a few colorful crayons");
+  stk(J(848), J(1236), J(112), "an artist paint palette with colorful paint and a brush");
+  T(J(253), J(1358), J(494), J(28), has2(nl.closing) ? nl.closing : "가정에 늘 건강과 평안이 가득하시기를 기원합니다. 감사합니다.", 13, GREET, "center", "center");
+  T(J(437), J(1390), J(140), J(27), has2(nl.date) ? nl.date : "2026. 05. 00", 13, "#a99a80", "center", "center", "title");
+
+  els.forEach((e) => { if (e.type === "shape") e.locked = true; else if (e.type === "text") e.pinned = true; });
+  return doc("가정통신문 · 행사안내", PAGE, els);
+}
+
+// ════════════ 가정통신문 · 체험학습 (딸기 농장 체험) · Figma 164:82 ════════════
+// 웜 크림 카드 A4(Figma 1000×1414 → 794×1123, 스케일 0.794). 헤더(발행일·반명·2톤 제목·부제·딸기 장식) +
+// 한눈에 보기(4열: 일시·장소·이동·준비물) + 일정 안내(시간표) + 가정 연계(딸기 바구니) + 푸터.
+// 이미지는 subject 스티커 슬롯(주제 클레이 스티커로 해석). payload: { newsletter:{ kind:'fieldtrip', title?,
+//   month?, subtitle?, pubDate?, className?, orgName?, glance:[{label,value,subject}], schedule:[{time,desc}], homeNote? } }
+export function buildNewsletterFieldtripDoc(payload) {
+  const d = payload || {};
+  const nl = d.newsletter || d;
+  const m = maker();
+  const S = 794 / 1000;
+  const J = (v) => Math.round(v * S);
+  const has2 = (s) => s != null && String(s).trim() !== "";
+  const PAGE = "#f8f1de", PINK = "#fce9ec", PINK_BD = "#f4cdd6", GREENP = "#eef6e6", GREEN_BD = "#a9cf8f";
+  const PILL_G = "#7fbe5a", PILL_P = "#ef91a7", PILL_C = "#f0917f";
+  const BERRY = "#e5486a", DARKG = "#3f6b52", MONTH = "#7cb342", LBL = "#e05a72", VAL = "#5f5648", FOOT_BG = "#d9e8cc", FOOT_TX = "#4d6b3f";
+  const FT_ASSET = "/generated-assets/fieldtrip";  // 딸기 체험학습 실제 리소스(레퍼런스 이미지)
+  const els = [];
+  const T = (x, y, w, h, text, fs, color, align = "left", valign = "center", role, ff) =>
+    els.push(m.text(x, y, w, h, text, { fontSize: fs, fontFamily: ff || BODY_FONT, color, align, valign }, role ? { textRole: role } : {}));
+  const stk = (x, y, sz, subject, ph) => els.push({
+    id: `nf${Math.round(x)}_${Math.round(y)}`, type: "image", src: ph || null,
+    fit: "contain", sticker: true, subject, x, y, w: sz, h: sz, rotation: 0, style: { radius: 0 },
+  });
+
+  els.push(m.shape(0, 0, A4.W, A4.H, { bg: PAGE, radius: 0 }));   // 웜 크림 카드
+
+  // ── 헤더 pill(발행일 · 반명) ──
+  els.push(m.shape(J(54), J(14), J(218), J(52), { bg: "#f7c9d3", radius: 999 }));
+  T(J(54), J(14), J(218), J(52), "📅  " + (has2(nl.pubDate) ? nl.pubDate : "2026.02.15"), 14, "#c25c73", "center", "center", "title");
+  els.push(m.shape(J(755), J(17), J(191), J(52), { bg: PILL_C, radius: 999 }));
+  T(J(755), J(17), J(191), J(52), "🌈  " + (has2(nl.className) ? nl.className : "무지개반"), 14, "#ffffff", "center", "center", "title");
+
+  // ── 제목(월 · 2톤 딸기/체험학습 안내 · 부제) ──
+  T(J(430), J(79), J(140), J(46), has2(nl.month) ? nl.month : "4월", 22, MONTH, "center", "center", "title", TITLE_FONT);
+  if (has2(nl.title)) {
+    T(J(200), J(133), J(600), J(60), nl.title, 31, DARKG, "center", "center", "title", TITLE_FONT);
+  } else {
+    T(J(298), J(133), J(122), J(60), "딸기", 32, BERRY, "right", "center", "title", TITLE_FONT);
+    T(J(432), J(133), J(300), J(60), "체험 학습 안내", 32, DARKG, "left", "center", "title", TITLE_FONT);
+  }
+  els.push(m.shape(J(311), J(212), J(377), J(50), { bg: "#f9d6de", radius: 999 }));
+  T(J(311), J(212), J(377), J(50), has2(nl.subtitle) ? nl.subtitle : "봄 농장으로 떠나는 즐거운 체험", 14, "#c25c73", "center", "center", "title");
+
+  // ── 헤더 딸기 장식 — 딸기 리소스는 레퍼런스 실제 이미지(우리 리소스), 나비·무당벌레는 주제 스티커 슬롯 ──
+  stk(J(64), J(231), J(225), "a cute child harvesting strawberries into a basket", `${FT_ASSET}/berry-child.png`);
+  stk(J(714), J(217), J(222), "strawberry plants growing in a wooden planter box", `${FT_ASSET}/berry-field.png`);
+  stk(J(452), J(300), J(110), "a cluster of fresh red strawberries", `${FT_ASSET}/berry.png`);
+  stk(J(285), J(263), J(66), "a cute butterfly");
+  stk(J(752), J(148), J(70), "a cute red ladybug");
+  T(J(248), J(305), J(30), J(36), "♥", 18, "#ef8fa6", "center", "center");
+
+  // ── 한눈에 보기(4열: 일시·장소·이동·준비물) ──
+  els.push(m.shape(J(380), J(430), J(240), J(54), { bg: PILL_G, radius: 999 }));
+  T(J(380), J(430), J(240), J(54), "한눈에 보기 🌿", 16, "#ffffff", "center", "center", "title");
+  els.push(m.shape(J(54), J(462), J(892), J(260), { bg: PINK, radius: J(20), stroke: PINK_BD, strokeWidth: 1.5 }));
+  const glance = arr(nl.glance).length ? arr(nl.glance) : [
+    { label: "일시", value: "2026.04.00", subject: "a cute calendar icon" },
+    { label: "장소", value: "근교 딸기 농원", subject: "a red location map pin" },
+    { label: "이동", value: "원 버스", subject: "a cute yellow school bus" },
+    { label: "준비물", value: "원복·운동화·물병", subject: "kids sneakers and a water bottle" },
+  ];
+  const gcx = [J(165), J(388), J(611), J(834)];
+  glance.slice(0, 4).forEach((g, i) => {
+    const cx = gcx[i];
+    stk(cx - J(59), J(490), J(118), g.subject || "a cute icon", g.ph);
+    T(cx - J(95), J(620), J(190), J(30), g.label || "", 16, LBL, "center", "center", "title");
+    T(cx - J(105), J(664), J(210), J(30), g.value || "", 12.5, VAL, "center", "center");
+  });
+
+  // ── 일정 안내(좌) ──
+  els.push(m.shape(J(54), J(730), J(441), J(367), { bg: PINK, radius: J(20), stroke: PINK_BD, strokeWidth: 1.5 }));
+  els.push(m.shape(J(176), J(706), J(197), J(48), { bg: PILL_P, radius: 999 }));
+  T(J(176), J(706), J(197), J(48), "일정 안내 🍓", 15, "#ffffff", "center", "center", "title");
+  const sched = arr(nl.schedule).length ? arr(nl.schedule) : [
+    { time: "09:30~10:00", desc: "점검 및 탑승" }, { time: "10:00~11:30", desc: "농장 이동" },
+    { time: "11:30~13:00", desc: "수확 및 요리 체험" }, { time: "13:00~14:00", desc: "점심 식사" },
+    { time: "14:00~15:00", desc: "원으로 이동" },
+  ];
+  sched.slice(0, 6).forEach((s, i) => {
+    const ry = 774 + i * 45;
+    T(J(64), J(ry - 2), J(34), J(32), "🍓", 13, "#e0607a", "center", "center");
+    T(J(124), J(ry), J(130), J(28), s.time || "", 13, "#e0607a", "left", "center", "title");
+    T(J(276), J(ry), J(210), J(28), s.desc || "", 13, VAL, "left", "center");
+  });
+
+  // ── 가정 연계(우) ──
+  els.push(m.shape(J(521), J(730), J(425), J(367), { bg: GREENP, radius: J(20), stroke: GREEN_BD, strokeWidth: 1.5 }));
+  els.push(m.shape(J(635), J(709), J(197), J(48), { bg: PILL_G, radius: 999 }));
+  T(J(635), J(709), J(197), J(48), "가정 연계 🌿", 15, "#ffffff", "center", "center", "title");
+  stk(J(625), J(774), J(216), "a wicker basket full of fresh red strawberries", `${FT_ASSET}/berry-basket.png`);
+  T(J(589), J(1000), J(290), J(64), has2(nl.homeNote) ? nl.homeNote : "아이와 딸기 수확\n경험을 함께 이야기해 주세요.", 13, VAL, "center", "center");
+
+  // ── 푸터 밴드 ──
+  els.push(m.shape(0, J(1356), A4.W, A4.H - J(1356), { bg: FOOT_BG, radius: 0 }));
+  T(0, J(1356), A4.W, A4.H - J(1356), (has2(nl.orgName) ? nl.orgName : "OO어린이집") + "   ●   유치원", 16, FOOT_TX, "center", "center", "title");
+
+  els.forEach((e) => { if (e.type === "shape") e.locked = true; else if (e.type === "text") e.pinned = true; });
+  return doc("가정통신문 · 체험학습", PAGE, els);
 }
 
 
@@ -1984,6 +2801,59 @@ export function buildHeadbandDoc(payload) {
   return doc("역할놀이 머리띠", "#efe9dc", els);
 }
 
+// ════════════ 이름표 도안 (오려서 이름 쓰고 달기) · Figma 132:309 ════════════
+// A4 세로 크림 패널 + 이름표 3개(캐릭터 색 상단 + 이름칸 하단). payload: { name_tag:true, meta.tag,
+//   introduction.text, items:[{label,src}] }. 캐릭터 이미지는 주제 에셋(꽃게/불가사리/갈매기).
+export function buildNameTagDoc(payload) {
+  const d = payload || {};
+  const W = A4.W, H = A4.H;
+  const tag = d.meta?.tag || "이름표 도안";
+  const intro = d.introduction?.text || "오려서 이름을 쓰고 달아 보아요";
+  const items = (Array.isArray(d.items) ? d.items : []).filter(Boolean).slice(0, 3);
+  const m = maker();
+  const els = [m.bg({ bg: "#efe9dc" })];
+  els.push(m.shape(16, 16, W - 32, H - 32, { bg: "#f7f3e9", radius: 24 }));
+  // 태그 + 안내 + 우상단 점
+  const tagW = Math.min(360, 40 + [...tag].length * 15);
+  els.push(m.shape(40, 30, tagW, 40, { bg: "#ffffff", radius: 999, stroke: "#7a6a55", strokeWidth: 2 }));
+  els.push(m.text(40, 30, tagW, 40, tag, { fontSize: 15, fontFamily: LABEL_FONT, color: "#5a4a38", align: "center", valign: "center" }));
+  els.push(m.text(40 + tagW + 14, 30, 320, 40, intro, { fontSize: 14, fontFamily: BODY_FONT, color: "#8a7a63", align: "left", valign: "center" }));
+  ["#f0785a", "#5cb3d6", "#e6c169"].forEach((c, i) => els.push(m.shape(W - 98 + i * 24, 44, 14, 14, { bg: c, radius: 999 })));
+
+  const PAL = [
+    { top: "#f0785a", label: "#c74f31", band: "#fbe3dc", bandTx: "#c74f31", line: "#f0a58e" },
+    { top: "#5cb3d6", label: "#2e7a94", band: "#dcecf3", bandTx: "#2e7a94", line: "#9fd0e3" },
+    { top: "#e6c169", label: "#a67c2e", band: "#f5ecd4", bandTx: "#a67c2e", line: "#e0cc94" },
+  ];
+  const n = 3, tw = 236, gap = 14, x0 = Math.round((W - (tw * n + gap * (n - 1))) / 2);
+  const ty = 118, th = 966, topH = 300;
+  for (let i = 0; i < n; i++) {
+    const x = x0 + i * (tw + gap), it = items[i] || {}, p = PAL[i % 3];
+    // 카드(흰 배경) + 상단 캐릭터 색
+    els.push(m.shape(x, ty, tw, th, { bg: "#ffffff", radius: 22, shadow: "0 8px 14px rgba(90,70,50,0.12)" }));
+    els.push(m.shape(x, ty, tw, topH, { bg: p.top, radius: 22 }));
+    els.push(m.shape(x, ty + topH - 24, tw, 24, { bg: p.top, radius: 0 }));   // 상단 색 하단 각지게
+    // 이름 pill(라벨) + 걸이 구멍
+    els.push(m.shape(x + 18, ty + 20, 96, 38, { bg: "rgba(255,255,255,0.92)", radius: 999 }));
+    els.push(m.text(x + 18, ty + 20, 96, 38, it.label || "친구", { fontSize: 16, fontFamily: LABEL_FONT, color: p.label, align: "center", valign: "center" }));
+    els.push(m.shape(x + tw / 2 - 17, ty + 22, 34, 34, { bg: "#ffffff", radius: 999, stroke: p.top, strokeWidth: 3 }));
+    // 캐릭터 이미지
+    if (it.src) els.push({ id: `nt-img${i}`, type: "image", src: it.src, fit: "contain", x: Math.round(x + tw / 2 - 100), y: ty + 92, w: 200, h: 190, style: { radius: 0 } });
+    else els.push({ id: `nt-img${i}`, type: "image", src: null, fit: "contain", subject: (it.label || "sea friend"), sticker: true, x: Math.round(x + tw / 2 - 100), y: ty + 92, w: 200, h: 190, style: { radius: 0 } });
+  }
+  // 하단: 이름 + 쓰는 선 + 안내 + 여름바다친구 밴드
+  for (let i = 0; i < n; i++) {
+    const x = x0 + i * (tw + gap), p = PAL[i % 3];
+    els.push(m.text(x, ty + 428, tw, 42, "이름", 26, { fontFamily: TITLE_FONT, color: p.label, align: "center", valign: "center" }, { textRole: "title" }));
+    els.push(m.shape(x + 30, ty + 528, tw - 60, 3, { bg: p.line, radius: 999 }));
+    els.push(m.text(x, ty + 548, tw, 22, "이름을 크게 써 보아요", 12, { fontFamily: BODY_FONT, color: "#9b8b76", align: "center", valign: "center" }));
+    els.push(m.shape(x, ty + th - 62, tw, 62, { bg: p.band, radius: 0 }));
+    els.push(m.shape(x, ty + th - 62, tw, 22, { bg: p.band, radius: 0 }));
+    els.push(m.text(x, ty + th - 62, tw, 62, "여름 바다 친구", 15, { fontFamily: LABEL_FONT, color: p.bandTx, align: "center", valign: "center" }, { textRole: "title" }));
+  }
+  return doc("이름표 도안", "#efe9dc", els);
+}
+
 // payload → 주제 키 (찜 저장/조회용)
 export function themeKeyOf(payload) {
   const text = `${payload?.meta?.theme || ""} ${payload?.header?.title || ""}`;
@@ -2050,33 +2920,26 @@ const TEMPLATE_REGISTRY = {
 
 // 조합 id 문자열 → { build, photos } (없는 조합은 default 로 폴백).
 // 놀이주제망(topicweb)은 테마×가족 조합이 아닌 단일 템플릿 → 특수 처리.
-// ════════════ 미로 찾기 활동지 (알고리즘 완전 미로 = 항상 풀림) ════════════
+// ════════════ 우주 미로 여행 활동지 (알고리즘 완전 미로 = 항상 풀림) ════════════
 // AI 이미지는 풀리는 미로를 못 그린다 → recursive-backtracker로 완전 미로(모든 셀이 유일 경로로
-// 연결)를 만들어 벽을 사각형으로 렌더. 출발/도착은 주제 캐릭터. payload: { maze:true, header.title,
-// meta.theme, introduction.text, start:{label,src}, goal:{label,src} }. 주제 시드로 배치 고정(재현성).
+// 연결)를 만들어 밝은 벽을 딥 스페이스 배경 위에 렌더. 출발=로켓🚀 / 도착=달🌙 이모지(정적 에셋 불필요),
+// 별·행성 장식. payload: { maze:true, header.title, meta.theme, introduction.text,
+// start:{label,emoji}, goal:{label,emoji} }. 주제 시드로 배치 고정(재현성).
 export function buildMazeDoc(payload) {
   const d = payload || {};
   const W = A4.W, H = A4.H;
-  const title = d.header?.title || "미로 찾기";
-  const intro = d.introduction?.text || "";
+  const title = d.header?.title || "우주 미로 여행";
+  const intro = d.introduction?.text || "로켓이 달에 도착할 수 있도록 길을 찾아 주세요!";
+  const startEmoji = d.start?.emoji || "🚀", goalEmoji = d.goal?.emoji || "🌙";
+  const startLabel = d.start?.label || "출발", goalLabel = d.goal?.label || "도착";
   const m = maker();
-  const els = [{ id: "mz-bg", type: "shape", x: 0, y: 0, w: W, h: H, locked: true, style: { bg: "#ffffff", radius: 0 } }];
+  // 딥 스페이스 배경
+  const els = [{ id: "mz-bg", type: "shape", x: 0, y: 0, w: W, h: H, locked: true, style: { bg: "#141a35", radius: 0 } }];
 
-  // ── 헤더(초록 톤) ──
-  const tag = d.meta?.tag || "미로찾기";
-  const tagW = Math.min(300, 44 + [...tag].length * 15);
-  els.push(m.shape(28, 24, tagW, 34, { bg: "#eef7f0", radius: 999, stroke: "#93c79f", strokeWidth: 2 }));
-  els.push(m.text(28, 24, tagW, 34, tag, { fontSize: 14, fontFamily: LABEL_FONT, color: "#5fa06e", align: "center", valign: "center" }));
-  els.push(m.text(28, 64, 520, 50, title, { fontSize: 34, fontFamily: HEAD_FONT, color: "#4a9a63", align: "left", valign: "center" }, { textRole: "title" }));
-  if (intro) els.push(m.text(30, 120, 560, 26, intro, { fontSize: 15, fontFamily: BODY_FONT, color: "#6a6a6a", align: "left", valign: "center" }));
-  els.push(m.text(590, 30, 60, 30, "이름:", { fontSize: 16, fontFamily: LABEL_FONT, color: "#5a5a5a", align: "left", valign: "center" }));
-  els.push(m.shape(642, 54, 124, 2, { bg: "#c9c0b4", radius: 0 }));
-
-  // ── 완전 미로 생성 (recursive backtracker) ──
+  // ── 완전 미로 생성 (recursive backtracker) — 시드 고정으로 재현성 ──
   const COLS = 5, ROWS = 6;
-  const ox = 60, oy = 178, mw = W - 120, mh = H - oy - 60;
+  const ox = 66, oy = 190, mw = W - 132, mh = H - oy - 84;
   const cw = mw / COLS, ch = mh / ROWS;
-  // 주제 문자열 시드 PRNG(xorshift) — 같은 주제면 같은 미로(재현성).
   const seedStr = `${d.meta?.theme || title}-${COLS}x${ROWS}`;
   let s = 2166136261 >>> 0;
   for (let i = 0; i < seedStr.length; i++) { s ^= seedStr.charCodeAt(i); s = Math.imul(s, 16777619) >>> 0; }
@@ -2101,12 +2964,36 @@ export function buildMazeDoc(payload) {
     stack.push([nr, nc]);
   }
 
-  // ── 출발/도착 셀 강조(벽보다 먼저 → 벽이 위에) ──
-  els.push(m.shape(Math.round(ox + 6), Math.round(oy + 6), Math.round(cw - 12), Math.round(ch - 12), { bg: "#eaf3fb", radius: 12 }));
-  els.push(m.shape(Math.round(ox + (COLS - 1) * cw + 6), Math.round(oy + (ROWS - 1) * ch + 6), Math.round(cw - 12), Math.round(ch - 12), { bg: "#fbeeee", radius: 12 }));
+  // ── 별 뿌리기(미로 시드 rng 이어서 → 재현성). 헤더 아래부터, 벽보다 먼저(벽이 위) ──
+  const STAR_COLS = ["#ffffff", "#ffe9a8", "#a8c7ff"];
+  for (let i = 0; i < 66; i++) {
+    const sx = 14 + rng() * (W - 28), sy = 150 + rng() * (H - 210);
+    const rr = 1.4 + rng() * 2.4, col = STAR_COLS[Math.floor(rng() * 3)];
+    els.push(m.shape(Math.round(sx - rr), Math.round(sy - rr), Math.round(rr * 2), Math.round(rr * 2), { bg: col, radius: 999 }));
+  }
+  // 반짝임 이모지(여백 존) + 행성
+  [["✨", 22, 300], ["⭐", 744, 460], ["✨", 20, 780], ["🌟", 380, 1068]].forEach(([e, x, y]) =>
+    els.push(m.text(x, y, 40, 40, e, { fontSize: 20, align: "center", valign: "center" })));
+  els.push(m.shape(734, 300, 48, 48, { bg: "#5cb3d6", radius: 999 }));       // 청록 행성(우측 여백)
+  els.push(m.shape(16, 520, 34, 34, { bg: "#f0785a", radius: 999 }));        // 코랄 행성(좌측 여백)
+  els.push(m.shape(740, 720, 30, 30, { bg: "#e6c169", radius: 999 }));       // 골드 행성(우측 여백)
 
-  // ── 벽 렌더 (각 셀의 N·W 벽 + 외곽 S·E). 출발 상단·도착 하단은 입·출구로 개방. ──
-  const WT = 6, WC = "#5a5a5a";
+  // ── 헤더 ──
+  const tag = d.meta?.tag || "우주 미로";
+  const tagW = Math.min(300, 44 + [...tag].length * 15);
+  els.push(m.shape(28, 26, tagW, 34, { bg: "rgba(255,255,255,0.12)", radius: 999, stroke: "#6f7cb8", strokeWidth: 2 }));
+  els.push(m.text(28, 26, tagW, 34, tag, { fontSize: 14, fontFamily: LABEL_FONT, color: "#c7d0f5", align: "center", valign: "center" }));
+  els.push(m.text(28, 66, 560, 52, title, { fontSize: 36, fontFamily: HEAD_FONT, color: "#f5f3ff", align: "left", valign: "center" }, { textRole: "title" }));
+  if (intro) els.push(m.text(30, 126, 600, 26, intro, { fontSize: 15, fontFamily: BODY_FONT, color: "#b9c2e6", align: "left", valign: "center" }));
+  els.push(m.text(590, 30, 60, 30, "이름:", { fontSize: 16, fontFamily: LABEL_FONT, color: "#c7d0f5", align: "left", valign: "center" }));
+  els.push(m.shape(642, 54, 124, 2, { bg: "#6f7cb8", radius: 0 }));
+
+  // ── 출발/도착 셀 강조(벽보다 먼저 → 벽이 위에) ──
+  els.push(m.shape(Math.round(ox + 6), Math.round(oy + 6), Math.round(cw - 12), Math.round(ch - 12), { bg: "rgba(120,180,255,0.20)", radius: 12 }));
+  els.push(m.shape(Math.round(ox + (COLS - 1) * cw + 6), Math.round(oy + (ROWS - 1) * ch + 6), Math.round(cw - 12), Math.round(ch - 12), { bg: "rgba(255,220,140,0.20)", radius: 12 }));
+
+  // ── 벽 렌더 (밝은 라인). 출발 상단·도착 하단은 입·출구로 개방. ──
+  const WT = 6, WC = "#dfe6ff";
   const hWall = (x, y, len) => els.push(m.shape(Math.round(x), Math.round(y - WT / 2), Math.round(len), WT, { bg: WC, radius: WT / 2 }));
   const vWall = (x, y, len) => els.push(m.shape(Math.round(x - WT / 2), Math.round(y), WT, Math.round(len), { bg: WC, radius: WT / 2 }));
   for (let r = 0; r < ROWS; r++) {
@@ -2119,29 +3006,35 @@ export function buildMazeDoc(payload) {
   for (let c = 0; c < COLS; c++) if (c !== COLS - 1) hWall(ox + c * cw, oy + ROWS * ch, cw); // 하단(도착 아래 개방)
   for (let r = 0; r < ROWS; r++) vWall(ox + COLS * cw, oy + r * ch, ch); // 우측
 
-  // ── 출발/도착 캐릭터(모서리 셀) ──
-  const isz = Math.round(Math.min(cw, ch) * 0.62);
-  const placeChar = (r, c, o, color) => {
+  // ── 로켓(출발) / 달(도착) 이모지 + 라벨(모서리 셀) ──
+  const placeEmoji = (r, c, emoji, label, color) => {
     const cx = ox + c * cw, cy = oy + r * ch;
-    if (o && o.src) els.push({ id: `mz-img-${r}-${c}`, type: "image", src: o.src, fit: "contain", x: Math.round(cx + (cw - isz) / 2), y: Math.round(cy + (ch - isz) / 2 - 8), w: isz, h: isz, style: { radius: 0 } });
-    els.push(m.text(cx, Math.round(cy + ch - 26), Math.round(cw), 20, (o && o.label) || "", { fontSize: 13, fontFamily: LABEL_FONT, color, align: "center", valign: "center" }));
+    els.push(m.text(cx, Math.round(cy + (ch - 66) / 2 - 8), Math.round(cw), 66, emoji, { fontSize: 50, align: "center", valign: "center" }));
+    els.push(m.text(cx, Math.round(cy + ch - 26), Math.round(cw), 20, label, { fontSize: 14, fontFamily: LABEL_FONT, color, align: "center", valign: "center" }));
   };
-  placeChar(0, 0, d.start, "#5f92b0");
-  placeChar(ROWS - 1, COLS - 1, d.goal, "#cf7f7f");
+  placeEmoji(0, 0, startEmoji, startLabel, "#8fd0ff");
+  placeEmoji(ROWS - 1, COLS - 1, goalEmoji, goalLabel, "#ffd98f");
 
-  return { output_type: "DesignDoc", title, frame: { w: W, h: H, bg: "#ffffff" }, elements: els };
+  return { output_type: "DesignDoc", title, frame: { w: W, h: H, bg: "#141a35" }, elements: els };
 }
 
 function templateEntry(id) {
   if (id === "topicweb") return { build: buildTopicWebDoc, photos: 0 };
   if (id === "weeklyplan") return { build: buildWeeklyPlanDoc, photos: 0 };
   if (id === "weeklyplan-journal") return { build: buildWeeklyPlanJournalDoc, photos: 0 };
+  if (id === "daily-journal") return { build: buildDailyPlanJournalDoc, photos: 0 };
+  if (id === "daily-idea") return { build: buildDailyIdeaDoc, photos: 0 };
   if (id === "monthlyplan" || id === "monthlyplan-summer") return { build: buildMonthlyPlanSummerDoc, photos: 0 };
+  if (id === "monthlyplan-color") return { build: buildMonthlyColorDoc, photos: 0 };
+  if (id === "newsletter-cooking") return { build: buildNewsletterCookingDoc, photos: 0 };
+  if (id === "newsletter-event") return { build: buildNewsletterEventDoc, photos: 0 };
+  if (id === "newsletter-fieldtrip") return { build: buildNewsletterFieldtripDoc, photos: 0 };
   if (id === "half-drawing") return { build: buildHalfDrawingDoc, photos: 4 };
   if (id === "counting") return { build: buildCountingDoc, photos: 0 };
   if (id === "shadow-match") return { build: buildShadowMatchDoc, photos: 0 };
   if (id === "hangul-writing") return { build: buildHangulWritingDoc, photos: 0 };
   if (id === "headband") return { build: buildHeadbandDoc, photos: 0 };
+  if (id === "name-tag") return { build: buildNameTagDoc, photos: 0 };
   if (id === "maze") return { build: buildMazeDoc, photos: 0 };
   const [theme, family] = String(id).split("-");
   const set = TEMPLATE_REGISTRY[theme] || TEMPLATE_REGISTRY.default;
@@ -2149,7 +3042,7 @@ function templateEntry(id) {
 }
 // 유효한 조합 id 인지
 export function isTemplateId(id) {
-  if (id === "topicweb" || id === "weeklyplan" || id === "weeklyplan-journal" || id === "monthlyplan" || id === "monthlyplan-summer" || id === "half-drawing" || id === "counting" || id === "shadow-match" || id === "hangul-writing" || id === "headband" || id === "maze") return true;
+  if (id === "topicweb" || id === "weeklyplan" || id === "weeklyplan-journal" || id === "daily-journal" || id === "daily-idea" || id === "monthlyplan" || id === "monthlyplan-summer" || id === "monthlyplan-color" || id === "newsletter-cooking" || id === "newsletter-event" || id === "newsletter-fieldtrip" || id === "half-drawing" || id === "counting" || id === "shadow-match" || id === "hangul-writing" || id === "headband" || id === "name-tag" || id === "maze") return true;
   const [theme, family] = String(id).split("-");
   return !!(TEMPLATE_REGISTRY[theme] && TEMPLATE_REGISTRY[theme][family]);
 }
@@ -2169,12 +3062,19 @@ export function templateLabel(id) {
   if (id === "topicweb") return "놀이주제망";
   if (id === "weeklyplan") return "주안 여름";
   if (id === "weeklyplan-journal") return "주안 일지형";
+  if (id === "daily-journal") return "일일 놀이계획 일지형";
+  if (id === "daily-idea") return "일일 놀이계획 아이디어형";
   if (id === "monthlyplan" || id === "monthlyplan-summer") return "월간 여름바다";
+  if (id === "monthlyplan-color") return "월안 색깔탐험";
+  if (id === "newsletter-cooking") return "가정통신문 · 요리체험";
+  if (id === "newsletter-event") return "가정통신문 · 행사안내";
+  if (id === "newsletter-fieldtrip") return "가정통신문 · 체험학습";
   if (id === "half-drawing") return "반쪽 그림 그리기";
   if (id === "counting") return "바다 친구들 수세기";
   if (id === "shadow-match") return "그림자를 찾아요";
   if (id === "hangul-writing") return "낱말을 알아요";
   if (id === "headband") return "역할놀이 머리띠";
+  if (id === "name-tag") return "이름표 도안";
   if (id === "maze") return "미로 찾기";
   const [theme, family] = String(id).split("-");
   const t = TEMPLATE_THEMES.find((x) => x.key === theme);
@@ -2188,16 +3088,30 @@ export function templateLabel(id) {
 export function pickerTemplates(payload) {
   // 놀이주제망·주간계획안 기록 → 각 단일 템플릿만 노출(놀이기록 카드/스토리 템플릿과 섞이지 않게).
   if (payload?.topic_web) return [{ id: "topicweb", theme: "topicweb", family: "web", label: "놀이주제망" }];
+  if (payload?.daily_schedule) return [
+    { id: "daily-journal", theme: "weeklyplan", family: "day", label: "일일 놀이계획 일지형" },
+    { id: "daily-idea", theme: "weeklyplan", family: "day", label: "일일 놀이계획 아이디어형" },
+  ];
   if (payload?.daily_flow) return [
     { id: "weeklyplan", theme: "weeklyplan", family: "week", label: "주안 여름" },
     { id: "weeklyplan-journal", theme: "weeklyplan", family: "week", label: "주안 일지형" },
   ];
-  if (payload?.weekly_flow) return [{ id: "monthlyplan-summer", theme: "monthlyplan", family: "month", label: "월간 여름바다" }];
+  if (payload?.weekly_flow) return [
+    { id: "monthlyplan-summer", theme: "monthlyplan", family: "month", label: "월간 여름바다" },
+    { id: "monthlyplan-color", theme: "monthlyplan", family: "month", label: "월안 색깔탐험" },
+  ];
+  // 가정통신문 — 체험학습을 가장 위에 두고 3종을 함께 노출(요리체험·행사안내 전환 가능).
+  if (payload?.newsletter) return [
+    { id: "newsletter-fieldtrip", theme: "newsletter", family: "letter", label: "가정통신문 · 체험학습" },
+    { id: "newsletter-cooking", theme: "newsletter", family: "letter", label: "가정통신문 · 요리체험" },
+    { id: "newsletter-event", theme: "newsletter", family: "letter", label: "가정통신문 · 행사안내" },
+  ];
   if (payload?.half_drawing) return [{ id: "half-drawing", theme: "half-drawing", family: "worksheet", label: "반쪽 그림 그리기" }];
   if (payload?.counting) return [{ id: "counting", theme: "counting", family: "worksheet", label: "바다 친구들 수세기" }];
   if (payload?.shadow_match) return [{ id: "shadow-match", theme: "shadow-match", family: "worksheet", label: "그림자를 찾아요" }];
   if (payload?.hangul_writing) return [{ id: "hangul-writing", theme: "hangul-writing", family: "worksheet", label: "낱말을 알아요" }];
   if (payload?.headband) return [{ id: "headband", theme: "headband", family: "worksheet", label: "역할놀이 머리띠" }];
+  if (payload?.name_tag) return [{ id: "name-tag", theme: "name-tag", family: "worksheet", label: "이름표 도안" }];
   if (payload?.maze) return [{ id: "maze", theme: "maze", family: "worksheet", label: "미로 찾기" }];
   const out = [];
   for (const theme of Object.keys(TEMPLATE_REGISTRY)) {
@@ -2240,6 +3154,9 @@ function buildPhotoGridPage(payload, photos, pageNo) {
 
 // 변형 + 입력 사진 수에 맞춘 페이지 배열(첫 페이지에 못 담은 사진은 추가 페이지로).
 export function buildVariantPages(id, payload) {
+  // 일일 일지형은 A4 2페이지 문서 — 페이지 네비(‹ 1/2 ›)로 넘긴다.
+  if (id === "daily-journal") return buildDailyPlanJournalPages(payload);
+  if (id === "daily-idea") return buildDailyIdeaPages(payload);
   const c = read(payload);
   const pages = [buildVariant(id, payload)];
   const used = templateEntry(id).photos || 0;

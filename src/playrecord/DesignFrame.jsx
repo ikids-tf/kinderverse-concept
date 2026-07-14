@@ -8,6 +8,9 @@ import { cutout as runCutout } from "./cutout";
 import { DECO_IMAGES } from "./decoManifest";
 import "./playrecord.css";
 
+// A4 1장 높이(px). 프레임이 이보다 높으면(여러 장짜리 문서) 각 A4 경계에 안내선을 그린다.
+const A4_PAGE_H = 1123;
+
 export function DesignFrame({ data, selected, zoom = 1, onChange, photos, decoAssets, onRegenerate }) {
   const { frame, elements = [] } = data;
   const wrapRef = useRef(null);
@@ -170,7 +173,7 @@ export function DesignFrame({ data, selected, zoom = 1, onChange, photos, decoAs
 
   return (
     <div className={`dframe-outer${activeId || showDeco ? " pe-panel-open" : ""}`} ref={outerRef} tabIndex={-1} onKeyDown={onFrameKey} style={{ outline: "none" }}>
-      <div className="dframe-wrap" ref={wrapRef}>
+      <div className="dframe-wrap" ref={wrapRef} style={frame.h > A4_PAGE_H + 4 ? { overflowY: "auto", overflowX: "hidden" } : undefined}>
         <div
           className="dframe"
           onMouseDown={(e) => { if (selected && !e.target.closest(".del")) deselect(); }}
@@ -207,7 +210,22 @@ export function DesignFrame({ data, selected, zoom = 1, onChange, photos, decoAs
               <DesignEl key={el.id} el={el} frozen={selected} />
             )
           )}
+          {/* A4 페이지 경계 안내선 — 프레임이 A4 1장보다 높으면(다중 페이지) 각 경계에 점선.
+              class="a4-guide" 는 PNG 저장 시 제외(편집 보조선일 뿐, 인쇄물엔 안 나옴). */}
+          {frame.h > A4_PAGE_H + 4 &&
+            Array.from({ length: Math.floor((frame.h - 4) / A4_PAGE_H) }, (_, i) => (i + 1) * A4_PAGE_H)
+              .filter((y) => y < frame.h - 4)
+              .map((y, i) => (
+                <div key={`a4g${y}`} className="a4-guide" style={{ position: "absolute", left: 0, top: y, width: frame.w, height: 0, borderTop: "2px dashed #d0a53f", pointerEvents: "none", zIndex: 9998 }}>
+                  <span style={{ position: "absolute", right: 12, top: -30, fontSize: 16, lineHeight: 1, color: "#a9741f", background: "#fff7e4", padding: "5px 14px", borderRadius: 12, fontFamily: "'SUIT', sans-serif", fontWeight: 700, border: "1.5px solid #e7cf94", whiteSpace: "nowrap" }}>
+                    ↑ {i + 1}페이지 · {i + 2}페이지 ↓
+                  </span>
+                </div>
+              ))}
         </div>
+        {/* 스크롤 스페이서 — .dframe 는 position:absolute(레이아웃 높이 0)라, 여러 장(A4 초과) 문서에서
+            래퍼가 스크롤되도록 스케일된 문서 높이만큼 자리를 차지하는 빈 블록을 둔다. */}
+        {frame.h > A4_PAGE_H + 4 && <div aria-hidden style={{ height: Math.ceil(frame.h * scale), width: 1, pointerEvents: "none" }} />}
       </div>
 
       {/* 컨트롤 패널 — 카드 바깥(오른쪽)에 띄워 내용을 가리지 않음 */}
@@ -858,8 +876,8 @@ function EditableEl({ el, scale, active, flatZ, editing, onSelect, onCycle, onEd
       scale={scale}
       bounds={el.sticker ? undefined : "parent"}
       lockAspectRatio={isImage}
-      disableDragging={editing}
-      enableResizing={active && !editing}
+      disableDragging={editing || el.pinned}
+      enableResizing={active && !editing && !el.pinned}
       onMouseDown={onSelect}
       onPointerDown={(e) => e.stopPropagation()}
       onDragStart={(e, d) => { dragStartRef.current = { x: d.x, y: d.y }; draggedRef.current = false; }}
