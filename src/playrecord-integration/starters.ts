@@ -1,12 +1,18 @@
 // "편집디자인" 버튼이 넘길 스타터 payload — kinderverse엔 아직 구조화 데이터가 없으므로
 // 각 기능의 샘플 템플릿으로 편집기를 연다(교사가 캔버스에서 편집·저장). 나중에 실제 생성 데이터로 교체 가능.
 
+import { buildWorksheetEditorPayload } from './fromWorksheet';
+
 export interface Starter {
   key: string;
   label: string;
   variant: string;
   payload: unknown;
 }
+
+// 활동지 편집디자인 템플릿 스타터 payload — 실제 생성과 동일한 빌더(buildWorksheetEditorPayload)로
+// '여름 바다' 주제 샘플을 만든다(정적 에셋 매칭 → 이미지 즉시 표시). 교사가 캔버스에서 주제·글자·이미지 편집.
+const ws = (variant: string) => buildWorksheetEditorPayload(variant, { theme: '여름 바다' }) ?? {};
 
 export const STARTERS: Starter[] = [
   {
@@ -90,4 +96,10 @@ export const STARTERS: Starter[] = [
       home_connection: '',
     },
   },
+  // ── 활동지 편집디자인 5종(편집 템플릿이 있는 유형) ──
+  { key: 'ws_half_drawing', label: '활동지 · 반쪽 그림', variant: 'half-drawing', payload: ws('half-drawing') },
+  { key: 'ws_counting', label: '활동지 · 수 세기', variant: 'counting', payload: ws('counting') },
+  { key: 'ws_shadow_match', label: '활동지 · 그림자 짝짓기', variant: 'shadow-match', payload: ws('shadow-match') },
+  { key: 'ws_hangul_writing', label: '활동지 · 한글 쓰기', variant: 'hangul-writing', payload: ws('hangul-writing') },
+  { key: 'ws_maze', label: '활동지 · 미로 찾기', variant: 'maze', payload: ws('maze') },
 ];
