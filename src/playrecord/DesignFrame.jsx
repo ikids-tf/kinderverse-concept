@@ -29,12 +29,19 @@ export function DesignFrame({ data, selected, zoom = 1, onChange, photos, decoAs
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const update = () => setScale(el.clientWidth / frame.w);
+    const update = () => {
+      const wFit = el.clientWidth / frame.w;
+      const hFit = el.clientHeight / frame.h;
+      // A4 한 장(단일 페이지)은 폭·높이 모두 맞춰 전체가 A4 규격대로 보이게(fit). 다중 페이지(2장+)는
+      // 폭맞춤 유지(세로 스크롤로 넘김). 컨테이너 높이가 아직 0이면 폭맞춤으로 폴백.
+      const s = (frame.h > A4_PAGE_H + 4 || !(hFit > 0)) ? wFit : Math.min(wFit, hFit);
+      setScale(s > 0 ? s : wFit);
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [frame.w]);
+  }, [frame.w, frame.h]);
 
   // 모든 요소 변경의 단일 통로 — 변경 직전 스냅샷을 실행취소 스택에 push(무제한)
   const commit = (nextElements) => {

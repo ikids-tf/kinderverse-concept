@@ -10,10 +10,10 @@ export type FormatChoice = 'idea-list' | 'mindmap' | 'topic-web' | 'plan-doc' | 
 /** 놀이계획 vs 프로젝트 수업 — 프로젝트는 하나의 주제를 1주~한 달 단계별로 깊이 탐구(다른 계획 문서). */
 export type LessonKind = 'play' | 'project';
 
-/** 모드별 노출 선택지 — 아이디어=리스트·마인드맵·주제망, 놀이계획=+계획문서·패키지. */
+/** 모드별 노출 선택지 — 놀이계획='놀이계획 만들어줘' 팝업: 놀이아이디어·마인드맵·주안·패키지 4종. */
 export const MODE_CHOICES: Record<FormatMode, FormatChoice[]> = {
   idea: ['idea-list', 'mindmap', 'topic-web'],
-  plan: ['idea-list', 'mindmap', 'topic-web', 'plan-doc', 'package'],
+  plan: ['idea-list', 'mindmap', 'plan-doc', 'package'],
 };
 
 interface FormatChoiceState {

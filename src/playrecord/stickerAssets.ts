@@ -171,7 +171,8 @@ export async function galleryCutoutsForTheme(themeKey: string): Promise<Array<{ 
 }
 
 // 주제 스티커 1개를 해석한다. 기존 에셋이 (실제 로드되면) 재사용, 없으면 생성.
-export async function resolveSticker(ref: StickerAssetRef): Promise<ResolvedSticker | null> {
+// cacheOnly: 편집기 로드 시엔 캐시/정적풀만 — 미캐시 주제는 생성하지 않는다(로드 지연 방지).
+export async function resolveSticker(ref: StickerAssetRef, opts: { cacheOnly?: boolean } = {}): Promise<ResolvedSticker | null> {
   const pool = THEME_DECO_ASSETS[ref.themeKey];
   if (pool && pool.length) {
     const url = pool[ref.idx % pool.length];
@@ -180,7 +181,7 @@ export async function resolveSticker(ref: StickerAssetRef): Promise<ResolvedStic
   }
   // 등록 주제가 없으면 생성(캐시 우선 — 같은 주제는 다음부터 재사용)
   const label = ref.themeLabel || ref.themeKey;
-  const r = await getAssetSmart(`pr-sticker-${ref.themeKey}-${ref.idx}`, label, [label]);
+  const r = await getAssetSmart(`pr-sticker-${ref.themeKey}-${ref.idx}`, label, [label], null, { cacheOnly: opts.cacheOnly });
   return r.src ? { src: r.src, cutout: true } : null;
 }
 

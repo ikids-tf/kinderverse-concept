@@ -2806,52 +2806,55 @@ export function buildHeadbandDoc(payload) {
 //   introduction.text, items:[{label,src}] }. 캐릭터 이미지는 주제 에셋(꽃게/불가사리/갈매기).
 export function buildNameTagDoc(payload) {
   const d = payload || {};
-  const W = A4.W, H = A4.H;
+  // 가로형 A4 — 레퍼런스(Figma 132:309, 1536×900)대로 이름표 3개를 420×640(1:1.52) 비율로 나란히.
+  // (세로 A4에 3개를 넣으면 236×966 세로 strip으로 늘어나 너무 길어짐 → 가로형으로 교정.)
+  const W = 1123, H = 794;
+  const S = W / 1536;                             // 레퍼런스 폭 → 가로 A4 맞춤
+  const J = (v) => Math.round(v * S);
+  const topOff = Math.round((H - 900 * S) / 2);   // 세로 가운데 정렬
+  const X = (v) => J(v);
+  const Y = (v) => topOff + J(v);
   const tag = d.meta?.tag || "이름표 도안";
   const intro = d.introduction?.text || "오려서 이름을 쓰고 달아 보아요";
   const items = (Array.isArray(d.items) ? d.items : []).filter(Boolean).slice(0, 3);
   const m = maker();
-  const els = [m.bg({ bg: "#efe9dc" })];
-  els.push(m.shape(16, 16, W - 32, H - 32, { bg: "#f7f3e9", radius: 24 }));
-  // 태그 + 안내 + 우상단 점
-  const tagW = Math.min(360, 40 + [...tag].length * 15);
-  els.push(m.shape(40, 30, tagW, 40, { bg: "#ffffff", radius: 999, stroke: "#7a6a55", strokeWidth: 2 }));
-  els.push(m.text(40, 30, tagW, 40, tag, { fontSize: 15, fontFamily: LABEL_FONT, color: "#5a4a38", align: "center", valign: "center" }));
-  els.push(m.text(40 + tagW + 14, 30, 320, 40, intro, { fontSize: 14, fontFamily: BODY_FONT, color: "#8a7a63", align: "left", valign: "center" }));
-  ["#f0785a", "#5cb3d6", "#e6c169"].forEach((c, i) => els.push(m.shape(W - 98 + i * 24, 44, 14, 14, { bg: c, radius: 999 })));
+  const els = [m.shape(0, 0, W, H, { bg: "#efe9dc", radius: 0 })];
+  els.push(m.shape(J(24), J(24), W - J(48), H - J(48), { bg: "#f7f3e9", radius: 24 }));
+  // 헤더: 태그 + 안내 + 우상단 점 3개
+  const tagW = J(265);
+  els.push(m.shape(X(90), Y(44), tagW, J(53), { bg: "#ffffff", radius: 999, stroke: "#7a6a55", strokeWidth: 2 }));
+  els.push(m.text(X(90), Y(44), tagW, J(53), tag, { fontSize: 15, fontFamily: LABEL_FONT, color: "#5a4a38", align: "center", valign: "center" }));
+  els.push(m.text(X(371), Y(48), J(320), J(44), intro, { fontSize: 14, fontFamily: BODY_FONT, color: "#8a7a63", align: "left", valign: "center" }));
+  ["#f0785a", "#5cb3d6", "#e6c169"].forEach((c, i) => els.push(m.shape(X(1384 + i * 24), Y(52), J(14), J(14), { bg: c, radius: 999 })));
 
   const PAL = [
     { top: "#f0785a", label: "#c74f31", band: "#fbe3dc", bandTx: "#c74f31", line: "#f0a58e" },
     { top: "#5cb3d6", label: "#2e7a94", band: "#dcecf3", bandTx: "#2e7a94", line: "#9fd0e3" },
     { top: "#e6c169", label: "#a67c2e", band: "#f5ecd4", bandTx: "#a67c2e", line: "#e0cc94" },
   ];
-  const n = 3, tw = 236, gap = 14, x0 = Math.round((W - (tw * n + gap * (n - 1))) / 2);
-  const ty = 118, th = 966, topH = 300;
-  for (let i = 0; i < n; i++) {
-    const x = x0 + i * (tw + gap), it = items[i] || {}, p = PAL[i % 3];
-    // 카드(흰 배경) + 상단 캐릭터 색
-    els.push(m.shape(x, ty, tw, th, { bg: "#ffffff", radius: 22, shadow: "0 8px 14px rgba(90,70,50,0.12)" }));
-    els.push(m.shape(x, ty, tw, topH, { bg: p.top, radius: 22 }));
-    els.push(m.shape(x, ty + topH - 24, tw, 24, { bg: p.top, radius: 0 }));   // 상단 색 하단 각지게
-    // 이름 pill(라벨) + 걸이 구멍
-    els.push(m.shape(x + 18, ty + 20, 96, 38, { bg: "rgba(255,255,255,0.92)", radius: 999 }));
-    els.push(m.text(x + 18, ty + 20, 96, 38, it.label || "친구", { fontSize: 16, fontFamily: LABEL_FONT, color: p.label, align: "center", valign: "center" }));
-    els.push(m.shape(x + tw / 2 - 17, ty + 22, 34, 34, { bg: "#ffffff", radius: 999, stroke: p.top, strokeWidth: 3 }));
-    // 캐릭터 이미지
-    if (it.src) els.push({ id: `nt-img${i}`, type: "image", src: it.src, fit: "contain", x: Math.round(x + tw / 2 - 100), y: ty + 92, w: 200, h: 190, style: { radius: 0 } });
-    else els.push({ id: `nt-img${i}`, type: "image", src: null, fit: "contain", subject: (it.label || "sea friend"), sticker: true, x: Math.round(x + tw / 2 - 100), y: ty + 92, w: 200, h: 190, style: { radius: 0 } });
+  const tagLX = [90, 558, 1026], tw = J(420), th = J(640), topH = J(200), ty = Y(170);
+  for (let i = 0; i < 3; i++) {
+    const x = X(tagLX[i]), it = items[i] || {}, p = PAL[i % 3];
+    // 흰 카드 + 상단 캐릭터 색
+    els.push(m.shape(x, ty, tw, th, { bg: "#ffffff", radius: J(22), shadow: "0 8px 14px rgba(90,70,50,0.12)" }));
+    els.push(m.shape(x, ty, tw, topH, { bg: p.top, radius: J(22) }));
+    els.push(m.shape(x, ty + topH - J(24), tw, J(24), { bg: p.top, radius: 0 }));   // 상단 색 하단 각지게
+    // 이름 라벨 pill + 걸이 구멍
+    els.push(m.shape(x + J(26), ty + J(24), J(120), J(40), { bg: "rgba(255,255,255,0.92)", radius: 999 }));
+    els.push(m.text(x + J(26), ty + J(24), J(120), J(40), it.label || "친구", { fontSize: J(24), fontFamily: LABEL_FONT, color: p.label, align: "center", valign: "center" }));
+    els.push(m.shape(x + tw / 2 - J(17), ty + J(22), J(34), J(34), { bg: "#ffffff", radius: 999, stroke: p.top, strokeWidth: 3 }));
+    // 캐릭터 이미지 (ref 80,82,260,230)
+    const ix = Math.round(x + J(80)), iy = ty + J(82), iw = J(260), ih = J(230);
+    if (it.src) els.push({ id: `nt-img${i}`, type: "image", src: it.src, fit: "contain", x: ix, y: iy, w: iw, h: ih, style: { radius: 0 } });
+    else els.push({ id: `nt-img${i}`, type: "image", src: null, fit: "contain", subject: (it.label || "sea friend"), sticker: true, x: ix, y: iy, w: iw, h: ih, style: { radius: 0 } });
+    // 이름 + 쓰는 선 + 안내 + 여름바다친구 밴드
+    els.push(m.text(x, ty + J(350), tw, J(44), "이름", J(30), { fontFamily: LABEL_FONT, color: p.label, align: "center", valign: "center" }, { textRole: "title" }));
+    els.push(m.shape(x + J(70), ty + J(472), J(280), Math.max(2, J(4)), { bg: p.line, radius: 999 }));
+    els.push(m.text(x, ty + J(498), tw, J(26), "이름을 크게 써 보아요", J(20), { fontFamily: LABEL_FONT, color: "#bba690", align: "center", valign: "center" }));
+    els.push(m.shape(x, ty + J(584), tw, J(56), { bg: p.band, radius: 0 }));
+    els.push(m.text(x, ty + J(584), tw, J(56), "여름 바다 친구", J(22), { fontFamily: LABEL_FONT, color: p.bandTx, align: "center", valign: "center" }, { textRole: "title" }));
   }
-  // 하단: 이름 + 쓰는 선 + 안내 + 여름바다친구 밴드
-  for (let i = 0; i < n; i++) {
-    const x = x0 + i * (tw + gap), p = PAL[i % 3];
-    els.push(m.text(x, ty + 428, tw, 42, "이름", 26, { fontFamily: TITLE_FONT, color: p.label, align: "center", valign: "center" }, { textRole: "title" }));
-    els.push(m.shape(x + 30, ty + 528, tw - 60, 3, { bg: p.line, radius: 999 }));
-    els.push(m.text(x, ty + 548, tw, 22, "이름을 크게 써 보아요", 12, { fontFamily: BODY_FONT, color: "#9b8b76", align: "center", valign: "center" }));
-    els.push(m.shape(x, ty + th - 62, tw, 62, { bg: p.band, radius: 0 }));
-    els.push(m.shape(x, ty + th - 62, tw, 22, { bg: p.band, radius: 0 }));
-    els.push(m.text(x, ty + th - 62, tw, 62, "여름 바다 친구", 15, { fontFamily: LABEL_FONT, color: p.bandTx, align: "center", valign: "center" }, { textRole: "title" }));
-  }
-  return doc("이름표 도안", "#efe9dc", els);
+  return { output_type: "DesignDoc", title: "이름표 도안", frame: { w: W, h: H, bg: "#efe9dc" }, elements: els };
 }
 
 // payload → 주제 키 (찜 저장/조회용)

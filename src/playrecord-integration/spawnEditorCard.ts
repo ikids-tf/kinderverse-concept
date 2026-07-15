@@ -13,6 +13,13 @@ const EDIT_KEY = (id: string) => `kv-playedit-${id}`;
 /** 편집기 임베드 URL(뷰어 엔트리 + 데이터 키). */
 export const editorEmbedUrl = (editId: string) => `/playedit.html?id=${editId}`;
 
+// 가로형(A4 landscape) 문서 variant — 카드도 가로 비율로 만든다(세로 카드에 letterbox 되지 않게).
+const LANDSCAPE_VARIANTS = new Set(['name-tag']);
+/** variant 별 편집디자인 카드 크기. 가로형 문서는 가로 카드(A4 landscape ≈ 1.41:1). */
+export function editorCardSize(variant: string): { w: number; h: number } {
+  return LANDSCAPE_VARIANTS.has(variant) ? { w: 820, h: 580 } : { w: 560, h: 820 };
+}
+
 /** variant/payload 를 localStorage 에 stash 하고 편집기 데이터 id 를 돌려준다(카드 생성은 별도).
  *  spawnEditorCard(새 카드) 와 '제자리 변환'(placeholder → 편집디자인 카드) 이 공유한다. */
 export function stashEditorPayload(variant: string, payload: unknown): string {
@@ -28,13 +35,14 @@ export function stashEditorPayload(variant: string, payload: unknown): string {
 export function spawnEditorCard(variant: string, payload: unknown): string {
   const editId = stashEditorPayload(variant, payload);
   const c = viewportCenterBoardPoint();
+  const { w, h } = editorCardSize(variant);
   const nodeId = addPresetNodeCmd(
     'sticky',
     c.x,
     c.y,
     {
-      w: 560,
-      h: 820,
+      w,
+      h,
       autoH: false,
       text: '편집디자인',
       data: { embed: editorEmbedUrl(editId), title: '편집디자인' },

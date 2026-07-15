@@ -8,7 +8,7 @@ const META: Record<FormatChoice, { emoji: string; label: string; desc: string; s
   'idea-list': { emoji: '💡', label: '놀이 아이디어', desc: '놀이명·배움영역·놀이 방법·놀이팁까지 담은 놀이 아이디어 카드' },
   mindmap: { emoji: '🧠', label: '마인드맵', desc: '대주제 → 소주제 → 활동을 가지로 펼친 생각그물' },
   'topic-web': { emoji: '🕸️', label: '놀이중심 주제망', desc: '대주제 → 소주제 → 놀이 + 환경구성·유아 예상질문 한 장' },
-  'plan-doc': { emoji: '📋', label: '놀이계획 문서', desc: '바로 쓰는 주간 놀이계획안 한 장(A4)' },
+  'plan-doc': { emoji: '📋', label: '주안', desc: '바로 쓰는 주간 놀이계획안 한 장(A4)' },
   package: { emoji: '📦', label: '놀이 패키지', desc: '아이디어·계획안·활동이미지·시청각자료·활동지·동영상·게임 한 세트', soon: false },
 };
 

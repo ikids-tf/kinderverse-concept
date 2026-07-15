@@ -135,10 +135,13 @@ export async function getAssetSmart(
   theme: string,
   plays: string[],
   reference?: string | null,
-  opts: { force?: boolean } = {}
+  opts: { force?: boolean; cacheOnly?: boolean } = {}
 ): Promise<AssetResult & { subject?: string }> {
   const d: AssetDescriptor = { kind: "illustration", key: `smart-${cacheId}`, label: theme, subject: "" };
   if (!opts.force) { const c = getCachedAsset(d); if (c) return { src: c, cached: true }; }
+  // 로드 시 자동 해석은 캐시만 — 미캐시면 생성하지 않고 빈 결과 반환(편집기 로드 시 20초 AI 생성이
+  // 슬롯마다 몰려 느려지던 문제 방지). 생성은 온디맨드('재생성'·'꾸미기 그림')에서만.
+  if (opts.cacheOnly) return { src: "", cached: false };
   let subject = "";
   try {
     const r = await fetch("/api/icon-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme, plays }) });

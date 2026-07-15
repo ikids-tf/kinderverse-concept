@@ -115,9 +115,9 @@ export default function PlayRecordEditor({ value, selected, zoom = 1, onChange, 
       const resolved = await Promise.all(
         targets.map(async (el) => {
           try {
-            if (el.stickerAsset) return [el.id, await resolveSticker(el.stickerAsset)];
-            // subject 슬롯 — 주제/활동 키워드로 클레이 아이콘 생성(캐시: 같은 subject 재사용).
-            const r = await getAssetSmart(`jslot:${el.subject}`, el.subject, [el.subject]);
+            if (el.stickerAsset) return [el.id, await resolveSticker(el.stickerAsset, { cacheOnly: true })];
+            // subject 슬롯 — 로드 시엔 캐시만(미캐시면 빈 채로 두고 온디맨드 생성). 로드 지연 방지.
+            const r = await getAssetSmart(`jslot:${el.subject}`, el.subject, [el.subject], null, { cacheOnly: true });
             return [el.id, r && r.src ? { src: r.src, cutout: true } : null];
           } catch {
             return [el.id, null];

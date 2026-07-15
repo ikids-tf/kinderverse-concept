@@ -61,7 +61,7 @@ import { SUGGESTION_HIDE_BELOW, type RouterOutput, type RecordMode, type RouteTa
 import type { RegistryPayload, WorksheetCardProps } from '@/ui-registry/contracts';
 import type { LessonKind } from '@/store/formatChoiceStore';
 import { buildWorksheetEditorPayload } from '@/playrecord-integration/fromWorksheet';
-import { stashEditorPayload, editorEmbedUrl } from '@/playrecord-integration/spawnEditorCard';
+import { stashEditorPayload, editorEmbedUrl, editorCardSize } from '@/playrecord-integration/spawnEditorCard';
 
 /* Frame Composer (core page brain). A board prompt with nothing selected →
    classify intent (reuse runRouter) → pick a frame template → seed a frame →
@@ -2206,9 +2206,10 @@ function fillWorksheetEditorCard(cid: string, props: WorksheetCardProps): boolea
   delete data.doc;
   delete data.role;
   delete data.payload;
+  const { w, h } = editorCardSize(variant); // 가로형(이름표 등)은 가로 카드로
   b.updateNodeRaw(cid, {
-    w: 560,
-    h: 820,
+    w,
+    h,
     autoH: false,
     text: '편집디자인',
     data: { ...data, embed: editorEmbedUrl(editId), title: '편집디자인' },
