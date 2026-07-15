@@ -96,6 +96,12 @@ export function planNodeToPayload(node: BoardNode) {
 export function openPlanInEditor(frameOrNodeId: string): void {
   const node = findPlanNode(frameOrNodeId);
   if (!node) return;
+  // 월간 계획(MonthlyPlan 또는 data.monthly)은 월안 캔버스로 — 프레임 상단 버튼이 무조건 주안으로 열던 버그 수정.
+  const t = (node.data?.payload as { type?: string } | undefined)?.type;
+  if (t === 'MonthlyPlan' || node.data?.monthly) {
+    openMonthlyInEditor(frameOrNodeId);
+    return;
+  }
   spawnEditorCard('weeklyplan', planNodeToPayload(node));
 }
 

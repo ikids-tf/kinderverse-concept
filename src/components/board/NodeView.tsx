@@ -2260,6 +2260,7 @@ export function NodeView({ node, selected, onPointerDown, dx = 0, dy = 0, lod = 
                 else if (t === 'WeeklyPlan') open = openPlanInEditor;
                 else if (t === 'WeeklyPlanGrid') open = node.data?.monthly ? openMonthlyInEditor : openPlanInEditor;
                 else if (t === 'LetterPreview' && ((node.data?.payload as { props?: { kind?: string } } | undefined)?.props?.kind ?? 'letter') !== 'text') open = openLetterInEditor; // 가정통신문·안내문(일반 문장 제외)
+                else if (node.data?.role === 'newsletter') open = openLetterInEditor; // 소식지(decorateDoc, payload 없음)
                 else if (t === 'WorksheetCard' && worksheetVariantForNode(node)) open = openWorksheetInEditor; // 편집 디자인 템플릿이 있는 활동지 유형만
                 else if (isMindmapDoc(node)) open = openMindmapDocInEditor; // 마크다운 마인드맵 문서 → 주제망 캔버스
                 if (!open) return null;

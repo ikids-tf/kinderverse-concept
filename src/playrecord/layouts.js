@@ -1242,9 +1242,11 @@ export function buildWeeklyPlanJournalDoc(payload) {
   // 레퍼런스 추출 팔레트
   const PAGE = "#fcf8ec", INK = "#3a3a35", GRAY = "#8a8375", LINE = "#e3d9c4", NAVY = "#26436f";
   const els = [m.bg({ bg: PAGE })];
-  // 콘텐츠 이미지 슬롯(빈 src → 플레이스홀더 + 재생성). subject = 주제/활동 키워드.
+  // 콘텐츠 이미지 슬롯 — 주제 정적 에셋(DAILY_ICONS 순환)을 즉시 표시 + subject 유지(재생성). 로드 시 생성 불필요.
+  //   (이전 src:null 은 로드 시 자동생성에 의존 → cacheOnly 로 빈 슬롯이 되던 문제. 정적 에셋으로 항상 보이게.)
+  let iconN = 0;
   const img = (x, y, w, h, subject, rot = 0) =>
-    els.push({ id: `jimg${Math.round(x)}_${Math.round(y)}`, type: "image", src: null, fit: "contain", sticker: true, subject: (subject && String(subject).trim()) || c.theme, x, y, w, h, rotation: rot, style: { radius: 8 } });
+    els.push({ id: `jimg${Math.round(x)}_${Math.round(y)}`, type: "image", src: `/generated-assets/topicweb-record/${DAILY_ICONS[iconN++ % DAILY_ICONS.length]}`, fit: "contain", sticker: true, subject: (subject && String(subject).trim()) || c.theme, x, y, w, h, rotation: rot, style: { radius: 8 } });
   // 코너 장식(고정 에셋, 편집 가능) — 레퍼런스: 해님·갈매기·게·소라
   const stk = (src, x, y, w, h, subj, rot = 0) =>
     els.push({ id: `jdec${Math.round(x)}_${Math.round(y)}`, type: "image", src: `/generated-assets/topicweb-record/${src}`, fit: "contain", sticker: true, subject: subj, x, y, w, h, rotation: rot, style: { radius: 0 } });

@@ -1899,6 +1899,10 @@ export async function genDocFromIdeas(ideaNodeId: string, targetDocId: string): 
       fillPlaceholderDoc(id, worksheetText(res.payload), res.payload);
     } else {
       const res = await runPlan(topic, labels, buildAgentContext('plan'), isProject ? { project: true } : undefined);
+      // 아이디어로 만든 놀이계획 제목 = "주제 + 주간놀이계획"(예: 여름 주간놀이계획). 프로젝트 수업은 제외.
+      if (!isProject && res.payload?.type === 'WeeklyPlanGrid' && (res.payload.props as { title?: string })) {
+        (res.payload.props as { title?: string }).title = `${topic} 주간놀이계획`;
+      }
       fillPlaceholderDoc(id, isProject ? projectDocMarkdown(res.payload) : planDocMarkdown(res.payload), res.payload);
     }
     showToast(`${label}을(를) 만들었어요`, 'success');
