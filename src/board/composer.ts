@@ -38,6 +38,7 @@ import { worldBox } from './geometry';
 import { saveWebLinks } from './webLinks';
 import { decorateComposedFrame, decorateDocStickers, decorateMindMapStickers } from './decorate';
 import { ruleBasedVariant, asLayoutVariant, ruleBasedSpec } from './design-spec';
+import { resolvePackagePreset } from './packageThemes';
 import { runDesignDirector } from '@/ai/agents/design';
 import { pickTemplate, type FrameTemplate, type FrameRegion, type FillAgent } from './templates';
 import { runRouter } from '@/ai/agents/router';
@@ -1124,6 +1125,12 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
   const t = (topic || '놀이').trim();
   const isProject = kind === 'project';
   const kindLabel = isProject ? '프로젝트' : '놀이';
+  // 주제 맞춤 시각 프리셋(스킨·스티커·레이아웃) — 항상 유효(명사 매칭 → 계절 폴백). 문서 카드에 디폴트로 주입.
+  const preset = resolvePackagePreset(t);
+  const skinCard = (id: string) => {
+    const n = useBoardStore.getState().nodes[id];
+    if (n) useBoardStore.getState().updateNodeRaw(id, { data: { ...(n.data ?? {}), docTheme: preset.docTheme, docVariant: preset.docVariant } });
+  };
   const ctx = buildAgentContext('plan');
   const vc = viewportCenterBoardPoint();
   const W0 = 2100, H0 = 1700;
@@ -1171,7 +1178,7 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
     const ideaCardId = spawnDocCard(frameId, `# 💡 ${t} ${kindLabel} 아이디어\n\n아이디어를 모으는 중…`, 'idealist', 520);
     {
       const c = useBoardStore.getState().nodes[ideaCardId];
-      useBoardStore.getState().updateNodeRaw(ideaCardId, { data: { ...(c?.data ?? {}), loadingDoc: true, ideaTitle: `${t} ${kindLabel} 아이디어` } });
+      useBoardStore.getState().updateNodeRaw(ideaCardId, { data: { ...(c?.data ?? {}), loadingDoc: true, ideaTitle: `${t} ${kindLabel} 아이디어`, docTheme: preset.docTheme, docVariant: preset.docVariant } });
     }
     created.push(ideaCardId);
     // 동영상 — 패키지 프레임 '안의 서브 프레임'에 유튜브 뷰어 + 활동별 썸네일을 묶어 정리해 넣는다
@@ -1211,6 +1218,7 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
         const res = await runPlan(t, [], ctx, isProject ? { project: true } : undefined);
         const md = isProject ? projectDocMarkdown(res.payload) : planDocMarkdown(res.payload);
         const cid = spawnDocCard(frameId, md, 'plan', PLAN_DOC_W);
+        skinCard(cid);
         stashPayload(cid, res.payload);
         created.push(cid);
         if (res.payload.type === 'WeeklyPlanGrid') planId = res.payload.props.id;
@@ -1234,6 +1242,7 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
       (async () => {
         for (const act of pickWorksheetActivities(activities, t)) {
           const cid = spawnPlaceholderDoc(frameId, 'worksheet');
+          skinCard(cid);
           created.push(cid);
           try {
             const res = await runStudioWorksheet(act, buildAgentContext('studio'), planId);
@@ -1257,7 +1266,9 @@ export async function buildPlayPackage(topic: string, kind: LessonKind = 'play')
     // ── 마무리 정돈 ── 채워진 문서 높이(renderH)가 안정된 뒤 컬럼+동영상 띠 배치 + 겹침 해소 + 핏.
     say('🪄 패키지를 정리하고 있어요…');
     await new Promise((r) => setTimeout(r, 480)); // 방금 채워진 autoH 문서의 실제 높이 측정 대기
-    designComposedFrame(frameId, asLayoutVariant(undefined));
+    // 아이디어 카드에 주제 스티커(결정론·무비용) — 계획/활동지는 공식·인쇄물이라 그대로 둔다.
+    decorateDocStickers(ideaCardId, t, 3, preset.stickers);
+    designComposedFrame(frameId, asLayoutVariant(preset.layoutVariant));
     await new Promise((r) => setTimeout(r, 360));
     gridDeOverlap(frameId);
 
